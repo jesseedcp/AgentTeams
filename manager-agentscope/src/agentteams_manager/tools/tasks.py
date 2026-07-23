@@ -6,6 +6,11 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from agentteams_manager.clients.git import GitRequest, GitRequestParser
+from agentteams_manager.workflows.git_delegation import (
+    GitDelegationReceipt,
+    GitDelegationService,
+)
 from agentteams_manager.workflows.resources import MutationContext
 from agentteams_manager.workflows.projects import (
     ProjectReceipt,
@@ -75,6 +80,12 @@ class CloseProjectInput(BaseModel):
 
     project_id: str = Field(min_length=1)
     force: bool = False
+
+
+class GitDelegationInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    message: str = Field(min_length=1)
 
 
 class TaskTools:
@@ -191,4 +202,26 @@ class ProjectTools:
             project_id=request.project_id,
             force=request.force,
             context=context,
+        )
+
+
+class GitDelegationTools:
+    def __init__(self, service: GitDelegationService) -> None:
+        self._service = service
+
+    @staticmethod
+    def inspect(request: GitDelegationInput) -> GitRequest:
+        return GitRequestParser.parse(request.message)
+
+    async def execute(
+        self,
+        request: GitDelegationInput,
+        *,
+        context: MutationContext,
+        confirmed: bool = False,
+    ) -> GitDelegationReceipt:
+        return await self._service.execute(
+            GitRequestParser.parse(request.message),
+            context=context,
+            confirmed=confirmed,
         )

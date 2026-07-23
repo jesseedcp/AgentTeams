@@ -321,6 +321,17 @@ class ProjectRecord(StrictModel):
     updated_at: datetime
 
 
+class ProcessingLeaseRecord(FrozenStrictModel):
+    task_id: str
+    lease_id: str
+    processor: str
+    operation: str
+    started_at: datetime
+    expires_at: datetime
+    remote_etag: str
+    updated_at: datetime
+
+
 class ProjectMetadata(FrozenStrictModel):
     """Canonical structured project state stored in MinIO."""
 

@@ -320,6 +320,7 @@ class MinioClient:
                 transferred += len(data)
                 manifest.append(
                     {
+                        "etag": receipt.etag,
                         "key": receipt.key,
                         "sha256": receipt.sha256,
                         "size": receipt.size,
@@ -407,6 +408,7 @@ class MinioClient:
                 receipt = existing
             manifest.append(
                 {
+                    "etag": receipt.etag,
                     "key": key,
                     "sha256": receipt.sha256,
                     "size": receipt.size,

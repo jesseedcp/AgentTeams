@@ -1,5 +1,9 @@
 """Deterministic Manager workflows."""
 
+from .git_delegation import (
+    GitDelegationService,
+    ProcessingLeaseService,
+)
 from .matrix_resources import MatrixResourceService
 from .projects import ProjectReceipt, ProjectService
 from .resources import (
@@ -21,7 +25,9 @@ from .tasks import (
 )
 
 __all__ = [
+    "GitDelegationService",
     "OperationSupervisor",
+    "ProcessingLeaseService",
     "ProjectReceipt",
     "ProjectService",
     "MutationContext",

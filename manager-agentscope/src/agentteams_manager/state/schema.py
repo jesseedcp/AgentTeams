@@ -1,6 +1,6 @@
 """Initial SQLite schema for durable operations."""
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS operations (
@@ -80,6 +80,19 @@ CREATE TABLE IF NOT EXISTS projects (
 );
 CREATE INDEX IF NOT EXISTS projects_status_idx
   ON projects(status, updated_at);
+
+CREATE TABLE IF NOT EXISTS processing_leases (
+  task_id TEXT PRIMARY KEY,
+  lease_id TEXT NOT NULL UNIQUE,
+  processor TEXT NOT NULL,
+  operation TEXT NOT NULL,
+  started_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  remote_etag TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS processing_leases_expiry_idx
+  ON processing_leases(expires_at);
 
 CREATE TABLE IF NOT EXISTS topology (
   resource_type TEXT NOT NULL,
