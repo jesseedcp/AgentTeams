@@ -14,6 +14,7 @@ from agentteams_manager.config import ManagerConfig, RuntimeDocument
 from agentteams_manager.domain.models import RoomPolicy
 
 from .prompts import PromptBuilder
+from .config_watcher import RuntimeRegistry
 
 
 class ToolkitFactory(Protocol):
@@ -25,21 +26,31 @@ class AgentFactory:
         self,
         *,
         config: ManagerConfig,
-        runtime: RuntimeDocument,
+        runtime: RuntimeDocument | RuntimeRegistry,
         prompt_builder: PromptBuilder,
         toolkit_factory: ToolkitFactory,
     ) -> None:
         self._config = config
-        self._runtime = runtime
+        self._registry = (
+            runtime if isinstance(runtime, RuntimeRegistry) else None
+        )
+        self._runtime = (
+            runtime if isinstance(runtime, RuntimeDocument) else None
+        )
         self._prompt_builder = prompt_builder
         self._toolkit_factory = toolkit_factory
 
     @property
     def runtime_revision(self) -> int:
-        return self._runtime.revision
+        return self._current_runtime().revision
 
     def replace_runtime(self, runtime: RuntimeDocument) -> None:
-        if runtime.revision <= self._runtime.revision:
+        if self._registry is not None:
+            raise RuntimeError(
+                "registry-backed runtime changes through ConfigWatcher",
+            )
+        current = self._current_runtime()
+        if runtime.revision <= current.revision:
             raise ValueError("runtime revision must increase")
         self._runtime = runtime
 
@@ -49,7 +60,7 @@ class AgentFactory:
         policy: RoomPolicy,
         state: AgentState | None = None,
     ) -> Agent:
-        runtime = self._runtime
+        runtime = self._current_runtime()
         credential = OpenAICredential(
             api_key=self._config.gateway_key,
             base_url=f"{self._config.ai_gateway_url}/v1",
@@ -73,3 +84,9 @@ class AgentFactory:
             or AgentState(session_id=f"matrix:{room_id}"),
         )
 
+    def _current_runtime(self) -> RuntimeDocument:
+        if self._registry is not None:
+            return self._registry.current.document
+        if self._runtime is None:
+            raise RuntimeError("AgentFactory has no runtime document")
+        return self._runtime

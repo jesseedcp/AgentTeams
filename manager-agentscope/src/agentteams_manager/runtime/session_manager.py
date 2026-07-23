@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any, Protocol
@@ -47,12 +48,27 @@ class RoomSessionManager:
         self._factory = factory
         self._sessions = sessions
         self._cache: dict[str, RoomSession] = {}
+        self._room_locks: dict[str, asyncio.Lock] = {}
         self._cache_guard = asyncio.Lock()
 
     async def get_or_create(
         self,
         room_id: str,
         policy: RoomPolicy,
+    ) -> RoomSession:
+        lock = await self._lock_for(room_id)
+        async with lock:
+            return await self._get_or_create_locked(
+                room_id,
+                policy,
+                lock,
+            )
+
+    async def _get_or_create_locked(
+        self,
+        room_id: str,
+        policy: RoomPolicy,
+        lock: asyncio.Lock,
     ) -> RoomSession:
         cached = self._cache.get(room_id)
         runtime_revision = getattr(
@@ -67,38 +83,40 @@ class RoomSessionManager:
         ):
             return cached
 
-        async with self._cache_guard:
-            cached = self._cache.get(room_id)
-            if (
-                cached is not None
-                and cached.policy_revision == policy.revision
-                and cached.runtime_revision == runtime_revision
-            ):
-                return cached
-            stored = await self._sessions.load(room_id)
-            state = (
-                cached.agent.state
+        stored = await self._sessions.load(room_id)
+        state = (
+            cached.agent.state.model_copy(deep=True)
+            if cached is not None
+            else (
+                stored.state.model_copy(deep=True)
+                if stored is not None
+                else None
+            )
+        )
+        agent = await self._factory.create(
+            room_id,
+            policy,
+            state=state,
+        )
+        session = RoomSession(
+            agent=agent,
+            lock=lock,
+            policy_revision=policy.revision,
+            runtime_revision=runtime_revision,
+            last_event_id=(
+                cached.last_event_id
                 if cached is not None
-                else stored.state if stored is not None else None
-            )
-            agent = await self._factory.create(
-                room_id,
-                policy,
-                state=state,
-            )
-            session = RoomSession(
-                agent=agent,
-                lock=cached.lock if cached is not None else asyncio.Lock(),
-                policy_revision=policy.revision,
-                runtime_revision=runtime_revision,
-                last_event_id=(
-                    cached.last_event_id
-                    if cached is not None
-                    else stored.last_event_id if stored else None
-                ),
-            )
-            self._cache[room_id] = session
-            return session
+                else stored.last_event_id if stored else None
+            ),
+        )
+        self._cache[room_id] = session
+        if cached is not None:
+            retire = getattr(self._factory, "retire", None)
+            if retire is not None:
+                result = retire(cached.agent)
+                if inspect.isawaitable(result):
+                    await result
+        return session
 
     async def run(
         self,
@@ -130,8 +148,13 @@ class RoomSessionManager:
         tool_event_id: str | None = None,
     ) -> AsyncIterator[AgentEvent]:
         """Run one native AgentScope input under the room session lock."""
-        session = await self.get_or_create(event.room_id, policy)
-        async with session.lock:
+        lock = await self._lock_for(event.room_id)
+        async with lock:
+            session = await self._get_or_create_locked(
+                event.room_id,
+                policy,
+                lock,
+            )
             try:
                 with bind_matrix_turn(
                     event.room_id,
@@ -144,6 +167,16 @@ class RoomSessionManager:
             finally:
                 session.last_event_id = event.event_id
                 await self._save(event.room_id, session)
+
+    async def _lock_for(self, room_id: str) -> asyncio.Lock:
+        lock = self._room_locks.get(room_id)
+        if lock is not None:
+            return lock
+        async with self._cache_guard:
+            return self._room_locks.setdefault(
+                room_id,
+                asyncio.Lock(),
+            )
 
     async def persist(self, room_id: str) -> None:
         """Persist a cached session after out-of-stream state changes."""
