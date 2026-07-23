@@ -18,8 +18,8 @@ class FakeAgent:
     def __init__(self, room_id: str) -> None:
         self.state = AgentState(session_id=f"matrix:{room_id}")
 
-    async def reply_stream(self, message):
-        self.state.summary = message.get_text_content() or ""
+    async def reply_stream(self, *, inputs):
+        self.state.summary = inputs.get_text_content() or ""
         if False:
             yield None
 

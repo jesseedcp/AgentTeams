@@ -39,73 +39,89 @@ class StreamProjection:
     tool_calls: tuple[ProjectedToolCall, ...]
     media: tuple[ProjectedMedia, ...]
     pending_confirmations: tuple[ToolCallBlock, ...]
+    confirmation_reply_id: str | None = None
 
 
 class EventStreamProjector:
+    def __init__(self) -> None:
+        self.reset()
+
+    def reset(self) -> None:
+        self._text: list[str] = []
+        self._tools: dict[str, ProjectedToolCall] = {}
+        self._media: list[ProjectedMedia] = []
+        self._confirmations: list[ToolCallBlock] = []
+        self._confirmation_reply_id: str | None = None
+
+    async def accept(self, event: AgentEvent) -> StreamProjection:
+        """Apply one public event and return the current projection."""
+        if isinstance(event, TextBlockDeltaEvent):
+            self._text.append(event.delta)
+        elif isinstance(event, ToolCallStartEvent):
+            self._tools[event.tool_call_id] = ProjectedToolCall(
+                tool_call_id=event.tool_call_id,
+                name=event.tool_call_name,
+                state="running",
+            )
+        elif isinstance(event, ToolCallEndEvent):
+            current = self._tools.get(event.tool_call_id)
+            if current is not None:
+                self._tools[event.tool_call_id] = ProjectedToolCall(
+                    tool_call_id=current.tool_call_id,
+                    name=current.name,
+                    state="submitted",
+                )
+        elif isinstance(event, ToolResultEndEvent):
+            current = self._tools.get(event.tool_call_id)
+            if current is not None:
+                self._tools[event.tool_call_id] = ProjectedToolCall(
+                    tool_call_id=current.tool_call_id,
+                    name=current.name,
+                    state=str(event.state),
+                )
+        elif isinstance(event, RequireUserConfirmEvent):
+            self._confirmation_reply_id = event.reply_id
+            self._confirmations.extend(event.tool_calls)
+            for call in event.tool_calls:
+                current = self._tools.get(call.id)
+                self._tools[call.id] = ProjectedToolCall(
+                    tool_call_id=call.id,
+                    name=call.name if current is None else current.name,
+                    state="asking",
+                )
+        elif isinstance(event, DataBlockDeltaEvent):
+            self._media.append(
+                ProjectedMedia(
+                    block_id=event.block_id,
+                    media_type=event.media_type,
+                    data=event.data,
+                ),
+            )
+        elif isinstance(event, ToolResultDataDeltaEvent):
+            self._media.append(
+                ProjectedMedia(
+                    block_id=event.block_id,
+                    media_type=event.media_type,
+                    data=event.data,
+                    url=event.url,
+                ),
+            )
+        return self.snapshot()
+
+    def snapshot(self) -> StreamProjection:
+        return StreamProjection(
+            text="".join(self._text),
+            tool_calls=tuple(self._tools.values()),
+            media=tuple(self._media),
+            pending_confirmations=tuple(self._confirmations),
+            confirmation_reply_id=self._confirmation_reply_id,
+        )
+
     async def consume(
         self,
         events: AsyncIterable[AgentEvent],
     ) -> StreamProjection:
-        text: list[str] = []
-        tools: dict[str, ProjectedToolCall] = {}
-        media: list[ProjectedMedia] = []
-        confirmations: list[ToolCallBlock] = []
-
+        self.reset()
         async for event in events:
-            if isinstance(event, TextBlockDeltaEvent):
-                text.append(event.delta)
-            elif isinstance(event, ToolCallStartEvent):
-                tools[event.tool_call_id] = ProjectedToolCall(
-                    tool_call_id=event.tool_call_id,
-                    name=event.tool_call_name,
-                    state="running",
-                )
-            elif isinstance(event, ToolCallEndEvent):
-                current = tools.get(event.tool_call_id)
-                if current is not None:
-                    tools[event.tool_call_id] = ProjectedToolCall(
-                        tool_call_id=current.tool_call_id,
-                        name=current.name,
-                        state="submitted",
-                    )
-            elif isinstance(event, ToolResultEndEvent):
-                current = tools.get(event.tool_call_id)
-                if current is not None:
-                    tools[event.tool_call_id] = ProjectedToolCall(
-                        tool_call_id=current.tool_call_id,
-                        name=current.name,
-                        state=str(event.state),
-                    )
-            elif isinstance(event, RequireUserConfirmEvent):
-                confirmations.extend(event.tool_calls)
-                for call in event.tool_calls:
-                    current = tools.get(call.id)
-                    tools[call.id] = ProjectedToolCall(
-                        tool_call_id=call.id,
-                        name=call.name if current is None else current.name,
-                        state="asking",
-                    )
-            elif isinstance(event, DataBlockDeltaEvent):
-                media.append(
-                    ProjectedMedia(
-                        block_id=event.block_id,
-                        media_type=event.media_type,
-                        data=event.data,
-                    ),
-                )
-            elif isinstance(event, ToolResultDataDeltaEvent):
-                media.append(
-                    ProjectedMedia(
-                        block_id=event.block_id,
-                        media_type=event.media_type,
-                        data=event.data,
-                        url=event.url,
-                    ),
-                )
-
-        return StreamProjection(
-            text="".join(text),
-            tool_calls=tuple(tools.values()),
-            media=tuple(media),
-            pending_confirmations=tuple(confirmations),
-        )
+            await self.accept(event)
+        return self.snapshot()

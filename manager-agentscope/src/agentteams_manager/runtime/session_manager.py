@@ -104,37 +104,55 @@ class RoomSessionManager:
         event: InboundEvent,
         policy: RoomPolicy,
     ) -> AsyncIterator[AgentEvent]:
+        message = UserMsg(
+            name=event.sender,
+            content=event.body,
+            id=event.event_id,
+            created_at=event.timestamp.isoformat(),
+            metadata={
+                "room_id": event.room_id,
+                "event_id": event.event_id,
+                "sender_id": event.sender_id,
+                "thread_id": event.thread_id,
+                "mentions": list(event.mentions),
+            },
+        )
+        async for item in self.run_input(event, policy, message):
+            yield item
+
+    async def run_input(
+        self,
+        event: InboundEvent,
+        policy: RoomPolicy,
+        inputs: Any,
+    ) -> AsyncIterator[AgentEvent]:
+        """Run one native AgentScope input under the room session lock."""
         session = await self.get_or_create(event.room_id, policy)
         async with session.lock:
-            message = UserMsg(
-                name=event.sender,
-                content=event.body,
-                id=event.event_id,
-                created_at=event.timestamp.isoformat(),
-                metadata={
-                    "room_id": event.room_id,
-                    "thread_id": event.thread_id,
-                    "mentions": list(event.mentions),
-                },
-            )
             try:
-                async for item in session.agent.reply_stream(message):
+                async for item in session.agent.reply_stream(inputs=inputs):
                     yield item
             finally:
                 session.last_event_id = event.event_id
-                await self._sessions.save(
-                    room_id=event.room_id,
-                    state=session.agent.state,
-                    policy_revision=policy.revision,
-                    last_event_id=event.event_id,
-                )
+                await self._save(event.room_id, session)
+
+    async def persist(self, room_id: str) -> None:
+        """Persist a cached session after out-of-stream state changes."""
+        session = self._cache.get(room_id)
+        if session is None:
+            return
+        async with session.lock:
+            await self._save(room_id, session)
+
+    async def _save(self, room_id: str, session: RoomSession) -> None:
+        await self._sessions.save(
+            room_id=room_id,
+            state=session.agent.state,
+            policy_revision=session.policy_revision,
+            last_event_id=session.last_event_id,
+        )
 
     async def save_all(self) -> None:
         for room_id, session in tuple(self._cache.items()):
             async with session.lock:
-                await self._sessions.save(
-                    room_id=room_id,
-                    state=session.agent.state,
-                    policy_revision=session.policy_revision,
-                    last_event_id=session.last_event_id,
-                )
+                await self._save(room_id, session)
