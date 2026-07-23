@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import html
+import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -13,9 +15,10 @@ from nio import AsyncClient, AsyncClientConfig
 from pydantic import SecretStr
 
 from agentteams_manager.config import ManagerConfig
-from agentteams_manager.domain.models import InboundEvent
+from agentteams_manager.domain.models import InboundEvent, MediaReference
 
 from .crypto import CryptoStore, maintain_e2ee
+from .threads import RoomHistory, ThreadProjector
 
 InboundHandler = Callable[[InboundEvent], Awaitable[None]]
 
@@ -95,6 +98,7 @@ class MatrixClient:
         self._sync_task: asyncio.Task[None] | None = None
         self._sleeper = sleeper
         self.ready = asyncio.Event()
+        self.history = RoomHistory(limit=config.history_limit)
 
     async def start(self, handler: InboundHandler) -> None:
         """Prepare encryption state and start the owned sync loop."""
@@ -274,6 +278,7 @@ class MatrixClient:
             for event in events:
                 inbound = self._normalize_event(room_id, event)
                 if inbound is not None:
+                    self.history.append(inbound)
                     await self._handler(inbound)
 
     def _normalize_event(
@@ -305,6 +310,7 @@ class MatrixClient:
             if isinstance(mention_data, dict)
             else ()
         )
+        media = self._media_references(content, body)
         return InboundEvent(
             room_id=room_id,
             event_id=event_id,
@@ -314,6 +320,7 @@ class MatrixClient:
             is_direct=self._is_direct_room(room_id, sender),
             thread_id=thread_id,
             mentions=mentions,
+            media=media,
         )
 
     def _is_direct_room(self, room_id: str, sender: str) -> bool:
@@ -327,6 +334,53 @@ class MatrixClient:
             and sender in user_ids
         )
 
+    @staticmethod
+    def _media_references(
+        content: dict[str, Any],
+        body: str,
+    ) -> tuple[MediaReference, ...]:
+        msgtype = content.get("msgtype")
+        if msgtype not in {"m.image", "m.file", "m.audio", "m.video"}:
+            return ()
+        info = content.get("info", {})
+        info = info if isinstance(info, dict) else {}
+        encrypted_file = content.get("file")
+        if isinstance(encrypted_file, dict):
+            key = encrypted_file.get("key", {})
+            hashes = encrypted_file.get("hashes", {})
+            return (
+                MediaReference(
+                    mxc_uri=str(encrypted_file.get("url", "")),
+                    media_type=str(
+                        info.get("mimetype", "application/octet-stream"),
+                    ),
+                    filename=body,
+                    size=info.get("size"),
+                    encryption_key=(
+                        key.get("k") if isinstance(key, dict) else None
+                    ),
+                    encryption_hash=(
+                        hashes.get("sha256")
+                        if isinstance(hashes, dict)
+                        else None
+                    ),
+                    encryption_iv=encrypted_file.get("iv"),
+                ),
+            )
+        uri = content.get("url")
+        if not isinstance(uri, str):
+            return ()
+        return (
+            MediaReference(
+                mxc_uri=uri,
+                media_type=str(
+                    info.get("mimetype", "application/octet-stream"),
+                ),
+                filename=body,
+                size=info.get("size"),
+            ),
+        )
+
     async def send_text(
         self,
         room_id: str,
@@ -336,12 +390,122 @@ class MatrixClient:
         thread_id: str | None = None,
         mentions: tuple[str, ...] = (),
     ) -> str:
-        """Send text through the Matrix port.
+        """Send one idempotent text event with structured relations."""
+        content = self._text_content(
+            text,
+            thread_id=thread_id,
+            mentions=mentions,
+        )
+        return await self._send_content(
+            room_id,
+            content,
+            txn_id=txn_id,
+        )
 
-        The concrete content mapping is added with the transport contract.
-        """
-        del room_id, text, txn_id, thread_id, mentions
-        raise NotImplementedError("Matrix outbound transport is not ready")
+    async def edit_text(
+        self,
+        room_id: str,
+        event_id: str,
+        text: str,
+        *,
+        txn_id: str,
+    ) -> str:
+        """Replace a previously sent streaming text event."""
+        final_content = self._text_content(text)
+        content: dict[str, Any] = {
+            **final_content,
+            "m.new_content": final_content,
+            "m.relates_to": ThreadProjector.replacement(event_id),
+        }
+        return await self._send_content(
+            room_id,
+            content,
+            txn_id=txn_id,
+        )
+
+    def _text_content(
+        self,
+        text: str,
+        *,
+        thread_id: str | None = None,
+        mentions: tuple[str, ...] = (),
+    ) -> dict[str, Any]:
+        content: dict[str, Any] = {
+            "msgtype": "m.text",
+            "body": text,
+        }
+        targets = list(dict.fromkeys(mentions))
+        if targets:
+            content["m.mentions"] = {"user_ids": targets}
+            if self.config.mention_pill_in_body:
+                pills = " ".join(
+                    (
+                        '<a href="https://matrix.to/#/'
+                        f'{html.escape(user_id, quote=True)}">'
+                        f"{html.escape(user_id)}</a>"
+                    )
+                    for user_id in targets
+                )
+                content["format"] = "org.matrix.custom.html"
+                content["formatted_body"] = (
+                    f"{pills} {html.escape(text)}"
+                ).strip()
+        if thread_id:
+            content["m.relates_to"] = ThreadProjector.relation(thread_id)
+        return content
+
+    async def _send_content(
+        self,
+        room_id: str,
+        content: dict[str, Any],
+        *,
+        txn_id: str,
+    ) -> str:
+        state_key = f"matrix.txn.{txn_id}"
+        await self._state.set_value(
+            state_key,
+            json.dumps(
+                {
+                    "room_id": room_id,
+                    "txn_id": txn_id,
+                    "status": "prepared",
+                },
+                separators=(",", ":"),
+                sort_keys=True,
+            ),
+        )
+        client = self._ensure_client()
+        for attempt in range(2):
+            try:
+                response = await client.room_send(
+                    room_id=room_id,
+                    message_type="m.room.message",
+                    content=content,
+                    tx_id=txn_id,
+                    ignore_unverified_devices=True,
+                )
+                break
+            except TimeoutError:
+                if attempt:
+                    raise
+                await self._sleeper(0)
+        event_id = getattr(response, "event_id", None)
+        if not isinstance(event_id, str) or not event_id:
+            raise RuntimeError(f"Matrix send failed: {response}")
+        await self._state.set_value(
+            state_key,
+            json.dumps(
+                {
+                    "room_id": room_id,
+                    "txn_id": txn_id,
+                    "event_id": event_id,
+                    "status": "sent",
+                },
+                separators=(",", ":"),
+                sort_keys=True,
+            ),
+        )
+        return event_id
 
 
 def _is_unknown_token(value: object) -> bool:

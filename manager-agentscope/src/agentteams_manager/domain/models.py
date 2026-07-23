@@ -177,6 +177,9 @@ class MediaReference(FrozenStrictModel):
     media_type: str
     filename: str | None = None
     size: int | None = Field(default=None, ge=0)
+    encryption_key: str | None = None
+    encryption_hash: str | None = None
+    encryption_iv: str | None = None
 
 
 class InboundEvent(FrozenStrictModel):
