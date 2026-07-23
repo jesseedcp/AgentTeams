@@ -423,6 +423,8 @@ func (h *ResourceHandler) CreateTeam(w http.ResponseWriter, r *http.Request) {
 				WorkerName:        req.Leader.WorkerName,
 				Model:             req.Leader.Model,
 				ModelProvider:     req.Leader.ModelProvider,
+				Runtime:           req.Leader.Runtime,
+				Image:             req.Leader.Image,
 				Identity:          req.Leader.Identity,
 				Soul:              req.Leader.Soul,
 				Agents:            req.Leader.Agents,
@@ -544,6 +546,12 @@ func (h *ResourceHandler) UpdateTeam(w http.ResponseWriter, r *http.Request) {
 			}
 			if req.Leader.ModelProvider != "" {
 				team.Spec.Leader.ModelProvider = req.Leader.ModelProvider
+			}
+			if req.Leader.Runtime != "" {
+				team.Spec.Leader.Runtime = req.Leader.Runtime
+			}
+			if req.Leader.Image != "" {
+				team.Spec.Leader.Image = req.Leader.Image
 			}
 			if req.Leader.Identity != "" {
 				team.Spec.Leader.Identity = req.Leader.Identity

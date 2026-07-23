@@ -408,6 +408,8 @@ func TestCreateAndUpdateTeamLeaderRuntimeConfig(t *testing.T) {
 		"leader":{
 			"name":"alpha-lead",
 			"modelProvider":"qwen",
+			"runtime":"qwenpaw",
+			"image":"agentteams-worker:qwenpaw",
 			"heartbeat":{"enabled":true,"every":"30m"},
 			"workerIdleTimeout":"12h"
 		},
@@ -433,6 +435,12 @@ func TestCreateAndUpdateTeamLeaderRuntimeConfig(t *testing.T) {
 	if created.Spec.Leader.ModelProvider != "qwen" {
 		t.Fatalf("leader.modelProvider=%q, want qwen", created.Spec.Leader.ModelProvider)
 	}
+	if created.Spec.Leader.Runtime != "qwenpaw" {
+		t.Fatalf("leader.runtime=%q, want qwenpaw", created.Spec.Leader.Runtime)
+	}
+	if created.Spec.Leader.Image != "agentteams-worker:qwenpaw" {
+		t.Fatalf("leader.image=%q, want qwenpaw image", created.Spec.Leader.Image)
+	}
 	if len(created.Spec.Workers) != 1 || created.Spec.Workers[0].ModelProvider != "openai" {
 		t.Fatalf("workers modelProvider not persisted: %#v", created.Spec.Workers)
 	}
@@ -440,6 +448,8 @@ func TestCreateAndUpdateTeamLeaderRuntimeConfig(t *testing.T) {
 	updateBody := []byte(`{
 		"leader":{
 			"modelProvider":"dashscope",
+			"runtime":"hermes",
+			"image":"agentteams-worker:hermes",
 			"heartbeat":{"enabled":true,"every":"45m"},
 			"workerIdleTimeout":"24h"
 		},
@@ -465,6 +475,12 @@ func TestCreateAndUpdateTeamLeaderRuntimeConfig(t *testing.T) {
 	}
 	if updated.Spec.Leader.ModelProvider != "dashscope" {
 		t.Fatalf("leader.modelProvider=%q, want dashscope", updated.Spec.Leader.ModelProvider)
+	}
+	if updated.Spec.Leader.Runtime != "hermes" {
+		t.Fatalf("leader.runtime=%q, want hermes", updated.Spec.Leader.Runtime)
+	}
+	if updated.Spec.Leader.Image != "agentteams-worker:hermes" {
+		t.Fatalf("leader.image=%q, want hermes image", updated.Spec.Leader.Image)
 	}
 	if len(updated.Spec.Workers) != 1 || updated.Spec.Workers[0].Name != "alpha-qa" || updated.Spec.Workers[0].ModelProvider != "qwen" {
 		t.Fatalf("workers after update=%#v, want alpha-qa with qwen modelProvider", updated.Spec.Workers)

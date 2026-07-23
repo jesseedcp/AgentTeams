@@ -3,16 +3,20 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import Awaitable, Callable, Collection
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any, Protocol
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agentteams_manager.clients.agt import (
     AgtProtocolError,
+    ResourceName,
+    TeamCreateRequest,
     WorkerCreateRequest,
+    WorkerRuntime,
     WorkerUpdateRequest,
 )
 from agentteams_manager.clients.process import ProcessTimeout
@@ -226,6 +230,18 @@ class ResourceController(ReconciliationController, Protocol):
 
     async def delete_worker(self, name: str) -> None: ...
 
+    async def list_teams(self) -> tuple[TeamResource, ...]: ...
+
+    async def create_team(self, request: TeamCreateRequest) -> None: ...
+
+    async def apply_team(
+        self,
+        name: str,
+        document: bytes,
+    ) -> TeamResource: ...
+
+    async def delete_team(self, name: str) -> None: ...
+
 
 class ResourceSupervisor(Protocol):
     async def begin(
@@ -280,6 +296,114 @@ class TopologyRefresher(Protocol):
 Sleeper = Callable[[float], Awaitable[None]]
 
 
+class TeamMemberSpec(BaseModel):
+    """Closed per-member configuration accepted by Team manifests."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    name: ResourceName
+    runtime: WorkerRuntime | None = None
+    model: str | None = None
+    image: str | None = None
+    identity: str | None = None
+    soul: str | None = None
+    skills: tuple[str, ...] = ()
+    package_uri: str | None = None
+
+    def to_document(self, *, leader: bool) -> dict[str, object]:
+        document: dict[str, object] = {
+            "name": self.name,
+        }
+        _document_value(document, "runtime", self.runtime)
+        _document_value(document, "model", self.model)
+        _document_value(document, "image", self.image)
+        _document_value(document, "identity", self.identity)
+        _document_value(document, "soul", self.soul)
+        _document_value(document, "package", self.package_uri)
+        if self.skills and not leader:
+            document["skills"] = list(self.skills)
+        return document
+
+
+class TeamSpec(BaseModel):
+    """Typed subset of the current AgentTeams v1beta1 Team contract."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    name: ResourceName
+    leader: TeamMemberSpec
+    workers: tuple[TeamMemberSpec, ...] = ()
+    team_name: ResourceName | None = None
+    description: str = ""
+    leader_heartbeat_every: str | None = "30m"
+    worker_idle_timeout: str | None = "12h"
+
+    @model_validator(mode="after")
+    def validate_roster(self) -> TeamSpec:
+        names = [self.leader.name, *(worker.name for worker in self.workers)]
+        if len(names) != len(set(names)):
+            raise ValueError("Team member names must be unique")
+        if self.leader.skills:
+            raise ValueError(
+                "Leader skills are Controller-managed; use a package instead",
+            )
+        return self
+
+    @property
+    def is_simple_create(self) -> bool:
+        if not _simple_team_member(self.leader, leader=True):
+            return False
+        return all(
+            _simple_team_member(worker, leader=False)
+            for worker in self.workers
+        )
+
+    def to_create_request(self) -> TeamCreateRequest:
+        if not self.is_simple_create:
+            raise ValueError("Team spec requires declarative apply")
+        return TeamCreateRequest(
+            name=self.name,
+            leader_name=self.leader.name,
+            workers=tuple(worker.name for worker in self.workers),
+            team_name=self.team_name,
+            leader_model=self.leader.model,
+            description=self.description or None,
+            leader_heartbeat_every=self.leader_heartbeat_every,
+            worker_idle_timeout=self.worker_idle_timeout,
+        )
+
+    def to_apply_document(self) -> bytes:
+        leader = self.leader.to_document(leader=True)
+        if self.leader_heartbeat_every:
+            leader["heartbeat"] = {
+                "enabled": True,
+                "every": self.leader_heartbeat_every,
+            }
+        if self.worker_idle_timeout:
+            leader["workerIdleTimeout"] = self.worker_idle_timeout
+        spec: dict[str, object] = {
+            "teamName": self.team_name or self.name,
+            "leader": leader,
+            "workers": [
+                worker.to_document(leader=False)
+                for worker in self.workers
+            ],
+        }
+        if self.description:
+            spec["description"] = self.description
+        return json.dumps(
+            {
+                "apiVersion": "agentteams.io/v1beta1",
+                "kind": "Team",
+                "metadata": {"name": self.name},
+                "spec": spec,
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+
+
 class ResourceService:
     """Run Worker mutations as durable, fact-proved workflows."""
 
@@ -292,6 +416,7 @@ class ResourceService:
         matrix: MatrixPort,
         sleeper: Sleeper = asyncio.sleep,
         worker_poll_delays: tuple[float, ...] = (0.25, 0.5, 1, 2, 4),
+        team_poll_delays: tuple[float, ...] = (0.5, 1, 2, 4, 8),
         greeting: str = (
             "Hello. I am the AgentTeams Manager. "
             "This room is your direct coordination channel."
@@ -301,12 +426,17 @@ class ResourceService:
             raise ValueError("worker_poll_delays cannot be empty")
         if any(delay < 0 for delay in worker_poll_delays):
             raise ValueError("worker poll delays cannot be negative")
+        if not team_poll_delays:
+            raise ValueError("team_poll_delays cannot be empty")
+        if any(delay < 0 for delay in team_poll_delays):
+            raise ValueError("team poll delays cannot be negative")
         self._controller = controller
         self._supervisor = supervisor
         self._topology = topology
         self._matrix = matrix
         self._sleeper = sleeper
         self._worker_poll_delays = worker_poll_delays
+        self._team_poll_delays = team_poll_delays
         self._greeting = greeting
 
     async def get_worker(self, name: str) -> WorkerResource | None:
@@ -314,6 +444,12 @@ class ResourceService:
 
     async def list_workers(self) -> tuple[WorkerResource, ...]:
         return await self._controller.list_workers()
+
+    async def get_team(self, name: str) -> TeamResource | None:
+        return await self._controller.get_team(name)
+
+    async def list_teams(self) -> tuple[TeamResource, ...]:
+        return await self._controller.list_teams()
 
     async def create_worker(
         self,
@@ -570,6 +706,249 @@ class ResourceService:
             mutate=mutate,
             prove=prove,
         )
+
+    async def create_team(
+        self,
+        spec: TeamSpec,
+        *,
+        context: MutationContext,
+    ) -> TeamResource:
+        return await self._run_team_upsert(
+            spec=spec,
+            context=context,
+            kind=OperationKind.CREATE_TEAM,
+            force_apply=not spec.is_simple_create,
+            reject_existing=True,
+        )
+
+    async def apply_team(
+        self,
+        spec: TeamSpec,
+        *,
+        context: MutationContext,
+    ) -> TeamResource:
+        return await self._run_team_upsert(
+            spec=spec,
+            context=context,
+            kind=OperationKind.UPDATE_TEAM,
+            force_apply=True,
+            reject_existing=False,
+        )
+
+    async def delete_team(
+        self,
+        name: str,
+        *,
+        context: MutationContext,
+    ) -> None:
+        operation = await self._supervisor.begin(
+            operation_id=context.operation_id,
+            kind=OperationKind.DELETE_TEAM,
+            target_key=f"team/{name}",
+            request={"name": name, "action": "delete"},
+        )
+        if operation.status is OperationStatus.FAILED:
+            raise ConflictError(f"delete team/{name} previously failed")
+        if operation.status is OperationStatus.SUCCEEDED:
+            if await self._controller.get_team(name) is not None:
+                raise ConflictError(
+                    f"team/{name} exists after a completed delete",
+                )
+            return
+        if operation.status is OperationStatus.PLANNED:
+            if await self._controller.get_team(name) is None:
+                await self._supervisor.effect_failed(
+                    operation.operation_id,
+                    ExternalEffect.CONTROLLER,
+                    "resource does not exist",
+                )
+                raise NotFoundError(f"team/{name} does not exist")
+            await self._supervisor.before_effect(
+                operation.operation_id,
+                ExternalEffect.CONTROLLER,
+                {"operation": "delete_team", "name": name},
+            )
+            try:
+                await self._controller.delete_team(name)
+            except Exception as exc:
+                if _ambiguous_exception(exc):
+                    await self._supervisor.effect_ambiguous(
+                        operation.operation_id,
+                        ExternalEffect.CONTROLLER,
+                        type(exc).__name__,
+                    )
+                else:
+                    await self._supervisor.effect_failed(
+                        operation.operation_id,
+                        ExternalEffect.CONTROLLER,
+                        _safe_reason(exc),
+                    )
+                    raise
+        if await self._controller.get_team(name) is not None:
+            await self._supervisor.effect_ambiguous(
+                operation.operation_id,
+                ExternalEffect.CONTROLLER,
+                "Controller still reports the Team",
+            )
+            raise AmbiguousEffectError(
+                f"delete team/{name} is not proven",
+            )
+        await self._refresh_topology_or_reconcile(operation.operation_id)
+        await self._supervisor.effect_succeeded(
+            operation.operation_id,
+            ExternalEffect.CONTROLLER,
+            {"name": name, "deleted": True},
+        )
+
+    async def _run_team_upsert(
+        self,
+        *,
+        spec: TeamSpec,
+        context: MutationContext,
+        kind: OperationKind,
+        force_apply: bool,
+        reject_existing: bool,
+    ) -> TeamResource:
+        mode = "apply" if force_apply else "create"
+        operation = await self._supervisor.begin(
+            operation_id=context.operation_id,
+            kind=kind,
+            target_key=f"team/{spec.name}",
+            request={
+                "mode": mode,
+                "spec": spec.model_dump(mode="json"),
+            },
+        )
+        if operation.status is OperationStatus.SUCCEEDED:
+            return await self._require_team(spec.name)
+        if operation.status is OperationStatus.FAILED:
+            raise ConflictError(
+                f"{mode} team/{spec.name} previously failed",
+            )
+
+        team: TeamResource | None = None
+        if operation.status is OperationStatus.PLANNED:
+            existing = await self._controller.get_team(spec.name)
+            if reject_existing and existing is not None:
+                await self._supervisor.effect_failed(
+                    operation.operation_id,
+                    ExternalEffect.CONTROLLER,
+                    "resource already exists",
+                )
+                raise ConflictError(f"team/{spec.name} already exists")
+            await self._supervisor.before_effect(
+                operation.operation_id,
+                ExternalEffect.CONTROLLER,
+                {
+                    "operation": f"{mode}_team",
+                    "name": spec.name,
+                },
+            )
+            try:
+                if force_apply:
+                    team = await self._controller.apply_team(
+                        spec.name,
+                        spec.to_apply_document(),
+                    )
+                else:
+                    await self._controller.create_team(
+                        spec.to_create_request(),
+                    )
+            except Exception as exc:
+                if _ambiguous_exception(exc):
+                    await self._supervisor.effect_ambiguous(
+                        operation.operation_id,
+                        ExternalEffect.CONTROLLER,
+                        type(exc).__name__,
+                    )
+                    team = await self._controller.get_team(spec.name)
+                    if team is None:
+                        raise AmbiguousEffectError(
+                            f"{mode} team/{spec.name} result is unknown",
+                        ) from exc
+                else:
+                    await self._supervisor.effect_failed(
+                        operation.operation_id,
+                        ExternalEffect.CONTROLLER,
+                        _safe_reason(exc),
+                    )
+                    raise
+        else:
+            team = await self._controller.get_team(spec.name)
+            if team is None:
+                raise AmbiguousEffectError(
+                    f"{mode} team/{spec.name} has no Controller proof",
+                )
+
+        ready = await self._wait_for_team(
+            operation_id=operation.operation_id,
+            spec=spec,
+            initial=team,
+        )
+        await self._refresh_topology_or_reconcile(operation.operation_id)
+        await self._supervisor.effect_succeeded(
+            operation.operation_id,
+            ExternalEffect.CONTROLLER,
+            _resource_receipt(ready),
+        )
+        return ready
+
+    async def _wait_for_team(
+        self,
+        *,
+        operation_id: str,
+        spec: TeamSpec,
+        initial: TeamResource | None,
+    ) -> TeamResource:
+        team = initial
+        attempts = len(self._team_poll_delays) + 1
+        for index in range(attempts):
+            if team is None or index > 0 or initial is None:
+                team = await self._controller.get_team(spec.name)
+            if team is not None:
+                phase = (team.phase or "").casefold()
+                if phase in {"failed", "error", "deleting"}:
+                    message = _resource_message(team)
+                    await self._supervisor.effect_failed(
+                        operation_id,
+                        ExternalEffect.CONTROLLER,
+                        message or f"team/{spec.name} entered {phase}",
+                    )
+                    raise ConflictError(
+                        message or f"team/{spec.name} entered {phase}",
+                    )
+                if _team_is_ready(team, expected_workers=len(spec.workers)):
+                    return team
+            if index < len(self._team_poll_delays):
+                await self._sleeper(self._team_poll_delays[index])
+        await self._supervisor.effect_ambiguous(
+            operation_id,
+            ExternalEffect.CONTROLLER,
+            "Team readiness did not converge",
+        )
+        raise AmbiguousEffectError(
+            f"team/{spec.name} is not ready",
+        )
+
+    async def _refresh_topology_or_reconcile(
+        self,
+        operation_id: str,
+    ) -> None:
+        try:
+            await self._topology.refresh()
+        except Exception as exc:
+            await self._supervisor.effect_ambiguous(
+                operation_id,
+                ExternalEffect.MATRIX,
+                f"topology not converged: {type(exc).__name__}",
+            )
+            raise
+
+    async def _require_team(self, name: str) -> TeamResource:
+        team = await self._controller.get_team(name)
+        if team is None:
+            raise NotFoundError(f"team/{name} does not exist")
+        return team
 
     async def _run_worker_mutation(
         self,
@@ -1079,6 +1458,55 @@ def _matches_worker_update(
     ):
         return False
     return True
+
+
+def _document_value(
+    document: dict[str, object],
+    key: str,
+    value: object | None,
+) -> None:
+    if value is not None and value != "":
+        document[key] = value
+
+
+def _simple_team_member(
+    member: TeamMemberSpec,
+    *,
+    leader: bool,
+) -> bool:
+    if leader and member.runtime not in {None, "copaw"}:
+        return False
+    if not leader and member.runtime is not None:
+        return False
+    if any(
+        value
+        for value in (
+            member.image,
+            member.identity,
+            member.soul,
+            member.skills,
+            member.package_uri,
+        )
+    ):
+        return False
+    return leader or member.model is None
+
+
+def _team_is_ready(
+    team: TeamResource,
+    *,
+    expected_workers: int,
+) -> bool:
+    if (team.phase or "").casefold() not in {"active", "ready", "running"}:
+        return False
+    if not bool(team.status.get("leaderReady")):
+        return False
+    try:
+        ready = int(team.status.get("readyWorkers", 0))
+        reported_total = int(team.status.get("totalWorkers", 0))
+    except (TypeError, ValueError):
+        return False
+    return ready >= max(expected_workers, reported_total)
 
 
 def _ambiguous_exception(exc: BaseException) -> bool:

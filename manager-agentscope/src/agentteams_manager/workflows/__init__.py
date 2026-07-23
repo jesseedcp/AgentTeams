@@ -5,6 +5,8 @@ from .resources import (
     ResourceHeartbeat,
     ResourceReconciler,
     ResourceService,
+    TeamMemberSpec,
+    TeamSpec,
     TopologyResolver,
 )
 from .supervisor import OperationSupervisor
@@ -15,5 +17,7 @@ __all__ = [
     "ResourceHeartbeat",
     "ResourceReconciler",
     "ResourceService",
+    "TeamMemberSpec",
+    "TeamSpec",
     "TopologyResolver",
 ]
