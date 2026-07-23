@@ -1,46 +1,42 @@
-# Worker Lifecycle Management
+# Worker Lifecycle
 
-The Manager automatically stops idle Workers and wakes them when assigning tasks. State is persisted in `~/worker-lifecycle.json` (local only, never synced to MinIO).
+## Inspect
 
-## Commands
+- Call `list_workers` to see Workers allowed by the current Human scope.
+- Call `get_worker` with `name` for the authoritative phase, container state,
+  runtime, Team placement, and room identity.
 
-```bash
-# Sync all Worker container statuses
-bash /opt/agentteams/agent/skills/worker-management/scripts/lifecycle-worker.sh --action sync-status
+## Sleep
 
-# Check for idle Workers and auto-stop those exceeding timeout
-bash /opt/agentteams/agent/skills/worker-management/scripts/lifecycle-worker.sh --action check-idle
+Before calling `sleep_worker`, verify that the Worker has no active task,
+unfinished handoff, or irreplaceable in-memory work. Then pass:
 
-# Ensure a Worker is ready (auto-start if stopped, auto-recreate if missing)
-bash /opt/agentteams/agent/skills/worker-management/scripts/lifecycle-worker.sh --action ensure-ready --worker <name>
-
-# Manually stop/start
-bash /opt/agentteams/agent/skills/worker-management/scripts/lifecycle-worker.sh --action stop --worker <name>
-bash /opt/agentteams/agent/skills/worker-management/scripts/lifecycle-worker.sh --action start --worker <name>
-
-# Delete a worker (stop + remove container + clean up lifecycle state)
-bash /opt/agentteams/agent/skills/worker-management/scripts/lifecycle-worker.sh --action delete --worker <name>
+```json
+{"name":"researcher"}
 ```
 
-## start vs create
+A successful receipt proves the Controller reports a stopped, sleeping, or
+exited container state. Sleeping preserves the Worker resource and durable
+data.
 
-| Situation | Command |
-|-----------|---------|
-| Container stopped | `lifecycle-worker.sh --action start` — restarts existing container |
-| Container not found | `create-worker.sh` — full registration flow |
-| Worker needs reset | `create-worker.sh` — removes old, rebuilds |
-| Worker permanently removed | `lifecycle-worker.sh --action delete` — stops, removes container, cleans lifecycle state |
+## Wake
 
-## Changing Idle Timeout
+Call `wake_worker` with the same name. A successful receipt proves the
+Controller reports a running or ready container state. Do not create a
+second Worker when an existing one is merely asleep.
 
-Default: 720 minutes (12 hours). Change via:
-```bash
-jq '.idle_timeout_minutes = 60' ~/worker-lifecycle.json > /tmp/lc.json && mv /tmp/lc.json ~/worker-lifecycle.json
-```
+## Update or replace
 
-## Heartbeat Check (automated every 15 minutes)
+Use `update_worker` for typed desired-state changes. Runtime, image, or
+package changes can replace the managed container while preserving the
+Controller identity and durable external data. Confirm interruption is
+acceptable first.
 
-1. Scan `/root/agentteams-fs/shared/tasks/*/meta.json` for `"status": "assigned"` tasks
-2. Ask each assigned Worker for status in their Room
-3. If Worker confirms completion, update meta.json: `"status": "completed"`, fill `completed_at`
-4. Assess capacity vs pending tasks
+## Delete
+
+Use `delete_worker` only when permanent removal is intended. State the exact
+Worker name and wait for the confirmation gate. The receipt is successful
+only after Controller absence is proven.
+
+If a mutation is interrupted, let heartbeat resume its journaled operation.
+Do not issue an unrelated create request to force recovery.

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 
 from agentteams_manager.clients.agt import (
     AgtClient,
     HumanCreateRequest,
+    HumanUpdateRequest,
     TeamCreateRequest,
     WorkerCreateRequest,
     WorkerUpdateRequest,
@@ -25,6 +27,11 @@ def _worker(name: str = "alice", runtime: str = "qwenpaw") -> dict:
         "message": "",
         "team": "",
         "role": "",
+        "identity": "Release specialist",
+        "soul": "Ship carefully.",
+        "skills": ["git", "review"],
+        "package": "oss://workers/release.zip",
+        "expose": [{"port": 8080}],
     }
 
 
@@ -38,6 +45,10 @@ async def test_get_worker_uses_json_and_parses_runtime() -> None:
 
     assert worker is not None
     assert worker.runtime == "qwenpaw"
+    assert worker.skills == ("git", "review")
+    assert worker.spec["identity"] == "Release specialist"
+    assert worker.spec["package"] == "oss://workers/release.zip"
+    assert worker.spec["expose"] == [8080]
     assert process.argv == (
         "agt",
         "get",
@@ -113,6 +124,57 @@ async def test_create_and_update_worker_map_only_known_flags() -> None:
         "--model",
         "qwen3.6-plus",
     )
+
+
+@pytest.mark.asyncio
+async def test_update_worker_preserves_explicit_empty_arrays() -> None:
+    process = FakeProcess()
+    process.queue_error("", returncode=0)
+    updated = _worker(runtime="copaw")
+    updated["skills"] = []
+    updated["expose"] = []
+    process.queue_json(updated)
+
+    worker = await AgtClient(process).update_worker(
+        WorkerUpdateRequest(
+            name="alice",
+            skills=(),
+            expose=(),
+        ),
+    )
+
+    assert worker.skills == ()
+    assert worker.spec["expose"] == []
+    assert process.calls[-2][0] == (
+        "agt",
+        "update",
+        "worker",
+        "--name",
+        "alice",
+        "--skills",
+        "",
+        "--expose",
+        "",
+    )
+
+
+@pytest.mark.parametrize(
+    "package_uri",
+    (
+        "nacos://admin:password@registry.example/public/coder/v1",
+        "https://packages.example/coder.zip?X-Amz-Signature=secret",
+    ),
+)
+def test_worker_requests_reject_credential_bearing_package_uris(
+    package_uri: str,
+) -> None:
+    with pytest.raises(ValidationError, match="credentials"):
+        WorkerCreateRequest(
+            name="alice",
+            runtime="copaw",
+            model="qwen3.6-plus",
+            package_uri=package_uri,
+        )
 
 
 @pytest.mark.asyncio
@@ -240,4 +302,54 @@ async def test_create_team_and_human_use_typed_argv() -> None:
         "2",
         "--accessible-teams",
         "alpha",
+    )
+
+
+@pytest.mark.asyncio
+async def test_update_human_supports_scope_changes_and_explicit_clears() -> None:
+    process = FakeProcess()
+    process.queue_error("", returncode=0)
+    process.queue_json(
+        {
+            "name": "reviewer",
+            "phase": "Active",
+            "displayName": "Reviewer",
+            "email": "",
+            "matrixUserID": "@reviewer:local",
+            "rooms": [],
+            "permissionLevel": 3,
+            "accessibleTeams": [],
+            "accessibleWorkers": ["alpha-dev"],
+            "note": "",
+        },
+    )
+
+    human = await AgtClient(process).update_human(
+        HumanUpdateRequest(
+            name="reviewer",
+            email="",
+            permission_level=3,
+            accessible_teams=(),
+            accessible_workers=("alpha-dev",),
+            note="",
+        ),
+    )
+
+    assert human.permission_level == 3
+    assert process.calls[-2][0] == (
+        "agt",
+        "update",
+        "human",
+        "--name",
+        "reviewer",
+        "--email",
+        "",
+        "--permission-level",
+        "3",
+        "--accessible-teams",
+        "",
+        "--accessible-workers",
+        "alpha-dev",
+        "--note",
+        "",
     )

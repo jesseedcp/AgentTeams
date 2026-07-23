@@ -14,6 +14,7 @@ from pydantic import (
     Field,
     StringConstraints,
     ValidationError,
+    field_validator,
     model_validator,
 )
 
@@ -81,6 +82,14 @@ class WorkerCreateRequest(_Request):
     team: ResourceName | None = None
     role: Literal["team_leader", "worker"] | None = None
 
+    @field_validator("package_uri")
+    @classmethod
+    def package_reference_has_no_credentials(
+        cls,
+        value: str | None,
+    ) -> str | None:
+        return _safe_package_reference(value)
+
 
 class WorkerUpdateRequest(_Request):
     name: ResourceName
@@ -92,6 +101,14 @@ class WorkerUpdateRequest(_Request):
     skills: tuple[str, ...] | None = None
     package_uri: str | None = None
     expose: tuple[int, ...] | None = None
+
+    @field_validator("package_uri")
+    @classmethod
+    def package_reference_has_no_credentials(
+        cls,
+        value: str | None,
+    ) -> str | None:
+        return _safe_package_reference(value)
 
     @model_validator(mode="after")
     def require_change(self) -> WorkerUpdateRequest:
@@ -131,6 +148,36 @@ class HumanCreateRequest(_Request):
     note: str | None = None
 
 
+class HumanUpdateRequest(_Request):
+    name: ResourceName
+    display_name: str | None = None
+    email: str | None = None
+    permission_level: int | None = Field(default=None, ge=1, le=3)
+    accessible_teams: tuple[ResourceName, ...] | None = None
+    accessible_workers: tuple[ResourceName, ...] | None = None
+    note: str | None = None
+
+    @model_validator(mode="after")
+    def require_change(self) -> HumanUpdateRequest:
+        changed = (
+            self.display_name,
+            self.email,
+            self.permission_level,
+            self.accessible_teams,
+            self.accessible_workers,
+            self.note,
+        )
+        if all(value is None for value in changed):
+            raise ValueError("at least one Human field must change")
+        return self
+
+
+class _ExposePayload(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    port: int = Field(ge=1, le=65535)
+
+
 class _WorkerPayload(BaseModel):
     model_config = ConfigDict(extra="allow", populate_by_name=True)
 
@@ -139,6 +186,11 @@ class _WorkerPayload(BaseModel):
     model: str = ""
     runtime: WorkerRuntime = "openclaw"
     image: str = ""
+    identity: str = ""
+    soul: str = ""
+    skills: tuple[str, ...] = ()
+    package_uri: str = Field(default="", alias="package")
+    expose: tuple[_ExposePayload, ...] = ()
     container_state: str = Field(default="", alias="containerState")
     matrix_user_id: str = Field(default="", alias="matrixUserID")
     room_id: str = Field(default="", alias="roomID")
@@ -156,7 +208,17 @@ class _WorkerPayload(BaseModel):
             matrix_user_id=self.matrix_user_id or None,
             team=self.team or None,
             role=self.role or None,
-            spec={"image": self.image} if self.image else {},
+            skills=self.skills,
+            spec={
+                "image": self.image,
+                "identity": self.identity,
+                "soul": self.soul,
+                "package": self.package_uri,
+                "expose": [
+                    item.port
+                    for item in self.expose
+                ],
+            },
             status={
                 "containerState": self.container_state,
                 "message": self.message,
@@ -283,11 +345,11 @@ class AgtClient:
         request: WorkerCreateRequest,
     ) -> WorkerResource | None:
         argv = ["agt", "create", "worker", "--name", request.name]
-        _flag(argv, "--model", request.model)
-        _flag(argv, "--runtime", request.runtime)
-        _flag(argv, "--image", request.image)
-        _flag(argv, "--identity", request.identity)
-        _flag(argv, "--soul", request.soul)
+        _optional_flag(argv, "--model", request.model)
+        _optional_flag(argv, "--runtime", request.runtime)
+        _optional_flag(argv, "--image", request.image)
+        _optional_flag(argv, "--identity", request.identity)
+        _optional_flag(argv, "--soul", request.soul)
         _csv_flag(argv, "--skills", request.skills)
         _flag(argv, "--package", request.package_uri)
         if request.expose:
@@ -313,9 +375,13 @@ class AgtClient:
         _flag(argv, "--soul", request.soul)
         if request.skills is not None:
             _csv_flag(argv, "--skills", request.skills, allow_empty=True)
-        _flag(argv, "--package", request.package_uri)
+        _optional_flag(argv, "--package", request.package_uri)
         if request.expose is not None:
-            _flag(argv, "--expose", ",".join(map(str, request.expose)))
+            _optional_flag(
+                argv,
+                "--expose",
+                ",".join(map(str, request.expose)),
+            )
         await self._command(tuple(argv))
         worker = await self.get_worker(request.name)
         if worker is None:
@@ -497,6 +563,37 @@ class AgtClient:
         _flag(argv, "--note", request.note)
         await self._command(tuple(argv))
 
+    async def update_human(
+        self,
+        request: HumanUpdateRequest,
+    ) -> HumanResource:
+        argv = ["agt", "update", "human", "--name", request.name]
+        _optional_flag(argv, "--display-name", request.display_name)
+        _optional_flag(argv, "--email", request.email)
+        _flag(argv, "--permission-level", request.permission_level)
+        if request.accessible_teams is not None:
+            _csv_flag(
+                argv,
+                "--accessible-teams",
+                request.accessible_teams,
+                allow_empty=True,
+            )
+        if request.accessible_workers is not None:
+            _csv_flag(
+                argv,
+                "--accessible-workers",
+                request.accessible_workers,
+                allow_empty=True,
+            )
+        _optional_flag(argv, "--note", request.note)
+        await self._command(tuple(argv))
+        human = await self.get_human(request.name)
+        if human is None:
+            raise AgtProtocolError(
+                f"updated human {request.name!r} is not readable",
+            )
+        return human
+
     async def delete_human(self, name: str) -> None:
         await self._delete("human", name)
 
@@ -603,6 +700,37 @@ def _validate_name(name: str) -> None:
 
 def _flag(argv: list[str], name: str, value: object | None) -> None:
     if value is not None and value != "":
+        argv.extend((name, str(value)))
+
+
+def _safe_package_reference(value: str | None) -> str | None:
+    if value is None or value == "":
+        return value
+    if any(ord(character) < 32 for character in value):
+        raise ValueError("package reference contains control characters")
+    parsed = urlsplit(value)
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError(
+            "package credentials must come from runtime configuration",
+        )
+    sensitive = re.compile(
+        r"(?:token|secret|password|credential|authorization|"
+        r"api[_-]?key|signature|sig)$",
+        re.IGNORECASE,
+    )
+    if any(sensitive.search(key) for key, _ in parse_qsl(parsed.query)):
+        raise ValueError(
+            "package credentials must come from runtime configuration",
+        )
+    return value
+
+
+def _optional_flag(
+    argv: list[str],
+    name: str,
+    value: object | None,
+) -> None:
+    if value is not None:
         argv.extend((name, str(value)))
 
 

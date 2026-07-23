@@ -37,6 +37,7 @@ def test_level_two_human_is_read_only_and_resource_scoped() -> None:
     assert "list_workers" in policy.allowed_tools
     assert "create_worker" not in policy.allowed_tools
     assert "delete_worker" not in policy.allowed_tools
+    assert "send_notification" in policy.confirm_tools
     assert policy.allowed_team_names == frozenset({"alpha"})
     assert policy.allowed_worker_names == frozenset({"alpha-dev"})
     authorize_resource_target(policy, resource_type="team", name="alpha")

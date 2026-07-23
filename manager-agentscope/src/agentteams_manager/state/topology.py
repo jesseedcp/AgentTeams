@@ -332,6 +332,26 @@ class TopologyRepository:
 
         return await self._database.read(read)
 
+    async def remove_trusted_channel(
+        self,
+        first_user_id: str,
+        second_user_id: str,
+    ) -> None:
+        first, second = _trusted_pair(first_user_id, second_user_id)
+
+        def write(connection: sqlite3.Connection) -> None:
+            connection.execute(
+                """
+                DELETE FROM channel_relationships
+                 WHERE relationship_kind='trusted'
+                   AND owner_user_id=?
+                   AND peer_user_id=?
+                """,
+                (first, second),
+            )
+
+        await self._database.write(write)
+
 
 def _require_channel_key(value: str, label: str) -> None:
     if not value:

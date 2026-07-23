@@ -1,128 +1,73 @@
-# Matrix API Reference
+# Matrix Tool Reference
 
-All calls use `MATRIX_URL="${AGENTTEAMS_MATRIX_URL}"`.
+## Read Operations
 
-## User Registration
+`list_matrix_rooms` takes no fields.
 
-Tuwunel uses single-step registration with a token (no UIAA flow).
-
-```bash
-# Register
-curl -X POST ${MATRIX_URL}/_matrix/client/v3/register \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "username": "<USERNAME>",
-    "password": "<PASSWORD>",
-    "auth": {
-      "type": "m.login.registration_token",
-      "token": "'"${AGENTTEAMS_REGISTRATION_TOKEN}"'"
-    }
-  }'
-# Response: { "user_id": "...", "access_token": "..." }
-
-# Login
-curl -X POST ${MATRIX_URL}/_matrix/client/v3/login \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "type": "m.login.password",
-    "identifier": {"type": "m.id.user", "user": "<USERNAME>"},
-    "password": "<PASSWORD>"
-  }'
+```json
+{}
 ```
 
-## Room Management
+`list_matrix_members` and `get_matrix_room_state` take a room ID:
 
-### Create room (3-party: Human + Manager + Worker)
-
-Use `trusted_private_chat` for auto-join. Override power levels: Admin + Manager = 100, Workers = 0.
-
-```bash
-curl -X POST ${MATRIX_URL}/_matrix/client/v3/createRoom \
-  -H "Authorization: Bearer ${MANAGER_TOKEN}" \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "name": "Worker: <NAME>",
-    "topic": "Communication channel for <NAME>",
-    "invite": [
-      "@'"${AGENTTEAMS_ADMIN_USER}"':'"${AGENTTEAMS_MATRIX_DOMAIN}"'",
-      "@<NAME>:'"${AGENTTEAMS_MATRIX_DOMAIN}"'"
-    ],
-    "preset": "trusted_private_chat",
-    "power_level_content_override": {
-      "users": {
-        "@manager:'"${AGENTTEAMS_MATRIX_DOMAIN}"'": 100,
-        "@'"${AGENTTEAMS_ADMIN_USER}"':'"${AGENTTEAMS_MATRIX_DOMAIN}"'": 100,
-        "@<NAME>:'"${AGENTTEAMS_MATRIX_DOMAIN}"'": 0
-      }
-    }
-  }'
+```json
+{"room_id":"!release:example.org"}
 ```
 
-### Send message (no mention)
+`lookup_matrix_user` takes a full Matrix user ID:
 
-```bash
-curl -X PUT "${MATRIX_URL}/_matrix/client/v3/rooms/<ROOM_ID>/send/m.room.message/$(date +%s)" \
-  -H "Authorization: Bearer ${MANAGER_TOKEN}" \
-  -H 'Content-Type: application/json' \
-  -d '{"msgtype": "m.text", "body": "Hello..."}'
+```json
+{"user_id":"@alice:example.org"}
 ```
 
-### Send message with @mention
+## Membership
 
-Workers have `requireMention: true` — without `m.mentions`, they receive but IGNORE the message.
+Use `invite_matrix_user` or `unban_matrix_user`:
 
-```bash
-# Single mention
-curl -X PUT "${MATRIX_URL}/_matrix/client/v3/rooms/<ROOM_ID>/send/m.room.message/$(date +%s)" \
-  -H "Authorization: Bearer ${MANAGER_TOKEN}" \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "msgtype": "m.text",
-    "body": "@<WORKER>:'"${AGENTTEAMS_MATRIX_DOMAIN}"' Your task: ...",
-    "m.mentions": {
-      "user_ids": ["@<WORKER>:'"${AGENTTEAMS_MATRIX_DOMAIN}"'"]
-    }
-  }'
-
-# Multiple mentions
-# Add all user IDs to both body text and m.mentions.user_ids array
+```json
+{
+  "room_id": "!release:example.org",
+  "user_id": "@alice:example.org"
+}
 ```
 
-### Upload and send a file
+Use `kick_matrix_user` or `ban_matrix_user` with an optional reason:
 
-```bash
-# 1. Upload
-curl -X POST "${MATRIX_URL}/_matrix/media/v3/upload?filename=<FILENAME>" \
-  -H "Authorization: Bearer ${MANAGER_TOKEN}" \
-  -H "Content-Type: application/octet-stream" \
-  --data-binary @/path/to/file
-# Response: {"content_uri": "mxc://<SERVER>/<MEDIA_ID>"}
-
-# 2. Send as m.file message
-curl -X PUT "${MATRIX_URL}/_matrix/client/v3/rooms/<ROOM_ID>/send/m.room.message/$(date +%s)" \
-  -H "Authorization: Bearer ${MANAGER_TOKEN}" \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "msgtype": "m.file",
-    "body": "<FILENAME>",
-    "url": "mxc://<SERVER>/<MEDIA_ID>"
-  }'
+```json
+{
+  "room_id": "!release:example.org",
+  "user_id": "@alice:example.org",
+  "reason": "Access scope removed"
+}
 ```
 
-Then reply in conversation with: `MEDIA: mxc://<SERVER>/<MEDIA_ID>`
+Never infer success from the request alone; report the typed success receipt.
 
-Use `text/plain` for text files, `application/octet-stream` as safe fallback. The `mxc://` URI is permanent and accessible to all room members.
+## Media
 
-### List joined rooms
+Upload a local file with `upload_matrix_media`:
 
-```bash
-curl -s ${MATRIX_URL}/_matrix/client/v3/joined_rooms \
-  -H "Authorization: Bearer ${MANAGER_TOKEN}" | jq
+```json
+{"path":"/workspace/reports/release.pdf"}
 ```
 
-### Get room messages
+Download with `download_matrix_media`:
 
-```bash
-curl -s "${MATRIX_URL}/_matrix/client/v3/rooms/<ROOM_ID>/messages?dir=b&limit=20" \
-  -H "Authorization: Bearer ${MANAGER_TOKEN}" | jq
+```json
+{
+  "mxc_uri": "mxc://example.org/media-id",
+  "media_type": "application/pdf",
+  "filename": "release.pdf"
+}
 ```
+
+For encrypted media, also pass the key, hash, and IV fields from the inbound
+media reference. The adapter owns decryption and local size limits.
+
+## Boundaries
+
+- Use `create_channel` for a new private room.
+- Use `send_notification` for an idempotent routed message.
+- Use `create_human` for a real Human account.
+- Task messages to Workers and Team Leaders must use their task workflows so
+  structured mentions, threads, and durable operation IDs are preserved.

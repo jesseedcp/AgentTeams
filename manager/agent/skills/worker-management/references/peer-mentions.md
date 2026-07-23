@@ -1,21 +1,19 @@
-# Enable Peer Mentions Between Workers
+# Worker-to-Worker Coordination
 
-By default, Workers only accept @mentions from Manager and admin — not from each other. This prevents infinite mutual-mention loops.
+The Manager does not edit runtime files to enable broad peer mentions.
+Worker collaboration is represented by Controller Team membership and
+Manager-owned task handoffs.
 
-Only enable when admin **explicitly** requests Workers to trigger each other directly (e.g., async handoffs without Manager relay).
+1. Use `get_worker` to confirm each participant and its current Team.
+2. Use the Team management tools when membership or leadership must change.
+3. Route a handoff through the task workflow so ownership, status, and
+   completion evidence remain auditable.
 
-## Command
+If an administrator requests unrestricted peer-triggering, explain the loop
+risk: acknowledgment messages can recursively trigger more responses.
+Require an explicit bounded policy such as “mentions only for blocking
+handoffs,” then implement it through a future typed policy resource rather
+than modifying a Worker's runtime configuration ad hoc.
 
-```bash
-bash /opt/agentteams/agent/skills/worker-management/scripts/enable-peer-mentions.sh \
-    --workers alice,bob,charlie
-```
-
-The script:
-1. Adds each Worker to every other Worker's `groupAllowFrom`
-2. Pushes updated `openclaw.json` to MinIO
-3. Sends Matrix @mention to each Worker to run `agentteams-sync`
-
-## Critical: Brief Workers afterward
-
-Remind them **not to @mention each other in celebration or acknowledgment messages** — only when they have blocking information that cannot go through Manager. Uncontrolled inter-worker @mentions cause response loops.
+`update_worker` changes supported Worker desired-state fields; it is not a
+back door for untyped mention rules.

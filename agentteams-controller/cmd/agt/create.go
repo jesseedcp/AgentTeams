@@ -130,7 +130,7 @@ func createWorkerCmd() *cobra.Command {
 
 	cmd.Flags().StringVar(&name, "name", "", "Worker name (required)")
 	cmd.Flags().StringVar(&model, "model", "", "LLM model ID (default: $AGENTTEAMS_DEFAULT_MODEL, else qwen3.6-plus)")
-	cmd.Flags().StringVar(&runtime, "runtime", "", "Agent runtime (openclaw|copaw|hermes|openhuman)")
+	cmd.Flags().StringVar(&runtime, "runtime", "", "Agent runtime (openclaw|copaw|hermes|qwenpaw|openhuman)")
 	cmd.Flags().StringVar(&image, "image", "", "Container image override")
 	cmd.Flags().StringVar(&identity, "identity", "", "Worker identity description")
 	cmd.Flags().StringVar(&soul, "soul", "", "Worker SOUL.md content (inline)")
@@ -408,7 +408,7 @@ func createManagerCmd() *cobra.Command {
 
 	cmd.Flags().StringVar(&name, "name", "", "Manager name (required)")
 	cmd.Flags().StringVar(&model, "model", "", "LLM model ID (required)")
-	cmd.Flags().StringVar(&runtime, "runtime", "", "Agent runtime (openclaw|copaw|hermes|openhuman)")
+	cmd.Flags().StringVar(&runtime, "runtime", "", "Agent runtime (openclaw|copaw|hermes|qwenpaw|openhuman)")
 	cmd.Flags().StringVar(&image, "image", "", "Container image override")
 	cmd.Flags().StringVar(&soul, "soul", "", "Manager SOUL.md content")
 	return cmd
@@ -477,7 +477,7 @@ func expandPackageURI(raw string) (string, error) {
 }
 
 func splitCSV(s string) []string {
-	var result []string
+	result := make([]string, 0)
 	for _, item := range strings.Split(s, ",") {
 		item = strings.TrimSpace(item)
 		if item != "" {
@@ -488,7 +488,7 @@ func splitCSV(s string) []string {
 }
 
 func parseExposePorts(s string) []map[string]interface{} {
-	var ports []map[string]interface{}
+	ports := make([]map[string]interface{}, 0)
 	for _, p := range splitCSV(s) {
 		port := map[string]interface{}{"port": p}
 		ports = append(ports, port)

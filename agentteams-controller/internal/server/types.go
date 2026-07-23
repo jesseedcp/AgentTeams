@@ -35,18 +35,18 @@ type CreateWorkerRequest struct {
 }
 
 type UpdateWorkerRequest struct {
-	WorkerName    string                             `json:"workerName,omitempty"`
-	Model         string                             `json:"model,omitempty"`
-	ModelProvider string                             `json:"modelProvider,omitempty"`
-	Runtime       string                             `json:"runtime,omitempty"`
-	Image         string                             `json:"image,omitempty"`
-	Identity      string                             `json:"identity,omitempty"`
-	Soul          string                             `json:"soul,omitempty"`
-	Agents        string                             `json:"agents,omitempty"`
-	Skills        []string                           `json:"skills,omitempty"`
-	McpServers    []v1beta1.MCPServer                `json:"mcpServers,omitempty"`
-	Package       string                             `json:"package,omitempty"`
-	Expose        []v1beta1.ExposePort               `json:"expose,omitempty"`
+	WorkerName    *string                            `json:"workerName,omitempty"`
+	Model         *string                            `json:"model,omitempty"`
+	ModelProvider *string                            `json:"modelProvider,omitempty"`
+	Runtime       *string                            `json:"runtime,omitempty"`
+	Image         *string                            `json:"image,omitempty"`
+	Identity      *string                            `json:"identity,omitempty"`
+	Soul          *string                            `json:"soul,omitempty"`
+	Agents        *string                            `json:"agents,omitempty"`
+	Skills        *[]string                          `json:"skills,omitempty"`
+	McpServers    *[]v1beta1.MCPServer               `json:"mcpServers,omitempty"`
+	Package       *string                            `json:"package,omitempty"`
+	Expose        *[]v1beta1.ExposePort              `json:"expose,omitempty"`
 	ChannelPolicy *v1beta1.ChannelPolicySpec         `json:"channelPolicy,omitempty"`
 	Resources     *v1beta1.AgentResourceRequirements `json:"resources,omitempty"`
 
@@ -59,20 +59,25 @@ type UpdateWorkerRequest struct {
 }
 
 type WorkerResponse struct {
-	Name             string            `json:"name"`
-	Phase            string            `json:"phase"`
-	ContainerManaged bool              `json:"containerManaged,omitempty"`
-	State            string            `json:"state,omitempty"` // desired lifecycle state
-	Model            string            `json:"model,omitempty"`
-	Runtime          string            `json:"runtime,omitempty"`
-	Image            string            `json:"image,omitempty"`
-	ContainerState   string            `json:"containerState,omitempty"`
-	MatrixUserID     string            `json:"matrixUserID,omitempty"`
-	RoomID           string            `json:"roomID,omitempty"`
-	Message          string            `json:"message,omitempty"`
-	ExposedPorts     []ExposedPortInfo `json:"exposedPorts,omitempty"`
-	Team             string            `json:"team,omitempty"`
-	Role             string            `json:"role,omitempty"`
+	Name             string               `json:"name"`
+	Phase            string               `json:"phase"`
+	ContainerManaged bool                 `json:"containerManaged,omitempty"`
+	State            string               `json:"state,omitempty"` // desired lifecycle state
+	Model            string               `json:"model,omitempty"`
+	Runtime          string               `json:"runtime,omitempty"`
+	Image            string               `json:"image,omitempty"`
+	Identity         string               `json:"identity,omitempty"`
+	Soul             string               `json:"soul,omitempty"`
+	Skills           []string             `json:"skills,omitempty"`
+	Package          string               `json:"package,omitempty"`
+	Expose           []v1beta1.ExposePort `json:"expose,omitempty"`
+	ContainerState   string               `json:"containerState,omitempty"`
+	MatrixUserID     string               `json:"matrixUserID,omitempty"`
+	RoomID           string               `json:"roomID,omitempty"`
+	Message          string               `json:"message,omitempty"`
+	ExposedPorts     []ExposedPortInfo    `json:"exposedPorts,omitempty"`
+	Team             string               `json:"team,omitempty"`
+	Role             string               `json:"role,omitempty"`
 }
 
 type ExposedPortInfo struct {
@@ -188,6 +193,15 @@ type CreateHumanRequest struct {
 	AccessibleTeams   []string `json:"accessibleTeams,omitempty"`
 	AccessibleWorkers []string `json:"accessibleWorkers,omitempty"`
 	Note              string   `json:"note,omitempty"`
+}
+
+type UpdateHumanRequest struct {
+	DisplayName       *string   `json:"displayName,omitempty"`
+	Email             *string   `json:"email,omitempty"`
+	PermissionLevel   *int      `json:"permissionLevel,omitempty"`
+	AccessibleTeams   *[]string `json:"accessibleTeams,omitempty"`
+	AccessibleWorkers *[]string `json:"accessibleWorkers,omitempty"`
+	Note              *string   `json:"note,omitempty"`
 }
 
 type HumanResponse struct {

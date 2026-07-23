@@ -1,23 +1,24 @@
-# QwenPaw Console Management
+# Worker Service Exposure
 
-Browser-based dashboard for QwenPaw Workers — view status, logs, and configuration.
+The new Manager does not maintain a separate runtime-specific console switch.
+It represents desired service ports on the Controller Worker resource.
 
-QwenPaw Workers are created **without** the console by default to save ~500MB RAM. Enable on demand when admin asks to "open console", "debug the worker", "access the worker shell", etc.
+1. Call `get_worker` with `name` and inspect the runtime, current phase, and
+   exposed ports.
+2. If the runtime supports the requested service, call `update_worker` with
+   the Worker `name` and the complete desired `expose` array.
+3. Call `get_worker` again and report the reconciled status. An exposed port
+   is not proof that a public route or firewall rule exists.
 
-## Constraints
+Example input shape:
 
-- Only local QwenPaw containers support this
-- Controller-managed workers that do not expose a Manager-local container, and openclaw workers, do NOT support this console
-- Not available on cloud (SAE) — use SAE console or SLS logs instead
-
-## Commands
-
-```bash
-# Enable — recreates container with console; result JSON contains console_host_port
-bash /opt/agentteams/agent/skills/worker-management/scripts/enable-worker-console.sh --name <NAME>
-
-# Disable — recreates container without console, frees ~500MB RAM
-bash /opt/agentteams/agent/skills/worker-management/scripts/enable-worker-console.sh --name <NAME> --action disable
+```json
+{"name":"researcher","expose":[8080]}
 ```
 
-After enabling, read `console_host_port` from the JSON result and report: `http://<manager-host>:<port>`. Remind admin to disable when done to reclaim memory.
+To close all Worker service ports, pass an empty `expose` array. This is an
+explicit configuration change, not an omitted field.
+
+Do not promise a browser URL from a port number alone. Publishing a service
+outside the Worker is a separate infrastructure operation and must use the
+deployment environment's approved routing controls.

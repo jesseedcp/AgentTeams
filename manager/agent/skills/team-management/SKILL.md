@@ -1,49 +1,30 @@
 ---
 name: team-management
-description: Use when admin requests creating a team, importing a team, managing team composition, adding/removing workers from a team, or delegating tasks to a Team Leader.
+description: Use when an admin wants to create, inspect, reconfigure, or delete a Team, or when work must be delegated through a Team Leader.
 ---
 
 # Team Management
 
-A Team consists of 1 Team Leader + N Workers. The Team Leader is a special Worker with management skills that handles task decomposition and assignment within the team. Manager delegates tasks to Team Leaders, not directly to team workers.
+The Controller owns Team resources and member containers. The Manager
+coordinates a Team only through its Leader Room and never enters or instructs
+the Team-private room.
 
-## Quick Create (2 steps)
+## Tools
 
-```bash
-# 1. Create team via agt CLI
-agt create team \
-  --name <TEAM_NAME> \
-  --leader-name <LEADER_NAME> \
-  --leader-model <MODEL> \
-  --workers <w1>,<w2>
+| Intent | Tool |
+|---|---|
+| Inspect | `list_teams`, `get_team` |
+| Create | `create_team` |
+| Replace desired roster/configuration | `update_team` |
+| Delete | `delete_team` |
+| Assign finite work through the Leader | `delegate_team_task` |
 
-# 2. @mention the Leader in Leader Room to assign task
-```
+Create, update, and delete require AgentScope confirmation. A successful
+resource receipt means Controller readiness and Matrix topology both converged.
 
-After creation, the Leader is online in the Leader Room (Manager + Global Admin + Leader). @mention the Leader there to delegate the task — the Leader will decompose it and coordinate with team workers in the Team Room.
+Teams may mix OpenClaw, CoPaw, Hermes, QwenPaw, and OpenHuman members. Preserve
+the hierarchy: admin → Manager → Team Leader → Team Workers.
 
-> Full workflow: read `references/create-team.md`
-
-If admin asks for CPU or memory requests/limits, use a YAML Team manifest with `leader.resources` and/or `workers[].resources`, then apply it with `agt apply -f`. The simple `agt create team` / `agt update team` flags do not expose resource tuning. Changing member resources recreates the affected member container, so confirm the team is not mid-task.
-
-## Gotchas
-
-- **Team Leader is a Worker container** — same runtime, but with team-leader-agent skills instead of worker-agent skills
-- **Team workers only talk to their Leader** — their groupAllowFrom has [Leader, Team Admin], NOT Manager
-- **Manager only talks to Team Leader** — never @mention team workers directly
-- **Team Room includes Team Admin** — it's Leader + Team Admin + all team workers (no Global Admin unless they are Team Admin)
-- **Leader Room is standard 3-party** — Manager + Global Admin + Leader (same as regular worker room)
-- **Leader DM is Team Admin ↔ Leader** — for team-level management
-- **Team Admin defaults to Global Admin** — if `--team-admin` not specified
-- **Delegated tasks use `--delegated-to-team`** — so heartbeat knows to check with Leader, not workers
-- **Controller forces `runtime: copaw` for all team members** — omit runtime from team creation
-
-## Operation Reference
-
-| Admin wants to... | Read | Command |
-|---|---|---|
-| Create a new team | `references/create-team.md` | `agt create team` |
-| Understand team lifecycle | `references/team-lifecycle.md` | — |
-| Delegate task to team | `references/team-task-delegation.md` | — |
-| Add/remove worker from team | `references/team-lifecycle.md` | `agt get team` |
-| Delete a team's containers | `references/team-lifecycle.md` | `scripts/lifecycle-worker.sh` (per worker) |
+Read `references/create-team.md` for typed Team input,
+`references/team-lifecycle.md` for changes, and
+`references/team-task-delegation.md` for delegation.

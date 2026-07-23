@@ -4,18 +4,89 @@ from __future__ import annotations
 
 import inspect
 import json
+from collections.abc import AsyncGenerator
 from collections.abc import Awaitable, Callable
+from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass
 from typing import Any
 
-from agentscope.message import TextBlock, ToolResultState
+from agentscope.message import (
+    TextBlock,
+    ToolCallBlock,
+    ToolResultState,
+)
 from agentscope.permission import PermissionContext, PermissionDecision
-from agentscope.tool import ToolBase, ToolChunk
+from agentscope.state import AgentState
+from agentscope.tool import (
+    ToolBase,
+    ToolChunk,
+    Toolkit,
+    ToolResponse,
+)
 from pydantic import BaseModel
 
 from agentteams_manager.domain.models import RoomPolicy
 from agentteams_manager.runtime.permissions import decide_tool_permission
 
 ToolHandler = Callable[..., Awaitable[object] | object]
+
+
+@dataclass(frozen=True, slots=True)
+class ToolInvocationContext:
+    room_id: str
+    event_id: str
+    tool_call_id: str
+
+
+_TURN_CONTEXT: ContextVar[tuple[str, str] | None] = ContextVar(
+    "agentteams_matrix_turn",
+    default=None,
+)
+_TOOL_CALL_ID: ContextVar[str | None] = ContextVar(
+    "agentteams_tool_call_id",
+    default=None,
+)
+
+
+@contextmanager
+def bind_matrix_turn(room_id: str, event_id: str):
+    """Bind Matrix identity for all tool calls made by one Agent turn."""
+    token = _TURN_CONTEXT.set((room_id, event_id))
+    try:
+        yield
+    finally:
+        _TURN_CONTEXT.reset(token)
+
+
+def current_tool_invocation() -> ToolInvocationContext:
+    turn = _TURN_CONTEXT.get()
+    tool_call_id = _TOOL_CALL_ID.get()
+    if turn is None or not tool_call_id:
+        raise RuntimeError(
+            "management tool called outside a bound Matrix turn",
+        )
+    return ToolInvocationContext(
+        room_id=turn[0],
+        event_id=turn[1],
+        tool_call_id=tool_call_id,
+    )
+
+
+class ManagerToolkit(Toolkit):
+    """Toolkit that exposes the real AgentScope tool-call ID to workflows."""
+
+    async def call_tool(
+        self,
+        tool_call: ToolCallBlock,
+        state: AgentState,
+    ) -> AsyncGenerator[ToolChunk | ToolResponse, None]:
+        token = _TOOL_CALL_ID.set(tool_call.id)
+        try:
+            async for item in super().call_tool(tool_call, state):
+                yield item
+        finally:
+            _TOOL_CALL_ID.reset(token)
 
 
 class ManagerTool(ToolBase):
@@ -86,4 +157,3 @@ class ManagerTool(ToolBase):
             is_last=True,
             metadata=metadata,
         )
-

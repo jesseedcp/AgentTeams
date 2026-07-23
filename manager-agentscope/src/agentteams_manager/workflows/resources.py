@@ -18,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from agentteams_manager.clients.agt import (
     AgtProtocolError,
     HumanCreateRequest,
+    HumanUpdateRequest,
     ResourceName,
     TeamCreateRequest,
     WorkerCreateRequest,
@@ -262,6 +263,11 @@ class ResourceController(ReconciliationController, Protocol):
 
     async def create_human(self, request: HumanCreateRequest) -> None: ...
 
+    async def update_human(
+        self,
+        request: HumanUpdateRequest,
+    ) -> HumanResource: ...
+
     async def delete_human(self, name: str) -> None: ...
 
 
@@ -322,6 +328,11 @@ class NacosDiscovery(Protocol):
     ) -> tuple[NacosWorker, ...]: ...
 
     async def verify_worker(self, candidate: NacosWorker) -> None: ...
+
+    async def inspect_worker_uri(
+        self,
+        package_uri: str,
+    ) -> NacosWorker: ...
 
 
 class WorkerImportError(ConflictError):
@@ -597,6 +608,37 @@ class ResourceService:
             ),
         )
 
+    async def confirm_direct_import(
+        self,
+        *,
+        package_uri: str,
+        worker_name: str,
+    ) -> WorkerImportConfirmation:
+        """Inspect but do not search one explicit URI, then bind its import."""
+        if self._nacos is None:
+            raise WorkerImportError("Nacos discovery is not configured")
+        candidate = await self._nacos.inspect_worker_uri(package_uri)
+        query = f"direct:{candidate.package_uri}"
+        candidates = (candidate,)
+        discovery = WorkerDiscovery(
+            query=query,
+            candidates=candidates,
+            discovery_token=self._confirmation_signature(
+                "discovery",
+                {
+                    "query": query,
+                    "candidates": [
+                        candidate.model_dump(mode="json"),
+                    ],
+                },
+            ),
+        )
+        return self.confirm_import(
+            discovery,
+            candidate_name=candidate.name,
+            worker_name=worker_name,
+        )
+
     async def import_worker(
         self,
         confirmation: WorkerImportConfirmation,
@@ -727,6 +769,15 @@ class ResourceService:
             name=name,
             initial=worker,
         )
+        if ready.runtime != candidate.runtime:
+            await self._supervisor.effect_ambiguous(
+                operation.operation_id,
+                ExternalEffect.CONTROLLER,
+                "Imported Worker runtime does not match confirmation",
+            )
+            raise AmbiguousEffectError(
+                f"import worker/{name} did not converge to confirmed runtime",
+            )
         try:
             await self._topology.refresh()
         except Exception as exc:
@@ -900,6 +951,15 @@ class ResourceService:
             name=request.name,
             initial=worker,
         )
+        if not _matches_worker_create(ready, request):
+            await self._supervisor.effect_ambiguous(
+                operation.operation_id,
+                ExternalEffect.CONTROLLER,
+                "Controller Worker does not match create request",
+            )
+            raise AmbiguousEffectError(
+                f"create worker/{request.name} is not proven",
+            )
         try:
             await self._topology.refresh()
         except Exception as exc:
@@ -1233,6 +1293,15 @@ class ResourceService:
             name=request.name,
             initial=human,
         )
+        if not _matches_human_create(ready, request):
+            await self._supervisor.effect_ambiguous(
+                operation.operation_id,
+                ExternalEffect.CONTROLLER,
+                "Controller Human does not match create request",
+            )
+            raise AmbiguousEffectError(
+                f"create human/{request.name} is not proven",
+            )
         await self._refresh_topology_or_reconcile(operation.operation_id)
         await self._supervisor.effect_succeeded(
             operation.operation_id,
@@ -1305,6 +1374,97 @@ class ResourceService:
             ExternalEffect.CONTROLLER,
             {"name": name, "deleted": True},
         )
+
+    async def update_human(
+        self,
+        request: HumanUpdateRequest,
+        *,
+        context: MutationContext,
+    ) -> HumanResource:
+        operation = await self._supervisor.begin(
+            operation_id=context.operation_id,
+            kind=OperationKind.UPDATE_HUMAN,
+            target_key=f"human/{request.name}",
+            request=request.model_dump(mode="json"),
+        )
+        if operation.status is OperationStatus.SUCCEEDED:
+            return await self._require_human(request.name)
+        if operation.status is OperationStatus.FAILED:
+            raise ConflictError(
+                f"update human/{request.name} previously failed",
+            )
+
+        human: HumanResource | None = None
+        if operation.status is OperationStatus.PLANNED:
+            if await self._controller.get_human(request.name) is None:
+                await self._supervisor.effect_failed(
+                    operation.operation_id,
+                    ExternalEffect.CONTROLLER,
+                    "resource does not exist",
+                )
+                raise NotFoundError(
+                    f"human/{request.name} does not exist",
+                )
+            await self._supervisor.before_effect(
+                operation.operation_id,
+                ExternalEffect.CONTROLLER,
+                {
+                    "operation": "update_human",
+                    "name": request.name,
+                },
+            )
+            try:
+                human = await self._controller.update_human(request)
+            except Exception as exc:
+                if _ambiguous_exception(exc):
+                    await self._supervisor.effect_ambiguous(
+                        operation.operation_id,
+                        ExternalEffect.CONTROLLER,
+                        type(exc).__name__,
+                    )
+                    human = await self._controller.get_human(request.name)
+                    if human is None or not _matches_human_update(
+                        human,
+                        request,
+                    ):
+                        raise AmbiguousEffectError(
+                            f"update human/{request.name} result is unknown",
+                        ) from exc
+                else:
+                    await self._supervisor.effect_failed(
+                        operation.operation_id,
+                        ExternalEffect.CONTROLLER,
+                        _safe_reason(exc),
+                    )
+                    raise
+        else:
+            human = await self._controller.get_human(request.name)
+            if human is None or not _matches_human_update(human, request):
+                raise AmbiguousEffectError(
+                    f"update human/{request.name} has no Controller proof",
+                )
+
+        ready = await self._wait_for_human(
+            operation_id=operation.operation_id,
+            name=request.name,
+            initial=human,
+        )
+        if not _matches_human_update(ready, request):
+            await self._supervisor.effect_ambiguous(
+                operation.operation_id,
+                ExternalEffect.CONTROLLER,
+                "Controller has not converged to the Human update",
+            )
+            raise AmbiguousEffectError(
+                f"update human/{request.name} is not proven",
+            )
+        await self._refresh_topology_or_reconcile(operation.operation_id)
+        await self._supervisor.effect_succeeded(
+            operation.operation_id,
+            ExternalEffect.CONTROLLER,
+            _resource_receipt(ready),
+        )
+        return ready
 
     async def _wait_for_human(
         self,
@@ -1435,6 +1595,18 @@ class ResourceService:
             spec=spec,
             initial=team,
         )
+        if (
+            ready.leader != spec.leader.name
+            or ready.workers != tuple(item.name for item in spec.workers)
+        ):
+            await self._supervisor.effect_ambiguous(
+                operation.operation_id,
+                ExternalEffect.CONTROLLER,
+                "Controller Team does not match desired members",
+            )
+            raise AmbiguousEffectError(
+                f"{mode} team/{spec.name} is not proven",
+            )
         await self._refresh_topology_or_reconcile(operation.operation_id)
         await self._supervisor.effect_succeeded(
             operation.operation_id,
@@ -1654,6 +1826,179 @@ class ResourceService:
             ) from exc
         return worker
 
+    async def resume_operation(
+        self,
+        operation: OperationRecord,
+    ) -> WorkerResource | TeamResource | HumanResource | None:
+        """Prove and finish one already-dispatched resource operation."""
+        if operation.kind is OperationKind.CREATE_WORKER:
+            return await self.resume_worker_create(operation)
+        if operation.kind is OperationKind.IMPORT_WORKER:
+            return await self.resume_worker_import(operation)
+        if operation.kind is OperationKind.UPDATE_WORKER:
+            return await self._resume_worker_mutation(operation)
+        if operation.kind is OperationKind.DELETE_WORKER:
+            await self._resume_resource_delete(
+                operation,
+                resource_type="worker",
+            )
+            return None
+        if operation.kind in {
+            OperationKind.CREATE_TEAM,
+            OperationKind.UPDATE_TEAM,
+        }:
+            return await self._resume_team_upsert(operation)
+        if operation.kind is OperationKind.DELETE_TEAM:
+            await self._resume_resource_delete(
+                operation,
+                resource_type="team",
+            )
+            return None
+        if operation.kind is OperationKind.CREATE_HUMAN:
+            return await self._resume_human_create(operation)
+        if operation.kind is OperationKind.UPDATE_HUMAN:
+            return await self._resume_human_update(operation)
+        if operation.kind is OperationKind.DELETE_HUMAN:
+            await self._resume_resource_delete(
+                operation,
+                resource_type="human",
+            )
+            return None
+        raise ValueError("operation is not a Controller resource mutation")
+
+    async def _resume_worker_mutation(
+        self,
+        operation: OperationRecord,
+    ) -> WorkerResource:
+        name = _target_name(operation.target_key, "worker")
+        worker = await self._controller.get_worker(name)
+        if worker is None:
+            raise AmbiguousEffectError(
+                f"worker/{name} disappeared during recovery",
+            )
+        action = str(operation.request.get("action", ""))
+        proven = False
+        if action == "update":
+            request = WorkerUpdateRequest.model_validate(
+                {
+                    key: value
+                    for key, value in operation.request.items()
+                    if key != "action"
+                },
+            )
+            proven = _matches_worker_update(worker, request)
+        elif action == "sleep":
+            proven = (
+                str(worker.status.get("containerState", "")).casefold()
+                in {"stopped", "sleeping", "exited"}
+            )
+        elif action == "wake":
+            proven = (
+                str(worker.status.get("containerState", "")).casefold()
+                in {"running", "ready"}
+            )
+        if not proven:
+            raise AmbiguousEffectError(
+                f"{action or 'update'} worker/{name} is not proven",
+            )
+        await self._finish_recovered_resource(operation, worker)
+        return worker
+
+    async def _resume_team_upsert(
+        self,
+        operation: OperationRecord,
+    ) -> TeamResource:
+        raw_spec = operation.request.get("spec")
+        if not isinstance(raw_spec, dict):
+            raise ConflictError("Team recovery request has no typed spec")
+        spec = TeamSpec.model_validate(raw_spec)
+        team = await self._controller.get_team(spec.name)
+        if team is None:
+            raise AmbiguousEffectError(
+                f"team/{spec.name} has no Controller proof",
+            )
+        ready = await self._wait_for_team(
+            operation_id=operation.operation_id,
+            spec=spec,
+            initial=team,
+        )
+        expected_workers = tuple(item.name for item in spec.workers)
+        if (
+            ready.leader != spec.leader.name
+            or ready.workers != expected_workers
+        ):
+            raise AmbiguousEffectError(
+                f"team/{spec.name} does not match its desired members",
+            )
+        await self._finish_recovered_resource(operation, ready)
+        return ready
+
+    async def _resume_human_create(
+        self,
+        operation: OperationRecord,
+    ) -> HumanResource:
+        request = HumanCreateRequest.model_validate(operation.request)
+        human = await self._controller.get_human(request.name)
+        if human is None:
+            raise AmbiguousEffectError(
+                f"human/{request.name} has no Controller proof",
+            )
+        ready = await self._wait_for_human(
+            operation_id=operation.operation_id,
+            name=request.name,
+            initial=human,
+        )
+        if not _matches_human_create(ready, request):
+            raise AmbiguousEffectError(
+                f"human/{request.name} does not match its desired scope",
+            )
+        await self._finish_recovered_resource(operation, ready)
+        return ready
+
+    async def _resume_human_update(
+        self,
+        operation: OperationRecord,
+    ) -> HumanResource:
+        request = HumanUpdateRequest.model_validate(operation.request)
+        human = await self._controller.get_human(request.name)
+        if human is None or not _matches_human_update(human, request):
+            raise AmbiguousEffectError(
+                f"update human/{request.name} is not proven",
+            )
+        await self._finish_recovered_resource(operation, human)
+        return human
+
+    async def _resume_resource_delete(
+        self,
+        operation: OperationRecord,
+        *,
+        resource_type: str,
+    ) -> None:
+        name = _target_name(operation.target_key, resource_type)
+        getter = getattr(self._controller, f"get_{resource_type}")
+        if await getter(name) is not None:
+            raise AmbiguousEffectError(
+                f"delete {resource_type}/{name} is not proven",
+            )
+        await self._refresh_topology_or_reconcile(operation.operation_id)
+        await self._supervisor.effect_succeeded(
+            operation.operation_id,
+            ExternalEffect.CONTROLLER,
+            {"name": name, "deleted": True},
+        )
+
+    async def _finish_recovered_resource(
+        self,
+        operation: OperationRecord,
+        resource: WorkerResource | TeamResource | HumanResource,
+    ) -> None:
+        await self._refresh_topology_or_reconcile(operation.operation_id)
+        await self._supervisor.effect_succeeded(
+            operation.operation_id,
+            ExternalEffect.CONTROLLER,
+            _resource_receipt(resource),
+        )
+
     async def _require_worker(self, name: str) -> WorkerResource:
         worker = await self._controller.get_worker(name)
         if worker is None:
@@ -1665,7 +2010,11 @@ class RecoverableOperationReader(Protocol):
     async def list_recoverable(self) -> tuple[OperationRecord, ...]: ...
 
 
-class WorkerRecoveryReport(BaseModel):
+class AuxiliaryOperationResumer(Protocol):
+    async def resume(self, operation: OperationRecord) -> object: ...
+
+
+class ResourceRecoveryReport(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     inspected: int = Field(ge=0)
@@ -1675,48 +2024,79 @@ class WorkerRecoveryReport(BaseModel):
 
 
 class ResourceHeartbeat:
-    """Resume pending Worker creates without issuing another create."""
+    """Resume pending resources without repeating unproven mutations."""
 
     def __init__(
         self,
         *,
         operations: RecoverableOperationReader,
         resources: ResourceService,
+        matrix_resources: AuxiliaryOperationResumer | None = None,
     ) -> None:
         self._operations = operations
         self._resources = resources
+        self._matrix_resources = matrix_resources
 
-    async def reconcile_pending_workers(self) -> WorkerRecoveryReport:
+    async def reconcile_pending_resources(self) -> ResourceRecoveryReport:
+        resource_kinds = {
+            OperationKind.CREATE_WORKER,
+            OperationKind.IMPORT_WORKER,
+            OperationKind.UPDATE_WORKER,
+            OperationKind.DELETE_WORKER,
+            OperationKind.CREATE_TEAM,
+            OperationKind.UPDATE_TEAM,
+            OperationKind.DELETE_TEAM,
+            OperationKind.CREATE_HUMAN,
+            OperationKind.UPDATE_HUMAN,
+            OperationKind.DELETE_HUMAN,
+        }
+        if self._matrix_resources is not None:
+            resource_kinds.update(
+                {
+                    OperationKind.MATRIX_MUTATION,
+                    OperationKind.CHANNEL_MUTATION,
+                },
+            )
         operations = tuple(
             operation
             for operation in await self._operations.list_recoverable()
-            if operation.kind
-            in {
-                OperationKind.CREATE_WORKER,
-                OperationKind.IMPORT_WORKER,
-            }
+            if operation.kind in resource_kinds
         )
         reconciled: list[str] = []
         pending: list[str] = []
         failed: list[str] = []
         for operation in operations:
             try:
-                if operation.kind is OperationKind.IMPORT_WORKER:
-                    await self._resources.resume_worker_import(operation)
+                if operation.kind in {
+                    OperationKind.MATRIX_MUTATION,
+                    OperationKind.CHANNEL_MUTATION,
+                }:
+                    if self._matrix_resources is None:
+                        raise RuntimeError(
+                            "Matrix resource recovery is not configured",
+                        )
+                    await self._matrix_resources.resume(operation)
                 else:
-                    await self._resources.resume_worker_create(operation)
+                    await self._resources.resume_operation(operation)
             except AmbiguousEffectError:
                 pending.append(operation.operation_id)
             except Exception:
                 failed.append(operation.operation_id)
             else:
                 reconciled.append(operation.operation_id)
-        return WorkerRecoveryReport(
+        return ResourceRecoveryReport(
             inspected=len(operations),
             reconciled=tuple(reconciled),
             pending=tuple(pending),
             failed=tuple(failed),
         )
+
+    async def reconcile_pending_workers(self) -> ResourceRecoveryReport:
+        """Compatibility alias for the original Worker-only heartbeat API."""
+        return await self.reconcile_pending_resources()
+
+
+WorkerRecoveryReport = ResourceRecoveryReport
 
 
 class TopologyController(Protocol):
@@ -2005,6 +2385,41 @@ def _resource_message(
     return str(value) if value is not None else ""
 
 
+def _matches_worker_create(
+    worker: WorkerResource,
+    request: WorkerCreateRequest,
+) -> bool:
+    return (
+        worker.name == request.name
+        and worker.runtime == request.runtime
+        and worker.model == request.model
+        and (
+            request.image is None
+            or worker.spec.get("image") == request.image
+        )
+        and (
+            request.identity is None
+            or worker.spec.get("identity") == request.identity
+        )
+        and (
+            request.soul is None
+            or worker.spec.get("soul") == request.soul
+        )
+        and (
+            not request.skills
+            or worker.skills == request.skills
+        )
+        and (
+            request.package_uri is None
+            or worker.spec.get("package") == request.package_uri
+        )
+        and (
+            not request.expose
+            or tuple(worker.spec.get("expose", ())) == request.expose
+        )
+    )
+
+
 def _matches_worker_update(
     worker: WorkerResource,
     request: WorkerUpdateRequest,
@@ -2018,7 +2433,68 @@ def _matches_worker_update(
         and worker.spec.get("image") != request.image
     ):
         return False
+    fields: tuple[tuple[object | None, object], ...] = (
+        (request.identity, worker.spec.get("identity", "")),
+        (request.soul, worker.spec.get("soul", "")),
+        (
+            request.skills,
+            tuple(worker.skills),
+        ),
+        (
+            request.package_uri,
+            worker.spec.get("package", ""),
+        ),
+        (
+            request.expose,
+            tuple(worker.spec.get("expose", ())),
+        ),
+    )
+    if any(
+        expected is not None and expected != actual
+        for expected, actual in fields
+    ):
+        return False
     return True
+
+
+def _matches_human_create(
+    human: HumanResource,
+    request: HumanCreateRequest,
+) -> bool:
+    return (
+        human.permission_level == request.permission_level
+        and human.spec.get("displayName") == request.display_name
+        and human.spec.get("email", "") == (request.email or "")
+        and tuple(human.spec.get("accessibleTeams", ()))
+        == request.accessible_teams
+        and tuple(human.spec.get("accessibleWorkers", ()))
+        == request.accessible_workers
+        and human.spec.get("note", "") == (request.note or "")
+    )
+
+
+def _matches_human_update(
+    human: HumanResource,
+    request: HumanUpdateRequest,
+) -> bool:
+    fields: tuple[tuple[object | None, object], ...] = (
+        (request.display_name, human.spec.get("displayName")),
+        (request.email, human.spec.get("email", "")),
+        (request.permission_level, human.permission_level),
+        (
+            request.accessible_teams,
+            tuple(human.spec.get("accessibleTeams", ())),
+        ),
+        (
+            request.accessible_workers,
+            tuple(human.spec.get("accessibleWorkers", ())),
+        ),
+        (request.note, human.spec.get("note", "")),
+    )
+    return all(
+        expected is None or expected == actual
+        for expected, actual in fields
+    )
 
 
 def _document_value(

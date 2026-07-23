@@ -13,6 +13,7 @@ from agentscope.state import AgentState
 
 from agentteams_manager.domain.models import InboundEvent, RoomPolicy
 from agentteams_manager.state.sessions import SessionRepository
+from agentteams_manager.tools.base import bind_matrix_turn
 
 
 class AgentFactoryPort(Protocol):
@@ -125,13 +126,21 @@ class RoomSessionManager:
         event: InboundEvent,
         policy: RoomPolicy,
         inputs: Any,
+        *,
+        tool_event_id: str | None = None,
     ) -> AsyncIterator[AgentEvent]:
         """Run one native AgentScope input under the room session lock."""
         session = await self.get_or_create(event.room_id, policy)
         async with session.lock:
             try:
-                async for item in session.agent.reply_stream(inputs=inputs):
-                    yield item
+                with bind_matrix_turn(
+                    event.room_id,
+                    tool_event_id or event.event_id,
+                ):
+                    async for item in session.agent.reply_stream(
+                        inputs=inputs,
+                    ):
+                        yield item
             finally:
                 session.last_event_id = event.event_id
                 await self._save(event.room_id, session)

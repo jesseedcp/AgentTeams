@@ -1,44 +1,36 @@
 ---
 name: human-management
-description: Use when admin requests adding a human user to the system, changing human permissions, removing human access, or managing human accounts.
+description: Use when an admin wants to add, inspect, change, or remove a real Human identity and its AgentTeams permission scope.
 ---
 
 # Human Management
 
-Import real human accounts into AgentTeams with configurable permission levels. Humans use their own Matrix client (Element) to communicate with agents.
+Humans are Controller resources backed by Matrix identities. They do not run a
+Worker container and do not receive Worker runtime configuration.
 
-## Permission Levels (inclusive — higher includes all lower)
+## Permission Levels
 
-| Level | Can talk to | Use case |
-|-------|------------|----------|
-| 1 | Manager + all Team Leaders + all Workers (= Admin equivalent) | CTO, tech lead |
-| 2 | Specified Team Leaders + their Workers + specified standalone Workers | Team member, PM |
-| 3 | Specified Workers only | External collaborator |
+| Level | Effective scope |
+|---|---|
+| 1 | Manager, all Team Leaders, and all Workers |
+| 2 | Declared Teams plus declared standalone Workers |
+| 3 | Declared Workers only |
 
-## Quick Create
+Level 1 ignores narrower lists. Level 3 ignores Team scope. Changes take effect
+only after Controller and Matrix topology converge.
 
-```bash
-bash /opt/agentteams/agent/skills/human-management/scripts/create-human.sh \
-  --matrix-id "@john:domain" --name "John Doe" \
-  --level 2 --teams alpha-team --workers standalone-dev \
-  --email john@example.com
-```
+## Tools
 
-> Full workflow: read `references/create-human.md`
+| Intent | Tool |
+|---|---|
+| List or inspect | `list_humans`, `get_human` |
+| Add identity and scope | `create_human` |
+| Change display, email, level, scope, or note | `update_human` |
+| Remove access | `delete_human` |
 
-## Gotchas
+Every change requires AgentScope confirmation. Never create Matrix credentials
+or edit room allowlists separately; the Controller reconciles identity and
+membership from the Human resource.
 
-- **Humans don't need containers, MinIO, or Higress** — they only need Matrix room access and groupAllowFrom entries
-- **Email is optional but recommended** — if provided, a welcome email with credentials is sent automatically
-- **Matrix account is registered automatically** — username from `--matrix-id`, random password generated
-- **Level 1 humans get access to everything** — `--teams` and `--workers` are ignored
-- **Level 3 humans ignore `--teams`** — only `--workers` matters
-- **Changing permission level requires recalculating all groupAllowFrom** — use `create-human.sh` with `--update` flag
-
-## Operation Reference
-
-| Admin wants to... | Read | Key script |
-|---|---|---|
-| Add a human user | `references/create-human.md` | `scripts/create-human.sh` |
-| List/query humans | — | `scripts/manage-humans-registry.sh --action list` |
-| Remove human access | — | `scripts/manage-humans-registry.sh --action remove` |
+Read `references/create-human.md` for exact typed requests and convergence
+rules.

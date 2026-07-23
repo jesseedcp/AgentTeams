@@ -13,6 +13,7 @@ func updateCmd() *cobra.Command {
 	}
 	cmd.AddCommand(updateWorkerCmd())
 	cmd.AddCommand(updateTeamCmd())
+	cmd.AddCommand(updateHumanCmd())
 	cmd.AddCommand(updateManagerCmd())
 	return cmd
 }
@@ -58,16 +59,28 @@ func updateWorkerCmd() *cobra.Command {
 			}
 
 			req := map[string]interface{}{}
-			setIfNotEmpty(req, "model", model)
-			setIfNotEmpty(req, "runtime", runtime)
-			setIfNotEmpty(req, "image", image)
-			setIfNotEmpty(req, "identity", identity)
-			setIfNotEmpty(req, "soul", soul)
-			setIfNotEmpty(req, "package", packageURI)
-			if skills != "" {
+			if cmd.Flags().Changed("model") {
+				req["model"] = model
+			}
+			if cmd.Flags().Changed("runtime") {
+				req["runtime"] = runtime
+			}
+			if cmd.Flags().Changed("image") {
+				req["image"] = image
+			}
+			if cmd.Flags().Changed("identity") {
+				req["identity"] = identity
+			}
+			if cmd.Flags().Changed("soul") {
+				req["soul"] = soul
+			}
+			if cmd.Flags().Changed("package") {
+				req["package"] = packageURI
+			}
+			if cmd.Flags().Changed("skills") {
 				req["skills"] = splitCSV(skills)
 			}
-			if expose != "" {
+			if cmd.Flags().Changed("expose") {
 				req["expose"] = parseExposePorts(expose)
 			}
 
@@ -87,13 +100,80 @@ func updateWorkerCmd() *cobra.Command {
 
 	cmd.Flags().StringVar(&name, "name", "", "Worker name (required)")
 	cmd.Flags().StringVar(&model, "model", "", "LLM model ID")
-	cmd.Flags().StringVar(&runtime, "runtime", "", "Agent runtime (openclaw|copaw|hermes|openhuman)")
+	cmd.Flags().StringVar(&runtime, "runtime", "", "Agent runtime (openclaw|copaw|hermes|qwenpaw|openhuman)")
 	cmd.Flags().StringVar(&image, "image", "", "Container image override")
 	cmd.Flags().StringVar(&identity, "identity", "", "Worker identity description")
 	cmd.Flags().StringVar(&soul, "soul", "", "Worker SOUL.md content")
 	cmd.Flags().StringVar(&skills, "skills", "", "Comma-separated built-in skills")
 	cmd.Flags().StringVar(&packageURI, "package", "", "Package URI")
 	cmd.Flags().StringVar(&expose, "expose", "", "Comma-separated ports to expose")
+	return cmd
+}
+
+// ---------------------------------------------------------------------------
+// update human
+// ---------------------------------------------------------------------------
+
+func updateHumanCmd() *cobra.Command {
+	var (
+		name              string
+		displayName       string
+		email             string
+		permissionLevel   int
+		accessibleTeams   string
+		accessibleWorkers string
+		note              string
+	)
+
+	cmd := &cobra.Command{
+		Use:   "human",
+		Short: "Update a Human permission scope",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if name == "" {
+				return fmt.Errorf("--name is required")
+			}
+			req := map[string]interface{}{}
+			if cmd.Flags().Changed("display-name") {
+				req["displayName"] = displayName
+			}
+			if cmd.Flags().Changed("email") {
+				req["email"] = email
+			}
+			if cmd.Flags().Changed("permission-level") {
+				if permissionLevel < 1 || permissionLevel > 3 {
+					return fmt.Errorf("--permission-level must be between 1 and 3")
+				}
+				req["permissionLevel"] = permissionLevel
+			}
+			if cmd.Flags().Changed("accessible-teams") {
+				req["accessibleTeams"] = splitCSV(accessibleTeams)
+			}
+			if cmd.Flags().Changed("accessible-workers") {
+				req["accessibleWorkers"] = splitCSV(accessibleWorkers)
+			}
+			if cmd.Flags().Changed("note") {
+				req["note"] = note
+			}
+			if len(req) == 0 {
+				return fmt.Errorf("at least one field must be specified for update")
+			}
+			client := NewAPIClient()
+			var resp map[string]interface{}
+			if err := client.DoJSON("PUT", "/api/v1/humans/"+name, req, &resp); err != nil {
+				return fmt.Errorf("update human: %w", err)
+			}
+			fmt.Printf("human/%s configured\n", name)
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&name, "name", "", "Human resource name (required)")
+	cmd.Flags().StringVar(&displayName, "display-name", "", "Matrix display name")
+	cmd.Flags().StringVar(&email, "email", "", "Email address (empty clears it)")
+	cmd.Flags().IntVar(&permissionLevel, "permission-level", 0, "Permission level (1, 2, or 3)")
+	cmd.Flags().StringVar(&accessibleTeams, "accessible-teams", "", "Comma-separated Team names (empty clears them)")
+	cmd.Flags().StringVar(&accessibleWorkers, "accessible-workers", "", "Comma-separated Worker names (empty clears them)")
+	cmd.Flags().StringVar(&note, "note", "", "Administrative note (empty clears it)")
 	return cmd
 }
 
@@ -212,7 +292,7 @@ func updateManagerCmd() *cobra.Command {
 
 	cmd.Flags().StringVar(&name, "name", "", "Manager name (required)")
 	cmd.Flags().StringVar(&model, "model", "", "LLM model ID")
-	cmd.Flags().StringVar(&runtime, "runtime", "", "Agent runtime (openclaw|copaw|hermes|openhuman)")
+	cmd.Flags().StringVar(&runtime, "runtime", "", "Agent runtime (openclaw|copaw|hermes|qwenpaw|openhuman)")
 	cmd.Flags().StringVar(&image, "image", "", "Container image override")
 	cmd.Flags().StringVar(&soul, "soul", "", "Manager SOUL.md content")
 	return cmd

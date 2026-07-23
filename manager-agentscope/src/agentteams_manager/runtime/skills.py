@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Protocol
 
 from agentscope.skill import LocalSkillLoader, Skill
-from agentscope.tool import Toolkit
+from agentscope.tool import ToolBase, Toolkit
 
 from agentteams_manager.domain.models import RoomPolicy
+from agentteams_manager.tools.base import ManagerToolkit
 
 EXPECTED_MANAGER_SKILLS = frozenset(
     {
@@ -57,14 +59,33 @@ class SkillRegistry:
         return tuple(sorted(skills, key=lambda skill: skill.name))
 
 
-class SkillToolkitFactory:
-    """Base Toolkit factory; later plans add policy-bound typed tools."""
+class ToolProvider(Protocol):
+    def tools_for_policy(
+        self,
+        policy: RoomPolicy,
+    ) -> tuple[ToolBase, ...]: ...
 
-    def __init__(self, registry: SkillRegistry) -> None:
+
+class SkillToolkitFactory:
+    """Combine retained skills with policy-bound typed tools."""
+
+    def __init__(
+        self,
+        registry: SkillRegistry,
+        *,
+        tools: ToolProvider | None = None,
+    ) -> None:
         self._registry = registry
+        self._tools = tools
 
     async def for_policy(self, policy: RoomPolicy) -> Toolkit:
-        del policy
         await self._registry.load()
-        return Toolkit(skills_or_loaders=[self._registry.loader])
-
+        registered = (
+            self._tools.tools_for_policy(policy)
+            if self._tools is not None
+            else ()
+        )
+        return ManagerToolkit(
+            tools=list(registered),
+            skills_or_loaders=[self._registry.loader],
+        )

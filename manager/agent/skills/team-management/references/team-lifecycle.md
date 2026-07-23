@@ -1,39 +1,27 @@
 # Team Lifecycle
 
-## Team States
+## Inspect
 
-- **Active**: Leader and workers are running, team is operational
-- **Degraded**: Some workers stopped or unavailable, Leader still running
-- **Stopped**: All containers stopped (can be restarted)
+Use `get_team` for one Team or `list_teams` for all visible Teams. Report phase,
+Leader, roster, readiness counts, and Leader Room.
 
-Check status: `agt get team <TEAM_NAME>`
+## Add, Remove, or Reconfigure a Member
 
-## Adding a Worker to an Existing Team
+Call `update_team` with the complete desired Team spec. It is replacement-style
+for the typed roster: include every member that must remain.
 
-1. Update the team via `agt apply -f` with the new worker added to the workers list
-2. Controller handles: creates Worker CR, joins Team Room, updates Leader's coordination context
+Before changing a busy Team, explain that affected member containers may be
+reconciled. AgentScope requests confirmation before applying the new document.
+The workflow returns only after the new roster and rooms converge.
 
-## Removing a Worker from a Team
+## Delete
 
-1. Update the team via `agt apply -f` with the worker removed from the workers list
-2. Controller handles: removes Worker CR, updates Leader's coordination context
+Call `delete_team`:
 
-## Deleting a Team
+```json
+{"name":"alpha"}
+```
 
-1. Delete the team: `agt delete team <TEAM_NAME>`
-2. Controller handles: deletes all worker containers, cleans up rooms, removes storage
-
-## Task Delegation to Teams
-
-When Manager receives a task that semantically matches a Team's name,
-description, Leader, or Worker roster:
-
-1. Use `manage-state.sh --action add-finite --delegated-to-team <TEAM>` to track
-2. @mention the Team Leader in the Leader Room with the task
-3. Team Leader handles decomposition and assignment internally
-4. Manager only checks with Team Leader for progress (never team workers)
-
-The Team registry and Team API do not expose structured team-level
-domain/expertise/capability fields for automatic filtering. Worker-level skills
-may describe individual members, but Manager delegation is not backed by a
-structured Team filter.
+Deletion is complete only when the Controller no longer reports the Team and
+the topology refresh removes its Leader and private-room bindings. Do not
+individually delete Team members as a substitute for deleting the Team.

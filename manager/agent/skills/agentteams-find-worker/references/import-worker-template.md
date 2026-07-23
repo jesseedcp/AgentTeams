@@ -1,112 +1,51 @@
-# Find Or Import a Worker Template
+# Worker Discovery and Import Contract
 
-Use this flow when the admin asks you to:
+## Search
 
-- install or import a Worker template from a registry
-- import a direct package URI such as `nacos://host:port/namespace/spec`
-- find a Worker template that matches a natural-language requirement
-- recommend a few template options before creating a Worker
+Call `find_worker`:
 
-Do not use this flow for hand-authored Workers. For that, switch to `worker-management` and read its `references/create-worker.md`.
-
-## Step 0: Decide whether to search or import directly
-
-If the admin already gave you a full package URI such as `nacos://host:port/namespace/spec`:
-
-1. Do not search.
-2. Confirm the Worker name you should create.
-3. Briefly restate the package URI.
-4. Wait for confirmation, then install with `--package-uri`.
-
-If the admin did not give you a package URI, search templates first.
-
-## Step 1: Search templates when needed
-
-Use the template search script:
-
-```bash
-# Exact template name
-bash /opt/agentteams/agent/skills/agentteams-find-worker/scripts/agentteams-find-worker.sh \
-  --name <TEMPLATE_NAME> --json
-
-# Requirement-based search
-bash /opt/agentteams/agent/skills/agentteams-find-worker/scripts/agentteams-find-worker.sh \
-  --query "<admin requirement>" --limit 3 --json
+```json
+{"query":"production Python coder"}
 ```
 
-The JSON includes:
+Return the candidates to the admin with display name, description, runtime,
+version, and package URI. Keep the complete discovery receipt for the selected
+candidate.
 
-- `registry.host`, `registry.port`, `registry.namespace`
-- `templates[].name`
-- `templates[].summary`
-- `templates[].package_uri`
-- `templates[].match_reason`
+## Import a Search Result
 
-Today the search implementation is backed by Nacos AgentSpecs, but the admin does not need to know or care about that detail.
+After the admin chooses a candidate and local Worker name, call
+`import_worker`:
 
-## Step 2: Recommend, then wait for confirmation
-
-If the admin named a template and there is exactly one match:
-
-1. Confirm the Worker name you should create.
-2. Briefly restate the template and package URI.
-3. Wait for confirmation before installing.
-
-If the admin described a need and multiple templates match:
-
-1. Recommend the top 1-3 templates.
-2. Explain in one short sentence why each one fits.
-3. Ask the admin which template to install.
-4. Do not install anything until they confirm.
-
-If there are no useful template matches, switch back to `worker-management` and hand-create the Worker.
-This fallback is only allowed before any template has been confirmed for installation.
-
-## Step 3: Install the confirmed template
-
-After the admin confirms the template and Worker name, run:
-
-```bash
-bash /opt/agentteams/agent/skills/agentteams-find-worker/scripts/install-worker-template.sh \
-  --template <TEMPLATE_NAME> \
-  --worker-name <WORKER_NAME>
+```json
+{
+  "discovery": "<the complete typed find_worker receipt>",
+  "candidate_name": "remote-coder",
+  "worker_name": "alice"
+}
 ```
 
-Optional overrides:
+AgentScope confirmation binds the full receipt and local name. A changed or
+fabricated receipt is rejected.
 
-```bash
-bash /opt/agentteams/agent/skills/agentteams-find-worker/scripts/install-worker-template.sh \
-  --template <TEMPLATE_NAME> \
-  --worker-name <WORKER_NAME> \
-  --model <MODEL_ID> \
-  --runtime openclaw|copaw \
-  --skills s1,s2 \
-  --mcp-servers m1,m2
+## Import a Direct URI
+
+Do not call `find_worker`. Restate the exact URI and proposed name, then call
+`import_worker`:
+
+```json
+{
+  "package_uri": "nacos://registry.example/public/remote-coder/1.4.0",
+  "worker_name": "alice"
+}
 ```
 
-This script delegates to `agt apply worker --package nacos://...`.
+The configured registry must own the URI. The workflow reads the AgentSpec,
+binds its digest, and the Controller verifies that digest after download.
 
-If the install command fails:
+## Result Handling
 
-1. Do not run `create-worker.sh`.
-2. Do not switch to `worker-management` automatically.
-3. Reply that the template installation failed.
-4. Quote or summarize the key error from the command output so the admin sees the real failure reason.
-5. Ask whether the admin wants a different template or an explicit hand-authored Worker instead.
-
-If the admin already gave you a full package URI, run:
-
-```bash
-bash /opt/agentteams/agent/skills/agentteams-find-worker/scripts/install-worker-template.sh \
-  --package-uri <PACKAGE_URI> \
-  --worker-name <WORKER_NAME>
-```
-
-## Gotchas
-
-- Do not write `SOUL.md` yourself for imported Workers unless the admin explicitly wants a hand-authored Worker instead of a template.
-- Do not run `create-worker.sh` for template imports.
-- Always confirm before installing when the template came from a fuzzy search.
-- If the admin already gave you a precise template name, you can skip recommendation and move straight to confirmation.
-- If the admin already gave you a package URI, you can skip both search and recommendation and move straight to confirmation.
-- After a confirmed template install fails, stay in the template-import flow and report the failure. Do not silently recover by hand-creating a Worker.
+A success receipt includes the Worker, package URI, digest, room, and
+Controller phase. A failure is terminal for that import attempt. Show its
+redacted reason; do not call `create_worker` unless the admin separately asks
+to abandon the Nacos path.

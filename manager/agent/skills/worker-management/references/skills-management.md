@@ -1,39 +1,33 @@
-# Worker Skills Management
+# Worker Skills and Configuration
 
-Manager centrally manages all Worker skills. Canonical definitions live in `~/worker-skills/`. Worker status is available via `agt get workers`.
+Skills are part of the Worker's Controller desired state.
 
-## Commands
+## Inspect
 
-```bash
-# Push all skills for a worker
-bash /opt/agentteams/agent/skills/worker-management/scripts/push-worker-skills.sh --worker <name>
+Call `get_worker` and read the current `skills` field before changing it.
 
-# Push a skill to all workers that have it (e.g., after updating the definition)
-bash /opt/agentteams/agent/skills/worker-management/scripts/push-worker-skills.sh --skill <skill-name>
+## Replace the desired skill set
 
-# Add a new skill to a worker and push
-bash /opt/agentteams/agent/skills/worker-management/scripts/push-worker-skills.sh --worker <name> --add-skill <skill-name>
+Call `update_worker` with `name` and the complete desired `skills` array:
 
-# Remove a skill (registry only; MinIO files remain until manually removed)
-bash /opt/agentteams/agent/skills/worker-management/scripts/push-worker-skills.sh --worker <name> --remove-skill <skill-name>
-
-# Skip Matrix notification (e.g., worker not yet running)
-bash /opt/agentteams/agent/skills/worker-management/scripts/push-worker-skills.sh --worker <name> --no-notify
+```json
+{
+  "name": "researcher",
+  "skills": ["web-research", "source-verification"]
+}
 ```
 
-After pushing, the script notifies affected Workers via Matrix @mention to use `file-sync`. Workers' periodic 5-minute sync is a fallback.
+An empty array explicitly removes all optional skills. Omitting `skills`
+leaves the current set unchanged.
 
-## Adding a New Custom Skill
+The same typed tool can change `model`, `runtime`, `image`, `identity`,
+`soul`, `package_uri`, and `expose`. Include only fields intentionally being
+changed, but when a field is an array, pass its complete desired value.
 
-1. Create `~/worker-skills/<skill-name>/SKILL.md` (must include `name`, `description`, `assign_when` frontmatter). Place scripts under `scripts/`.
-2. Assign to worker:
-   ```bash
-   bash /opt/agentteams/agent/skills/worker-management/scripts/push-worker-skills.sh \
-     --worker <name> --add-skill <skill-name>
-   ```
+For skills supplied by a Nacos Worker package, prefer a confirmed package
+import or package-version update so the package digest and provenance stay
+auditable. Do not copy definitions into a Manager-local directory.
 
-## Key facts
-
-- `file-sync`, `task-progress`, `project-participation` are default skills — always included, cannot be removed
-- Skills are Manager-controlled: Workers cannot modify their own skills (local→remote sync excludes `skills/**`)
-- After writing any file a Worker needs, always notify them to `file-sync`
+After the receipt, call `get_worker` when the administrator needs to see the
+reconciled configuration. Do not tell the Worker to synchronize local files;
+Controller reconciliation owns distribution.

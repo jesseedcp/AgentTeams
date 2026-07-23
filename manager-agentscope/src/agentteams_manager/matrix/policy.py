@@ -16,10 +16,13 @@ from agentteams_manager.state.topology import TopologyBinding
 ALL_MANAGER_TOOLS = frozenset(
     {
         "find_worker",
+        "import_worker",
         "list_workers",
         "get_worker",
         "create_worker",
         "update_worker",
+        "sleep_worker",
+        "wake_worker",
         "delete_worker",
         "list_teams",
         "get_team",
@@ -122,7 +125,15 @@ CONFIRM_TOOLS = frozenset(
             "invite_",
         ),
     )
-) | frozenset({"upload_matrix_media"})
+) | frozenset(
+    {
+        "import_worker",
+        "sleep_worker",
+        "wake_worker",
+        "send_notification",
+        "upload_matrix_media",
+    },
+)
 READ_ONLY_RESOURCE_TOOLS = frozenset(
     {
         "list_workers",
@@ -304,11 +315,11 @@ def policy_for_human(
         scope_all = True
     elif human.permission_level == 2:
         tools = TEAM_SCOPED_HUMAN_TOOLS
-        confirmations = frozenset()
+        confirmations = tools & CONFIRM_TOOLS
         scope_all = False
     else:
         tools = WORKER_SCOPED_HUMAN_TOOLS
-        confirmations = frozenset()
+        confirmations = tools & CONFIRM_TOOLS
         scope_all = False
     return RoomPolicy(
         room_id=room_id,

@@ -276,19 +276,87 @@ class NacosClient:
             raise NacosIntegrityError(
                 "confirmed package URI is outside the configured registry",
             )
-        version = None if candidate.version == "latest" else candidate.version
-        current = await self._fetch_spec(candidate.name, version=version)
+        selector = candidate.version
+        label = (
+            selector.removeprefix("label:")
+            if selector.startswith("label:")
+            else None
+        )
+        version = (
+            None
+            if selector == "latest" or label is not None
+            else selector
+        )
+        current = await self._fetch_spec(
+            candidate.name,
+            version=version,
+            label=label,
+        )
         digest = _digest(current.digest_value())
         if digest != candidate.digest:
             raise NacosIntegrityError(
                 f"AgentSpec {candidate.name!r} changed after confirmation",
             )
 
+    async def inspect_worker_uri(self, package_uri: str) -> NacosWorker:
+        """Resolve one explicit URI without performing a market search."""
+        parsed = urlsplit(package_uri)
+        if parsed.scheme != "nacos" or not parsed.hostname:
+            raise ValueError("Worker package must use a valid nacos:// URI")
+        host = parsed.hostname
+        if ":" in host:
+            host = f"[{host}]"
+        authority = (
+            f"{host}:{parsed.port}" if parsed.port is not None else host
+        )
+        if authority != self._registry.authority:
+            raise NacosIntegrityError(
+                "direct package URI is outside the configured registry",
+            )
+        parts = [unquote(item) for item in parsed.path.split("/") if item]
+        if len(parts) not in {2, 3}:
+            raise ValueError(
+                "Nacos package URI must contain namespace, name, "
+                "and optional version",
+            )
+        namespace, name = parts[:2]
+        if namespace != self._registry.namespace:
+            raise NacosIntegrityError(
+                "direct package URI is outside the configured namespace",
+            )
+        selector = parts[2] if len(parts) == 3 else ""
+        label = (
+            selector.removeprefix("label:")
+            if selector.startswith("label:")
+            else None
+        )
+        version = None if label else selector or None
+        spec = await self._fetch_spec(
+            name,
+            version=version,
+            label=label,
+        )
+        summary = _Summary(
+            namespaceId=namespace,
+            name=name,
+            description=spec.description,
+            enable=True,
+            onlineCnt=1,
+            labels={},
+        )
+        return _candidate(
+            self._registry,
+            summary,
+            spec,
+            version=selector or _manifest_version(spec.content),
+        )
+
     async def _fetch_spec(
         self,
         name: str,
         *,
         version: str | None,
+        label: str | None = None,
     ) -> _AgentSpec:
         params = {
             "namespaceId": self._registry.namespace,
@@ -296,6 +364,8 @@ class NacosClient:
         }
         if version:
             params["version"] = version
+        if label:
+            params["label"] = label
         raw = await self._request_json(
             "GET",
             "/nacos/v3/client/ai/agentspecs",

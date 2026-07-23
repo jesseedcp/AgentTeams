@@ -262,10 +262,11 @@ async def test_all_five_worker_runtimes_are_accepted() -> None:
         name = f"worker-{runtime}"
         controller.get_sequences[name] = [
             None,
-            WorkerResource(
-                name=name,
-                runtime=runtime,
-                phase="Running",
+                WorkerResource(
+                    name=name,
+                    runtime=runtime,
+                    model="qwen3.6-plus",
+                    phase="Running",
                 room_id=f"!{runtime}:example",
             ),
         ]

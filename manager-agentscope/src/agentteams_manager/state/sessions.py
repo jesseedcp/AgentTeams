@@ -29,6 +29,7 @@ class PendingConfirmation(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     reply_id: str
+    event_id: str
     tool_calls: tuple[ToolCallBlock, ...]
     status: Literal["awaiting", "resolving"] = "awaiting"
     decision: bool | None = None

@@ -299,41 +299,50 @@ func (h *ResourceHandler) UpdateWorker(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if req.Model != "" {
-			worker.Spec.Model = req.Model
+		if req.Model != nil {
+			worker.Spec.Model = *req.Model
 		}
-		if req.ModelProvider != "" {
-			worker.Spec.ModelProvider = req.ModelProvider
+		if req.ModelProvider != nil {
+			worker.Spec.ModelProvider = *req.ModelProvider
 		}
-		if req.WorkerName != "" {
-			worker.Spec.WorkerName = req.WorkerName
+		if req.WorkerName != nil {
+			worker.Spec.WorkerName = *req.WorkerName
 		}
-		if req.Runtime != "" {
-			worker.Spec.Runtime = req.Runtime
+		if req.Runtime != nil {
+			worker.Spec.Runtime = *req.Runtime
 		}
-		if req.Image != "" {
-			worker.Spec.Image = req.Image
+		if req.Image != nil {
+			worker.Spec.Image = *req.Image
 		}
-		if req.Identity != "" {
-			worker.Spec.Identity = req.Identity
+		if req.Identity != nil {
+			worker.Spec.Identity = *req.Identity
 		}
-		if req.Soul != "" {
-			worker.Spec.Soul = req.Soul
+		if req.Soul != nil {
+			worker.Spec.Soul = *req.Soul
 		}
-		if req.Agents != "" {
-			worker.Spec.Agents = req.Agents
+		if req.Agents != nil {
+			worker.Spec.Agents = *req.Agents
 		}
 		if req.Skills != nil {
-			worker.Spec.Skills = req.Skills
+			worker.Spec.Skills = append(
+				[]string(nil),
+				(*req.Skills)...,
+			)
 		}
 		if req.McpServers != nil {
-			worker.Spec.McpServers = req.McpServers
+			worker.Spec.McpServers = append(
+				[]v1beta1.MCPServer(nil),
+				(*req.McpServers)...,
+			)
 		}
-		if req.Package != "" {
-			worker.Spec.Package = req.Package
+		if req.Package != nil {
+			worker.Spec.Package = *req.Package
 		}
 		if req.Expose != nil {
-			worker.Spec.Expose = req.Expose
+			worker.Spec.Expose = append(
+				[]v1beta1.ExposePort(nil),
+				(*req.Expose)...,
+			)
 		}
 		if req.ChannelPolicy != nil {
 			worker.Spec.ChannelPolicy = req.ChannelPolicy
@@ -709,6 +718,70 @@ func (h *ResourceHandler) ListHumans(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, http.StatusOK, HumanListResponse{Humans: humans, Total: len(humans)})
 }
 
+func (h *ResourceHandler) UpdateHuman(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if name == "" {
+		httputil.WriteError(w, http.StatusBadRequest, "human name is required")
+		return
+	}
+
+	var req UpdateHumanRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	if req.PermissionLevel != nil && (*req.PermissionLevel < 1 || *req.PermissionLevel > 3) {
+		httputil.WriteError(w, http.StatusBadRequest, "permissionLevel must be between 1 and 3")
+		return
+	}
+	if req.DisplayName == nil &&
+		req.Email == nil &&
+		req.PermissionLevel == nil &&
+		req.AccessibleTeams == nil &&
+		req.AccessibleWorkers == nil &&
+		req.Note == nil {
+		httputil.WriteError(w, http.StatusBadRequest, "at least one field must be specified for update")
+		return
+	}
+
+	ctx := r.Context()
+	for attempt := 0; attempt < k8sUpdateMaxRetries; attempt++ {
+		var human v1beta1.Human
+		if err := h.client.Get(ctx, client.ObjectKey{Name: name, Namespace: h.namespace}, &human); err != nil {
+			writeK8sError(w, "get human for update", err)
+			return
+		}
+		if req.DisplayName != nil {
+			human.Spec.DisplayName = *req.DisplayName
+		}
+		if req.Email != nil {
+			human.Spec.Email = *req.Email
+		}
+		if req.PermissionLevel != nil {
+			human.Spec.PermissionLevel = *req.PermissionLevel
+		}
+		if req.AccessibleTeams != nil {
+			human.Spec.AccessibleTeams = append([]string(nil), (*req.AccessibleTeams)...)
+		}
+		if req.AccessibleWorkers != nil {
+			human.Spec.AccessibleWorkers = append([]string(nil), (*req.AccessibleWorkers)...)
+		}
+		if req.Note != nil {
+			human.Spec.Note = *req.Note
+		}
+		if err := h.client.Update(ctx, &human); err != nil {
+			if apierrors.IsConflict(err) && attempt+1 < k8sUpdateMaxRetries {
+				time.Sleep(time.Duration(attempt+1) * 100 * time.Millisecond)
+				continue
+			}
+			writeK8sError(w, "update human", err)
+			return
+		}
+		httputil.WriteJSON(w, http.StatusOK, humanToResponse(&human))
+		return
+	}
+}
+
 func (h *ResourceHandler) DeleteHuman(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	if name == "" {
@@ -908,6 +981,11 @@ func workerToResponse(w *v1beta1.Worker) WorkerResponse {
 		Model:          w.Spec.Model,
 		Runtime:        w.Spec.Runtime,
 		Image:          w.Spec.Image,
+		Identity:       w.Spec.Identity,
+		Soul:           w.Spec.Soul,
+		Skills:         append([]string(nil), w.Spec.Skills...),
+		Package:        w.Spec.Package,
+		Expose:         append([]v1beta1.ExposePort(nil), w.Spec.Expose...),
 		ContainerState: w.Status.ContainerState,
 		MatrixUserID:   w.Status.MatrixUserID,
 		RoomID:         w.Status.RoomID,
@@ -1135,6 +1213,10 @@ func (h *ResourceHandler) teamMemberToResponse(ctx context.Context, t *v1beta1.T
 		resp.Role = "team_leader"
 		resp.Runtime = "copaw"
 		resp.Model = t.Spec.Leader.Model
+		resp.Image = t.Spec.Leader.Image
+		resp.Identity = t.Spec.Leader.Identity
+		resp.Soul = t.Spec.Leader.Soul
+		resp.Package = t.Spec.Leader.Package
 		if t.Spec.Leader.State != nil {
 			resp.State = *t.Spec.Leader.State
 		}
@@ -1147,6 +1229,11 @@ func (h *ResourceHandler) teamMemberToResponse(ctx context.Context, t *v1beta1.T
 			resp.Model = wk.Model
 			resp.Image = wk.Image
 			resp.Runtime = wk.Runtime
+			resp.Identity = wk.Identity
+			resp.Soul = wk.Soul
+			resp.Skills = append([]string(nil), wk.Skills...)
+			resp.Package = wk.Package
+			resp.Expose = append([]v1beta1.ExposePort(nil), wk.Expose...)
 			if wk.State != nil {
 				resp.State = *wk.State
 			}

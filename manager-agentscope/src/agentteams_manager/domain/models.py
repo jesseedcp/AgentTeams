@@ -63,6 +63,8 @@ class OperationKind(StrEnum):
     CREATE_HUMAN = "create_human"
     UPDATE_HUMAN = "update_human"
     DELETE_HUMAN = "delete_human"
+    MATRIX_MUTATION = "matrix_mutation"
+    CHANNEL_MUTATION = "channel_mutation"
     DELEGATE_TASK = "delegate_task"
     COMPLETE_TASK = "complete_task"
     CREATE_PROJECT = "create_project"

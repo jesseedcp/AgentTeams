@@ -7,6 +7,7 @@ import pytest
 
 from agentteams_manager.clients.nacos import (
     NacosClient,
+    NacosIntegrityError,
     NacosProtocolError,
 )
 
@@ -143,6 +144,59 @@ async def test_search_caps_detail_fetches_and_drops_offline_specs() -> None:
 
     assert len(workers) == 2
     assert detail_names == ["coder-0", "coder-1"]
+
+
+@pytest.mark.asyncio
+async def test_direct_uri_fetches_exact_version_without_market_search() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        assert request.url.path == "/nacos/v3/client/ai/agentspecs"
+        assert request.url.params["namespaceId"] == "public"
+        assert request.url.params["name"] == "remote-coder"
+        assert request.url.params["version"] == "1.4.0"
+        return httpx.Response(
+            200,
+            json=_detail_response("remote-coder"),
+        )
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+    ) as http:
+        candidate = await NacosClient(
+            registry_uri="nacos://registry.example:8848/public",
+            http_client=http,
+        ).inspect_worker_uri(
+            "nacos://registry.example:8848/public/remote-coder/1.4.0",
+        )
+
+    assert len(requests) == 1
+    assert candidate.name == "remote-coder"
+    assert candidate.version == "1.4.0"
+    assert candidate.package_uri.endswith("/remote-coder/1.4.0")
+    assert candidate.digest.startswith("sha256:")
+
+
+@pytest.mark.asyncio
+async def test_direct_uri_outside_configured_registry_fails_closed() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError(f"unexpected request: {request.url}")
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+    ) as http:
+        client = NacosClient(
+            registry_uri="nacos://registry.example:8848/public",
+            http_client=http,
+        )
+        with pytest.raises(
+            NacosIntegrityError,
+            match="outside the configured registry",
+        ):
+            await client.inspect_worker_uri(
+                "nacos://attacker.example/public/remote-coder/1.4.0",
+            )
 
 
 @pytest.mark.asyncio

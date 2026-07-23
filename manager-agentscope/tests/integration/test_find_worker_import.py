@@ -34,6 +34,7 @@ class Nacos:
             digest="sha256:" + ("a" * 64),
         )
         self.searches: list[str] = []
+        self.inspected: list[str] = []
         self.verified: list[NacosWorker] = []
 
     async def search_workers(
@@ -45,6 +46,10 @@ class Nacos:
 
     async def verify_worker(self, candidate: NacosWorker) -> None:
         self.verified.append(candidate)
+
+    async def inspect_worker_uri(self, package_uri: str) -> NacosWorker:
+        self.inspected.append(package_uri)
+        return self.candidate
 
 
 class Controller:
@@ -229,6 +234,35 @@ async def test_confirmed_candidate_is_bound_to_name_uri_and_digest() -> None:
     with pytest.raises(WorkerImportError, match="confirmation"):
         await service.import_worker(changed, context=_context())
     assert len(controller.apply_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_direct_uri_is_inspected_bound_and_verified_before_apply() -> None:
+    controller = Controller()
+    nacos = Nacos()
+    service = _service(controller, nacos)
+
+    confirmation = await service.confirm_direct_import(
+        package_uri=nacos.candidate.package_uri,
+        worker_name="alice",
+    )
+    worker = await service.import_worker(
+        confirmation,
+        context=_context(),
+    )
+
+    assert worker.name == "alice"
+    assert nacos.searches == []
+    assert nacos.inspected == [nacos.candidate.package_uri]
+    assert nacos.verified == [nacos.candidate]
+    assert controller.apply_calls == [
+        (
+            "alice",
+            nacos.candidate.package_uri,
+            nacos.candidate.digest,
+            "hermes",
+        ),
+    ]
 
 
 @pytest.mark.asyncio

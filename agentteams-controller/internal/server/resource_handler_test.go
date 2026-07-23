@@ -153,6 +153,76 @@ func TestCreateManagerPreservesResources(t *testing.T) {
 	assertAgentResources(t, mgr.Spec.Resources, "500m", "1Gi", "3", "5Gi")
 }
 
+func TestUpdateWorkerClearsDesiredFieldsAndReturnsProof(t *testing.T) {
+	scheme := newServerTestScheme(t)
+	worker := &v1beta1.Worker{}
+	worker.Name = "clearable"
+	worker.Namespace = "default"
+	worker.Spec.Model = "qwen3.5-plus"
+	worker.Spec.Runtime = "copaw"
+	worker.Spec.Identity = "old identity"
+	worker.Spec.Soul = "old soul"
+	worker.Spec.Skills = []string{"git"}
+	worker.Spec.Package = "oss://workers/old.zip"
+	worker.Spec.Expose = []v1beta1.ExposePort{{Port: 8080}}
+	k8sClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(worker).
+		Build()
+	handler := NewResourceHandler(k8sClient, "default", nil, "")
+
+	body := []byte(`{
+		"identity":"",
+		"soul":"",
+		"skills":[],
+		"package":"",
+		"expose":[]
+	}`)
+	req := httptest.NewRequest(
+		http.MethodPut,
+		"/api/v1/workers/clearable",
+		bytes.NewReader(body),
+	)
+	req.SetPathValue("name", "clearable")
+	rec := httptest.NewRecorder()
+	handler.UpdateWorker(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf(
+			"expected status %d, got %d: %s",
+			http.StatusOK,
+			rec.Code,
+			rec.Body.String(),
+		)
+	}
+	var got v1beta1.Worker
+	if err := k8sClient.Get(
+		context.Background(),
+		client.ObjectKey{Name: "clearable", Namespace: "default"},
+		&got,
+	); err != nil {
+		t.Fatalf("get worker: %v", err)
+	}
+	if got.Spec.Identity != "" ||
+		got.Spec.Soul != "" ||
+		got.Spec.Package != "" ||
+		len(got.Spec.Skills) != 0 ||
+		len(got.Spec.Expose) != 0 {
+		t.Fatalf("desired fields were not cleared: %+v", got.Spec)
+	}
+	var resp WorkerResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Identity != "" ||
+		resp.Soul != "" ||
+		resp.Package != "" ||
+		len(resp.Skills) != 0 ||
+		len(resp.Expose) != 0 {
+		t.Fatalf("response does not prove cleared fields: %+v", resp)
+	}
+}
+
 // /api/v1/workers/{name} must synthesize a response for a team member even
 // though no Worker CR exists. The synthesized response MUST carry the
 // RoomID + MatrixUserID recorded in Team.Status.Members so that clients like
@@ -780,6 +850,48 @@ func TestGetHumanIncludesPermissionScope(t *testing.T) {
 	}
 	if response.Email != "reviewer@example.com" || response.Note != "release reviewer" {
 		t.Fatalf("human metadata not preserved: %#v", response)
+	}
+}
+
+func TestUpdateHumanChangesPermissionScope(t *testing.T) {
+	scheme := newServerTestScheme(t)
+	human := &v1beta1.Human{}
+	human.Name = "reviewer"
+	human.Namespace = "default"
+	human.Spec = v1beta1.HumanSpec{
+		DisplayName:       "Reviewer",
+		Email:             "old@example.com",
+		PermissionLevel:   2,
+		AccessibleTeams:   []string{"alpha"},
+		AccessibleWorkers: []string{"alpha-dev"},
+		Note:              "old",
+	}
+	k8sClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(human).
+		Build()
+	handler := NewResourceHandler(k8sClient, "default", nil, "")
+	body := []byte(`{"email":"","permissionLevel":3,"accessibleTeams":[],"accessibleWorkers":["beta-dev"],"note":""}`)
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/humans/reviewer", bytes.NewReader(body))
+	req.SetPathValue("name", "reviewer")
+	rec := httptest.NewRecorder()
+
+	handler.UpdateHuman(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected %d, got %d: %s", http.StatusOK, rec.Code, rec.Body.String())
+	}
+	var updated v1beta1.Human
+	if err := k8sClient.Get(context.Background(), client.ObjectKey{Name: "reviewer", Namespace: "default"}, &updated); err != nil {
+		t.Fatalf("get human: %v", err)
+	}
+	if updated.Spec.PermissionLevel != 3 ||
+		updated.Spec.Email != "" ||
+		len(updated.Spec.AccessibleTeams) != 0 ||
+		len(updated.Spec.AccessibleWorkers) != 1 ||
+		updated.Spec.AccessibleWorkers[0] != "beta-dev" ||
+		updated.Spec.Note != "" {
+		t.Fatalf("unexpected updated human: %#v", updated.Spec)
 	}
 }
 

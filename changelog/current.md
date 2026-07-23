@@ -4,8 +4,17 @@ Record image-affecting changes to `manager/`, `worker/`, `copaw/`, `hermes/`, `o
 
 ---
 
+**Features**
+
+- **AgentScope resource administration**: Expose policy-scoped typed tools for
+  Worker, Team, Human, Matrix, channel, and Nacos operations, with durable
+  recovery and deterministic heartbeat reconciliation.
+
 **Bug Fixes**
 
+- **Provable resource updates**: Return complete Worker desired state and add
+  typed Human updates so Manager mutations can be confirmed from Controller
+  facts, including explicit skill, exposure, and permission-scope clearing.
 - **CoPaw Team coordination routing**: Route Team Leader worker assignments sent through the `message` tool from Leader DM to Team Room, matching the Matrix channel send path. ([92c8145](https://github.com/agentscope-ai/AgentTeams/commit/92c8145))
 - **Pinned OpenClaw source fetch**: Fetch the pinned OpenClaw commit directly so the base image build does not depend on a retired-brand external branch name. ([b0081c2](https://github.com/agentscope-ai/AgentTeams/commit/b0081c2))
 

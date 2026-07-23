@@ -144,7 +144,12 @@ class MatrixSessionRunner:
             reply_id=reply_id,
             confirm_results=results,
         )
-        await self._run_and_project(event, policy, continuation)
+        await self._run_and_project(
+            event,
+            policy,
+            continuation,
+            tool_event_id=pending.event_id,
+        )
         clear_pending_confirmation(session.agent.state)
         await self._sessions.persist(event.room_id)
 
@@ -153,6 +158,8 @@ class MatrixSessionRunner:
         event: InboundEvent,
         policy: RoomPolicy,
         inputs: Any,
+        *,
+        tool_event_id: str | None = None,
     ) -> None:
         projector = EventStreamProjector()
         operation_id = operation_id_for(
@@ -170,6 +177,7 @@ class MatrixSessionRunner:
             event,
             policy,
             inputs,
+            tool_event_id=tool_event_id,
         ):
             projection = await projector.accept(agent_event)
             if isinstance(agent_event, TextBlockDeltaEvent) and projection.text:
@@ -203,6 +211,7 @@ class MatrixSessionRunner:
             if isinstance(agent_event, RequireUserConfirmEvent):
                 pending = PendingConfirmation(
                     reply_id=agent_event.reply_id,
+                    event_id=event.event_id,
                     tool_calls=tuple(agent_event.tool_calls),
                 )
                 session = await self._sessions.get_or_create(
