@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 from .models import (
     HumanResource,
@@ -90,6 +90,39 @@ class ArtifactPort(Protocol):
     ) -> ObjectReceipt: ...
 
     async def get_bytes(self, key: str) -> bytes: ...
+
+    async def get_json(self, key: str) -> Any: ...
+
+    async def head(self, key: str) -> ObjectReceipt | None: ...
+
+    async def list_prefix(
+        self,
+        prefix: str,
+    ) -> tuple[ObjectReceipt, ...]: ...
+
+    async def put_bytes_if_version(
+        self,
+        key: str,
+        data: bytes,
+        *,
+        expected_etag: str | None,
+        content_type: str,
+    ) -> ObjectReceipt: ...
+
+    async def put_json_if_version(
+        self,
+        key: str,
+        value: Any,
+        *,
+        expected_etag: str | None,
+    ) -> ObjectReceipt: ...
+
+    async def delete_if_version(
+        self,
+        key: str,
+        *,
+        expected_etag: str,
+    ) -> None: ...
 
     async def mirror_down(
         self,

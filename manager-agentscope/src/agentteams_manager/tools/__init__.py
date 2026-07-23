@@ -10,9 +10,18 @@ from .resources import (
     human_room_policy,
 )
 from .storage import TaskArtifactSet, TaskMetadata
+from .tasks import (
+    CancelTaskInput,
+    CompleteTaskInput,
+    CreateFiniteTaskInput,
+    TaskTools,
+)
 
 __all__ = [
     "ChannelResolver",
+    "CancelTaskInput",
+    "CompleteTaskInput",
+    "CreateFiniteTaskInput",
     "ManagerTool",
     "ManagerToolkit",
     "RESOURCE_TOOL_NAMES",
@@ -20,6 +29,7 @@ __all__ = [
     "ResourceToolkitFactory",
     "TaskArtifactSet",
     "TaskMetadata",
+    "TaskTools",
     "authorize_resource_target",
     "human_room_policy",
 ]

@@ -99,6 +99,7 @@ class TaskRepository:
         target: str,
         last_executed_at: datetime | None = None,
         next_scheduled_at: datetime | None = None,
+        metadata: dict[str, object] | None = None,
     ) -> TaskRecord | None:
         if not expected:
             raise ValueError("expected statuses must not be empty")
@@ -111,6 +112,7 @@ class TaskRepository:
                    SET status=?,
                        last_executed_at=COALESCE(?, last_executed_at),
                        next_scheduled_at=COALESCE(?, next_scheduled_at),
+                       metadata_json=COALESCE(?, metadata_json),
                        updated_at=?
                  WHERE task_id=?
                    AND status IN ({placeholders})
@@ -125,6 +127,16 @@ class TaskRepository:
                     (
                         next_scheduled_at.isoformat()
                         if next_scheduled_at
+                        else None
+                    ),
+                    (
+                        json.dumps(
+                            metadata,
+                            ensure_ascii=False,
+                            separators=(",", ":"),
+                            sort_keys=True,
+                        )
+                        if metadata is not None
                         else None
                     ),
                     datetime.now(UTC).isoformat(),
