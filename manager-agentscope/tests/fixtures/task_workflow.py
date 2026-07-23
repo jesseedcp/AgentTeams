@@ -84,7 +84,10 @@ class TaskStorage:
     async def put_json_if_version(self, key: str, value: Any, **kwargs: Any):
         status = value.get("status") if isinstance(value, dict) else None
         self.order.append(
-            "minio.meta" if status == "prepared" else f"minio.{status}",
+            "minio.meta"
+            if key.endswith("/meta.json")
+            and status in {"prepared", "planning"}
+            else f"minio.{status}",
         )
         return await self.client.put_json_if_version(key, value, **kwargs)
 

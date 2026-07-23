@@ -7,6 +7,10 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from agentteams_manager.workflows.resources import MutationContext
+from agentteams_manager.workflows.projects import (
+    ProjectReceipt,
+    ProjectService,
+)
 from agentteams_manager.workflows.tasks import TaskReceipt, TaskService
 
 
@@ -45,6 +49,32 @@ class CancelTaskInput(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     task_id: str = Field(min_length=1)
+
+
+class CreateProjectInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    title: str = Field(min_length=1)
+    description: str = Field(min_length=1)
+    plan: str = Field(min_length=1)
+    participants: tuple[str, ...] = Field(min_length=1)
+
+
+class AddProjectTaskInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    project_id: str = Field(min_length=1)
+    title: str = Field(min_length=1)
+    specification: str = Field(min_length=1)
+    assigned_to: str = Field(min_length=1)
+    delegated_to_team: str | None = None
+
+
+class CloseProjectInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    project_id: str = Field(min_length=1)
+    force: bool = False
 
 
 class TaskTools:
@@ -114,5 +144,51 @@ class TaskTools:
     ) -> TaskReceipt:
         return await self._service.cancel(
             task_id=request.task_id,
+            context=context,
+        )
+
+
+class ProjectTools:
+    def __init__(self, service: ProjectService) -> None:
+        self._service = service
+
+    async def create(
+        self,
+        request: CreateProjectInput,
+        *,
+        context: MutationContext,
+    ) -> ProjectReceipt:
+        return await self._service.create(
+            title=request.title,
+            description=request.description,
+            plan=request.plan,
+            participants=request.participants,
+            context=context,
+        )
+
+    async def add_task(
+        self,
+        request: AddProjectTaskInput,
+        *,
+        context: MutationContext,
+    ) -> TaskReceipt:
+        return await self._service.add_task(
+            project_id=request.project_id,
+            title=request.title,
+            specification=request.specification,
+            assigned_to=request.assigned_to,
+            delegated_to_team=request.delegated_to_team,
+            context=context,
+        )
+
+    async def close(
+        self,
+        request: CloseProjectInput,
+        *,
+        context: MutationContext,
+    ) -> ProjectReceipt:
+        return await self._service.close(
+            project_id=request.project_id,
+            force=request.force,
             context=context,
         )

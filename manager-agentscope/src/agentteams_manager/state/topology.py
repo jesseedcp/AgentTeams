@@ -135,7 +135,10 @@ class TopologyRepository:
             )
 
         def write(connection: sqlite3.Connection) -> None:
-            connection.execute("DELETE FROM topology")
+            connection.execute(
+                "DELETE FROM topology "
+                "WHERE resource_type IN ('worker', 'team')",
+            )
             connection.execute("DELETE FROM human_access")
             connection.executemany(
                 """
@@ -222,6 +225,46 @@ class TopologyRepository:
             return tuple(_binding_from_row(row) for row in rows)
 
         return await self._database.read(read)
+
+    async def upsert_project(
+        self,
+        *,
+        project_id: str,
+        room_id: str,
+        payload: dict[str, object],
+        refreshed_at: datetime,
+    ) -> None:
+        _require_channel_key(project_id, "project_id")
+        _require_channel_key(room_id, "room_id")
+
+        def write(connection: sqlite3.Connection) -> None:
+            connection.execute(
+                """
+                INSERT INTO topology(
+                    resource_type, resource_name, room_kind, room_id,
+                    matrix_user_id, payload_json, refreshed_at
+                ) VALUES ('project', ?, ?, ?, NULL, ?, ?)
+                ON CONFLICT(resource_type, resource_name, room_kind)
+                DO UPDATE SET
+                    room_id=excluded.room_id,
+                    payload_json=excluded.payload_json,
+                    refreshed_at=excluded.refreshed_at
+                """,
+                (
+                    project_id,
+                    RoomKind.PROJECT_ROOM.value,
+                    room_id,
+                    json.dumps(
+                        payload,
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                        sort_keys=True,
+                    ),
+                    refreshed_at.isoformat(),
+                ),
+            )
+
+        await self._database.write(write)
 
     async def set_primary_channel(
         self,

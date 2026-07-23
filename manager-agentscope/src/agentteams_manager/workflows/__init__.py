@@ -1,6 +1,7 @@
 """Deterministic Manager workflows."""
 
 from .matrix_resources import MatrixResourceService
+from .projects import ProjectReceipt, ProjectService
 from .resources import (
     MutationContext,
     ResourceHeartbeat,
@@ -21,6 +22,8 @@ from .tasks import (
 
 __all__ = [
     "OperationSupervisor",
+    "ProjectReceipt",
+    "ProjectService",
     "MutationContext",
     "MatrixResourceService",
     "ResourceHeartbeat",

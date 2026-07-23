@@ -174,3 +174,22 @@ class TaskRepository:
             return tuple(_task_from_row(row) for row in rows)
 
         return await self._database.read(read)
+
+    async def list_by_project(
+        self,
+        project_id: str,
+    ) -> tuple[TaskRecord, ...]:
+        def read(
+            connection: sqlite3.Connection,
+        ) -> tuple[TaskRecord, ...]:
+            rows = connection.execute(
+                """
+                SELECT * FROM tasks
+                 WHERE project_id=?
+                 ORDER BY created_at, task_id
+                """,
+                (project_id,),
+            ).fetchall()
+            return tuple(_task_from_row(row) for row in rows)
+
+        return await self._database.read(read)

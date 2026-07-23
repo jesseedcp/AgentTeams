@@ -69,6 +69,8 @@ class OperationKind(StrEnum):
     DELEGATE_TASK = "delegate_task"
     COMPLETE_TASK = "complete_task"
     CREATE_PROJECT = "create_project"
+    UPDATE_PROJECT = "update_project"
+    CLOSE_PROJECT = "close_project"
     GIT_DELEGATION = "git_delegation"
     FILE_SYNC = "file_sync"
     CONFIGURE_MCP = "configure_mcp"
@@ -317,6 +319,70 @@ class ProjectRecord(StrictModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
     updated_at: datetime
+
+
+class ProjectMetadata(FrozenStrictModel):
+    """Canonical structured project state stored in MinIO."""
+
+    schema_version: Literal[1] = 1
+    project_id: str = Field(
+        pattern=r"^project-\d{8}-\d{6}-[a-z0-9]{6}$",
+    )
+    title: str = Field(min_length=1)
+    description: str = Field(min_length=1)
+    status: Literal["planning", "active", "completed", "cancelled"]
+    room_id: str | None = None
+    participants: tuple[str, ...]
+    task_ids: tuple[str, ...] = ()
+    created_at: datetime
+    updated_at: datetime
+    completed_at: datetime | None = None
+
+    @model_validator(mode="after")
+    def validate_project_state(self) -> Self:
+        if self.status == "planning" and self.room_id is not None:
+            raise ValueError("planning project must not publish a room")
+        if self.status in {"active", "completed"} and not self.room_id:
+            raise ValueError(f"{self.status} project requires a room")
+        if self.status == "completed" and self.completed_at is None:
+            raise ValueError("completed project requires completed_at")
+        if self.status != "completed" and self.completed_at is not None:
+            raise ValueError("only completed project may have completed_at")
+        return self
+
+
+class ProjectPlan(FrozenStrictModel):
+    schema_version: Literal[1] = 1
+    project_id: str
+    title: str = Field(min_length=1)
+    description: str = Field(min_length=1)
+    status: Literal["planning", "active", "completed", "cancelled"]
+    body: str = Field(min_length=1)
+    task_ids: tuple[str, ...] = ()
+    task_statuses: dict[str, str] = Field(default_factory=dict)
+    updated_at: datetime
+
+    def render(self) -> str:
+        markers = {
+            "completed": "x",
+            "assigned": "~",
+            "active": "~",
+            "failed": "-",
+            "cancelled": "-",
+        }
+        tasks = "\n".join(
+            f"- [{markers.get(self.task_statuses.get(task_id, ''), ' ')}] "
+            f"{task_id}"
+            for task_id in self.task_ids
+        ) or "- No tasks assigned yet."
+        return (
+            f"# {self.title}\n\n"
+            f"**ID**: {self.project_id}\n\n"
+            f"**Status**: {self.status}\n\n"
+            f"## Goal\n\n{self.description}\n\n"
+            f"## Plan\n\n{self.body.strip()}\n\n"
+            f"## Tasks\n\n{tasks}\n"
+        )
 
 
 class JournalEvent(FrozenStrictModel):
