@@ -5,6 +5,7 @@ from .git_delegation import (
     ProcessingLeaseService,
 )
 from .matrix_resources import MatrixResourceService
+from .notifications import DailyMemory, NotificationService
 from .projects import ProjectReceipt, ProjectService
 from .resources import (
     MutationContext,
@@ -26,7 +27,9 @@ from .tasks import (
 
 __all__ = [
     "GitDelegationService",
+    "DailyMemory",
     "OperationSupervisor",
+    "NotificationService",
     "ProcessingLeaseService",
     "ProjectReceipt",
     "ProjectService",

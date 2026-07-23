@@ -9,7 +9,12 @@ from .resources import (
     authorize_resource_target,
     human_room_policy,
 )
-from .storage import TaskArtifactSet, TaskMetadata
+from .storage import (
+    FileSyncReceipt,
+    FileSyncService,
+    TaskArtifactSet,
+    TaskMetadata,
+)
 from .tasks import (
     AddProjectTaskInput,
     CancelTaskInput,
@@ -34,6 +39,8 @@ __all__ = [
     "CreateFiniteTaskInput",
     "CreateProjectInput",
     "CreateRecurringTaskInput",
+    "FileSyncReceipt",
+    "FileSyncService",
     "GitDelegationInput",
     "GitDelegationTools",
     "ManagerTool",

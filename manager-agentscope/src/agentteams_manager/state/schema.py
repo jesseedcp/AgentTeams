@@ -1,6 +1,6 @@
 """Initial SQLite schema for durable operations."""
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS operations (
@@ -93,6 +93,21 @@ CREATE TABLE IF NOT EXISTS processing_leases (
 );
 CREATE INDEX IF NOT EXISTS processing_leases_expiry_idx
   ON processing_leases(expires_at);
+
+CREATE TABLE IF NOT EXISTS notifications (
+  notification_id TEXT PRIMARY KEY,
+  source_operation_id TEXT NOT NULL UNIQUE,
+  recipient TEXT NOT NULL,
+  room_id TEXT NOT NULL,
+  text TEXT NOT NULL,
+  txn_id TEXT NOT NULL UNIQUE,
+  status TEXT NOT NULL,
+  event_id TEXT,
+  created_at TEXT NOT NULL,
+  sent_at TEXT
+);
+CREATE INDEX IF NOT EXISTS notifications_status_idx
+  ON notifications(status, created_at);
 
 CREATE TABLE IF NOT EXISTS topology (
   resource_type TEXT NOT NULL,

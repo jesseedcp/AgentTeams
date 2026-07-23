@@ -512,10 +512,42 @@ class TaskService:
             f"complete:{task_id}",
         )
         if task.status == "completed":
+            canonical_operation_id = str(
+                task.metadata.get("completion_operation_id")
+                or operation_id
+            )
+            summary = _completion_summary(task)
+            if self._notifications is not None and summary is not None:
+                await self._notifications.send_completion(
+                    operation_id=canonical_operation_id,
+                    task=task,
+                    summary=summary,
+                )
+            if not task.metadata.get("completion_finalized"):
+                await self._supervisor.effect_succeeded(
+                    canonical_operation_id,
+                    ExternalEffect.STORAGE,
+                    {
+                        "task_id": task_id,
+                        "status": "completed",
+                        "summary": summary,
+                        "recovered": True,
+                    },
+                )
+                changed = await self._tasks.transition(
+                    task_id,
+                    expected={"completed"},
+                    target="completed",
+                    metadata={
+                        **task.metadata,
+                        "completion_finalized": True,
+                    },
+                )
+                task = changed or task
             return _task_receipt(
-                operation_id,
+                canonical_operation_id,
                 task,
-                summary=_completion_summary(task),
+                summary=summary,
             )
         if task.status not in {"assigned", "active"}:
             raise ConflictError(
@@ -603,6 +635,7 @@ class TaskService:
         )
         local_metadata = {
             **task.metadata,
+            "completion_operation_id": operation_id,
             "completion_event_id": worker_event_id,
             "completed_at": completed_at.isoformat(),
             "completion_summary": summary,
@@ -635,6 +668,16 @@ class TaskService:
                 "summary": summary,
             },
         )
+        changed = await self._tasks.transition(
+            task_id,
+            expected={"completed"},
+            target="completed",
+            metadata={
+                **task.metadata,
+                "completion_finalized": True,
+            },
+        )
+        task = changed or task
         return _task_receipt(operation_id, task, summary=summary)
 
     async def dispatch_recurring(

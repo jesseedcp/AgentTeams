@@ -66,6 +66,7 @@ class OperationKind(StrEnum):
     DELETE_HUMAN = "delete_human"
     MATRIX_MUTATION = "matrix_mutation"
     CHANNEL_MUTATION = "channel_mutation"
+    SEND_NOTIFICATION = "send_notification"
     DELEGATE_TASK = "delegate_task"
     COMPLETE_TASK = "complete_task"
     CREATE_PROJECT = "create_project"
@@ -330,6 +331,19 @@ class ProcessingLeaseRecord(FrozenStrictModel):
     expires_at: datetime
     remote_etag: str
     updated_at: datetime
+
+
+class NotificationRecord(FrozenStrictModel):
+    notification_id: str = Field(min_length=32, max_length=32)
+    source_operation_id: str = Field(min_length=32, max_length=32)
+    recipient: str
+    room_id: str
+    text: str
+    txn_id: str
+    status: Literal["prepared", "sent"]
+    event_id: str | None = None
+    created_at: datetime
+    sent_at: datetime | None = None
 
 
 class ProjectMetadata(FrozenStrictModel):
