@@ -38,5 +38,45 @@ CREATE TABLE IF NOT EXISTS key_values (
   value TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
-"""
 
+CREATE TABLE IF NOT EXISTS sessions (
+  room_id TEXT PRIMARY KEY,
+  agent_state_json TEXT NOT NULL,
+  policy_revision INTEGER NOT NULL,
+  last_event_id TEXT,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS tasks (
+  task_id TEXT PRIMARY KEY,
+  task_type TEXT NOT NULL,
+  status TEXT NOT NULL,
+  title TEXT NOT NULL,
+  assigned_to TEXT NOT NULL,
+  room_id TEXT NOT NULL,
+  project_id TEXT,
+  delegated_to_team TEXT,
+  schedule TEXT,
+  timezone TEXT,
+  last_executed_at TEXT,
+  next_scheduled_at TEXT,
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS tasks_due_idx
+  ON tasks(status, next_scheduled_at);
+
+CREATE TABLE IF NOT EXISTS topology (
+  resource_type TEXT NOT NULL,
+  resource_name TEXT NOT NULL,
+  room_kind TEXT NOT NULL,
+  room_id TEXT NOT NULL,
+  matrix_user_id TEXT,
+  payload_json TEXT NOT NULL,
+  refreshed_at TEXT NOT NULL,
+  PRIMARY KEY(resource_type, resource_name, room_kind)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS topology_room_idx
+  ON topology(room_id);
+"""
