@@ -75,6 +75,7 @@ class ManagerConfig(BaseModel):
     matrix_url: str
     matrix_domain: str
     matrix_access_token: SecretStr
+    matrix_password: SecretStr | None = None
     controller_url: str
     controller_auth_token: SecretStr | None
     ai_gateway_url: str
@@ -108,6 +109,11 @@ class ManagerConfig(BaseModel):
             matrix_domain=env["AGENTTEAMS_MATRIX_DOMAIN"],
             matrix_access_token=SecretStr(
                 env["AGENTTEAMS_MANAGER_MATRIX_TOKEN"],
+            ),
+            matrix_password=(
+                SecretStr(env["AGENTTEAMS_MANAGER_MATRIX_PASSWORD"])
+                if env.get("AGENTTEAMS_MANAGER_MATRIX_PASSWORD")
+                else None
             ),
             controller_url=env["AGENTTEAMS_CONTROLLER_URL"].rstrip("/"),
             controller_auth_token=(

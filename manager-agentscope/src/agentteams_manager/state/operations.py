@@ -180,6 +180,33 @@ class OperationRepository:
 
         return await self._database.write(write)
 
+    async def get_value(self, key: str) -> str | None:
+        """Read a durable process cursor or transport value."""
+        def read(connection: sqlite3.Connection) -> str | None:
+            row = connection.execute(
+                "SELECT value FROM key_values WHERE key=?",
+                (key,),
+            ).fetchone()
+            return str(row["value"]) if row is not None else None
+
+        return await self._database.read(read)
+
+    async def set_value(self, key: str, value: str) -> None:
+        """Atomically create or replace a durable process value."""
+        def write(connection: sqlite3.Connection) -> None:
+            connection.execute(
+                """
+                INSERT INTO key_values(key, value, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(key) DO UPDATE SET
+                    value=excluded.value,
+                    updated_at=excluded.updated_at
+                """,
+                (key, value, datetime.now(UTC).isoformat()),
+            )
+
+        await self._database.write(write)
+
     async def next_sequence(self, operation_id: str) -> int:
         del operation_id
 

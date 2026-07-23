@@ -52,6 +52,18 @@ async def test_matrix_event_is_claimed_once(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_key_value_round_trip_is_durable(tmp_path: Path) -> None:
+    database = Database(tmp_path / "manager.db")
+    await database.open()
+    repository = OperationRepository(database)
+
+    assert await repository.get_value("matrix.sync_token") is None
+    await repository.set_value("matrix.sync_token", "next-batch")
+
+    assert await repository.get_value("matrix.sync_token") == "next-batch"
+
+
+@pytest.mark.asyncio
 async def test_next_event_sequence_is_durable(tmp_path: Path) -> None:
     database = Database(tmp_path / "manager.db")
     await database.open()
