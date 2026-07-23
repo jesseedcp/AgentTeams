@@ -188,6 +188,11 @@ class InboundEvent(FrozenStrictModel):
     mentions: tuple[str, ...] = ()
     media: tuple[MediaReference, ...] = ()
 
+    @property
+    def sender_id(self) -> str:
+        """Expose the sender with the explicit name used at transport edges."""
+        return self.sender
+
 
 class WorkerResource(FrozenStrictModel):
     name: str
@@ -301,4 +306,3 @@ class TopologySnapshot(FrozenStrictModel):
     teams: tuple[TeamResource, ...] = ()
     humans: tuple[HumanResource, ...] = ()
     refreshed_at: datetime
-

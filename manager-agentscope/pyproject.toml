@@ -25,7 +25,7 @@ agentteams-manager = "agentteams_manager.main:main"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+pythonpath = [".", "src"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
-
