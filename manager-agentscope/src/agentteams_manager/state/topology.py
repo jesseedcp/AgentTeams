@@ -8,7 +8,11 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from agentteams_manager.domain.errors import ConflictError
-from agentteams_manager.domain.models import RoomKind, TopologySnapshot
+from agentteams_manager.domain.models import (
+    HumanResource,
+    RoomKind,
+    TopologySnapshot,
+)
 
 from .database import Database
 
@@ -42,6 +46,7 @@ class TopologyRepository:
 
     async def replace_snapshot(self, snapshot: TopologySnapshot) -> None:
         rows: list[tuple[str, str, str, str, str | None, str, str]] = []
+        human_rows: list[tuple[str, str, int, str, str, str]] = []
         kinds_by_room: dict[str, RoomKind] = {}
 
         def add(
@@ -92,9 +97,21 @@ class TopologyRepository:
                 matrix_user_id=None,
                 payload=team.model_dump_json(),
             )
+        for human in snapshot.humans:
+            human_rows.append(
+                (
+                    human.name,
+                    human.matrix_user_id,
+                    human.permission_level,
+                    json.dumps(list(human.allowed_rooms)),
+                    human.model_dump_json(),
+                    snapshot.refreshed_at.isoformat(),
+                ),
+            )
 
         def write(connection: sqlite3.Connection) -> None:
             connection.execute("DELETE FROM topology")
+            connection.execute("DELETE FROM human_access")
             connection.executemany(
                 """
                 INSERT INTO topology(
@@ -103,6 +120,15 @@ class TopologyRepository:
                 ) VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 rows,
+            )
+            connection.executemany(
+                """
+                INSERT INTO human_access(
+                    name, matrix_user_id, permission_level,
+                    allowed_rooms_json, payload_json, refreshed_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                human_rows,
             )
 
         await self._database.write(write)
@@ -114,6 +140,25 @@ class TopologyRepository:
                 (room_id,),
             ).fetchone()
             return _binding_from_row(row) if row else None
+
+        return await self._database.read(read)
+
+    async def human_for_sender(
+        self,
+        matrix_user_id: str,
+    ) -> HumanResource | None:
+        """Resolve Controller-declared Human access by Matrix identity."""
+        def read(connection: sqlite3.Connection) -> HumanResource | None:
+            row = connection.execute(
+                """
+                SELECT payload_json FROM human_access
+                 WHERE matrix_user_id=?
+                """,
+                (matrix_user_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            return HumanResource.model_validate_json(row["payload_json"])
 
         return await self._database.read(read)
 

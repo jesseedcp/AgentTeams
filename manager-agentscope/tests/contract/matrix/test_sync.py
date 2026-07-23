@@ -40,6 +40,7 @@ class FakeNio:
         self.should_upload_keys = False
         self.should_query_keys = False
         self.should_claim_keys = False
+        self.rooms: dict[str, object] = {}
 
     @staticmethod
     def response(
@@ -153,6 +154,45 @@ async def test_invites_are_joined_before_timeline_dispatch(
 
     assert nio.joined_rooms == ["!worker:local"]
     assert order == ["join", "dispatch"]
+
+
+@pytest.mark.asyncio
+async def test_two_member_room_is_normalized_as_direct(
+    tmp_path: Path,
+) -> None:
+    state = FakeState()
+    nio = FakeNio()
+    nio.rooms["!dm:local"] = SimpleNamespace(
+        users={
+            "@manager:local": object(),
+            "@admin:local": object(),
+        },
+    )
+    event = SimpleNamespace(
+        event_id="$dm",
+        sender="@admin:local",
+        body="status",
+        server_timestamp=1_700_000_000_000,
+        source={"content": {"body": "status"}},
+    )
+    nio.next_sync = nio.response(
+        joined={
+            "!dm:local": SimpleNamespace(
+                timeline=SimpleNamespace(events=[event]),
+            ),
+        },
+    )
+    received: list[object] = []
+
+    async def handler(inbound: object) -> None:
+        received.append(inbound)
+
+    client = MatrixClient(_config(tmp_path), state, nio_client=nio)
+    client.bind_handler(handler)
+
+    await client.sync_once()
+
+    assert received[0].is_direct
 
 
 @pytest.mark.asyncio

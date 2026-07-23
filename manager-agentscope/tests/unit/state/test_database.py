@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from agentteams_manager.state.database import Database
+from agentteams_manager.state.schema import SCHEMA_VERSION
 
 
 @pytest.mark.asyncio
@@ -31,7 +32,7 @@ async def test_database_enables_required_sqlite_guards(tmp_path: Path) -> None:
         "journal_mode": "wal",
         "foreign_keys": 1,
         "busy_timeout": 5000,
-        "user_version": 1,
+        "user_version": SCHEMA_VERSION,
     }
 
 
@@ -59,4 +60,3 @@ async def test_database_backup_is_a_readable_consistent_copy(
         ).fetchone()[0],
     )
     assert value == "3"
-

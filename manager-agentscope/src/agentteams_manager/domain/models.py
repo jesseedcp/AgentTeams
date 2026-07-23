@@ -169,6 +169,7 @@ class RoomPolicy(FrozenStrictModel):
     resource_name: str | None = None
     team_name: str | None = None
     project_id: str | None = None
+    silent: bool = False
 
 
 class MediaReference(FrozenStrictModel):
@@ -184,6 +185,7 @@ class InboundEvent(FrozenStrictModel):
     sender: str
     body: str
     timestamp: datetime
+    is_direct: bool = False
     thread_id: str | None = None
     mentions: tuple[str, ...] = ()
     media: tuple[MediaReference, ...] = ()

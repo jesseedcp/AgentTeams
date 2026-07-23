@@ -5,6 +5,7 @@ import pytest
 
 from agentteams_manager.domain.errors import ConflictError
 from agentteams_manager.domain.models import (
+    HumanResource,
     TeamResource,
     TopologySnapshot,
     WorkerResource,
@@ -72,3 +73,32 @@ async def test_room_binding_returns_typed_resource(
     assert binding.resource_type == "worker"
     assert binding.resource_name == "alice"
     assert binding.matrix_user_id == "@alice:example"
+
+
+@pytest.mark.asyncio
+async def test_human_access_is_indexed_by_matrix_identity(
+    tmp_path: Path,
+) -> None:
+    database = Database(tmp_path / "manager.db")
+    await database.open()
+    repository = TopologyRepository(database)
+    await repository.replace_snapshot(
+        TopologySnapshot(
+            revision=3,
+            humans=(
+                HumanResource(
+                    name="reviewer",
+                    matrix_user_id="@reviewer:example",
+                    permission_level=2,
+                    allowed_rooms=("!team:example",),
+                ),
+            ),
+            refreshed_at=datetime.now(UTC),
+        ),
+    )
+
+    human = await repository.human_for_sender("@reviewer:example")
+
+    assert human is not None
+    assert human.permission_level == 2
+    assert human.allowed_rooms == ("!team:example",)

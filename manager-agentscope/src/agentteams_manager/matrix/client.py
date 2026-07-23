@@ -311,8 +311,20 @@ class MatrixClient:
             sender=sender,
             body=body,
             timestamp=timestamp,
+            is_direct=self._is_direct_room(room_id, sender),
             thread_id=thread_id,
             mentions=mentions,
+        )
+
+    def _is_direct_room(self, room_id: str, sender: str) -> bool:
+        rooms = getattr(self._client, "rooms", {}) or {}
+        room = rooms.get(room_id)
+        users = getattr(room, "users", {}) if room is not None else {}
+        user_ids = set(users)
+        return (
+            len(user_ids) == 2
+            and self.config.user_id in user_ids
+            and sender in user_ids
         )
 
     async def send_text(
