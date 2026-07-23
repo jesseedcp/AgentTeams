@@ -66,6 +66,27 @@ class ToolProvider(Protocol):
     ) -> tuple[ToolBase, ...]: ...
 
 
+class CompositeToolProvider:
+    """Combine independently owned tool families without name collisions."""
+
+    def __init__(self, *providers: ToolProvider) -> None:
+        self._providers = providers
+
+    def tools_for_policy(
+        self,
+        policy: RoomPolicy,
+    ) -> tuple[ToolBase, ...]:
+        tools = tuple(
+            tool
+            for provider in self._providers
+            for tool in provider.tools_for_policy(policy)
+        )
+        names = [tool.name for tool in tools]
+        if len(names) != len(set(names)):
+            raise RuntimeError("duplicate Manager tool registration")
+        return tools
+
+
 class SkillToolkitFactory:
     """Combine retained skills with policy-bound typed tools."""
 

@@ -11,6 +11,7 @@ from agentteams_manager.domain.errors import (
     AmbiguousEffectError,
     ConflictError,
     NotFoundError,
+    RecoveryError,
 )
 from agentteams_manager.domain.ids import (
     matrix_transaction_id,
@@ -573,18 +574,38 @@ class ProjectService:
                 "nonterminal_tasks": list(nonterminal),
             },
         )
-        completed_at = self._clock.now().astimezone(UTC)
-        changed = await self._projects.update(
-            project_id,
-            expected={"active"},
-            status="completed",
-            metadata={
-                **project.metadata,
-                "completed_at": completed_at.isoformat(),
-                "forced_close": force,
-            },
-        )
-        project = changed or await self._require_project(project_id)
+        return await self._resume_close(operation)
+
+    async def _resume_close(
+        self,
+        operation: OperationRecord,
+    ) -> ProjectReceipt:
+        if operation.kind is not OperationKind.CLOSE_PROJECT:
+            raise ValueError("operation is not project closure")
+        project_id = str(operation.request.get("project_id", ""))
+        if not project_id:
+            raise RecoveryError("project closure has no project ID")
+        project = await self._require_project(project_id)
+        if operation.status is OperationStatus.SUCCEEDED:
+            return _project_receipt(operation.operation_id, project)
+        force = bool(operation.request.get("force", False))
+        if project.status == "active":
+            completed_at = self._clock.now().astimezone(UTC)
+            changed = await self._projects.update(
+                project_id,
+                expected={"active"},
+                status="completed",
+                metadata={
+                    **project.metadata,
+                    "completed_at": completed_at.isoformat(),
+                    "forced_close": force,
+                },
+            )
+            project = changed or await self._require_project(project_id)
+        if project.status != "completed":
+            raise ConflictError(
+                f"project {project_id} cannot close from {project.status}",
+            )
         receipt = await self._replace_project_metadata(
             operation,
             _project_metadata(project),
@@ -630,6 +651,128 @@ class ProjectService:
             },
         )
         return _project_receipt(operation.operation_id, project)
+
+    async def _resume_project_task_index(
+        self,
+        operation: OperationRecord,
+    ) -> TaskRecord:
+        request = operation.request
+        action = request.get("action")
+        if action not in {"add_task", "complete_task"}:
+            raise RecoveryError(
+                f"unknown project update action: {action!r}",
+            )
+        project_id = str(request.get("project_id", ""))
+        task_id = str(request.get("task_id", ""))
+        if not project_id or not task_id:
+            raise RecoveryError(
+                "project update is missing project or task identity",
+            )
+        project = await self._require_project(project_id)
+        tasks = await self._tasks.list_by_project(project_id)
+        task = next(
+            (item for item in tasks if item.task_id == task_id),
+            None,
+        )
+        if task is None:
+            raise RecoveryError(
+                f"project task {task_id} is not durably indexed",
+            )
+        if operation.status is OperationStatus.SUCCEEDED:
+            return task
+        task_ids = tuple(
+            dict.fromkeys(
+                (*project.metadata.get("task_ids", ()), task_id),
+            ),
+        )
+        statuses = {
+            **dict(project.metadata.get("task_statuses", {})),
+            task_id: task.status,
+        }
+        changed = await self._projects.update(
+            project_id,
+            expected={"active"},
+            status="active",
+            metadata={
+                **project.metadata,
+                "task_ids": list(task_ids),
+                "task_statuses": statuses,
+            },
+        )
+        project = changed or await self._require_project(project_id)
+        await self._replace_project_metadata(
+            operation,
+            _project_metadata(project),
+            operation_name=f"recover_{action}",
+        )
+        await self._replace_project_plan(
+            operation,
+            project,
+            operation_name=f"recover_{action}_plan",
+        )
+        txn_id = matrix_transaction_id(operation.operation_id, 0)
+        if action == "add_task":
+            text = (
+                f"[Project Task Assigned] {task.task_id}: "
+                f"{task.title} to {task.assigned_to}."
+            )
+        else:
+            summary = str(
+                task.metadata.get("completion_summary") or "Completed.",
+            )
+            text = (
+                f"[Project Task Completed] {task.task_id}: {summary}"
+            )
+        await self._supervisor.before_effect(
+            operation.operation_id,
+            ExternalEffect.MATRIX,
+            {
+                "operation": f"recover_project_{action}",
+                "project_id": project_id,
+                "task_id": task_id,
+                "room_id": project.room_id,
+                "txn_id": txn_id,
+            },
+        )
+        try:
+            event_id = await self._matrix.send_text(
+                project.room_id,
+                text,
+                txn_id=txn_id,
+            )
+        except Exception as exc:
+            await self._record_external_failure(
+                operation.operation_id,
+                ExternalEffect.MATRIX,
+                exc,
+            )
+            raise
+        await self._supervisor.effect_succeeded(
+            operation.operation_id,
+            ExternalEffect.MATRIX,
+            {
+                "project_id": project_id,
+                "task_id": task_id,
+                "event_id": event_id,
+                "recovered": True,
+            },
+        )
+        return task
+
+    async def resume_operation(
+        self,
+        operation: OperationRecord,
+    ) -> object:
+        """Resume one project operation from durable request facts."""
+        if operation.kind is OperationKind.CREATE_PROJECT:
+            return await self.resume_create(operation)
+        if operation.kind is OperationKind.UPDATE_PROJECT:
+            return await self._resume_project_task_index(operation)
+        if operation.kind is OperationKind.CLOSE_PROJECT:
+            return await self._resume_close(operation)
+        raise RecoveryError(
+            f"ProjectService cannot recover {operation.kind.value}",
+        )
 
     async def _ensure_members(
         self,

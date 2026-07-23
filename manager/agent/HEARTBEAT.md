@@ -27,8 +27,8 @@ means an effect did not happen.
 
 ## Conversational summary
 
-When the room policy requests a heartbeat summary, call the read-only
-`inspect_heartbeat_status` tool. Summarize:
+When the room policy requests a heartbeat summary, summarize the typed report
+returned by the scheduler:
 
 - operations reconciled;
 - due occurrences dispatched;

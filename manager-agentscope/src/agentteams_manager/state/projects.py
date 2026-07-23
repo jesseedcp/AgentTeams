@@ -65,6 +65,22 @@ class ProjectRepository:
 
         return await self._database.read(read)
 
+    async def list_all(self) -> tuple[ProjectRecord, ...]:
+        """Return every durable project in stable creation order."""
+
+        def read(
+            connection: sqlite3.Connection,
+        ) -> tuple[ProjectRecord, ...]:
+            rows = connection.execute(
+                """
+                SELECT * FROM projects
+                 ORDER BY created_at, project_id
+                """,
+            ).fetchall()
+            return tuple(_project_from_row(row) for row in rows)
+
+        return await self._database.read(read)
+
     async def update(
         self,
         project_id: str,

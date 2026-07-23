@@ -91,6 +91,20 @@ class TaskRepository:
 
         return await self._database.read(read)
 
+    async def list_all(self) -> tuple[TaskRecord, ...]:
+        """Return every durable task in stable creation order."""
+
+        def read(connection: sqlite3.Connection) -> tuple[TaskRecord, ...]:
+            rows = connection.execute(
+                """
+                SELECT * FROM tasks
+                 ORDER BY created_at, task_id
+                """,
+            ).fetchall()
+            return tuple(_task_from_row(row) for row in rows)
+
+        return await self._database.read(read)
+
     async def transition(
         self,
         task_id: str,

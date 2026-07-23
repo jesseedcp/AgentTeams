@@ -16,6 +16,7 @@ from .storage import (
     TaskMetadata,
 )
 from .tasks import (
+    TASK_TOOL_NAMES,
     AddProjectTaskInput,
     CancelTaskInput,
     CloseProjectInput,
@@ -27,6 +28,8 @@ from .tasks import (
     GitDelegationTools,
     ProjectTools,
     RecordTaskExecutionInput,
+    TaskToolkit,
+    TaskToolkitFactory,
     TaskTools,
 )
 
@@ -50,8 +53,11 @@ __all__ = [
     "ResourceToolkit",
     "ResourceToolkitFactory",
     "RecordTaskExecutionInput",
+    "TASK_TOOL_NAMES",
     "TaskArtifactSet",
     "TaskMetadata",
+    "TaskToolkit",
+    "TaskToolkitFactory",
     "TaskTools",
     "authorize_resource_target",
     "human_room_policy",

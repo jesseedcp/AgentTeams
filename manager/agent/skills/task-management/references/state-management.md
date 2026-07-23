@@ -1,35 +1,22 @@
-# State Management (state.json)
+# Durable Task State
 
-Path: `~/state.json`
+SQLite is the local scheduler and operation ledger. MinIO stores canonical
+human-readable task and project artifacts plus the immutable recovery journal.
+Matrix carries assignments and reports; it is not the scheduler.
 
-Single source of truth for active tasks. Heartbeat reads this instead of scanning all meta.json files.
+Read state with `list_tasks` and `get_task`. Mutate it only through
+`create_task`, `schedule_task`, `update_task`, `complete_task`, or
+`delete_task`.
 
-**Always use `manage-state.sh` to modify** — never edit manually. The script handles initialization, deduplication, and atomic writes.
+Every cross-system mutation follows:
 
-## Script reference
+1. deterministic operation identity;
+2. durable intent;
+3. effect-planned journal entry;
+4. external effect with a stable idempotency key or conditional version;
+5. verified receipt;
+6. local transition;
+7. terminal journal state.
 
-```bash
-STATE_SCRIPT=/opt/agentteams/agent/skills/task-management/scripts/manage-state.sh
-```
-
-| When | Command |
-|------|---------|
-| Ensure file exists | `bash $STATE_SCRIPT --action init` |
-| Assign finite task | `bash $STATE_SCRIPT --action add-finite --task-id T --title TITLE --assigned-to W --room-id R [--project-room-id P]` |
-| Create infinite task | `bash $STATE_SCRIPT --action add-infinite --task-id T --title TITLE --assigned-to W --room-id R --schedule CRON --timezone TZ --next-scheduled-at ISO` |
-| Finite task completed | `bash $STATE_SCRIPT --action complete --task-id T` |
-| Infinite task executed | `bash $STATE_SCRIPT --action executed --task-id T --next-scheduled-at ISO` |
-| Cache admin DM room | `bash $STATE_SCRIPT --action set-admin-dm --room-id R` |
-| View active tasks | `bash $STATE_SCRIPT --action list` |
-
-`admin_dm_room_id`: cached room ID for Manager-Admin DM. Set once via `set-admin-dm`, used by heartbeat to report to admin.
-
-## Notification channel resolution
-
-```bash
-bash /opt/agentteams/agent/skills/task-management/scripts/resolve-notify-channel.sh
-```
-
-Output: `{"channel": "dingtalk|matrix|none", "target": "...", "via": "primary-channel|admin-dm|none"}`
-
-Priority: primary-channel.json (if confirmed, non-matrix) → state.json admin_dm_room_id → none.
+Timeout means “unknown,” not “did not happen.” Recovery compares SQLite,
+MinIO, Matrix, Controller, and process evidence before continuing.

@@ -1,95 +1,247 @@
-"""Closed request contracts for task and project management tools."""
+"""Policy-bound AgentScope tools for task and project workflows."""
 
 from __future__ import annotations
 
-from typing import Any
+import inspect
+from collections.abc import Awaitable, Callable
+from typing import Any, Literal, Protocol
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    model_validator,
+)
 
 from agentteams_manager.clients.git import GitRequest, GitRequestParser
+from agentteams_manager.domain.errors import (
+    NotFoundError,
+    PermissionDeniedError,
+)
+from agentteams_manager.domain.models import (
+    ProjectRecord,
+    RoomKind,
+    RoomPolicy,
+    TaskRecord,
+)
+from agentteams_manager.tools.base import (
+    ManagerTool,
+    current_tool_invocation,
+)
 from agentteams_manager.workflows.git_delegation import (
     GitDelegationReceipt,
     GitDelegationService,
 )
-from agentteams_manager.workflows.resources import MutationContext
 from agentteams_manager.workflows.projects import (
     ProjectReceipt,
     ProjectService,
 )
+from agentteams_manager.workflows.resources import MutationContext
 from agentteams_manager.workflows.tasks import TaskReceipt, TaskService
 
+TASK_TOOL_NAMES = frozenset(
+    {
+        "list_tasks",
+        "get_task",
+        "create_task",
+        "update_task",
+        "delete_task",
+        "delegate_task",
+        "delegate_team_task",
+        "complete_task",
+        "schedule_task",
+        "create_project",
+        "list_projects",
+        "get_project",
+        "update_project",
+        "delete_project",
+        "sync_files",
+        "inspect_git_request",
+        "git_delegate",
+        "git_delegate_high_risk",
+    },
+)
 
-class CreateFiniteTaskInput(BaseModel):
+
+class _Input(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    title: str = Field(min_length=1)
-    specification: str = Field(min_length=1)
-    assigned_to: str = Field(min_length=1)
-    delegated_to_team: str | None = None
-    project_id: str | None = None
+
+class _EmptyInput(_Input):
+    pass
+
+
+class _TaskIdInput(_Input):
+    task_id: str = Field(pattern=r"^task-[A-Za-z0-9-]+$")
+
+
+class _ProjectIdInput(_Input):
+    project_id: str = Field(pattern=r"^project-[A-Za-z0-9-]+$")
+
+
+class CreateFiniteTaskInput(_Input):
+    title: str = Field(min_length=1, max_length=500)
+    specification: str = Field(min_length=1, max_length=100_000)
+    assigned_to: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")
+    delegated_to_team: str | None = Field(
+        default=None,
+        pattern=r"^[a-z0-9][a-z0-9-]*$",
+    )
+    project_id: str | None = Field(
+        default=None,
+        pattern=r"^project-[A-Za-z0-9-]+$",
+    )
     project_room_id: str | None = None
 
 
-class CompleteTaskInput(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+class DelegateTeamTaskInput(_Input):
+    title: str = Field(min_length=1, max_length=500)
+    specification: str = Field(min_length=1, max_length=100_000)
+    leader: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")
+    team_name: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")
+    project_id: str | None = Field(
+        default=None,
+        pattern=r"^project-[A-Za-z0-9-]+$",
+    )
+    project_room_id: str | None = None
 
-    task_id: str = Field(min_length=1)
-    worker_event_id: str = Field(min_length=1)
-    structured_result: dict[str, Any] | None = None
+
+class CompleteTaskInput(_TaskIdInput):
+    result: dict[str, Any] | None = None
 
 
 class CreateRecurringTaskInput(CreateFiniteTaskInput):
     schedule: str = Field(min_length=1, max_length=128)
-    timezone: str = Field(min_length=1)
+    timezone: str = Field(min_length=1, max_length=128)
 
 
-class RecordTaskExecutionInput(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    task_id: str = Field(min_length=1)
-    worker_event_id: str = Field(min_length=1)
+class RecordTaskExecutionInput(_TaskIdInput):
+    pass
 
 
-class CancelTaskInput(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    task_id: str = Field(min_length=1)
+class CancelTaskInput(_TaskIdInput):
+    pass
 
 
-class CreateProjectInput(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+class UpdateTaskInput(_TaskIdInput):
+    action: Literal["complete", "record_execution", "cancel"]
+    result: dict[str, Any] | None = None
 
-    title: str = Field(min_length=1)
-    description: str = Field(min_length=1)
-    plan: str = Field(min_length=1)
+
+class CreateProjectInput(_Input):
+    title: str = Field(min_length=1, max_length=500)
+    description: str = Field(min_length=1, max_length=20_000)
+    plan: str = Field(min_length=1, max_length=100_000)
     participants: tuple[str, ...] = Field(min_length=1)
 
 
-class AddProjectTaskInput(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+class AddProjectTaskInput(_Input):
+    project_id: str = Field(pattern=r"^project-[A-Za-z0-9-]+$")
+    title: str = Field(min_length=1, max_length=500)
+    specification: str = Field(min_length=1, max_length=100_000)
+    assigned_to: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")
+    delegated_to_team: str | None = Field(
+        default=None,
+        pattern=r"^[a-z0-9][a-z0-9-]*$",
+    )
 
-    project_id: str = Field(min_length=1)
-    title: str = Field(min_length=1)
-    specification: str = Field(min_length=1)
-    assigned_to: str = Field(min_length=1)
-    delegated_to_team: str | None = None
+
+class UpdateProjectInput(_ProjectIdInput):
+    action: Literal["add_task", "complete_task"]
+    task_id: str | None = Field(
+        default=None,
+        pattern=r"^task-[A-Za-z0-9-]+$",
+    )
+    title: str | None = Field(default=None, max_length=500)
+    specification: str | None = Field(
+        default=None,
+        max_length=100_000,
+    )
+    assigned_to: str | None = Field(
+        default=None,
+        pattern=r"^[a-z0-9][a-z0-9-]*$",
+    )
+    delegated_to_team: str | None = Field(
+        default=None,
+        pattern=r"^[a-z0-9][a-z0-9-]*$",
+    )
+    result: dict[str, Any] | None = None
+
+    @model_validator(mode="after")
+    def validate_action_fields(self) -> UpdateProjectInput:
+        if self.action == "add_task" and not (
+            self.title and self.specification and self.assigned_to
+        ):
+            raise ValueError(
+                "add_task requires title, specification, and assigned_to",
+            )
+        if self.action == "complete_task" and not self.task_id:
+            raise ValueError("complete_task requires task_id")
+        return self
 
 
-class CloseProjectInput(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    project_id: str = Field(min_length=1)
+class CloseProjectInput(_ProjectIdInput):
     force: bool = False
 
 
-class GitDelegationInput(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+class SyncFilesInput(_TaskIdInput):
+    direction: Literal["pull", "push"]
 
-    message: str = Field(min_length=1)
+
+class GitDelegationInput(_Input):
+    message: str = Field(min_length=1, max_length=100_000)
+
+
+class TaskCollectionReceipt(_Input):
+    tool: str
+    items: tuple[dict[str, Any], ...]
+    total: int = Field(ge=0)
+
+
+class LookupReceipt(_Input):
+    tool: str
+    status: Literal["found", "not_found"]
+    item: dict[str, Any] | None = None
+
+
+class SyncReceipt(_Input):
+    tool: Literal["sync_files"] = "sync_files"
+    direction: Literal["pull", "push"]
+    task_id: str
+    result: dict[str, Any]
+
+
+class TaskReader(Protocol):
+    async def list_all(self) -> tuple[TaskRecord, ...]: ...
+
+    async def get(self, task_id: str) -> TaskRecord | None: ...
+
+
+class ProjectReader(Protocol):
+    async def list_all(self) -> tuple[ProjectRecord, ...]: ...
+
+    async def get(self, project_id: str) -> ProjectRecord | None: ...
+
+
+class FileSyncPort(Protocol):
+    async def pull_task(self, task_id: str) -> object: ...
+
+    async def push_task(
+        self,
+        task_id: str,
+        *,
+        processor: str,
+    ) -> object: ...
+
+
+ContextProvider = Callable[
+    [],
+    MutationContext | Awaitable[MutationContext],
+]
 
 
 class TaskTools:
-    """Thin typed facade; AgentScope registration is added at the task gate."""
+    """Typed task facade retained for direct workflow composition."""
 
     def __init__(self, service: TaskService) -> None:
         self._service = service
@@ -113,11 +265,13 @@ class TaskTools:
     async def complete(
         self,
         request: CompleteTaskInput,
+        *,
+        context: MutationContext,
     ) -> TaskReceipt:
         return await self._service.record_completion(
             task_id=request.task_id,
-            worker_event_id=request.worker_event_id,
-            structured_result=request.structured_result,
+            worker_event_id=context.event_id,
+            structured_result=request.result,
         )
 
     async def create_recurring(
@@ -141,10 +295,12 @@ class TaskTools:
     async def record_execution(
         self,
         request: RecordTaskExecutionInput,
+        *,
+        context: MutationContext,
     ) -> TaskReceipt:
         return await self._service.record_execution(
             task_id=request.task_id,
-            worker_event_id=request.worker_event_id,
+            worker_event_id=context.event_id,
         )
 
     async def cancel(
@@ -160,6 +316,8 @@ class TaskTools:
 
 
 class ProjectTools:
+    """Typed project facade retained for direct workflow composition."""
+
     def __init__(self, service: ProjectService) -> None:
         self._service = service
 
@@ -206,6 +364,8 @@ class ProjectTools:
 
 
 class GitDelegationTools:
+    """Typed Git facade with parsing separated from confirmed execution."""
+
     def __init__(self, service: GitDelegationService) -> None:
         self._service = service
 
@@ -225,3 +385,588 @@ class GitDelegationTools:
             context=context,
             confirmed=confirmed,
         )
+
+
+class TaskToolkit:
+    """Closed-schema tools filtered by the immutable Matrix room policy."""
+
+    def __init__(
+        self,
+        *,
+        policy: RoomPolicy,
+        tasks: TaskReader,
+        projects: ProjectReader,
+        task_service: TaskService | Any,
+        project_service: ProjectService | Any,
+        file_sync: FileSyncPort | Any,
+        git: GitDelegationService | Any,
+        context_provider: ContextProvider | None = None,
+        yolo: bool = False,
+    ) -> None:
+        self._policy = policy
+        self._tasks = tasks
+        self._projects = projects
+        self._task_service = task_service
+        self._project_service = project_service
+        self._file_sync = file_sync
+        self._git = git
+        self._context_provider = (
+            context_provider or _current_mutation_context
+        )
+        self._yolo = yolo
+        self.tools = self._build_tools()
+
+    def _build_tools(self) -> tuple[ManagerTool, ...]:
+        specs: tuple[
+            tuple[
+                str,
+                str,
+                type[BaseModel],
+                Callable[[BaseModel], Awaitable[object]],
+                bool,
+            ],
+            ...,
+        ] = (
+            (
+                "list_tasks",
+                "List durable tasks visible in this room.",
+                _EmptyInput,
+                self._list_tasks,
+                True,
+            ),
+            (
+                "get_task",
+                "Get one durable task visible in this room.",
+                _TaskIdInput,
+                self._get_task,
+                True,
+            ),
+            (
+                "create_task",
+                "Prepare and dispatch one finite task.",
+                CreateFiniteTaskInput,
+                self._create_task,
+                False,
+            ),
+            (
+                "update_task",
+                "Complete, record, or cancel one task transition.",
+                UpdateTaskInput,
+                self._update_task,
+                False,
+            ),
+            (
+                "delete_task",
+                "Cancel one finite or recurring task.",
+                CancelTaskInput,
+                self._delete_task,
+                False,
+            ),
+            (
+                "delegate_task",
+                "Delegate one finite task to a Worker Room.",
+                CreateFiniteTaskInput,
+                self._create_task,
+                False,
+            ),
+            (
+                "delegate_team_task",
+                "Delegate one finite task to a Team Leader Room.",
+                DelegateTeamTaskInput,
+                self._delegate_team_task,
+                False,
+            ),
+            (
+                "complete_task",
+                "Record finite completion or recurring execution.",
+                CompleteTaskInput,
+                self._complete_task,
+                False,
+            ),
+            (
+                "schedule_task",
+                "Create one five-field recurring task schedule.",
+                CreateRecurringTaskInput,
+                self._schedule_task,
+                False,
+            ),
+            (
+                "create_project",
+                "Create one durable project and private Matrix room.",
+                CreateProjectInput,
+                self._create_project,
+                False,
+            ),
+            (
+                "list_projects",
+                "List durable projects visible in this room.",
+                _EmptyInput,
+                self._list_projects,
+                True,
+            ),
+            (
+                "get_project",
+                "Get one durable project visible in this room.",
+                _ProjectIdInput,
+                self._get_project,
+                True,
+            ),
+            (
+                "update_project",
+                "Add or complete one project task.",
+                UpdateProjectInput,
+                self._update_project,
+                False,
+            ),
+            (
+                "delete_project",
+                "Close one project after confirmation.",
+                CloseProjectInput,
+                self._delete_project,
+                False,
+            ),
+            (
+                "sync_files",
+                "Pull or push one task cache through verified MinIO I/O.",
+                SyncFilesInput,
+                self._sync_files,
+                False,
+            ),
+            (
+                "inspect_git_request",
+                "Parse a Git request and report its risk without execution.",
+                GitDelegationInput,
+                self._inspect_git,
+                True,
+            ),
+            (
+                "git_delegate",
+                "Execute a low or medium-risk constrained Git request.",
+                GitDelegationInput,
+                self._git_delegate,
+                False,
+            ),
+            (
+                "git_delegate_high_risk",
+                "Execute a confirmed high-risk constrained Git request.",
+                GitDelegationInput,
+                self._git_delegate_high_risk,
+                False,
+            ),
+        )
+        return tuple(
+            self._tool(
+                name=name,
+                description=description,
+                request_model=request_model,
+                handler=handler,
+                read_only=read_only,
+            )
+            for (
+                name,
+                description,
+                request_model,
+                handler,
+                read_only,
+            ) in specs
+            if name in self._policy.allowed_tools
+        )
+
+    def _tool(
+        self,
+        *,
+        name: str,
+        description: str,
+        request_model: type[BaseModel],
+        handler: Callable[[BaseModel], Awaitable[object]],
+        read_only: bool,
+    ) -> ManagerTool:
+        async def invoke(**raw: Any) -> object:
+            self._require_tool(name)
+            return await handler(request_model.model_validate(raw))
+
+        return ManagerTool(
+            name=name,
+            description=description,
+            input_schema=request_model.model_json_schema(),
+            policy=self._policy,
+            handler=invoke,
+            is_read_only=read_only,
+            is_concurrency_safe=read_only,
+            yolo=self._yolo,
+        )
+
+    def _require_tool(self, name: str) -> None:
+        if name not in self._policy.allowed_tools:
+            raise PermissionDeniedError(
+                f"{name} is not allowed in {self._policy.kind.value}",
+            )
+
+    async def _context(self) -> MutationContext:
+        value = self._context_provider()
+        if inspect.isawaitable(value):
+            value = await value
+        if not isinstance(value, MutationContext):
+            raise TypeError("context_provider returned an invalid context")
+        return value
+
+    async def _list_tasks(self, request: BaseModel) -> object:
+        del request
+        tasks = tuple(
+            task
+            for task in await self._tasks.list_all()
+            if self._task_visible(task)
+        )
+        return TaskCollectionReceipt(
+            tool="list_tasks",
+            items=tuple(
+                task.model_dump(mode="json") for task in tasks
+            ),
+            total=len(tasks),
+        )
+
+    async def _get_task(self, request: BaseModel) -> object:
+        item = _TaskIdInput.model_validate(request)
+        task = await self._tasks.get(item.task_id)
+        if task is not None and not self._task_visible(task):
+            raise PermissionDeniedError(
+                f"task/{item.task_id} is outside this room's scope",
+            )
+        return LookupReceipt(
+            tool="get_task",
+            status="found" if task is not None else "not_found",
+            item=(
+                task.model_dump(mode="json")
+                if task is not None
+                else None
+            ),
+        )
+
+    async def _create_task(self, request: BaseModel) -> object:
+        item = CreateFiniteTaskInput.model_validate(request)
+        self._require_assignment_scope(
+            worker=item.assigned_to,
+            team=item.delegated_to_team,
+        )
+        return await TaskTools(self._task_service).create_finite(
+            item,
+            context=await self._context(),
+        )
+
+    async def _update_task(self, request: BaseModel) -> object:
+        item = UpdateTaskInput.model_validate(request)
+        await self._require_visible_task(item.task_id)
+        context = await self._context()
+        if item.action == "cancel":
+            return await self._task_service.cancel(
+                task_id=item.task_id,
+                context=context,
+            )
+        if item.action == "record_execution":
+            return await self._task_service.record_execution(
+                task_id=item.task_id,
+                worker_event_id=context.event_id,
+            )
+        return await self._task_service.record_completion(
+            task_id=item.task_id,
+            worker_event_id=context.event_id,
+            structured_result=item.result,
+        )
+
+    async def _delete_task(self, request: BaseModel) -> object:
+        item = CancelTaskInput.model_validate(request)
+        await self._require_visible_task(item.task_id)
+        return await self._task_service.cancel(
+            task_id=item.task_id,
+            context=await self._context(),
+        )
+
+    async def _delegate_team_task(self, request: BaseModel) -> object:
+        item = DelegateTeamTaskInput.model_validate(request)
+        self._require_assignment_scope(
+            worker=item.leader,
+            team=item.team_name,
+        )
+        return await self._task_service.create_finite(
+            title=item.title,
+            spec=item.specification,
+            assigned_to=item.leader,
+            delegated_to_team=item.team_name,
+            project_id=item.project_id,
+            project_room_id=item.project_room_id,
+            context=await self._context(),
+        )
+
+    async def _complete_task(self, request: BaseModel) -> object:
+        item = CompleteTaskInput.model_validate(request)
+        task = await self._tasks.get(item.task_id)
+        if task is None:
+            raise NotFoundError(f"task/{item.task_id} does not exist")
+        if not self._task_visible(task):
+            raise PermissionDeniedError(
+                f"task/{item.task_id} is outside this room's scope",
+            )
+        context = await self._context()
+        if task.task_type in {"infinite", "recurring"}:
+            return await self._task_service.record_execution(
+                task_id=item.task_id,
+                worker_event_id=context.event_id,
+            )
+        return await self._task_service.record_completion(
+            task_id=item.task_id,
+            worker_event_id=context.event_id,
+            structured_result=item.result,
+        )
+
+    async def _schedule_task(self, request: BaseModel) -> object:
+        item = CreateRecurringTaskInput.model_validate(request)
+        return await TaskTools(self._task_service).create_recurring(
+            item,
+            context=await self._context(),
+        )
+
+    async def _create_project(self, request: BaseModel) -> object:
+        item = CreateProjectInput.model_validate(request)
+        return await ProjectTools(self._project_service).create(
+            item,
+            context=await self._context(),
+        )
+
+    async def _list_projects(self, request: BaseModel) -> object:
+        del request
+        projects = tuple(
+            project
+            for project in await self._projects.list_all()
+            if self._project_visible(project)
+        )
+        return TaskCollectionReceipt(
+            tool="list_projects",
+            items=tuple(
+                project.model_dump(mode="json")
+                for project in projects
+            ),
+            total=len(projects),
+        )
+
+    async def _get_project(self, request: BaseModel) -> object:
+        item = _ProjectIdInput.model_validate(request)
+        project = await self._projects.get(item.project_id)
+        if project is not None and not self._project_visible(project):
+            raise PermissionDeniedError(
+                f"project/{item.project_id} is outside this room's scope",
+            )
+        return LookupReceipt(
+            tool="get_project",
+            status="found" if project is not None else "not_found",
+            item=(
+                project.model_dump(mode="json")
+                if project is not None
+                else None
+            ),
+        )
+
+    async def _update_project(self, request: BaseModel) -> object:
+        item = UpdateProjectInput.model_validate(request)
+        await self._require_visible_project(item.project_id)
+        context = await self._context()
+        if item.action == "complete_task":
+            assert item.task_id is not None
+            return await self._project_service.complete_task(
+                project_id=item.project_id,
+                task_id=item.task_id,
+                worker_event_id=context.event_id,
+                structured_result=item.result,
+            )
+        assert item.title is not None
+        assert item.specification is not None
+        assert item.assigned_to is not None
+        return await self._project_service.add_task(
+            project_id=item.project_id,
+            title=item.title,
+            specification=item.specification,
+            assigned_to=item.assigned_to,
+            delegated_to_team=item.delegated_to_team,
+            context=context,
+        )
+
+    async def _delete_project(self, request: BaseModel) -> object:
+        item = CloseProjectInput.model_validate(request)
+        await self._require_visible_project(item.project_id)
+        return await self._project_service.close(
+            project_id=item.project_id,
+            force=item.force,
+            context=await self._context(),
+        )
+
+    async def _sync_files(self, request: BaseModel) -> object:
+        item = SyncFilesInput.model_validate(request)
+        await self._require_visible_task(item.task_id)
+        if item.direction == "pull":
+            path = await self._file_sync.pull_task(item.task_id)
+            result = {"path": str(path)}
+        else:
+            receipt = await self._file_sync.push_task(
+                item.task_id,
+                processor=self._policy.resource_name or "manager",
+            )
+            result = (
+                receipt.model_dump(mode="json")
+                if isinstance(receipt, BaseModel)
+                else {"receipt": str(receipt)}
+            )
+        return SyncReceipt(
+            direction=item.direction,
+            task_id=item.task_id,
+            result=result,
+        )
+
+    async def _inspect_git(self, request: BaseModel) -> object:
+        item = GitDelegationInput.model_validate(request)
+        return GitRequestParser.parse(item.message)
+
+    async def _git_delegate(self, request: BaseModel) -> object:
+        item = GitDelegationInput.model_validate(request)
+        return await self._git.execute(
+            GitRequestParser.parse(item.message),
+            context=await self._context(),
+            confirmed=False,
+        )
+
+    async def _git_delegate_high_risk(
+        self,
+        request: BaseModel,
+    ) -> object:
+        item = GitDelegationInput.model_validate(request)
+        parsed = GitRequestParser.parse(item.message)
+        if not parsed.requires_confirmation:
+            raise ValueError(
+                "use git_delegate for low or medium-risk requests",
+            )
+        return await self._git.execute(
+            parsed,
+            context=await self._context(),
+            confirmed=True,
+        )
+
+    def _task_visible(self, task: TaskRecord) -> bool:
+        if self._policy.resource_scope_all:
+            return True
+        if self._policy.kind is RoomKind.WORKER_ROOM:
+            return task.assigned_to == self._policy.resource_name
+        if self._policy.kind is RoomKind.LEADER_ROOM:
+            return task.delegated_to_team == self._policy.team_name
+        if self._policy.kind is RoomKind.PROJECT_ROOM:
+            return task.project_id == self._policy.project_id
+        if task.assigned_to in self._policy.allowed_worker_names:
+            return True
+        return bool(
+            task.delegated_to_team
+            and task.delegated_to_team
+            in self._policy.allowed_team_names
+        )
+
+    def _project_visible(self, project: ProjectRecord) -> bool:
+        if self._policy.resource_scope_all:
+            return True
+        if self._policy.kind is RoomKind.PROJECT_ROOM:
+            return project.project_id == self._policy.project_id
+        participants = frozenset(
+            str(item)
+            for item in project.metadata.get("participants", ())
+        )
+        return bool(participants & self._policy.allowed_worker_names)
+
+    async def _require_visible_task(self, task_id: str) -> TaskRecord:
+        task = await self._tasks.get(task_id)
+        if task is None:
+            raise NotFoundError(f"task/{task_id} does not exist")
+        if not self._task_visible(task):
+            raise PermissionDeniedError(
+                f"task/{task_id} is outside this room's scope",
+            )
+        return task
+
+    async def _require_visible_project(
+        self,
+        project_id: str,
+    ) -> ProjectRecord:
+        project = await self._projects.get(project_id)
+        if project is None:
+            raise NotFoundError(
+                f"project/{project_id} does not exist",
+            )
+        if not self._project_visible(project):
+            raise PermissionDeniedError(
+                f"project/{project_id} is outside this room's scope",
+            )
+        return project
+
+    def _require_assignment_scope(
+        self,
+        *,
+        worker: str,
+        team: str | None,
+    ) -> None:
+        if self._policy.resource_scope_all:
+            return
+        if self._policy.kind is RoomKind.WORKER_ROOM:
+            if worker == self._policy.resource_name and team is None:
+                return
+        elif self._policy.kind is RoomKind.LEADER_ROOM:
+            if team == self._policy.team_name:
+                return
+        elif team is not None:
+            if team in self._policy.allowed_team_names:
+                return
+        elif worker in self._policy.allowed_worker_names:
+            return
+        raise PermissionDeniedError(
+            "task assignment target is outside this room's scope",
+        )
+
+
+class TaskToolkitFactory:
+    """Create a fresh task tool set for each immutable room policy."""
+
+    def __init__(
+        self,
+        *,
+        tasks: TaskReader,
+        projects: ProjectReader,
+        task_service: TaskService,
+        project_service: ProjectService,
+        file_sync: FileSyncPort,
+        git: GitDelegationService,
+        yolo: bool = False,
+    ) -> None:
+        self._tasks = tasks
+        self._projects = projects
+        self._task_service = task_service
+        self._project_service = project_service
+        self._file_sync = file_sync
+        self._git = git
+        self._yolo = yolo
+
+    def tools_for_policy(
+        self,
+        policy: RoomPolicy,
+    ) -> tuple[ManagerTool, ...]:
+        return TaskToolkit(
+            policy=policy,
+            tasks=self._tasks,
+            projects=self._projects,
+            task_service=self._task_service,
+            project_service=self._project_service,
+            file_sync=self._file_sync,
+            git=self._git,
+            yolo=self._yolo,
+        ).tools
+
+
+def _current_mutation_context() -> MutationContext:
+    invocation = current_tool_invocation()
+    return MutationContext(
+        room_id=invocation.room_id,
+        event_id=invocation.event_id,
+        tool_call_id=invocation.tool_call_id,
+    )

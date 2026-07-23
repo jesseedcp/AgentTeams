@@ -49,8 +49,9 @@ ALL_MANAGER_TOOLS = frozenset(
         "update_project",
         "delete_project",
         "sync_files",
+        "inspect_git_request",
         "git_delegate",
-        "git_result",
+        "git_delegate_high_risk",
         "list_channels",
         "create_channel",
         "update_channel",
@@ -76,10 +77,29 @@ ALL_MANAGER_TOOLS = frozenset(
 )
 
 WORKER_TOOLS = frozenset(
-    {"delegate_task", "complete_task", "sync_files", "git_result"},
+    {
+        "delegate_task",
+        "complete_task",
+        "sync_files",
+        "inspect_git_request",
+        "git_delegate",
+        "git_delegate_high_risk",
+    },
 )
 LEADER_TOOLS = frozenset(
     {"delegate_team_task", "complete_task", "sync_files"},
+)
+PROJECT_TOOLS = frozenset(
+    {
+        "list_tasks",
+        "get_task",
+        "complete_task",
+        "list_projects",
+        "get_project",
+        "update_project",
+        "delete_project",
+        "sync_files",
+    },
 )
 HUMAN_TOOLS = frozenset({"list_workers", "list_tasks", "sync_files"})
 TEAM_SCOPED_HUMAN_TOOLS = frozenset(
@@ -132,6 +152,7 @@ CONFIRM_TOOLS = frozenset(
         "wake_worker",
         "send_notification",
         "upload_matrix_media",
+        "git_delegate_high_risk",
     },
 )
 READ_ONLY_RESOURCE_TOOLS = frozenset(
@@ -256,12 +277,18 @@ class RoomPolicyResolver:
             kind=binding.room_kind,
             revision=revision,
             allowed_tools=tools,
+            confirm_tools=tools & CONFIRM_TOOLS,
             allowed_senders=frozenset({event.sender_id}),
             resource_name=binding.resource_name,
             team_name=(
                 binding.resource_name
                 if binding.room_kind
                 in {RoomKind.LEADER_ROOM, RoomKind.TEAM_ROOM}
+                else None
+            ),
+            project_id=(
+                binding.resource_name
+                if binding.room_kind is RoomKind.PROJECT_ROOM
                 else None
             ),
         )
@@ -299,6 +326,8 @@ def _tools_for_kind(kind: RoomKind) -> frozenset[str]:
         return WORKER_TOOLS
     if kind is RoomKind.LEADER_ROOM:
         return LEADER_TOOLS
+    if kind is RoomKind.PROJECT_ROOM:
+        return PROJECT_TOOLS
     return UNKNOWN_TOOLS
 
 

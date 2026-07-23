@@ -110,7 +110,14 @@ async def test_worker_identity_gets_only_worker_room_tools() -> None:
 
     assert policy.kind is RoomKind.WORKER_ROOM
     assert policy.allowed_tools == frozenset(
-        {"delegate_task", "complete_task", "sync_files", "git_result"},
+        {
+            "delegate_task",
+            "complete_task",
+            "sync_files",
+            "inspect_git_request",
+            "git_delegate",
+            "git_delegate_high_risk",
+        },
     )
     assert policy.resource_name == "alice"
 
@@ -140,3 +147,31 @@ async def test_scoped_human_cannot_gain_resource_admin_tools() -> None:
     assert "list_workers" in policy.allowed_tools
     assert "create_worker" not in policy.allowed_tools
     assert "switch_model" not in policy.allowed_tools
+
+
+@pytest.mark.asyncio
+async def test_admin_can_manage_only_bound_project_in_project_room() -> None:
+    binding = SimpleNamespace(
+        room_kind=RoomKind.PROJECT_ROOM,
+        room_id="!project:local",
+        resource_name="project-20260723-120000-abc123",
+        matrix_user_id=None,
+        payload={},
+    )
+    resolver = RoomPolicyResolver(
+        topology=FakeTopology({"!project:local": binding}),
+        admin_user_id="@admin:local",
+    )
+
+    policy = await resolver.resolve(
+        _event(
+            room_id="!project:local",
+            sender_id="@admin:local",
+            is_direct=False,
+        ),
+    )
+
+    assert policy.kind is RoomKind.PROJECT_ROOM
+    assert policy.project_id == "project-20260723-120000-abc123"
+    assert "update_project" in policy.allowed_tools
+    assert "delete_project" in policy.confirm_tools

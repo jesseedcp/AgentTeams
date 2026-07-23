@@ -14,6 +14,7 @@ from agentteams_manager.domain.errors import (
     AmbiguousEffectError,
     ConflictError,
     NotFoundError,
+    RecoveryError,
 )
 from agentteams_manager.domain.ids import (
     matrix_transaction_id,
@@ -268,7 +269,7 @@ class TaskService:
         project_id: str | None = None,
         project_room_id: str | None = None,
     ) -> TaskReceipt:
-        parsed = CronSchedule.parse(schedule)
+        CronSchedule.parse(schedule)
         request = RecurringTaskCreateRequest(
             title=title,
             specification=spec,
@@ -286,9 +287,16 @@ class TaskService:
             target_key=f"task-request/{context.operation_id}",
             request=request.model_dump(mode="json"),
         )
+        return await self._resume_recurring_creation(operation)
+
+    async def _resume_recurring_creation(
+        self,
+        operation: OperationRecord,
+    ) -> TaskReceipt:
         request = RecurringTaskCreateRequest.model_validate(
             operation.request,
         )
+        parsed = CronSchedule.parse(request.schedule)
         task_id = _task_id_for(operation)
         if operation.status is OperationStatus.FAILED:
             raise TaskError(f"task delegation {task_id} previously failed")
@@ -893,6 +901,27 @@ class TaskService:
             target_key=f"task/{task_id}",
             request={"task_id": task_id, "action": "cancel"},
         )
+        return await self._resume_cancel(operation)
+
+    async def _resume_cancel(
+        self,
+        operation: OperationRecord,
+    ) -> TaskReceipt:
+        request = operation.request
+        task_id = str(request.get("task_id", ""))
+        if (
+            operation.kind is not OperationKind.COMPLETE_TASK
+            or request.get("action") != "cancel"
+            or not task_id
+        ):
+            raise ValueError("operation is not task cancellation")
+        task = await self._require_task(task_id)
+        if task.status == "cancelled":
+            return _task_receipt(operation.operation_id, task)
+        if task.status not in {"prepared", "assigned", "active"}:
+            raise ConflictError(
+                f"task {task_id} cannot cancel from {task.status}",
+            )
         remote = await self._read_task_metadata(task_id)
         cancelled = TaskMetadata.model_validate(
             {
@@ -926,6 +955,50 @@ class TaskService:
             },
         )
         return _task_receipt(operation.operation_id, task)
+
+    async def resume_operation(
+        self,
+        operation: OperationRecord,
+    ) -> object:
+        """Resume one task-owned operation from its durable request."""
+        if operation.kind is OperationKind.DELEGATE_TASK:
+            if operation.request.get("action") == "dispatch_recurring":
+                task_id = str(operation.request.get("task_id", ""))
+                task = await self._require_task(task_id)
+                return await self.dispatch_recurring(task)
+            if "schedule" in operation.request:
+                return await self._resume_recurring_creation(operation)
+            return await self.dispatch(operation)
+        if operation.kind is OperationKind.COMPLETE_TASK:
+            action = operation.request.get("action")
+            task_id = str(operation.request.get("task_id", ""))
+            if action == "cancel":
+                return await self._resume_cancel(operation)
+            worker_event_id = str(
+                operation.request.get("worker_event_id", ""),
+            )
+            if not task_id or not worker_event_id:
+                raise RecoveryError(
+                    "task completion request is missing durable identity",
+                )
+            if action == "record_execution":
+                return await self.record_execution(
+                    task_id=task_id,
+                    worker_event_id=worker_event_id,
+                )
+            structured = operation.request.get("structured_result")
+            if structured is not None and not isinstance(structured, dict):
+                raise RecoveryError(
+                    "structured task result is not an object",
+                )
+            return await self.record_completion(
+                task_id=task_id,
+                worker_event_id=worker_event_id,
+                structured_result=structured,
+            )
+        raise RecoveryError(
+            f"TaskService cannot recover {operation.kind.value}",
+        )
 
     async def _resolve_assignment(
         self,

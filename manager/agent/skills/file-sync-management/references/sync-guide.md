@@ -1,40 +1,33 @@
-# File Sync Guide
+# Verified File Sync Guide
 
-Workers push their output to MinIO. Your local `/root/agentteams-fs/` is NOT automatically synced — you must pull explicitly.
+## Pull before reading
 
-## Pull task directory (after Worker reports completion)
+Call `sync_files` with the task ID and `direction="pull"`. Read files only
+after the typed receipt succeeds. A pull downloads a complete task prefix into
+a sibling temporary directory, verifies every object, and then atomically
+replaces the requested cache directory.
 
-```bash
-mc mirror ${AGENTTEAMS_STORAGE_PREFIX}/shared/tasks/{task-id}/ /root/agentteams-fs/shared/tasks/{task-id}/ --overwrite
-cat /root/agentteams-fs/shared/tasks/{task-id}/result.md
-```
+Typical Worker output is `shared/tasks/<task-id>/result.md`, with optional
+artifacts beneath `workspace/` or `notes/`.
 
-## Pull single file (Worker gave you a path)
+## Push after writing
 
-```bash
-mc cp ${AGENTTEAMS_STORAGE_PREFIX}/<path-worker-gave-you> /root/agentteams-fs/<same-path>
-```
+Call `sync_files` with the task ID and `direction="push"`. A push:
 
-## Pull directory
+1. acquires the remote processing lease;
+2. resolves every path beneath the task root;
+3. rejects symlinks and path escape;
+4. excludes Manager-owned task documents;
+5. conditionally uploads changed objects;
+6. returns a checksum manifest;
+7. releases the lease.
 
-```bash
-mc mirror ${AGENTTEAMS_STORAGE_PREFIX}/<dir>/ /root/agentteams-fs/<dir>/ --overwrite
-```
+Notify the Worker only after the receipt succeeds. If a live lease conflicts,
+do not bypass it; wait for its owner or deterministic expiry recovery.
 
-## Push after writing files Workers need
+## Source-of-truth rules
 
-```bash
-# Single file
-mc cp /root/agentteams-fs/<path> ${AGENTTEAMS_STORAGE_PREFIX}/<path>
-
-# Directory
-mc mirror /root/agentteams-fs/<dir>/ ${AGENTTEAMS_STORAGE_PREFIX}/<dir>/ --overwrite
-```
-
-Then notify the target Worker via Matrix @mention to run their file-sync skill.
-
-## Rules
-
-1. When you write files to `/root/agentteams-fs/`, always push to MinIO immediately, then @mention the target Worker to file-sync
-2. When a Worker tells you they've pushed files, always pull from MinIO before reading — never assume local is up to date
-3. If a local file is missing or stale after a Worker notification, pull from MinIO directly — do not wait for background sync
+- MinIO objects are canonical; the cache is disposable.
+- `meta.json` and `spec.md` are Manager-owned.
+- `result.md`, `plan.md`, `workspace/`, and `notes/` are Worker-owned.
+- Missing or stale local content always requires another verified pull.

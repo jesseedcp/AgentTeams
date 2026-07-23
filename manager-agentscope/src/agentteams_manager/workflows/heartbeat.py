@@ -7,7 +7,16 @@ from typing import Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from agentteams_manager.domain.models import TaskRecord, TopologySnapshot
+from agentteams_manager.domain.errors import (
+    AmbiguousEffectError,
+    RecoveryError,
+)
+from agentteams_manager.domain.models import (
+    OperationKind,
+    OperationRecord,
+    TaskRecord,
+    TopologySnapshot,
+)
 
 from .resources import ResourceRecoveryReport
 from .tasks import TaskService
@@ -30,6 +39,183 @@ class FailureNotifications(Protocol):
     ) -> None: ...
 
 
+class TaskOperationReader(Protocol):
+    async def list_recoverable(self) -> tuple[OperationRecord, ...]: ...
+
+
+class OperationResumer(Protocol):
+    async def resume_operation(
+        self,
+        operation: OperationRecord,
+    ) -> object: ...
+
+
+class TaskRecoveryReport(BaseModel):
+    """Typed result of task, project, and Git operation recovery."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    inspected: int = Field(ge=0)
+    reconciled: tuple[str, ...] = ()
+    pending: tuple[str, ...] = ()
+    failed: tuple[str, ...] = ()
+    needs_attention: tuple[str, ...] = ()
+
+
+class TaskRecovery:
+    """Route only task-owned operation kinds to deterministic resumers."""
+
+    _TASK_KINDS = frozenset(
+        {
+            OperationKind.DELEGATE_TASK,
+            OperationKind.FILE_SYNC,
+        },
+    )
+    _PROJECT_KINDS = frozenset(
+        {
+            OperationKind.CREATE_PROJECT,
+            OperationKind.UPDATE_PROJECT,
+            OperationKind.CLOSE_PROJECT,
+        },
+    )
+
+    def __init__(
+        self,
+        *,
+        operations: TaskOperationReader,
+        tasks: OperationResumer,
+        projects: OperationResumer,
+        git: OperationResumer,
+        files: OperationResumer | None = None,
+    ) -> None:
+        self._operations = operations
+        self._tasks = tasks
+        self._projects = projects
+        self._git = git
+        self._files = files
+
+    async def reconcile_pending_tasks(self) -> TaskRecoveryReport:
+        owned = (
+            self._TASK_KINDS
+            | self._PROJECT_KINDS
+            | {OperationKind.GIT_DELEGATION}
+        )
+        operations = tuple(
+            operation
+            for operation in await self._operations.list_recoverable()
+            if operation.kind in owned
+        )
+        reconciled: list[str] = []
+        pending: list[str] = []
+        failed: list[str] = []
+        needs_attention: list[str] = []
+        for operation in operations:
+            if operation.kind is OperationKind.FILE_SYNC:
+                if self._files is None:
+                    needs_attention.append(operation.operation_id)
+                    continue
+                resumer = self._files
+            elif operation.kind in self._TASK_KINDS:
+                resumer = self._tasks
+            elif operation.kind in self._PROJECT_KINDS:
+                resumer = self._projects
+            else:
+                resumer = self._git
+            try:
+                await resumer.resume_operation(operation)
+            except AmbiguousEffectError:
+                pending.append(operation.operation_id)
+            except RecoveryError:
+                needs_attention.append(operation.operation_id)
+            except Exception:
+                failed.append(operation.operation_id)
+            else:
+                reconciled.append(operation.operation_id)
+        return TaskRecoveryReport(
+            inspected=len(operations),
+            reconciled=tuple(reconciled),
+            pending=tuple(pending),
+            failed=tuple(failed),
+            needs_attention=tuple(needs_attention),
+        )
+
+
+class TaskRecoveryRunner(Protocol):
+    async def reconcile_pending_tasks(self) -> TaskRecoveryReport: ...
+
+
+class LeaseReclaimer(Protocol):
+    async def reclaim_expired(self, now: datetime) -> object: ...
+
+
+class DueTaskDispatcher(Protocol):
+    async def dispatch_due(self, now: datetime) -> DispatchReport: ...
+
+
+class CompletionRecovery(Protocol):
+    async def reconcile_pending_completions(
+        self,
+    ) -> CompletionRecoveryReport: ...
+
+
+class CompletionRecoveryReport(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    inspected: int = Field(ge=0)
+    reconciled: tuple[str, ...] = ()
+    pending: tuple[str, ...] = ()
+    failed: tuple[str, ...] = ()
+    needs_attention: tuple[str, ...] = ()
+
+
+class TaskCompletionRecovery:
+    """Recover finite completion and recurring execution operations later."""
+
+    def __init__(
+        self,
+        *,
+        operations: TaskOperationReader,
+        tasks: OperationResumer,
+    ) -> None:
+        self._operations = operations
+        self._tasks = tasks
+
+    async def reconcile_pending_completions(
+        self,
+    ) -> CompletionRecoveryReport:
+        operations = tuple(
+            operation
+            for operation in await self._operations.list_recoverable()
+            if operation.kind is OperationKind.COMPLETE_TASK
+        )
+        reconciled: list[str] = []
+        pending: list[str] = []
+        failed: list[str] = []
+        needs_attention: list[str] = []
+        for operation in operations:
+            try:
+                await self._tasks.resume_operation(operation)
+            except AmbiguousEffectError:
+                pending.append(operation.operation_id)
+            except RecoveryError:
+                needs_attention.append(operation.operation_id)
+            except Exception:
+                failed.append(operation.operation_id)
+            else:
+                reconciled.append(operation.operation_id)
+        return CompletionRecoveryReport(
+            inspected=len(operations),
+            reconciled=tuple(reconciled),
+            pending=tuple(pending),
+            failed=tuple(failed),
+            needs_attention=tuple(needs_attention),
+        )
+
+
+class SnapshotScheduler(Protocol):
+    async def snapshot_if_due(self) -> bool: ...
+
+
 class HeartbeatReport(BaseModel):
     """Typed evidence from one model-free reconciliation pass."""
 
@@ -41,6 +227,19 @@ class HeartbeatReport(BaseModel):
     failed: int = Field(ge=0)
     topology_revision: int = Field(ge=0)
     notifications: int = Field(ge=0)
+    task_inspected: int = Field(default=0, ge=0)
+    task_reconciled: int = Field(default=0, ge=0)
+    task_pending: int = Field(default=0, ge=0)
+    task_failed: int = Field(default=0, ge=0)
+    task_needs_attention: int = Field(default=0, ge=0)
+    leases_reclaimed: int = Field(default=0, ge=0)
+    lease_conflicts: int = Field(default=0, ge=0)
+    recurring_dispatched: int = Field(default=0, ge=0)
+    recurring_pending: int = Field(default=0, ge=0)
+    completions_reconciled: int = Field(default=0, ge=0)
+    completions_pending: int = Field(default=0, ge=0)
+    completions_failed: int = Field(default=0, ge=0)
+    snapshot_created: bool = False
 
 
 class Heartbeat:
@@ -52,21 +251,63 @@ class Heartbeat:
         recovery: ResourceRecovery,
         topology: TopologyRefresh,
         notifications: FailureNotifications,
+        task_recovery: TaskRecoveryRunner | None = None,
+        leases: LeaseReclaimer | None = None,
+        task_scheduler: DueTaskDispatcher | None = None,
+        completions: CompletionRecovery | None = None,
+        snapshotter: SnapshotScheduler | None = None,
     ) -> None:
         self._recovery = recovery
         self._topology = topology
         self._notifications = notifications
+        self._task_recovery = task_recovery
+        self._leases = leases
+        self._task_scheduler = task_scheduler
+        self._completions = completions
+        self._snapshotter = snapshotter
 
     async def run_once(self) -> HeartbeatReport:
         recovery = await self._recovery.reconcile_pending_resources()
         snapshot = await self._topology.refresh()
+        task_recovery = (
+            await self._task_recovery.reconcile_pending_tasks()
+            if self._task_recovery is not None
+            else TaskRecoveryReport(inspected=0)
+        )
+        now = datetime.now(UTC)
+        lease_report = (
+            await self._leases.reclaim_expired(now)
+            if self._leases is not None
+            else None
+        )
+        dispatch_report = (
+            await self._task_scheduler.dispatch_due(now)
+            if self._task_scheduler is not None
+            else DispatchReport(inspected=0)
+        )
+        completion_report = (
+            await self._completions.reconcile_pending_completions()
+            if self._completions is not None
+            else CompletionRecoveryReport(inspected=0)
+        )
 
         notification_count = 0
-        for operation_id in recovery.failed:
+        for operation_id in dict.fromkeys(
+            (
+                *recovery.failed,
+                *task_recovery.failed,
+                *completion_report.failed,
+            ),
+        ):
             if await self._notifications.already_sent(operation_id):
                 continue
             await self._notifications.send_terminal_failure(operation_id)
             notification_count += 1
+        snapshot_created = (
+            await self._snapshotter.snapshot_if_due()
+            if self._snapshotter is not None
+            else False
+        )
 
         return HeartbeatReport(
             inspected=recovery.inspected,
@@ -75,6 +316,27 @@ class Heartbeat:
             failed=len(recovery.failed),
             topology_revision=snapshot.revision,
             notifications=notification_count,
+            task_inspected=task_recovery.inspected,
+            task_reconciled=len(task_recovery.reconciled),
+            task_pending=len(task_recovery.pending),
+            task_failed=len(task_recovery.failed),
+            task_needs_attention=len(task_recovery.needs_attention),
+            leases_reclaimed=(
+                len(getattr(lease_report, "reclaimed", ()))
+                if lease_report is not None
+                else 0
+            ),
+            lease_conflicts=(
+                len(getattr(lease_report, "conflicted", ()))
+                if lease_report is not None
+                else 0
+            ),
+            recurring_dispatched=len(dispatch_report.dispatched),
+            recurring_pending=len(dispatch_report.pending),
+            completions_reconciled=len(completion_report.reconciled),
+            completions_pending=len(completion_report.pending),
+            completions_failed=len(completion_report.failed),
+            snapshot_created=snapshot_created,
         )
 
 

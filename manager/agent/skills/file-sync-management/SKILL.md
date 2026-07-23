@@ -1,19 +1,19 @@
 ---
 name: file-sync-management
-description: Use when you need to push files to MinIO for Workers to access, pull Worker output from MinIO, or when a Worker reports they've uploaded files. Also use when notifying Workers to file-sync after writing files they need.
+description: Use for verified task-file transfer between the local cache and authoritative MinIO storage.
 ---
 
 # File Sync Management
 
-## Gotchas
+MinIO is authoritative. The local task directory is only a cache.
 
-- **Local `/root/agentteams-fs/` is NOT real-time synced** — you must explicitly pull from MinIO
-- **After writing to `/root/agentteams-fs/`, immediately push to MinIO** + notify Worker to file-sync via @mention
-- **When Worker says they pushed files, pull before reading** — never assume local copy is current
-- **`mc mirror` uses `--overwrite`; single file uses `mc cp`**
+Use `sync_files` with `direction="pull"` before reading Worker output. Use
+`sync_files` with `direction="push"` after writing Worker-owned task files.
+The tool verifies object metadata, checksums, and task scope.
 
-## Operation Reference
+Never overwrite Manager-owned `meta.json`, `spec.md`, `base/`, or the remote
+processing lease through a Worker push. Never infer that a local file is
+current merely because it exists.
 
-| Situation | Read |
-|---|---|
-| Pull/push files, sync commands, notification workflow | `references/sync-guide.md` |
+Read `references/sync-guide.md` for the exact pull-before-read and
+push-after-write protocol.

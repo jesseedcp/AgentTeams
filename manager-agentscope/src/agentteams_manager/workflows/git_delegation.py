@@ -17,10 +17,16 @@ from agentteams_manager.clients.git import (
     GitRequest,
 )
 from agentteams_manager.clients.minio import ObjectVersionConflict
-from agentteams_manager.domain.errors import ConflictError, NotFoundError
+from agentteams_manager.domain.errors import (
+    AmbiguousEffectError,
+    ConflictError,
+    NotFoundError,
+    RecoveryError,
+)
 from agentteams_manager.domain.ids import matrix_transaction_id
 from agentteams_manager.domain.models import (
     ExternalEffect,
+    JournalEvent,
     OperationKind,
     OperationStatus,
     ProcessingLeaseRecord,
@@ -46,6 +52,11 @@ class ConfirmationRequired(RuntimeError):
 class LeaseRepositoryPort(Protocol):
     async def get(self, task_id: str) -> ProcessingLeaseRecord | None: ...
 
+    async def expired(
+        self,
+        now: datetime,
+    ) -> tuple[ProcessingLeaseRecord, ...]: ...
+
     async def upsert(
         self,
         lease: ProcessingLeaseRecord,
@@ -56,6 +67,13 @@ class LeaseRepositoryPort(Protocol):
 
 class TaskReader(Protocol):
     async def get(self, task_id: str) -> TaskRecord | None: ...
+
+
+class OperationEventReader(Protocol):
+    async def events_for(
+        self,
+        operation_id: str,
+    ) -> tuple[JournalEvent, ...]: ...
 
 
 class ProcessingMarker(BaseModel):
@@ -93,6 +111,18 @@ class ProcessingLease(BaseModel):
     started_at: datetime
     expires_at: datetime
     etag: str
+
+
+class LeaseReclaimReport(BaseModel):
+    """Evidence from one conditional expired-lease cleanup pass."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    inspected: int = Field(ge=0)
+    reclaimed: tuple[str, ...] = ()
+    live: tuple[str, ...] = ()
+    conflicted: tuple[str, ...] = ()
+    pending: tuple[str, ...] = ()
 
 
 class GitDelegationReceipt(BaseModel):
@@ -243,6 +273,62 @@ class ProcessingLeaseService:
                 raise
         await self._leases.delete(lease.task_id, lease.lease_id)
 
+    async def reclaim_expired(
+        self,
+        now: datetime | None = None,
+    ) -> LeaseReclaimReport:
+        """Delete only an expired remote marker matching local identity."""
+        instant = (now or self._clock.now()).astimezone(UTC)
+        expired = await self._leases.expired(instant)
+        reclaimed: list[str] = []
+        live: list[str] = []
+        conflicted: list[str] = []
+        pending: list[str] = []
+        for local in expired:
+            key = _lease_key(local.task_id)
+            try:
+                receipt = await self._storage.head(key)
+                if receipt is None:
+                    await self._leases.delete(
+                        local.task_id,
+                        local.lease_id,
+                    )
+                    reclaimed.append(local.task_id)
+                    continue
+                remote = ProcessingMarker.model_validate(
+                    await self._storage.get_json(key),
+                )
+                if (
+                    remote.task_id != local.task_id
+                    or remote.lease_id != local.lease_id
+                ):
+                    conflicted.append(local.task_id)
+                    continue
+                if remote.expires_at > instant:
+                    await self._materialize(remote, receipt.etag)
+                    live.append(local.task_id)
+                    continue
+                await self._storage.delete_if_version(
+                    key,
+                    expected_etag=receipt.etag,
+                )
+                await self._leases.delete(
+                    local.task_id,
+                    local.lease_id,
+                )
+                reclaimed.append(local.task_id)
+            except ObjectVersionConflict:
+                conflicted.append(local.task_id)
+            except Exception:
+                pending.append(local.task_id)
+        return LeaseReclaimReport(
+            inspected=len(expired),
+            reclaimed=tuple(reclaimed),
+            live=tuple(live),
+            conflicted=tuple(conflicted),
+            pending=tuple(pending),
+        )
+
     async def _prove_marker(
         self,
         key: str,
@@ -301,6 +387,7 @@ class GitDelegationService:
         supervisor: TaskSupervisorPort,
         cache_root: Path,
         renewal_interval: float = 300,
+        events: OperationEventReader | None = None,
     ) -> None:
         if renewal_interval <= 0:
             raise ValueError("lease renewal interval must be positive")
@@ -312,6 +399,7 @@ class GitDelegationService:
         self._supervisor = supervisor
         self._cache_root = cache_root.resolve()
         self._renewal_interval = renewal_interval
+        self._events = events
 
     async def execute(
         self,
@@ -345,6 +433,19 @@ class GitDelegationService:
                 "context": request.context,
             },
         )
+        return await self._execute_operation(
+            request=request,
+            operation=operation,
+            task=task,
+        )
+
+    async def _execute_operation(
+        self,
+        *,
+        request: GitRequest,
+        operation: OperationRecord,
+        task: TaskRecord,
+    ) -> GitDelegationReceipt:
         if operation.status is OperationStatus.SUCCEEDED:
             return GitDelegationReceipt.model_validate(operation.result)
         if operation.status is OperationStatus.FAILED:
@@ -525,6 +626,63 @@ class GitDelegationService:
             receipt.model_dump(mode="json"),
         )
         return receipt
+
+    async def resume_operation(
+        self,
+        operation: OperationRecord,
+    ) -> GitDelegationReceipt:
+        """Resume only while evidence proves no Git process could have run."""
+        if operation.kind is not OperationKind.GIT_DELEGATION:
+            raise ValueError("operation is not Git delegation")
+        if operation.status is OperationStatus.SUCCEEDED:
+            return GitDelegationReceipt.model_validate(operation.result)
+        if self._events is None:
+            raise RecoveryError(
+                "Git recovery requires operation event evidence",
+            )
+        events = await self._events.events_for(operation.operation_id)
+        process_planned = any(
+            event.event_type == "effect_planned"
+            and event.payload.get("effect") == ExternalEffect.PROCESS.value
+            for event in events
+        )
+        if process_planned:
+            raise RecoveryError(
+                "Git process may have started; refusing blind replay",
+            )
+        task_id = str(operation.request.get("task_id", ""))
+        if not task_id:
+            raise RecoveryError("Git request has no task identity")
+        lease_was_planned = any(
+            event.event_type == "effect_planned"
+            and event.payload.get("effect") == ExternalEffect.STORAGE.value
+            and isinstance(event.payload.get("request"), dict)
+            and event.payload["request"].get("operation")
+            == "acquire_processing_lease"
+            for event in events
+        )
+        if lease_was_planned and await self._storage.head(
+            _lease_key(task_id),
+        ) is not None:
+            raise AmbiguousEffectError(
+                "Git processing lease is still present",
+            )
+        try:
+            request = GitRequest.model_validate(operation.request)
+        except Exception as exc:
+            raise RecoveryError(
+                "Git request cannot be reconstructed",
+            ) from exc
+        task = await self._tasks.get(task_id)
+        if task is None:
+            raise RecoveryError(
+                f"Git task {task_id} is no longer present",
+            )
+        return await self._execute_operation(
+            request=request,
+            operation=operation,
+            task=task,
+        )
 
     async def _renew_lease_until_stopped(
         self,
