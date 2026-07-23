@@ -54,6 +54,11 @@ ALL_MANAGER_TOOLS = frozenset(
         "delete_channel",
         "send_notification",
         "list_matrix_rooms",
+        "list_matrix_members",
+        "lookup_matrix_user",
+        "get_matrix_room_state",
+        "upload_matrix_media",
+        "download_matrix_media",
         "invite_matrix_user",
         "kick_matrix_user",
         "ban_matrix_user",
@@ -74,6 +79,28 @@ LEADER_TOOLS = frozenset(
     {"delegate_team_task", "complete_task", "sync_files"},
 )
 HUMAN_TOOLS = frozenset({"list_workers", "list_tasks", "sync_files"})
+TEAM_SCOPED_HUMAN_TOOLS = frozenset(
+    {
+        "list_workers",
+        "get_worker",
+        "list_teams",
+        "get_team",
+        "list_tasks",
+        "get_task",
+        "sync_files",
+        "send_notification",
+    },
+)
+WORKER_SCOPED_HUMAN_TOOLS = frozenset(
+    {
+        "list_workers",
+        "get_worker",
+        "list_tasks",
+        "get_task",
+        "sync_files",
+        "send_notification",
+    },
+)
 TRUSTED_TOOLS = frozenset({"list_workers", "list_tasks"})
 UNKNOWN_TOOLS: frozenset[str] = frozenset()
 
@@ -95,7 +122,7 @@ CONFIRM_TOOLS = frozenset(
             "invite_",
         ),
     )
-)
+) | frozenset({"upload_matrix_media"})
 READ_ONLY_RESOURCE_TOOLS = frozenset(
     {
         "list_workers",
@@ -162,13 +189,10 @@ class RoomPolicyResolver:
             )
 
         if human is not None and self._human_can_access(human, event.room_id):
-            return RoomPolicy(
+            return policy_for_human(
+                human,
                 room_id=event.room_id,
-                kind=RoomKind.HUMAN_OR_CHANNEL_ROOM,
                 revision=revision,
-                allowed_tools=HUMAN_TOOLS,
-                allowed_senders=frozenset({event.sender_id}),
-                resource_name=human.name,
             )
         if event.sender_id in self._trusted_contacts:
             return RoomPolicy(
@@ -206,7 +230,11 @@ class RoomPolicyResolver:
             human,
             event.room_id,
         ):
-            tools = HUMAN_TOOLS
+            return policy_for_human(
+                human,
+                room_id=event.room_id,
+                revision=revision,
+            )
         elif event.sender_id in self._trusted_contacts:
             tools = TRUSTED_TOOLS
         else:
@@ -261,3 +289,50 @@ def _tools_for_kind(kind: RoomKind) -> frozenset[str]:
     if kind is RoomKind.LEADER_ROOM:
         return LEADER_TOOLS
     return UNKNOWN_TOOLS
+
+
+def policy_for_human(
+    human: HumanResource,
+    *,
+    room_id: str,
+    revision: int,
+) -> RoomPolicy:
+    """Map Controller Human tiers to tools and named resource scopes."""
+    if human.permission_level == 1:
+        tools = ALL_MANAGER_TOOLS
+        confirmations = CONFIRM_TOOLS
+        scope_all = True
+    elif human.permission_level == 2:
+        tools = TEAM_SCOPED_HUMAN_TOOLS
+        confirmations = frozenset()
+        scope_all = False
+    else:
+        tools = WORKER_SCOPED_HUMAN_TOOLS
+        confirmations = frozenset()
+        scope_all = False
+    return RoomPolicy(
+        room_id=room_id,
+        kind=RoomKind.HUMAN_OR_CHANNEL_ROOM,
+        revision=revision,
+        allowed_tools=tools,
+        confirm_tools=confirmations,
+        allowed_senders=frozenset({human.matrix_user_id}),
+        resource_name=human.name,
+        resource_scope_all=scope_all,
+        allowed_team_names=_scope_names(
+            human.spec.get("accessibleTeams"),
+        ),
+        allowed_worker_names=_scope_names(
+            human.spec.get("accessibleWorkers"),
+        ),
+    )
+
+
+def _scope_names(value: object) -> frozenset[str]:
+    if not isinstance(value, (list, tuple, set, frozenset)):
+        return frozenset()
+    return frozenset(
+        item
+        for item in value
+        if isinstance(item, str) and item
+    )

@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agentteams_manager.clients.agt import (
     AgtProtocolError,
+    HumanCreateRequest,
     ResourceName,
     TeamCreateRequest,
     WorkerCreateRequest,
@@ -45,11 +46,11 @@ from agentteams_manager.domain.ports import MatrixPort
 from agentteams_manager.matrix.policy import (
     ALL_MANAGER_TOOLS,
     CONFIRM_TOOLS,
-    HUMAN_TOOLS,
     LEADER_TOOLS,
     READ_ONLY_RESOURCE_TOOLS,
     TRUSTED_TOOLS,
     WORKER_TOOLS,
+    policy_for_human,
 )
 from agentteams_manager.state.topology import TopologyRepository
 
@@ -242,6 +243,12 @@ class ResourceController(ReconciliationController, Protocol):
 
     async def delete_team(self, name: str) -> None: ...
 
+    async def list_humans(self) -> tuple[HumanResource, ...]: ...
+
+    async def create_human(self, request: HumanCreateRequest) -> None: ...
+
+    async def delete_human(self, name: str) -> None: ...
+
 
 class ResourceSupervisor(Protocol):
     async def begin(
@@ -417,6 +424,7 @@ class ResourceService:
         sleeper: Sleeper = asyncio.sleep,
         worker_poll_delays: tuple[float, ...] = (0.25, 0.5, 1, 2, 4),
         team_poll_delays: tuple[float, ...] = (0.5, 1, 2, 4, 8),
+        human_poll_delays: tuple[float, ...] = (0.5, 1, 2, 4, 8),
         greeting: str = (
             "Hello. I am the AgentTeams Manager. "
             "This room is your direct coordination channel."
@@ -430,6 +438,10 @@ class ResourceService:
             raise ValueError("team_poll_delays cannot be empty")
         if any(delay < 0 for delay in team_poll_delays):
             raise ValueError("team poll delays cannot be negative")
+        if not human_poll_delays:
+            raise ValueError("human_poll_delays cannot be empty")
+        if any(delay < 0 for delay in human_poll_delays):
+            raise ValueError("human poll delays cannot be negative")
         self._controller = controller
         self._supervisor = supervisor
         self._topology = topology
@@ -437,6 +449,7 @@ class ResourceService:
         self._sleeper = sleeper
         self._worker_poll_delays = worker_poll_delays
         self._team_poll_delays = team_poll_delays
+        self._human_poll_delays = human_poll_delays
         self._greeting = greeting
 
     async def get_worker(self, name: str) -> WorkerResource | None:
@@ -450,6 +463,12 @@ class ResourceService:
 
     async def list_teams(self) -> tuple[TeamResource, ...]:
         return await self._controller.list_teams()
+
+    async def get_human(self, name: str) -> HumanResource | None:
+        return await self._controller.get_human(name)
+
+    async def list_humans(self) -> tuple[HumanResource, ...]:
+        return await self._controller.list_humans()
 
     async def create_worker(
         self,
@@ -799,6 +818,193 @@ class ResourceService:
             ExternalEffect.CONTROLLER,
             {"name": name, "deleted": True},
         )
+
+    async def create_human(
+        self,
+        request: HumanCreateRequest,
+        *,
+        context: MutationContext,
+    ) -> HumanResource:
+        operation = await self._supervisor.begin(
+            operation_id=context.operation_id,
+            kind=OperationKind.CREATE_HUMAN,
+            target_key=f"human/{request.name}",
+            request=request.model_dump(mode="json"),
+        )
+        if operation.status is OperationStatus.SUCCEEDED:
+            return await self._require_human(request.name)
+        if operation.status is OperationStatus.FAILED:
+            raise ConflictError(
+                f"create human/{request.name} previously failed",
+            )
+
+        human: HumanResource | None = None
+        if operation.status is OperationStatus.PLANNED:
+            if await self._controller.get_human(request.name) is not None:
+                await self._supervisor.effect_failed(
+                    operation.operation_id,
+                    ExternalEffect.CONTROLLER,
+                    "resource already exists",
+                )
+                raise ConflictError(f"human/{request.name} already exists")
+            await self._supervisor.before_effect(
+                operation.operation_id,
+                ExternalEffect.CONTROLLER,
+                {
+                    "operation": "create_human",
+                    "name": request.name,
+                    "permission_level": request.permission_level,
+                },
+            )
+            try:
+                await self._controller.create_human(request)
+            except Exception as exc:
+                if _ambiguous_exception(exc):
+                    await self._supervisor.effect_ambiguous(
+                        operation.operation_id,
+                        ExternalEffect.CONTROLLER,
+                        type(exc).__name__,
+                    )
+                    human = await self._controller.get_human(request.name)
+                    if human is None:
+                        raise AmbiguousEffectError(
+                            f"create human/{request.name} result is unknown",
+                        ) from exc
+                else:
+                    await self._supervisor.effect_failed(
+                        operation.operation_id,
+                        ExternalEffect.CONTROLLER,
+                        _safe_reason(exc),
+                    )
+                    raise
+        else:
+            human = await self._controller.get_human(request.name)
+            if human is None:
+                raise AmbiguousEffectError(
+                    f"create human/{request.name} has no Controller proof",
+                )
+
+        ready = await self._wait_for_human(
+            operation_id=operation.operation_id,
+            name=request.name,
+            initial=human,
+        )
+        await self._refresh_topology_or_reconcile(operation.operation_id)
+        await self._supervisor.effect_succeeded(
+            operation.operation_id,
+            ExternalEffect.CONTROLLER,
+            _resource_receipt(ready),
+        )
+        return ready
+
+    async def delete_human(
+        self,
+        name: str,
+        *,
+        context: MutationContext,
+    ) -> None:
+        operation = await self._supervisor.begin(
+            operation_id=context.operation_id,
+            kind=OperationKind.DELETE_HUMAN,
+            target_key=f"human/{name}",
+            request={"name": name, "action": "delete"},
+        )
+        if operation.status is OperationStatus.FAILED:
+            raise ConflictError(f"delete human/{name} previously failed")
+        if operation.status is OperationStatus.SUCCEEDED:
+            if await self._controller.get_human(name) is not None:
+                raise ConflictError(
+                    f"human/{name} exists after a completed delete",
+                )
+            return
+        if operation.status is OperationStatus.PLANNED:
+            if await self._controller.get_human(name) is None:
+                await self._supervisor.effect_failed(
+                    operation.operation_id,
+                    ExternalEffect.CONTROLLER,
+                    "resource does not exist",
+                )
+                raise NotFoundError(f"human/{name} does not exist")
+            await self._supervisor.before_effect(
+                operation.operation_id,
+                ExternalEffect.CONTROLLER,
+                {"operation": "delete_human", "name": name},
+            )
+            try:
+                await self._controller.delete_human(name)
+            except Exception as exc:
+                if _ambiguous_exception(exc):
+                    await self._supervisor.effect_ambiguous(
+                        operation.operation_id,
+                        ExternalEffect.CONTROLLER,
+                        type(exc).__name__,
+                    )
+                else:
+                    await self._supervisor.effect_failed(
+                        operation.operation_id,
+                        ExternalEffect.CONTROLLER,
+                        _safe_reason(exc),
+                    )
+                    raise
+        if await self._controller.get_human(name) is not None:
+            await self._supervisor.effect_ambiguous(
+                operation.operation_id,
+                ExternalEffect.CONTROLLER,
+                "Controller still reports the Human",
+            )
+            raise AmbiguousEffectError(
+                f"delete human/{name} is not proven",
+            )
+        await self._refresh_topology_or_reconcile(operation.operation_id)
+        await self._supervisor.effect_succeeded(
+            operation.operation_id,
+            ExternalEffect.CONTROLLER,
+            {"name": name, "deleted": True},
+        )
+
+    async def _wait_for_human(
+        self,
+        *,
+        operation_id: str,
+        name: str,
+        initial: HumanResource | None,
+    ) -> HumanResource:
+        human = initial
+        attempts = len(self._human_poll_delays) + 1
+        for index in range(attempts):
+            if human is None or index > 0 or initial is None:
+                human = await self._controller.get_human(name)
+            if human is not None:
+                phase = _resource_phase(human).casefold()
+                if phase in {"failed", "error", "deleting"}:
+                    message = _resource_message(human)
+                    await self._supervisor.effect_failed(
+                        operation_id,
+                        ExternalEffect.CONTROLLER,
+                        message or f"human/{name} entered {phase}",
+                    )
+                    raise ConflictError(
+                        message or f"human/{name} entered {phase}",
+                    )
+                if (
+                    human.matrix_user_id
+                    and phase in {"active", "ready", "running"}
+                ):
+                    return human
+            if index < len(self._human_poll_delays):
+                await self._sleeper(self._human_poll_delays[index])
+        await self._supervisor.effect_ambiguous(
+            operation_id,
+            ExternalEffect.CONTROLLER,
+            "Human provisioning did not converge",
+        )
+        raise AmbiguousEffectError(f"human/{name} is not ready")
+
+    async def _require_human(self, name: str) -> HumanResource:
+        human = await self._controller.get_human(name)
+        if human is None:
+            raise NotFoundError(f"human/{name} does not exist")
+        return human
 
     async def _run_team_upsert(
         self,
@@ -1347,7 +1553,11 @@ class TopologyResolver:
                 human.permission_level == 1
                 or room_id in human.allowed_rooms
             ):
-                tools = HUMAN_TOOLS
+                return policy_for_human(
+                    human,
+                    room_id=room_id,
+                    revision=revision,
+                )
             elif sender_id in self._trusted_contacts:
                 tools = TRUSTED_TOOLS
             else:

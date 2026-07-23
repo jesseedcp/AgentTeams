@@ -169,6 +169,9 @@ class RoomPolicy(FrozenStrictModel):
     resource_name: str | None = None
     team_name: str | None = None
     project_id: str | None = None
+    resource_scope_all: bool = False
+    allowed_team_names: frozenset[str] = frozenset()
+    allowed_worker_names: frozenset[str] = frozenset()
     silent: bool = False
 
 

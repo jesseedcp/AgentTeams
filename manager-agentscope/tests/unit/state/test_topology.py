@@ -102,3 +102,36 @@ async def test_human_access_is_indexed_by_matrix_identity(
     assert human is not None
     assert human.permission_level == 2
     assert human.allowed_rooms == ("!team:example",)
+
+
+@pytest.mark.asyncio
+async def test_channel_relationships_survive_resource_refresh(
+    tmp_path: Path,
+) -> None:
+    database = Database(tmp_path / "manager.db")
+    await database.open()
+    repository = TopologyRepository(database)
+    await repository.set_primary_channel(
+        "@reviewer:example",
+        "!primary:example",
+    )
+    await repository.set_trusted_channel(
+        "@manager:example",
+        "@reviewer:example",
+        "!trusted:example",
+    )
+
+    await repository.replace_snapshot(
+        TopologySnapshot(
+            revision=1,
+            refreshed_at=datetime.now(UTC),
+        ),
+    )
+
+    assert (
+        await repository.primary_channel("@reviewer:example")
+        == "!primary:example"
+    )
+    assert await repository.trusted_channels("@reviewer:example") == (
+        "!trusted:example",
+    )

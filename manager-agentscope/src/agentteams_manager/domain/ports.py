@@ -8,6 +8,7 @@ from typing import Protocol
 
 from .models import (
     HumanResource,
+    MediaReference,
     MirrorReceipt,
     ObjectReceipt,
     TeamResource,
@@ -40,6 +41,23 @@ class MatrixAdministrationPort(Protocol):
     async def joined_rooms(self) -> tuple[str, ...]: ...
 
     async def members(self, room_id: str) -> tuple[str, ...]: ...
+
+    async def lookup_user(
+        self,
+        user_id: str,
+    ) -> dict[str, str | None]: ...
+
+    async def room_state(
+        self,
+        room_id: str,
+    ) -> tuple[dict[str, object], ...]: ...
+
+    async def upload_media(self, path: Path) -> str: ...
+
+    async def download_media(
+        self,
+        reference: MediaReference,
+    ) -> tuple[object, ...]: ...
 
     async def invite_user(self, room_id: str, user_id: str) -> None: ...
 

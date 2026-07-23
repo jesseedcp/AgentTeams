@@ -11,13 +11,19 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
 
-from nio import AsyncClient, AsyncClientConfig
+from nio import (
+    AsyncClient,
+    AsyncClientConfig,
+    RoomPreset,
+    RoomVisibility,
+)
 from pydantic import SecretStr
 
 from agentteams_manager.config import ManagerConfig
 from agentteams_manager.domain.models import InboundEvent, MediaReference
 
 from .crypto import CryptoStore, maintain_e2ee
+from .media import MediaAdapter
 from .threads import RoomHistory, ThreadProjector
 
 InboundHandler = Callable[[InboundEvent], Awaitable[None]]
@@ -402,6 +408,141 @@ class MatrixClient:
             txn_id=txn_id,
         )
 
+    async def joined_rooms(self) -> tuple[str, ...]:
+        response = await self._ensure_client().joined_rooms()
+        _require_matrix_success(response, "list joined rooms")
+        rooms = getattr(response, "rooms", None)
+        if not isinstance(rooms, list) or not all(
+            isinstance(room_id, str) for room_id in rooms
+        ):
+            raise RuntimeError("Matrix joined rooms response is invalid")
+        return tuple(sorted(set(rooms)))
+
+    async def members(self, room_id: str) -> tuple[str, ...]:
+        response = await self._ensure_client().joined_members(room_id)
+        _require_matrix_success(response, "list room members")
+        rows = getattr(response, "members", None)
+        if not isinstance(rows, list):
+            raise RuntimeError("Matrix member response is invalid")
+        user_ids = {
+            getattr(row, "user_id", None)
+            for row in rows
+        }
+        if None in user_ids or not all(
+            isinstance(user_id, str) and user_id
+            for user_id in user_ids
+        ):
+            raise RuntimeError("Matrix member identity is invalid")
+        return tuple(sorted(user_ids))
+
+    async def lookup_user(self, user_id: str) -> dict[str, str | None]:
+        response = await self._ensure_client().get_profile(user_id)
+        _require_matrix_success(response, "get user profile")
+        display_name = getattr(response, "displayname", None)
+        avatar_url = getattr(response, "avatar_url", None)
+        if display_name is not None and not isinstance(display_name, str):
+            raise RuntimeError("Matrix display name is invalid")
+        if avatar_url is not None and not isinstance(avatar_url, str):
+            raise RuntimeError("Matrix avatar URI is invalid")
+        return {
+            "user_id": user_id,
+            "display_name": display_name,
+            "avatar_url": avatar_url,
+        }
+
+    async def create_private_room(
+        self,
+        *,
+        name: str,
+        topic: str,
+        invite: tuple[str, ...],
+        creation_marker: dict[str, str | int],
+    ) -> str:
+        response = await self._ensure_client().room_create(
+            visibility=RoomVisibility.private,
+            name=name,
+            topic=topic,
+            is_direct=False,
+            preset=RoomPreset.private_chat,
+            invite=invite,
+            initial_state=(
+                {
+                    "type": "io.agentteams.creation",
+                    "state_key": "",
+                    "content": dict(creation_marker),
+                },
+            ),
+        )
+        _require_matrix_success(response, "create room")
+        room_id = getattr(response, "room_id", None)
+        if not isinstance(room_id, str) or not room_id:
+            raise RuntimeError("Matrix room create returned no room ID")
+        return room_id
+
+    async def invite_user(self, room_id: str, user_id: str) -> None:
+        response = await self._ensure_client().room_invite(
+            room_id,
+            user_id,
+        )
+        _require_matrix_success(response, "invite room member")
+
+    async def kick_user(
+        self,
+        room_id: str,
+        user_id: str,
+        *,
+        reason: str,
+    ) -> None:
+        response = await self._ensure_client().room_kick(
+            room_id,
+            user_id,
+            reason,
+        )
+        _require_matrix_success(response, "kick room member")
+
+    async def ban_user(
+        self,
+        room_id: str,
+        user_id: str,
+        *,
+        reason: str,
+    ) -> None:
+        response = await self._ensure_client().room_ban(
+            room_id,
+            user_id,
+            reason,
+        )
+        _require_matrix_success(response, "ban room member")
+
+    async def unban_user(self, room_id: str, user_id: str) -> None:
+        response = await self._ensure_client().room_unban(
+            room_id,
+            user_id,
+        )
+        _require_matrix_success(response, "unban room member")
+
+    async def room_state(
+        self,
+        room_id: str,
+    ) -> tuple[dict[str, Any], ...]:
+        response = await self._ensure_client().room_get_state(room_id)
+        _require_matrix_success(response, "get room state")
+        events = getattr(response, "events", None)
+        if not isinstance(events, list) or not all(
+            isinstance(event, dict) for event in events
+        ):
+            raise RuntimeError("Matrix room state response is invalid")
+        return tuple(dict(event) for event in events)
+
+    async def upload_media(self, path: Path) -> str:
+        return await MediaAdapter(self._ensure_client()).upload(path)
+
+    async def download_media(
+        self,
+        reference: MediaReference,
+    ) -> tuple[Any, ...]:
+        return await MediaAdapter(self._ensure_client()).download(reference)
+
     async def edit_text(
         self,
         room_id: str,
@@ -506,6 +647,11 @@ class MatrixClient:
             ),
         )
         return event_id
+
+
+def _require_matrix_success(response: object, operation: str) -> None:
+    if response is None or type(response).__name__.endswith("Error"):
+        raise RuntimeError(f"Matrix {operation} failed: {response}")
 
 
 def _is_unknown_token(value: object) -> bool:

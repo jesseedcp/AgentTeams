@@ -207,6 +207,7 @@ class _HumanPayload(BaseModel):
     name: str
     phase: str = "Pending"
     display_name: str = Field(alias="displayName")
+    email: str = ""
     matrix_user_id: str = Field(default="", alias="matrixUserID")
     rooms: tuple[str, ...] = ()
     permission_level: int = Field(alias="permissionLevel", ge=1, le=3)
@@ -218,6 +219,7 @@ class _HumanPayload(BaseModel):
         default=(),
         alias="accessibleWorkers",
     )
+    note: str = ""
     message: str = ""
 
     def domain(self) -> HumanResource:
@@ -228,8 +230,10 @@ class _HumanPayload(BaseModel):
             allowed_rooms=self.rooms,
             spec={
                 "displayName": self.display_name,
+                "email": self.email,
                 "accessibleTeams": list(self.accessible_teams),
                 "accessibleWorkers": list(self.accessible_workers),
+                "note": self.note,
             },
             status={"phase": self.phase, "message": self.message},
         )

@@ -191,13 +191,18 @@ type CreateHumanRequest struct {
 }
 
 type HumanResponse struct {
-	Name            string   `json:"name"`
-	Phase           string   `json:"phase"`
-	DisplayName     string   `json:"displayName"`
-	MatrixUserID    string   `json:"matrixUserID,omitempty"`
-	InitialPassword string   `json:"initialPassword,omitempty"`
-	Rooms           []string `json:"rooms,omitempty"`
-	Message         string   `json:"message,omitempty"`
+	Name              string   `json:"name"`
+	Phase             string   `json:"phase"`
+	DisplayName       string   `json:"displayName"`
+	Email             string   `json:"email,omitempty"`
+	PermissionLevel   int      `json:"permissionLevel"`
+	AccessibleTeams   []string `json:"accessibleTeams,omitempty"`
+	AccessibleWorkers []string `json:"accessibleWorkers,omitempty"`
+	Note              string   `json:"note,omitempty"`
+	MatrixUserID      string   `json:"matrixUserID,omitempty"`
+	InitialPassword   string   `json:"initialPassword,omitempty"`
+	Rooms             []string `json:"rooms,omitempty"`
+	Message           string   `json:"message,omitempty"`
 }
 
 type HumanListResponse struct {

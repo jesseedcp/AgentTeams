@@ -136,10 +136,13 @@ async def test_team_and_human_outputs_map_controller_fields() -> None:
             "name": "reviewer",
             "phase": "Running",
             "displayName": "Reviewer",
+            "email": "reviewer@example.com",
             "matrixUserID": "@reviewer:local",
             "rooms": ["!alpha-lead:local"],
             "permissionLevel": 2,
             "accessibleTeams": ["alpha"],
+            "accessibleWorkers": ["alpha-dev"],
+            "note": "release reviewer",
         },
     )
     client = AgtClient(process)
@@ -153,6 +156,8 @@ async def test_team_and_human_outputs_map_controller_fields() -> None:
     assert human is not None
     assert human.permission_level == 2
     assert human.allowed_rooms == ("!alpha-lead:local",)
+    assert human.spec["email"] == "reviewer@example.com"
+    assert human.spec["accessibleWorkers"] == ["alpha-dev"]
 
 
 @pytest.mark.asyncio

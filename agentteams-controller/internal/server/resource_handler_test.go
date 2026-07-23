@@ -733,6 +733,56 @@ func TestCreateHuman_StampsControllerLabel(t *testing.T) {
 	}
 }
 
+func TestGetHumanIncludesPermissionScope(t *testing.T) {
+	scheme := newServerTestScheme(t)
+	human := &v1beta1.Human{}
+	human.Name = "reviewer"
+	human.Namespace = "default"
+	human.Spec = v1beta1.HumanSpec{
+		DisplayName:       "Reviewer",
+		Email:             "reviewer@example.com",
+		PermissionLevel:   2,
+		AccessibleTeams:   []string{"alpha"},
+		AccessibleWorkers: []string{"alpha-dev"},
+		Note:              "release reviewer",
+	}
+	human.Status = v1beta1.HumanStatus{
+		Phase:        "Active",
+		MatrixUserID: "@reviewer:example",
+		Rooms:        []string{"!alpha:example"},
+	}
+	k8sClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(human).
+		Build()
+	handler := NewResourceHandler(k8sClient, "default", nil, "")
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/humans/reviewer", nil)
+	req.SetPathValue("name", "reviewer")
+	rec := httptest.NewRecorder()
+
+	handler.GetHuman(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected %d, got %d: %s", http.StatusOK, rec.Code, rec.Body.String())
+	}
+	var response HumanResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode human response: %v", err)
+	}
+	if response.PermissionLevel != 2 {
+		t.Fatalf("permissionLevel=%d, want 2", response.PermissionLevel)
+	}
+	if len(response.AccessibleTeams) != 1 || response.AccessibleTeams[0] != "alpha" {
+		t.Fatalf("accessibleTeams=%v, want [alpha]", response.AccessibleTeams)
+	}
+	if len(response.AccessibleWorkers) != 1 || response.AccessibleWorkers[0] != "alpha-dev" {
+		t.Fatalf("accessibleWorkers=%v, want [alpha-dev]", response.AccessibleWorkers)
+	}
+	if response.Email != "reviewer@example.com" || response.Note != "release reviewer" {
+		t.Fatalf("human metadata not preserved: %#v", response)
+	}
+}
+
 func TestCreateManager_StampsControllerLabel(t *testing.T) {
 	scheme := newServerTestScheme(t)
 	k8sClient := fake.NewClientBuilder().WithScheme(scheme).Build()

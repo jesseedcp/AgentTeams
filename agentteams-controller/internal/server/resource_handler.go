@@ -1006,13 +1006,18 @@ func managerToResponse(m *v1beta1.Manager) ManagerResponse {
 
 func humanToResponse(h *v1beta1.Human) HumanResponse {
 	resp := HumanResponse{
-		Name:            h.Name,
-		Phase:           h.Status.Phase,
-		DisplayName:     h.Spec.DisplayName,
-		MatrixUserID:    h.Status.MatrixUserID,
-		InitialPassword: h.Status.InitialPassword,
-		Rooms:           h.Status.Rooms,
-		Message:         h.Status.Message,
+		Name:              h.Name,
+		Phase:             h.Status.Phase,
+		DisplayName:       h.Spec.DisplayName,
+		Email:             h.Spec.Email,
+		PermissionLevel:   h.Spec.PermissionLevel,
+		AccessibleTeams:   h.Spec.AccessibleTeams,
+		AccessibleWorkers: h.Spec.AccessibleWorkers,
+		Note:              h.Spec.Note,
+		MatrixUserID:      h.Status.MatrixUserID,
+		InitialPassword:   h.Status.InitialPassword,
+		Rooms:             h.Status.Rooms,
+		Message:           h.Status.Message,
 	}
 	if resp.Phase == "" {
 		resp.Phase = "Pending"

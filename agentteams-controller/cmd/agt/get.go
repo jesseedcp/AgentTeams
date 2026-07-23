@@ -333,13 +333,18 @@ type teamListResp struct {
 }
 
 type humanResp struct {
-	Name            string   `json:"name"`
-	Phase           string   `json:"phase"`
-	DisplayName     string   `json:"displayName"`
-	MatrixUserID    string   `json:"matrixUserID,omitempty"`
-	InitialPassword string   `json:"initialPassword,omitempty"`
-	Rooms           []string `json:"rooms,omitempty"`
-	Message         string   `json:"message,omitempty"`
+	Name              string   `json:"name"`
+	Phase             string   `json:"phase"`
+	DisplayName       string   `json:"displayName"`
+	Email             string   `json:"email,omitempty"`
+	PermissionLevel   int      `json:"permissionLevel"`
+	AccessibleTeams   []string `json:"accessibleTeams,omitempty"`
+	AccessibleWorkers []string `json:"accessibleWorkers,omitempty"`
+	Note              string   `json:"note,omitempty"`
+	MatrixUserID      string   `json:"matrixUserID,omitempty"`
+	InitialPassword   string   `json:"initialPassword,omitempty"`
+	Rooms             []string `json:"rooms,omitempty"`
+	Message           string   `json:"message,omitempty"`
 }
 
 type humanListResp struct {
@@ -421,6 +426,11 @@ func humanDetail(h humanResp) []KeyValue {
 		{"Name", h.Name},
 		{"Phase", or(h.Phase, "Pending")},
 		{"DisplayName", h.DisplayName},
+		{"Email", h.Email},
+		{"PermissionLevel", strconv.Itoa(h.PermissionLevel)},
+		{"AccessibleTeams", strings.Join(h.AccessibleTeams, ", ")},
+		{"AccessibleWorkers", strings.Join(h.AccessibleWorkers, ", ")},
+		{"Note", h.Note},
 		{"MatrixUserID", h.MatrixUserID},
 		{"InitialPassword", h.InitialPassword},
 		{"Rooms", strings.Join(h.Rooms, ", ")},

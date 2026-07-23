@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 
 from agentteams_manager.domain.errors import ConflictError
 from agentteams_manager.domain.models import (
@@ -222,3 +222,126 @@ class TopologyRepository:
             return tuple(_binding_from_row(row) for row in rows)
 
         return await self._database.read(read)
+
+    async def set_primary_channel(
+        self,
+        user_id: str,
+        room_id: str,
+    ) -> None:
+        _require_channel_key(user_id, "user_id")
+        _require_channel_key(room_id, "room_id")
+
+        def write(connection: sqlite3.Connection) -> None:
+            connection.execute(
+                """
+                INSERT INTO channel_relationships(
+                    relationship_kind, owner_user_id, peer_user_id,
+                    room_id, updated_at
+                ) VALUES ('primary', ?, '', ?, ?)
+                ON CONFLICT(
+                    relationship_kind, owner_user_id, peer_user_id
+                ) DO UPDATE SET
+                    room_id=excluded.room_id,
+                    updated_at=excluded.updated_at
+                """,
+                (user_id, room_id, datetime.now(UTC).isoformat()),
+            )
+
+        await self._database.write(write)
+
+    async def clear_primary_channel(self, user_id: str) -> None:
+        _require_channel_key(user_id, "user_id")
+
+        def write(connection: sqlite3.Connection) -> None:
+            connection.execute(
+                """
+                DELETE FROM channel_relationships
+                 WHERE relationship_kind='primary'
+                   AND owner_user_id=?
+                """,
+                (user_id,),
+            )
+
+        await self._database.write(write)
+
+    async def primary_channel(self, user_id: str) -> str | None:
+        _require_channel_key(user_id, "user_id")
+
+        def read(connection: sqlite3.Connection) -> str | None:
+            row = connection.execute(
+                """
+                SELECT room_id FROM channel_relationships
+                 WHERE relationship_kind='primary'
+                   AND owner_user_id=?
+                """,
+                (user_id,),
+            ).fetchone()
+            return str(row["room_id"]) if row is not None else None
+
+        return await self._database.read(read)
+
+    async def set_trusted_channel(
+        self,
+        first_user_id: str,
+        second_user_id: str,
+        room_id: str,
+    ) -> None:
+        first, second = _trusted_pair(first_user_id, second_user_id)
+        _require_channel_key(room_id, "room_id")
+
+        def write(connection: sqlite3.Connection) -> None:
+            connection.execute(
+                """
+                INSERT INTO channel_relationships(
+                    relationship_kind, owner_user_id, peer_user_id,
+                    room_id, updated_at
+                ) VALUES ('trusted', ?, ?, ?, ?)
+                ON CONFLICT(
+                    relationship_kind, owner_user_id, peer_user_id
+                ) DO UPDATE SET
+                    room_id=excluded.room_id,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    first,
+                    second,
+                    room_id,
+                    datetime.now(UTC).isoformat(),
+                ),
+            )
+
+        await self._database.write(write)
+
+    async def trusted_channels(
+        self,
+        user_id: str,
+    ) -> tuple[str, ...]:
+        _require_channel_key(user_id, "user_id")
+
+        def read(connection: sqlite3.Connection) -> tuple[str, ...]:
+            rows = connection.execute(
+                """
+                SELECT room_id FROM channel_relationships
+                 WHERE relationship_kind='trusted'
+                   AND (owner_user_id=? OR peer_user_id=?)
+                 ORDER BY room_id
+                """,
+                (user_id, user_id),
+            ).fetchall()
+            return tuple(str(row["room_id"]) for row in rows)
+
+        return await self._database.read(read)
+
+
+def _require_channel_key(value: str, label: str) -> None:
+    if not value:
+        raise ValueError(f"{label} cannot be empty")
+
+
+def _trusted_pair(first: str, second: str) -> tuple[str, str]:
+    _require_channel_key(first, "first_user_id")
+    _require_channel_key(second, "second_user_id")
+    if first == second:
+        raise ValueError("trusted channel users must be distinct")
+    ordered = tuple(sorted((first, second)))
+    return ordered[0], ordered[1]

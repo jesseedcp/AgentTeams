@@ -1,6 +1,6 @@
 """Initial SQLite schema for durable operations."""
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS operations (
@@ -92,4 +92,15 @@ CREATE TABLE IF NOT EXISTS human_access (
 );
 CREATE INDEX IF NOT EXISTS human_access_matrix_idx
   ON human_access(matrix_user_id);
+
+CREATE TABLE IF NOT EXISTS channel_relationships (
+  relationship_kind TEXT NOT NULL,
+  owner_user_id TEXT NOT NULL,
+  peer_user_id TEXT NOT NULL DEFAULT '',
+  room_id TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY(relationship_kind, owner_user_id, peer_user_id)
+);
+CREATE INDEX IF NOT EXISTS channel_relationships_room_idx
+  ON channel_relationships(room_id);
 """
