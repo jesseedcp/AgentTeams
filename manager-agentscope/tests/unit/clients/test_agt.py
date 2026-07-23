@@ -116,6 +116,41 @@ async def test_create_and_update_worker_map_only_known_flags() -> None:
 
 
 @pytest.mark.asyncio
+async def test_apply_worker_package_binds_expected_digest_to_uri() -> None:
+    process = FakeProcess()
+    process.queue_error("", returncode=0)
+    process.queue_json(_worker(name="imported", runtime="hermes"))
+    client = AgtClient(process)
+    digest = "sha256:" + ("a" * 64)
+
+    worker = await client.apply_worker_package(
+        name="imported",
+        package_uri=(
+            "nacos://registry.example:8848/public/remote-coder/1.4.0"
+        ),
+        expected_digest=digest,
+        runtime="hermes",
+    )
+
+    assert worker.name == "imported"
+    assert process.calls[-2][0] == (
+        "agt",
+        "apply",
+        "worker",
+        "--name",
+        "imported",
+        "--package",
+        (
+            "nacos://registry.example:8848/public/remote-coder/1.4.0"
+            "?expectedDigest=sha256%3A"
+            + ("a" * 64)
+        ),
+        "--runtime",
+        "hermes",
+    )
+
+
+@pytest.mark.asyncio
 async def test_team_and_human_outputs_map_controller_fields() -> None:
     process = FakeProcess()
     process.queue_json(

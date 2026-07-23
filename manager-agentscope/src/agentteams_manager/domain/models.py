@@ -54,6 +54,7 @@ class ExternalEffect(StrEnum):
 
 class OperationKind(StrEnum):
     CREATE_WORKER = "create_worker"
+    IMPORT_WORKER = "import_worker"
     UPDATE_WORKER = "update_worker"
     DELETE_WORKER = "delete_worker"
     CREATE_TEAM = "create_team"

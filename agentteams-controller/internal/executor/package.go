@@ -3,6 +3,8 @@ package executor
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -848,8 +850,25 @@ func (p *PackageResolver) resolveNacos(ctx context.Context, u *url.URL) (string,
 		version = ""
 	}
 
-	if err := client.GetAgentSpec(ctx, specName, outputDir, version, label); err != nil {
+	expectedDigest := strings.TrimSpace(u.Query().Get("expectedDigest"))
+	if expectedDigest != "" {
+		if err := validateNacosDigest(expectedDigest); err != nil {
+			return "", err
+		}
+	}
+	actualDigest, err := client.GetAgentSpecWithDigest(ctx, specName, outputDir, version, label)
+	if err != nil {
 		return "", fmt.Errorf("fetch agentspec %s from nacos failed: %w", specName, err)
+	}
+	if expectedDigest != "" && subtle.ConstantTimeCompare(
+		[]byte(expectedDigest),
+		[]byte(actualDigest),
+	) != 1 {
+		return "", fmt.Errorf(
+			"agentspec digest mismatch: expected %s, got %s",
+			expectedDigest,
+			actualDigest,
+		)
 	}
 
 	info, err := os.Stat(destPath)
@@ -861,6 +880,24 @@ func (p *PackageResolver) resolveNacos(ctx context.Context, u *url.URL) (string,
 	}
 
 	return destPath, nil
+}
+
+func validateNacosDigest(value string) error {
+	const prefix = "sha256:"
+	if !strings.HasPrefix(value, prefix) {
+		return fmt.Errorf("invalid expectedDigest: must use sha256:<hex>")
+	}
+	raw := strings.TrimPrefix(value, prefix)
+	if len(raw) != sha256.Size*2 {
+		return fmt.Errorf("invalid expectedDigest: must use sha256:<hex>")
+	}
+	if _, err := hex.DecodeString(raw); err != nil {
+		return fmt.Errorf("invalid expectedDigest: must use lowercase sha256 hex")
+	}
+	if raw != strings.ToLower(raw) {
+		return fmt.Errorf("invalid expectedDigest: must use lowercase sha256 hex")
+	}
+	return nil
 }
 
 // ValidateNacosURIOptions configures Nacos preflight so it matches runtime
@@ -894,6 +931,11 @@ func ValidateNacosURI(ctx context.Context, raw string, opts ValidateNacosURIOpti
 	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
 	if len(parts) < 2 {
 		return fmt.Errorf("invalid nacos URI %q: expected nacos://[user:pass@]host:port/{namespace}/{agentspec-name}[/{version}]", raw)
+	}
+	if expectedDigest := strings.TrimSpace(u.Query().Get("expectedDigest")); expectedDigest != "" {
+		if err := validateNacosDigest(expectedDigest); err != nil {
+			return err
+		}
 	}
 
 	nacosAddr := u.Host

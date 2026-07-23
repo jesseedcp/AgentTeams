@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -217,14 +218,22 @@ func writeZipFile(entry *zip.File, dest string) error {
 }
 
 func (c *NacosAIClient) GetAgentSpec(ctx context.Context, name, outputDir string, version, label string) error {
+	_, err := c.GetAgentSpecWithDigest(ctx, name, outputDir, version, label)
+	return err
+}
+
+// GetAgentSpecWithDigest materializes an AgentSpec and returns a canonical
+// digest of the logical Nacos payload. The digest is independent of JSON key
+// ordering and is used to bind Manager discovery to Controller fetch.
+func (c *NacosAIClient) GetAgentSpecWithDigest(ctx context.Context, name, outputDir string, version, label string) (string, error) {
 	spec, err := c.fetchAgentSpec(ctx, name, version, label)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	specDir := filepath.Join(outputDir, name)
 	if err := os.MkdirAll(specDir, 0o755); err != nil {
-		return fmt.Errorf("failed to create directory: %w", err)
+		return "", fmt.Errorf("failed to create directory: %w", err)
 	}
 
 	for _, res := range spec.Resource {
@@ -239,24 +248,44 @@ func (c *NacosAIClient) GetAgentSpec(ctx context.Context, name, outputDir string
 
 		filePath := filepath.Join(specDir, filepath.FromSlash(rel))
 		if err := os.MkdirAll(filepath.Dir(filePath), 0o755); err != nil {
-			return fmt.Errorf("failed to create resource directory: %w", err)
+			return "", fmt.Errorf("failed to create resource directory: %w", err)
 		}
 
 		data := []byte(res.Content)
 		if encoding, ok := res.Metadata["encoding"].(string); ok && encoding == "base64" {
 			decoded, err := base64.StdEncoding.DecodeString(res.Content)
 			if err != nil {
-				return fmt.Errorf("failed to decode base64 resource %s: %w", res.Name, err)
+				return "", fmt.Errorf("failed to decode base64 resource %s: %w", res.Name, err)
 			}
 			data = decoded
 		}
 
 		if err := os.WriteFile(filePath, data, 0o644); err != nil {
-			return fmt.Errorf("failed to write resource file %s: %w", res.Name, err)
+			return "", fmt.Errorf("failed to write resource file %s: %w", res.Name, err)
 		}
 	}
 
-	return writeAgentSpecManifest(specDir, spec.Content)
+	if err := writeAgentSpecManifest(specDir, spec.Content); err != nil {
+		return "", err
+	}
+	return digestNacosAgentSpec(spec)
+}
+
+func digestNacosAgentSpec(spec *nacosAgentSpec) (string, error) {
+	raw, err := json.Marshal(spec)
+	if err != nil {
+		return "", fmt.Errorf("failed to encode agentspec digest: %w", err)
+	}
+	var canonical interface{}
+	if err := json.Unmarshal(raw, &canonical); err != nil {
+		return "", fmt.Errorf("failed to normalize agentspec digest: %w", err)
+	}
+	normalized, err := json.Marshal(canonical)
+	if err != nil {
+		return "", fmt.Errorf("failed to canonicalize agentspec digest: %w", err)
+	}
+	digest := sha256.Sum256(normalized)
+	return fmt.Sprintf("sha256:%x", digest), nil
 }
 
 func (c *NacosAIClient) CheckAgentSpecExists(ctx context.Context, name, version, label string) error {

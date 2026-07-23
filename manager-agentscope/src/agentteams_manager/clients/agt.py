@@ -6,6 +6,7 @@ import json
 import re
 from pathlib import Path
 from typing import Annotated, Any, Literal, Protocol
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from pydantic import (
     BaseModel,
@@ -323,6 +324,57 @@ class AgtClient:
             )
         return worker
 
+    async def apply_worker_package(
+        self,
+        *,
+        name: str,
+        package_uri: str,
+        expected_digest: str,
+        runtime: WorkerRuntime,
+    ) -> WorkerResource:
+        """Apply one digest-bound Nacos package and prove it is readable."""
+        _validate_name(name)
+        if re.fullmatch(r"sha256:[0-9a-f]{64}", expected_digest) is None:
+            raise ValueError("expected_digest must be a sha256 digest")
+        parsed = urlsplit(package_uri)
+        if parsed.scheme != "nacos" or not parsed.hostname:
+            raise ValueError("Worker packages must use a valid nacos:// URI")
+        query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+        existing = query.get("expectedDigest")
+        if existing is not None and existing != expected_digest:
+            raise ValueError(
+                "package URI expectedDigest conflicts with confirmation",
+            )
+        query["expectedDigest"] = expected_digest
+        bound_uri = urlunsplit(
+            (
+                parsed.scheme,
+                parsed.netloc,
+                parsed.path,
+                urlencode(query),
+                "",
+            ),
+        )
+        await self._command(
+            (
+                "agt",
+                "apply",
+                "worker",
+                "--name",
+                name,
+                "--package",
+                bound_uri,
+                "--runtime",
+                runtime,
+            ),
+        )
+        worker = await self.get_worker(name)
+        if worker is None:
+            raise AgtProtocolError(
+                f"applied worker {name!r} is not readable",
+            )
+        return worker
+
     async def worker_status(self, name: str) -> WorkerResource | None:
         _validate_name(name)
         raw = await self._json_or_none(
@@ -527,11 +579,15 @@ _SENSITIVE_VALUE = re.compile(
     r"(?i)(token|password|secret|authorization|api[_-]?key)"
     r"(\s*[=:]\s*)([^,\s\"'}]+)",
 )
+_URI_USERINFO = re.compile(
+    r"(?i)(nacos://)[^/@\s]+:[^/@\s]+@",
+)
 
 
 def _safe_error(stderr: bytes) -> str:
     text = stderr.decode("utf-8", errors="replace").strip()
     text = _SENSITIVE_VALUE.sub(r"\1\2[REDACTED]", text)
+    text = _URI_USERINFO.sub(r"\1[REDACTED]@", text)
     return text[:1000] or "no diagnostic output"
 
 

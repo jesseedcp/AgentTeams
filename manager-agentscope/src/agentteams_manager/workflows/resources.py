@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
 import json
+import re
+import secrets
 from collections.abc import Awaitable, Callable, Collection
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -20,6 +24,7 @@ from agentteams_manager.clients.agt import (
     WorkerRuntime,
     WorkerUpdateRequest,
 )
+from agentteams_manager.clients.nacos import NacosWorker
 from agentteams_manager.clients.process import ProcessTimeout
 from agentteams_manager.domain.errors import (
     AmbiguousEffectError,
@@ -122,6 +127,7 @@ class ResourceReconciler:
 
     _CREATE_KINDS = {
         OperationKind.CREATE_WORKER: "worker",
+        OperationKind.IMPORT_WORKER: "worker",
         OperationKind.CREATE_TEAM: "team",
         OperationKind.CREATE_HUMAN: "human",
     }
@@ -225,6 +231,15 @@ class ResourceController(ReconciliationController, Protocol):
         request: WorkerUpdateRequest,
     ) -> WorkerResource: ...
 
+    async def apply_worker_package(
+        self,
+        *,
+        name: str,
+        package_uri: str,
+        expected_digest: str,
+        runtime: WorkerRuntime,
+    ) -> WorkerResource: ...
+
     async def sleep_worker(self, name: str) -> WorkerResource: ...
 
     async def wake_worker(self, name: str) -> WorkerResource: ...
@@ -298,6 +313,40 @@ class ResourceSupervisor(Protocol):
 
 class TopologyRefresher(Protocol):
     async def refresh(self) -> object: ...
+
+
+class NacosDiscovery(Protocol):
+    async def search_workers(
+        self,
+        query: str,
+    ) -> tuple[NacosWorker, ...]: ...
+
+    async def verify_worker(self, candidate: NacosWorker) -> None: ...
+
+
+class WorkerImportError(ConflictError):
+    """A confirmed Nacos import failed without a generic fallback."""
+
+
+class WorkerDiscovery(BaseModel):
+    """Read-only discovery result requiring a separate import confirmation."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    query: str = Field(min_length=1)
+    candidates: tuple[NacosWorker, ...]
+    requires_confirmation: bool = True
+    discovery_token: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class WorkerImportConfirmation(BaseModel):
+    """Tamper-evident binding between a candidate and local Worker name."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    candidate: NacosWorker
+    worker_name: ResourceName
+    confirmation_token: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
 Sleeper = Callable[[float], Awaitable[None]]
@@ -421,6 +470,8 @@ class ResourceService:
         supervisor: ResourceSupervisor,
         topology: TopologyRefresher,
         matrix: MatrixPort,
+        nacos: NacosDiscovery | None = None,
+        confirmation_key: bytes | None = None,
         sleeper: Sleeper = asyncio.sleep,
         worker_poll_delays: tuple[float, ...] = (0.25, 0.5, 1, 2, 4),
         team_poll_delays: tuple[float, ...] = (0.5, 1, 2, 4, 8),
@@ -446,6 +497,10 @@ class ResourceService:
         self._supervisor = supervisor
         self._topology = topology
         self._matrix = matrix
+        self._nacos = nacos
+        self._confirmation_key = confirmation_key or secrets.token_bytes(32)
+        if len(self._confirmation_key) < 32:
+            raise ValueError("confirmation_key must be at least 32 bytes")
         self._sleeper = sleeper
         self._worker_poll_delays = worker_poll_delays
         self._team_poll_delays = team_poll_delays
@@ -469,6 +524,295 @@ class ResourceService:
 
     async def list_humans(self) -> tuple[HumanResource, ...]:
         return await self._controller.list_humans()
+
+    async def find_worker(self, query: str) -> WorkerDiscovery:
+        """Search Nacos without performing any Controller mutation."""
+        if self._nacos is None:
+            raise WorkerImportError("Nacos discovery is not configured")
+        normalized = " ".join(query.split())
+        if not normalized:
+            raise ValueError("Worker search query cannot be empty")
+        candidates = await self._nacos.search_workers(normalized)
+        unsigned = {
+            "query": normalized,
+            "candidates": [
+                item.model_dump(mode="json")
+                for item in candidates
+            ],
+        }
+        return WorkerDiscovery(
+            query=normalized,
+            candidates=candidates,
+            discovery_token=self._confirmation_signature(
+                "discovery",
+                unsigned,
+            ),
+        )
+
+    def confirm_import(
+        self,
+        discovery: WorkerDiscovery,
+        *,
+        candidate_name: str,
+        worker_name: str,
+    ) -> WorkerImportConfirmation:
+        """Bind an explicit candidate choice to its local Worker name."""
+        unsigned_discovery = {
+            "query": discovery.query,
+            "candidates": [
+                item.model_dump(mode="json")
+                for item in discovery.candidates
+            ],
+        }
+        expected = self._confirmation_signature(
+            "discovery",
+            unsigned_discovery,
+        )
+        if not hmac.compare_digest(expected, discovery.discovery_token):
+            raise WorkerImportError("Worker discovery confirmation is invalid")
+        candidate = next(
+            (
+                item
+                for item in discovery.candidates
+                if item.name == candidate_name
+            ),
+            None,
+        )
+        if candidate is None:
+            raise NotFoundError(
+                f"Nacos candidate {candidate_name!r} was not discovered",
+            )
+        if re.fullmatch(r"[a-z0-9][a-z0-9-]*", worker_name) is None:
+            raise ValueError(f"invalid resource name {worker_name!r}")
+        payload = {
+            "candidate": candidate.model_dump(mode="json"),
+            "worker_name": worker_name,
+        }
+        return WorkerImportConfirmation(
+            candidate=candidate,
+            worker_name=worker_name,
+            confirmation_token=self._confirmation_signature(
+                "import",
+                payload,
+            ),
+        )
+
+    async def import_worker(
+        self,
+        confirmation: WorkerImportConfirmation,
+        *,
+        context: MutationContext,
+    ) -> WorkerResource:
+        """Import exactly the confirmed package, with no generic fallback."""
+        self._validate_import_confirmation(confirmation)
+        operation = await self._supervisor.begin(
+            operation_id=context.operation_id,
+            kind=OperationKind.IMPORT_WORKER,
+            target_key=f"worker/{confirmation.worker_name}",
+            request=confirmation.model_dump(mode="json"),
+        )
+        return await self.resume_worker_import(operation)
+
+    async def resume_worker_import(
+        self,
+        operation: OperationRecord,
+    ) -> WorkerResource:
+        if operation.kind is not OperationKind.IMPORT_WORKER:
+            raise ValueError("operation is not a Worker import")
+        confirmation = WorkerImportConfirmation.model_validate(
+            operation.request,
+        )
+        self._validate_import_confirmation(confirmation)
+        name = confirmation.worker_name
+        candidate = confirmation.candidate
+        if operation.target_key != f"worker/{name}":
+            raise ConflictError(
+                "Worker import operation target does not match confirmation",
+            )
+        if operation.status is OperationStatus.SUCCEEDED:
+            return await self._require_worker(name)
+        if operation.status is OperationStatus.FAILED:
+            raise WorkerImportError(
+                f"import worker/{name} previously failed",
+            )
+
+        worker: WorkerResource | None = None
+        if operation.status is OperationStatus.PLANNED:
+            if await self._controller.get_worker(name) is not None:
+                await self._supervisor.effect_failed(
+                    operation.operation_id,
+                    ExternalEffect.CONTROLLER,
+                    "resource already exists",
+                )
+                raise ConflictError(f"worker/{name} already exists")
+            if self._nacos is None:
+                await self._supervisor.effect_failed(
+                    operation.operation_id,
+                    ExternalEffect.CONTROLLER,
+                    "Nacos discovery is not configured",
+                )
+                raise WorkerImportError("Nacos discovery is not configured")
+            try:
+                await self._nacos.verify_worker(candidate)
+            except Exception as exc:
+                reason = _safe_import_reason(exc)
+                await self._supervisor.effect_failed(
+                    operation.operation_id,
+                    ExternalEffect.CONTROLLER,
+                    reason,
+                )
+                raise WorkerImportError(reason) from exc
+            await self._supervisor.before_effect(
+                operation.operation_id,
+                ExternalEffect.CONTROLLER,
+                {
+                    "operation": "apply_worker_package",
+                    "name": name,
+                    "package_uri": candidate.package_uri,
+                    "expected_digest": candidate.digest,
+                    "runtime": candidate.runtime,
+                },
+            )
+            try:
+                worker = await self._controller.apply_worker_package(
+                    name=name,
+                    package_uri=candidate.package_uri,
+                    expected_digest=candidate.digest,
+                    runtime=candidate.runtime,
+                )
+            except Exception as exc:
+                if _ambiguous_exception(exc):
+                    await self._supervisor.effect_ambiguous(
+                        operation.operation_id,
+                        ExternalEffect.CONTROLLER,
+                        type(exc).__name__,
+                    )
+                    worker = await self._controller.get_worker(name)
+                    if worker is None:
+                        raise AmbiguousEffectError(
+                            f"import worker/{name} result is unknown",
+                        ) from exc
+                else:
+                    reason = _safe_import_reason(exc)
+                    await self._supervisor.effect_failed(
+                        operation.operation_id,
+                        ExternalEffect.CONTROLLER,
+                        reason,
+                    )
+                    raise WorkerImportError(reason) from exc
+            await self._supervisor.effect_acknowledged(
+                operation.operation_id,
+                ExternalEffect.CONTROLLER,
+                {
+                    "name": name,
+                    "package_uri": candidate.package_uri,
+                    "digest": candidate.digest,
+                    "accepted": True,
+                },
+            )
+        else:
+            worker = await self._controller.get_worker(name)
+            if worker is None:
+                raise AmbiguousEffectError(
+                    f"import worker/{name} has no Controller proof",
+                )
+            await self._supervisor.effect_acknowledged(
+                operation.operation_id,
+                ExternalEffect.CONTROLLER,
+                _resource_receipt(worker),
+            )
+
+        ready = await self._wait_for_worker_room(
+            operation_id=operation.operation_id,
+            name=name,
+            initial=worker,
+        )
+        try:
+            await self._topology.refresh()
+        except Exception as exc:
+            await self._supervisor.effect_ambiguous(
+                operation.operation_id,
+                ExternalEffect.MATRIX,
+                f"topology not converged: {type(exc).__name__}",
+            )
+            raise
+        transaction_id = matrix_transaction_id(
+            operation.operation_id,
+            0,
+        )
+        await self._supervisor.before_effect(
+            operation.operation_id,
+            ExternalEffect.MATRIX,
+            {
+                "operation": "greet_worker",
+                "room_id": ready.room_id or "",
+                "txn_id": transaction_id,
+            },
+        )
+        try:
+            event_id = await self._matrix.send_text(
+                ready.room_id or "",
+                self._greeting,
+                txn_id=transaction_id,
+            )
+        except Exception as exc:
+            if _ambiguous_exception(exc):
+                await self._supervisor.effect_ambiguous(
+                    operation.operation_id,
+                    ExternalEffect.MATRIX,
+                    type(exc).__name__,
+                )
+            else:
+                await self._supervisor.effect_failed(
+                    operation.operation_id,
+                    ExternalEffect.MATRIX,
+                    _safe_reason(exc),
+                )
+            raise
+        await self._supervisor.effect_succeeded(
+            operation.operation_id,
+            ExternalEffect.MATRIX,
+            {
+                **_resource_receipt(ready),
+                "package_uri": candidate.package_uri,
+                "digest": candidate.digest,
+                "greeting_event_id": event_id,
+                "greeting_txn_id": transaction_id,
+            },
+        )
+        return ready
+
+    def _validate_import_confirmation(
+        self,
+        confirmation: WorkerImportConfirmation,
+    ) -> None:
+        payload = {
+            "candidate": confirmation.candidate.model_dump(mode="json"),
+            "worker_name": confirmation.worker_name,
+        }
+        expected = self._confirmation_signature("import", payload)
+        if not hmac.compare_digest(
+            expected,
+            confirmation.confirmation_token,
+        ):
+            raise WorkerImportError("Worker import confirmation is invalid")
+
+    def _confirmation_signature(
+        self,
+        purpose: str,
+        payload: dict[str, object],
+    ) -> str:
+        encoded = json.dumps(
+            {"purpose": purpose, "payload": payload},
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+        return hmac.new(
+            self._confirmation_key,
+            encoded,
+            hashlib.sha256,
+        ).hexdigest()
 
     async def create_worker(
         self,
@@ -1346,14 +1690,21 @@ class ResourceHeartbeat:
         operations = tuple(
             operation
             for operation in await self._operations.list_recoverable()
-            if operation.kind is OperationKind.CREATE_WORKER
+            if operation.kind
+            in {
+                OperationKind.CREATE_WORKER,
+                OperationKind.IMPORT_WORKER,
+            }
         )
         reconciled: list[str] = []
         pending: list[str] = []
         failed: list[str] = []
         for operation in operations:
             try:
-                await self._resources.resume_worker_create(operation)
+                if operation.kind is OperationKind.IMPORT_WORKER:
+                    await self._resources.resume_worker_import(operation)
+                else:
+                    await self._resources.resume_worker_create(operation)
             except AmbiguousEffectError:
                 pending.append(operation.operation_id)
             except Exception:
@@ -1733,6 +2084,22 @@ def _ambiguous_exception(exc: BaseException) -> bool:
 
 def _safe_reason(exc: BaseException) -> str:
     return type(exc).__name__
+
+
+def _safe_import_reason(exc: BaseException) -> str:
+    message = str(exc).strip() or type(exc).__name__
+    message = re.sub(
+        r"(?i)(nacos://)[^/@\s]+:[^/@\s]+@",
+        r"\1[REDACTED]@",
+        message,
+    )
+    message = re.sub(
+        r"(?i)(token|password|secret|authorization|api[_-]?key)"
+        r"(\s*[=:]\s*)([^,\s\"'}]+)",
+        r"\1\2[REDACTED]",
+        message,
+    )
+    return message[:1000]
 
 
 def _unique_by_name(

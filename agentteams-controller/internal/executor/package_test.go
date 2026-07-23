@@ -3,6 +3,7 @@ package executor
 import (
 	"archive/zip"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -387,6 +388,66 @@ func TestResolveNacos_AddrExtraction(t *testing.T) {
 				t.Errorf("error should not reference AGENTTEAMS_NACOS_ADDR, got: %v", err)
 			}
 		})
+	}
+}
+
+func TestResolveNacos_EnforcesExpectedAgentSpecDigest(t *testing.T) {
+	spec := &nacosAgentSpec{
+		NamespaceID: "public",
+		Name:        "remote-coder",
+		Description: "production coder",
+		Content:     `{"displayName":"Remote Coder","runtime":"hermes"}`,
+		Resource:    map[string]*nacosAgentSpecResource{},
+	}
+	expected, err := digestNacosAgentSpec(spec)
+	if err != nil {
+		t.Fatalf("digestNacosAgentSpec failed: %v", err)
+	}
+	if expected != "sha256:ca8cc8aaf1355539eca5e3162b7b8f73d74dc6d55dbf6820ffa8f8971c1f0583" {
+		t.Fatalf("canonical digest = %q", expected)
+	}
+	specJSON, err := json.Marshal(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := fmt.Sprintf(
+		`{"code":0,"message":"success","data":%s}`,
+		specJSON,
+	)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/nacos/v3/client/ai/agentspecs" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(response))
+	}))
+	defer server.Close()
+
+	serverURL, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := "nacos://" + serverURL.Host + "/public/remote-coder/1.4.0"
+	resolver := NewPackageResolver(t.TempDir())
+
+	valid, err := url.Parse(base + "?expectedDigest=" + url.QueryEscape(expected))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = resolver.resolveNacos(context.Background(), valid); err != nil {
+		t.Fatalf("digest-bound resolve failed: %v", err)
+	}
+
+	invalid, err := url.Parse(
+		base + "?expectedDigest=sha256%3A" + strings.Repeat("0", 64),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = resolver.resolveNacos(context.Background(), invalid); err == nil {
+		t.Fatal("expected digest mismatch")
+	} else if !strings.Contains(err.Error(), "agentspec digest mismatch") {
+		t.Fatalf("unexpected mismatch error: %v", err)
 	}
 }
 
