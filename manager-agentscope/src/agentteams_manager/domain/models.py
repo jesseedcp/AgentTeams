@@ -295,6 +295,7 @@ class ObjectReceipt(FrozenStrictModel):
     sha256: str
     size: int = Field(ge=0)
     content_type: str | None = None
+    version_id: str | None = None
 
 
 class MirrorReceipt(FrozenStrictModel):

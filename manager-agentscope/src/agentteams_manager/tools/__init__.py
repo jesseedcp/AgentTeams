@@ -9,6 +9,7 @@ from .resources import (
     authorize_resource_target,
     human_room_policy,
 )
+from .storage import TaskArtifactSet, TaskMetadata
 
 __all__ = [
     "ChannelResolver",
@@ -17,6 +18,8 @@ __all__ = [
     "RESOURCE_TOOL_NAMES",
     "ResourceToolkit",
     "ResourceToolkitFactory",
+    "TaskArtifactSet",
+    "TaskMetadata",
     "authorize_resource_target",
     "human_room_policy",
 ]
