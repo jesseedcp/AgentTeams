@@ -136,3 +136,61 @@ async def test_before_effect_redacts_nested_secrets(
     assert event.payload["request"]["api_key"] == "[REDACTED]"
     assert len(await operations.events_for(operation.operation_id)) == 1
 
+
+@pytest.mark.asyncio
+async def test_acknowledged_effect_keeps_multistep_operation_running(
+    tmp_path: Path,
+) -> None:
+    supervisor, operations, _ = await make_supervisor(tmp_path)
+    operation = await supervisor.begin(
+        operation_id="a" * 32,
+        kind=OperationKind.CREATE_WORKER,
+        target_key="worker/alice",
+        request={"name": "alice"},
+    )
+    await supervisor.before_effect(
+        operation.operation_id,
+        ExternalEffect.CONTROLLER,
+        {"operation": "create_worker"},
+    )
+
+    changed = await supervisor.effect_acknowledged(
+        operation.operation_id,
+        ExternalEffect.CONTROLLER,
+        {"name": "alice", "accepted": True},
+    )
+
+    assert changed.status is OperationStatus.RUNNING
+    assert [
+        event.event_type
+        for event in await operations.events_for(operation.operation_id)
+    ] == ["effect_planned", "effect_acknowledged"]
+
+
+@pytest.mark.asyncio
+async def test_definite_effect_failure_is_terminal(
+    tmp_path: Path,
+) -> None:
+    supervisor, operations, _ = await make_supervisor(tmp_path)
+    operation = await supervisor.begin(
+        operation_id="b" * 32,
+        kind=OperationKind.UPDATE_WORKER,
+        target_key="worker/alice",
+        request={"name": "alice", "model": "new"},
+    )
+    await supervisor.before_effect(
+        operation.operation_id,
+        ExternalEffect.CONTROLLER,
+        {"operation": "update_worker"},
+    )
+
+    changed = await supervisor.effect_failed(
+        operation.operation_id,
+        ExternalEffect.CONTROLLER,
+        "validation rejected",
+    )
+
+    assert changed.status is OperationStatus.FAILED
+    assert changed.result["reason"] == "validation rejected"
+    events = await operations.events_for(operation.operation_id)
+    assert events[-1].event_type == "effect_failed"

@@ -3,24 +3,41 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Collection
+from collections.abc import Awaitable, Callable, Collection
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from agentteams_manager.domain.errors import ConflictError
+from agentteams_manager.clients.agt import (
+    AgtProtocolError,
+    WorkerCreateRequest,
+    WorkerUpdateRequest,
+)
+from agentteams_manager.clients.process import ProcessTimeout
+from agentteams_manager.domain.errors import (
+    AmbiguousEffectError,
+    ConflictError,
+    NotFoundError,
+)
+from agentteams_manager.domain.ids import (
+    matrix_transaction_id,
+    operation_id_for,
+)
 from agentteams_manager.domain.models import (
+    ExternalEffect,
     HumanResource,
     OperationKind,
     OperationRecord,
+    OperationStatus,
     RoomKind,
     RoomPolicy,
     TeamResource,
     TopologySnapshot,
     WorkerResource,
 )
+from agentteams_manager.domain.ports import MatrixPort
 from agentteams_manager.matrix.policy import (
     ALL_MANAGER_TOOLS,
     CONFIRM_TOOLS,
@@ -170,6 +187,600 @@ class ResourceReconciler:
         if resource_type == "team":
             return await self._controller.get_team(name)
         return await self._controller.get_human(name)
+
+
+class MutationContext(BaseModel):
+    """Stable Matrix/tool identity for a resource mutation."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    room_id: str = Field(min_length=1)
+    event_id: str = Field(min_length=1)
+    tool_call_id: str = Field(min_length=1)
+
+    @property
+    def operation_id(self) -> str:
+        return operation_id_for(
+            self.room_id,
+            self.event_id,
+            self.tool_call_id,
+        )
+
+
+class ResourceController(ReconciliationController, Protocol):
+    async def list_workers(self) -> tuple[WorkerResource, ...]: ...
+
+    async def create_worker(
+        self,
+        request: WorkerCreateRequest,
+    ) -> WorkerResource | None: ...
+
+    async def update_worker(
+        self,
+        request: WorkerUpdateRequest,
+    ) -> WorkerResource: ...
+
+    async def sleep_worker(self, name: str) -> WorkerResource: ...
+
+    async def wake_worker(self, name: str) -> WorkerResource: ...
+
+    async def delete_worker(self, name: str) -> None: ...
+
+
+class ResourceSupervisor(Protocol):
+    async def begin(
+        self,
+        *,
+        operation_id: str,
+        kind: OperationKind,
+        target_key: str,
+        request: dict[str, object],
+    ) -> OperationRecord: ...
+
+    async def before_effect(
+        self,
+        operation_id: str,
+        effect: ExternalEffect,
+        request: dict[str, object],
+    ) -> object: ...
+
+    async def effect_acknowledged(
+        self,
+        operation_id: str,
+        effect: ExternalEffect,
+        receipt: dict[str, object],
+    ) -> OperationRecord: ...
+
+    async def effect_succeeded(
+        self,
+        operation_id: str,
+        effect: ExternalEffect,
+        receipt: dict[str, object],
+    ) -> OperationRecord: ...
+
+    async def effect_ambiguous(
+        self,
+        operation_id: str,
+        effect: ExternalEffect,
+        reason: str,
+    ) -> OperationRecord: ...
+
+    async def effect_failed(
+        self,
+        operation_id: str,
+        effect: ExternalEffect,
+        reason: str,
+    ) -> OperationRecord: ...
+
+
+class TopologyRefresher(Protocol):
+    async def refresh(self) -> object: ...
+
+
+Sleeper = Callable[[float], Awaitable[None]]
+
+
+class ResourceService:
+    """Run Worker mutations as durable, fact-proved workflows."""
+
+    def __init__(
+        self,
+        *,
+        controller: ResourceController,
+        supervisor: ResourceSupervisor,
+        topology: TopologyRefresher,
+        matrix: MatrixPort,
+        sleeper: Sleeper = asyncio.sleep,
+        worker_poll_delays: tuple[float, ...] = (0.25, 0.5, 1, 2, 4),
+        greeting: str = (
+            "Hello. I am the AgentTeams Manager. "
+            "This room is your direct coordination channel."
+        ),
+    ) -> None:
+        if not worker_poll_delays:
+            raise ValueError("worker_poll_delays cannot be empty")
+        if any(delay < 0 for delay in worker_poll_delays):
+            raise ValueError("worker poll delays cannot be negative")
+        self._controller = controller
+        self._supervisor = supervisor
+        self._topology = topology
+        self._matrix = matrix
+        self._sleeper = sleeper
+        self._worker_poll_delays = worker_poll_delays
+        self._greeting = greeting
+
+    async def get_worker(self, name: str) -> WorkerResource | None:
+        return await self._controller.get_worker(name)
+
+    async def list_workers(self) -> tuple[WorkerResource, ...]:
+        return await self._controller.list_workers()
+
+    async def create_worker(
+        self,
+        request: WorkerCreateRequest,
+        *,
+        context: MutationContext,
+    ) -> WorkerResource:
+        operation = await self._supervisor.begin(
+            operation_id=context.operation_id,
+            kind=OperationKind.CREATE_WORKER,
+            target_key=f"worker/{request.name}",
+            request=request.model_dump(mode="json"),
+        )
+        return await self.resume_worker_create(operation)
+
+    async def resume_worker_create(
+        self,
+        operation: OperationRecord,
+    ) -> WorkerResource:
+        if operation.kind is not OperationKind.CREATE_WORKER:
+            raise ValueError("operation is not a Worker create")
+        request = WorkerCreateRequest.model_validate(operation.request)
+        if operation.target_key != f"worker/{request.name}":
+            raise ConflictError(
+                "Worker create operation target does not match request",
+            )
+        if operation.status is OperationStatus.SUCCEEDED:
+            return await self._require_worker(request.name)
+        if operation.status is OperationStatus.FAILED:
+            raise ConflictError(
+                f"create worker/{request.name} previously failed",
+            )
+
+        if operation.status is OperationStatus.PLANNED:
+            existing = await self._controller.get_worker(request.name)
+            if existing is not None:
+                await self._supervisor.effect_failed(
+                    operation.operation_id,
+                    ExternalEffect.CONTROLLER,
+                    "resource already exists",
+                )
+                raise ConflictError(
+                    f"worker/{request.name} already exists",
+                )
+            await self._supervisor.before_effect(
+                operation.operation_id,
+                ExternalEffect.CONTROLLER,
+                {
+                    "operation": "create_worker",
+                    "name": request.name,
+                    "runtime": request.runtime,
+                    "model": request.model,
+                },
+            )
+            try:
+                await self._controller.create_worker(request)
+            except Exception as exc:
+                worker = await self._handle_ambiguous_worker_effect(
+                    operation_id=operation.operation_id,
+                    name=request.name,
+                    effect=ExternalEffect.CONTROLLER,
+                    exc=exc,
+                )
+            else:
+                worker = None
+            await self._supervisor.effect_acknowledged(
+                operation.operation_id,
+                ExternalEffect.CONTROLLER,
+                {"name": request.name, "accepted": True},
+            )
+        else:
+            worker = await self._controller.get_worker(request.name)
+            if worker is None:
+                raise AmbiguousEffectError(
+                    f"create worker/{request.name} has no Controller proof",
+                )
+            await self._supervisor.effect_acknowledged(
+                operation.operation_id,
+                ExternalEffect.CONTROLLER,
+                _resource_receipt(worker),
+            )
+
+        ready = await self._wait_for_worker_room(
+            operation_id=operation.operation_id,
+            name=request.name,
+            initial=worker,
+        )
+        try:
+            await self._topology.refresh()
+        except Exception as exc:
+            await self._supervisor.effect_ambiguous(
+                operation.operation_id,
+                ExternalEffect.MATRIX,
+                f"topology not converged: {type(exc).__name__}",
+            )
+            raise
+
+        transaction_id = matrix_transaction_id(
+            operation.operation_id,
+            0,
+        )
+        await self._supervisor.before_effect(
+            operation.operation_id,
+            ExternalEffect.MATRIX,
+            {
+                "operation": "greet_worker",
+                "room_id": ready.room_id or "",
+                "txn_id": transaction_id,
+            },
+        )
+        try:
+            event_id = await self._matrix.send_text(
+                ready.room_id or "",
+                self._greeting,
+                txn_id=transaction_id,
+            )
+        except Exception as exc:
+            if _ambiguous_exception(exc):
+                await self._supervisor.effect_ambiguous(
+                    operation.operation_id,
+                    ExternalEffect.MATRIX,
+                    type(exc).__name__,
+                )
+            else:
+                await self._supervisor.effect_failed(
+                    operation.operation_id,
+                    ExternalEffect.MATRIX,
+                    _safe_reason(exc),
+                )
+            raise
+        await self._supervisor.effect_succeeded(
+            operation.operation_id,
+            ExternalEffect.MATRIX,
+            {
+                **_resource_receipt(ready),
+                "greeting_event_id": event_id,
+                "greeting_txn_id": transaction_id,
+            },
+        )
+        return ready
+
+    async def update_worker(
+        self,
+        request: WorkerUpdateRequest,
+        *,
+        context: MutationContext,
+    ) -> WorkerResource:
+        await self._require_worker(request.name)
+
+        async def mutate() -> None:
+            await self._controller.update_worker(request)
+
+        async def prove() -> WorkerResource | None:
+            worker = await self._controller.get_worker(request.name)
+            if worker is None or not _matches_worker_update(worker, request):
+                return None
+            return worker
+
+        result = await self._run_worker_mutation(
+            context=context,
+            kind=OperationKind.UPDATE_WORKER,
+            name=request.name,
+            request={
+                "action": "update",
+                **request.model_dump(mode="json"),
+            },
+            mutate=mutate,
+            prove=prove,
+        )
+        if result is None:
+            raise NotFoundError(f"worker/{request.name} disappeared")
+        return result
+
+    async def sleep_worker(
+        self,
+        name: str,
+        *,
+        context: MutationContext,
+    ) -> WorkerResource:
+        await self._require_worker(name)
+
+        async def mutate() -> None:
+            await self._controller.sleep_worker(name)
+
+        async def prove() -> WorkerResource | None:
+            worker = await self._controller.get_worker(name)
+            if worker is None:
+                return None
+            state = str(worker.status.get("containerState", "")).casefold()
+            return worker if state in {"stopped", "sleeping", "exited"} else None
+
+        result = await self._run_worker_mutation(
+            context=context,
+            kind=OperationKind.UPDATE_WORKER,
+            name=name,
+            request={"name": name, "action": "sleep"},
+            mutate=mutate,
+            prove=prove,
+        )
+        if result is None:
+            raise NotFoundError(f"worker/{name} disappeared")
+        return result
+
+    async def wake_worker(
+        self,
+        name: str,
+        *,
+        context: MutationContext,
+    ) -> WorkerResource:
+        await self._require_worker(name)
+
+        async def mutate() -> None:
+            await self._controller.wake_worker(name)
+
+        async def prove() -> WorkerResource | None:
+            worker = await self._controller.get_worker(name)
+            if worker is None:
+                return None
+            state = str(worker.status.get("containerState", "")).casefold()
+            return worker if state in {"running", "ready"} else None
+
+        result = await self._run_worker_mutation(
+            context=context,
+            kind=OperationKind.UPDATE_WORKER,
+            name=name,
+            request={"name": name, "action": "wake"},
+            mutate=mutate,
+            prove=prove,
+        )
+        if result is None:
+            raise NotFoundError(f"worker/{name} disappeared")
+        return result
+
+    async def delete_worker(
+        self,
+        name: str,
+        *,
+        context: MutationContext,
+    ) -> None:
+        await self._require_worker(name)
+
+        async def mutate() -> None:
+            await self._controller.delete_worker(name)
+
+        async def prove() -> WorkerResource | None | bool:
+            worker = await self._controller.get_worker(name)
+            return True if worker is None else None
+
+        await self._run_worker_mutation(
+            context=context,
+            kind=OperationKind.DELETE_WORKER,
+            name=name,
+            request={"name": name, "action": "delete"},
+            mutate=mutate,
+            prove=prove,
+        )
+
+    async def _run_worker_mutation(
+        self,
+        *,
+        context: MutationContext,
+        kind: OperationKind,
+        name: str,
+        request: dict[str, object],
+        mutate: Callable[[], Awaitable[None]],
+        prove: Callable[
+            [],
+            Awaitable[WorkerResource | None | bool],
+        ],
+    ) -> WorkerResource | None:
+        operation = await self._supervisor.begin(
+            operation_id=context.operation_id,
+            kind=kind,
+            target_key=f"worker/{name}",
+            request=request,
+        )
+        if operation.status is OperationStatus.FAILED:
+            raise ConflictError(
+                f"{request['action']} worker/{name} previously failed",
+            )
+        if operation.status is OperationStatus.SUCCEEDED:
+            proof = await prove()
+            return proof if isinstance(proof, WorkerResource) else None
+
+        if operation.status is OperationStatus.PLANNED:
+            await self._supervisor.before_effect(
+                operation.operation_id,
+                ExternalEffect.CONTROLLER,
+                {
+                    "operation": f"{request['action']}_worker",
+                    "name": name,
+                },
+            )
+            try:
+                await mutate()
+            except Exception as exc:
+                if _ambiguous_exception(exc):
+                    await self._supervisor.effect_ambiguous(
+                        operation.operation_id,
+                        ExternalEffect.CONTROLLER,
+                        type(exc).__name__,
+                    )
+                else:
+                    await self._supervisor.effect_failed(
+                        operation.operation_id,
+                        ExternalEffect.CONTROLLER,
+                        _safe_reason(exc),
+                    )
+                    raise
+
+        proof = await prove()
+        if proof is None:
+            await self._supervisor.effect_ambiguous(
+                operation.operation_id,
+                ExternalEffect.CONTROLLER,
+                "Controller state has not converged",
+            )
+            raise AmbiguousEffectError(
+                f"{request['action']} worker/{name} is not proven",
+            )
+        receipt = (
+            _resource_receipt(proof)
+            if isinstance(proof, WorkerResource)
+            else {"name": name, "deleted": True}
+        )
+        try:
+            await self._topology.refresh()
+        except Exception as exc:
+            await self._supervisor.effect_ambiguous(
+                operation.operation_id,
+                ExternalEffect.MATRIX,
+                f"topology not converged: {type(exc).__name__}",
+            )
+            raise
+        await self._supervisor.effect_succeeded(
+            operation.operation_id,
+            ExternalEffect.CONTROLLER,
+            receipt,
+        )
+        if isinstance(proof, WorkerResource):
+            return proof
+        return None
+
+    async def _wait_for_worker_room(
+        self,
+        *,
+        operation_id: str,
+        name: str,
+        initial: WorkerResource | None,
+    ) -> WorkerResource:
+        worker = initial
+        attempts = len(self._worker_poll_delays) + 1
+        for index in range(attempts):
+            if worker is None or index > 0 or initial is None:
+                worker = await self._controller.get_worker(name)
+            if worker is not None:
+                phase = (worker.phase or "").casefold()
+                if phase in {"failed", "error", "deleting"}:
+                    message = _resource_message(worker)
+                    await self._supervisor.effect_failed(
+                        operation_id,
+                        ExternalEffect.CONTROLLER,
+                        message or f"worker/{name} entered {phase}",
+                    )
+                    raise ConflictError(
+                        message or f"worker/{name} entered {phase}",
+                    )
+                if worker.room_id and phase not in {
+                    "pending",
+                    "creating",
+                    "provisioning",
+                }:
+                    return worker
+            if index < len(self._worker_poll_delays):
+                await self._sleeper(self._worker_poll_delays[index])
+        await self._supervisor.effect_ambiguous(
+            operation_id,
+            ExternalEffect.CONTROLLER,
+            "Worker readiness did not converge",
+        )
+        raise AmbiguousEffectError(
+            f"worker/{name} has no ready Controller room",
+        )
+
+    async def _handle_ambiguous_worker_effect(
+        self,
+        *,
+        operation_id: str,
+        name: str,
+        effect: ExternalEffect,
+        exc: Exception,
+    ) -> WorkerResource:
+        if not _ambiguous_exception(exc):
+            await self._supervisor.effect_failed(
+                operation_id,
+                effect,
+                _safe_reason(exc),
+            )
+            raise exc
+        await self._supervisor.effect_ambiguous(
+            operation_id,
+            effect,
+            type(exc).__name__,
+        )
+        worker = await self._controller.get_worker(name)
+        if worker is None:
+            raise AmbiguousEffectError(
+                f"worker/{name} create result is unknown",
+            ) from exc
+        return worker
+
+    async def _require_worker(self, name: str) -> WorkerResource:
+        worker = await self._controller.get_worker(name)
+        if worker is None:
+            raise NotFoundError(f"worker/{name} does not exist")
+        return worker
+
+
+class RecoverableOperationReader(Protocol):
+    async def list_recoverable(self) -> tuple[OperationRecord, ...]: ...
+
+
+class WorkerRecoveryReport(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    inspected: int = Field(ge=0)
+    reconciled: tuple[str, ...] = ()
+    pending: tuple[str, ...] = ()
+    failed: tuple[str, ...] = ()
+
+
+class ResourceHeartbeat:
+    """Resume pending Worker creates without issuing another create."""
+
+    def __init__(
+        self,
+        *,
+        operations: RecoverableOperationReader,
+        resources: ResourceService,
+    ) -> None:
+        self._operations = operations
+        self._resources = resources
+
+    async def reconcile_pending_workers(self) -> WorkerRecoveryReport:
+        operations = tuple(
+            operation
+            for operation in await self._operations.list_recoverable()
+            if operation.kind is OperationKind.CREATE_WORKER
+        )
+        reconciled: list[str] = []
+        pending: list[str] = []
+        failed: list[str] = []
+        for operation in operations:
+            try:
+                await self._resources.resume_worker_create(operation)
+            except AmbiguousEffectError:
+                pending.append(operation.operation_id)
+            except Exception:
+                failed.append(operation.operation_id)
+            else:
+                reconciled.append(operation.operation_id)
+        return WorkerRecoveryReport(
+            inspected=len(operations),
+            reconciled=tuple(reconciled),
+            pending=tuple(pending),
+            failed=tuple(failed),
+        )
 
 
 class TopologyController(Protocol):
@@ -452,6 +1063,38 @@ def _resource_message(
 ) -> str:
     value = resource.status.get("message")
     return str(value) if value is not None else ""
+
+
+def _matches_worker_update(
+    worker: WorkerResource,
+    request: WorkerUpdateRequest,
+) -> bool:
+    if request.model is not None and worker.model != request.model:
+        return False
+    if request.runtime is not None and worker.runtime != request.runtime:
+        return False
+    if (
+        request.image is not None
+        and worker.spec.get("image") != request.image
+    ):
+        return False
+    return True
+
+
+def _ambiguous_exception(exc: BaseException) -> bool:
+    return isinstance(
+        exc,
+        (
+            AgtProtocolError,
+            ConnectionError,
+            ProcessTimeout,
+            TimeoutError,
+        ),
+    )
+
+
+def _safe_reason(exc: BaseException) -> str:
+    return type(exc).__name__
 
 
 def _unique_by_name(

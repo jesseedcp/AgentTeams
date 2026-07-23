@@ -196,6 +196,110 @@ class OperationSupervisor:
         )
         return changed or await self._require(operation_id)
 
+    async def effect_acknowledged(
+        self,
+        operation_id: str,
+        effect: ExternalEffect,
+        receipt: dict[str, object],
+    ) -> OperationRecord:
+        """Record one successful step without terminating the operation."""
+        await self._record_outcome(
+            operation_id,
+            "effect_acknowledged",
+            effect,
+            {"receipt": receipt},
+        )
+        current = await self._require(operation_id)
+        if current.status is OperationStatus.SUCCEEDED:
+            return current
+        if current.status is OperationStatus.PREPARED:
+            current = (
+                await self._operations.transition(
+                    operation_id,
+                    expected={OperationStatus.PREPARED},
+                    target=OperationStatus.DISPATCHED,
+                )
+                or await self._require(operation_id)
+            )
+        if current.status in {
+            OperationStatus.DISPATCHED,
+            OperationStatus.ACKNOWLEDGED,
+            OperationStatus.RECONCILING,
+        }:
+            changed = await self._operations.transition(
+                operation_id,
+                expected={current.status},
+                target=OperationStatus.RUNNING,
+                result=receipt,
+            )
+            return changed or await self._require(operation_id)
+        if current.status is OperationStatus.RUNNING:
+            return current
+        raise ConflictError(
+            f"cannot acknowledge operation from {current.status}",
+        )
+
+    async def effect_failed(
+        self,
+        operation_id: str,
+        effect: ExternalEffect,
+        reason: str,
+    ) -> OperationRecord:
+        """Persist a definite external failure as a terminal operation."""
+        await self._record_outcome(
+            operation_id,
+            "effect_failed",
+            effect,
+            {"reason": reason},
+        )
+        current = await self._require(operation_id)
+        if current.status is OperationStatus.FAILED:
+            return current
+        if current.status is OperationStatus.SUCCEEDED:
+            raise ConflictError("cannot fail a succeeded operation")
+        if current.status in {
+            OperationStatus.PLANNED,
+            OperationStatus.PREPARED,
+            OperationStatus.RUNNING,
+            OperationStatus.RECONCILING,
+            OperationStatus.NEEDS_ATTENTION,
+        }:
+            changed = await self._operations.transition(
+                operation_id,
+                expected={current.status},
+                target=OperationStatus.FAILED,
+                result={"effect": effect.value, "reason": str(redact(reason))},
+            )
+            return changed or await self._require(operation_id)
+        if current.status in {
+            OperationStatus.DISPATCHED,
+            OperationStatus.ACKNOWLEDGED,
+        }:
+            current = (
+                await self._operations.transition(
+                    operation_id,
+                    expected={current.status},
+                    target=OperationStatus.RUNNING,
+                )
+                or await self._require(operation_id)
+            )
+        elif current.status is OperationStatus.RETRY_WAIT:
+            current = (
+                await self._operations.transition(
+                    operation_id,
+                    expected={OperationStatus.RETRY_WAIT},
+                    target=OperationStatus.RECONCILING,
+                )
+                or await self._require(operation_id)
+            )
+        changed = await self._operations.transition(
+            operation_id,
+            expected={current.status},
+            target=OperationStatus.FAILED,
+            result={"effect": effect.value, "reason": str(redact(reason))},
+        )
+        return changed or await self._require(operation_id)
+
     async def effect_ambiguous(
         self,
         operation_id: str,
