@@ -279,6 +279,9 @@ class TaskMetadata(FrozenStrictModel):
     project_id: str | None = None
     schedule: str | None = None
     timezone: str | None = None
+    last_executed_at: datetime | None = None
+    next_scheduled_at: datetime | None = None
+    last_execution_event_id: str | None = None
     created_at: datetime
     completed_at: datetime | None = None
 

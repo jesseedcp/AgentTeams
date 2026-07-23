@@ -12,7 +12,12 @@ from .resources import (
     TopologyResolver,
 )
 from .supervisor import OperationSupervisor
-from .tasks import TaskMessageFormatter, TaskReceipt, TaskService
+from .tasks import (
+    RecurringDispatchReceipt,
+    TaskMessageFormatter,
+    TaskReceipt,
+    TaskService,
+)
 
 __all__ = [
     "OperationSupervisor",
@@ -22,6 +27,7 @@ __all__ = [
     "ResourceRecoveryReport",
     "ResourceReconciler",
     "ResourceService",
+    "RecurringDispatchReceipt",
     "TeamMemberSpec",
     "TeamSpec",
     "TaskMessageFormatter",

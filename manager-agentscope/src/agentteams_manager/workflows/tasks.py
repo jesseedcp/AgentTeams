@@ -5,10 +5,11 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from agentteams_manager.domain.cron import CronSchedule
 from agentteams_manager.domain.errors import (
     AmbiguousEffectError,
     ConflictError,
@@ -134,6 +135,12 @@ class TaskCreateRequest(BaseModel):
     requester_room_id: str = Field(min_length=1)
 
 
+class RecurringTaskCreateRequest(TaskCreateRequest):
+    task_mode: Literal["recurring"] = "recurring"
+    schedule: str = Field(min_length=1, max_length=128)
+    timezone: str = Field(min_length=1)
+
+
 class TaskReceipt(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -144,6 +151,19 @@ class TaskReceipt(BaseModel):
     room_id: str
     assignment_event_id: str | None = None
     summary: str | None = None
+    last_executed_at: datetime | None = None
+    next_scheduled_at: datetime | None = None
+
+
+class RecurringDispatchReceipt(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    operation_id: str = Field(min_length=32, max_length=32)
+    task_id: str
+    scheduled_at: datetime
+    txn_id: str
+    event_id: str | None = None
+    dispatched: bool
 
 
 class TaskMessageFormatter:
@@ -234,6 +254,106 @@ class TaskService:
             request=request.model_dump(mode="json"),
         )
         return await self.dispatch(operation)
+
+    async def create_recurring(
+        self,
+        *,
+        title: str,
+        spec: str,
+        assigned_to: str,
+        schedule: str,
+        timezone: str,
+        context: MutationContext,
+        delegated_to_team: str | None = None,
+        project_id: str | None = None,
+        project_room_id: str | None = None,
+    ) -> TaskReceipt:
+        parsed = CronSchedule.parse(schedule)
+        request = RecurringTaskCreateRequest(
+            title=title,
+            specification=spec,
+            assigned_to=assigned_to,
+            delegated_to_team=delegated_to_team,
+            project_id=project_id,
+            project_room_id=project_room_id,
+            requester_room_id=context.room_id,
+            schedule=schedule,
+            timezone=timezone,
+        )
+        operation = await self._supervisor.begin(
+            operation_id=context.operation_id,
+            kind=OperationKind.DELEGATE_TASK,
+            target_key=f"task-request/{context.operation_id}",
+            request=request.model_dump(mode="json"),
+        )
+        request = RecurringTaskCreateRequest.model_validate(
+            operation.request,
+        )
+        task_id = _task_id_for(operation)
+        if operation.status is OperationStatus.FAILED:
+            raise TaskError(f"task delegation {task_id} previously failed")
+        task = await self._tasks.get(task_id)
+        if task is None:
+            room_id, matrix_user_id = await self._resolve_assignment(request)
+            now = self._clock.now().astimezone(UTC)
+            task = TaskRecord(
+                task_id=task_id,
+                task_type="infinite",
+                status="active",
+                title=request.title,
+                assigned_to=request.assigned_to,
+                room_id=room_id,
+                project_id=request.project_id,
+                delegated_to_team=request.delegated_to_team,
+                schedule=request.schedule,
+                timezone=request.timezone,
+                next_scheduled_at=parsed.next_after(now, request.timezone),
+                metadata={
+                    "operation_id": operation.operation_id,
+                    "matrix_user_id": matrix_user_id,
+                    "project_room_id": request.project_room_id,
+                    "requester_room_id": request.requester_room_id,
+                },
+                created_at=now,
+                updated_at=now,
+            )
+            try:
+                task = await self._tasks.create(task)
+            except Exception:
+                raced = await self._tasks.get(task_id)
+                if raced is None:
+                    raise
+                task = raced
+        self._verify_recurring_request(task, operation, request)
+        metadata = _task_metadata(task, status="active")
+        await self._ensure_json(
+            operation,
+            f"shared/tasks/{task_id}/meta.json",
+            metadata.model_dump(mode="json"),
+            operation_name="write_recurring_task_metadata",
+        )
+        specification_receipt = await self._ensure_bytes(
+            operation,
+            f"shared/tasks/{task_id}/spec.md",
+            request.specification.encode("utf-8"),
+            content_type="text/markdown",
+            operation_name="write_recurring_task_specification",
+        )
+        await self._supervisor.effect_succeeded(
+            operation.operation_id,
+            ExternalEffect.STORAGE,
+            {
+                "task_id": task_id,
+                "status": "active",
+                "specification_etag": specification_receipt.etag,
+                "next_scheduled_at": (
+                    task.next_scheduled_at.isoformat()
+                    if task.next_scheduled_at is not None
+                    else None
+                ),
+            },
+        )
+        return _task_receipt(operation.operation_id, task)
 
     async def dispatch(self, operation: OperationRecord) -> TaskReceipt:
         """Resume a finite dispatch from facts in SQLite, MinIO, and Matrix."""
@@ -516,6 +636,200 @@ class TaskService:
             },
         )
         return _task_receipt(operation_id, task, summary=summary)
+
+    async def dispatch_recurring(
+        self,
+        task: TaskRecord,
+    ) -> RecurringDispatchReceipt:
+        if (
+            task.task_type not in {"infinite", "recurring"}
+            or task.status != "active"
+            or task.next_scheduled_at is None
+        ):
+            raise ConflictError(
+                f"task {task.task_id} is not an active recurring task",
+            )
+        scheduled_at = task.next_scheduled_at.astimezone(UTC)
+        operation_id = operation_id_for(
+            task.room_id,
+            scheduled_at.isoformat(),
+            f"recurring:{task.task_id}",
+        )
+        operation = await self._supervisor.begin(
+            operation_id=operation_id,
+            kind=OperationKind.DELEGATE_TASK,
+            target_key=f"task/{task.task_id}/occurrence/"
+            f"{scheduled_at.isoformat()}",
+            request={
+                "task_id": task.task_id,
+                "scheduled_at": scheduled_at.isoformat(),
+                "action": "dispatch_recurring",
+            },
+        )
+        transaction_id = matrix_transaction_id(operation_id, 0)
+        if operation.status is OperationStatus.SUCCEEDED:
+            return RecurringDispatchReceipt(
+                operation_id=operation_id,
+                task_id=task.task_id,
+                scheduled_at=scheduled_at,
+                txn_id=transaction_id,
+                event_id=(
+                    str(operation.result["event_id"])
+                    if operation.result.get("event_id")
+                    else None
+                ),
+                dispatched=False,
+            )
+        if operation.status is OperationStatus.FAILED:
+            raise TaskError(
+                f"recurring dispatch for {task.task_id} previously failed",
+            )
+        matrix_user_id = str(
+            task.metadata.get("matrix_user_id")
+            or f"@worker-{task.assigned_to}:{self._matrix_domain}",
+        )
+        text = (
+            f"{matrix_user_id} Execute recurring task {task.task_id}: "
+            f"{task.title}. Report back with \"executed\" when done."
+        )
+        await self._supervisor.before_effect(
+            operation_id,
+            ExternalEffect.MATRIX,
+            {
+                "operation": "dispatch_recurring_task",
+                "task_id": task.task_id,
+                "scheduled_at": scheduled_at.isoformat(),
+                "room_id": task.room_id,
+                "txn_id": transaction_id,
+            },
+        )
+        try:
+            event_id = await self._matrix.send_text(
+                task.room_id,
+                text,
+                txn_id=transaction_id,
+                mentions=(matrix_user_id,),
+            )
+        except Exception as exc:
+            await self._record_external_failure(
+                operation_id,
+                ExternalEffect.MATRIX,
+                exc,
+            )
+            raise
+        await self._supervisor.effect_succeeded(
+            operation_id,
+            ExternalEffect.MATRIX,
+            {
+                "task_id": task.task_id,
+                "scheduled_at": scheduled_at.isoformat(),
+                "event_id": event_id,
+                "txn_id": transaction_id,
+            },
+        )
+        return RecurringDispatchReceipt(
+            operation_id=operation_id,
+            task_id=task.task_id,
+            scheduled_at=scheduled_at,
+            txn_id=transaction_id,
+            event_id=event_id,
+            dispatched=True,
+        )
+
+    async def record_execution(
+        self,
+        *,
+        task_id: str,
+        worker_event_id: str,
+    ) -> TaskReceipt:
+        task = await self._require_task(task_id)
+        if (
+            task.task_type not in {"infinite", "recurring"}
+            or task.status != "active"
+            or not task.schedule
+            or not task.timezone
+        ):
+            raise ConflictError(
+                f"task {task_id} is not an active recurring task",
+            )
+        seen = tuple(task.metadata.get("execution_event_ids", ()))
+        operation_id = operation_id_for(
+            task.room_id,
+            worker_event_id,
+            f"executed:{task_id}",
+        )
+        if worker_event_id in seen:
+            return _task_receipt(operation_id, task)
+        operation = await self._supervisor.begin(
+            operation_id=operation_id,
+            kind=OperationKind.COMPLETE_TASK,
+            target_key=f"task/{task_id}/execution",
+            request={
+                "task_id": task_id,
+                "worker_event_id": worker_event_id,
+                "action": "record_execution",
+            },
+        )
+        remote = await self._read_task_metadata(task_id)
+        if remote.last_execution_event_id == worker_event_id:
+            executed_at = remote.last_executed_at
+            next_at = remote.next_scheduled_at
+            if executed_at is None or next_at is None:
+                raise ConflictError(
+                    f"execution metadata for {task_id} is incomplete",
+                )
+            receipt = await self.storage.head(
+                f"shared/tasks/{task_id}/meta.json",
+            )
+            if receipt is None:
+                raise NotFoundError(
+                    f"task metadata does not exist: {task_id}",
+                )
+        else:
+            executed_at = self._clock.now().astimezone(UTC)
+            next_at = CronSchedule.parse(task.schedule).next_after(
+                executed_at,
+                task.timezone,
+            )
+            updated_remote = TaskMetadata.model_validate(
+                {
+                    **remote.model_dump(mode="json"),
+                    "last_executed_at": executed_at,
+                    "next_scheduled_at": next_at,
+                    "last_execution_event_id": worker_event_id,
+                },
+            )
+            receipt = await self._replace_task_metadata(
+                operation,
+                updated_remote,
+                operation_name="record_recurring_execution",
+            )
+        changed = await self._tasks.transition(
+            task_id,
+            expected={"active"},
+            target="active",
+            last_executed_at=executed_at,
+            next_scheduled_at=next_at,
+            metadata={
+                **task.metadata,
+                "execution_event_ids": [*seen, worker_event_id],
+                "last_execution_event_id": worker_event_id,
+                "last_execution_metadata_etag": receipt.etag,
+            },
+        )
+        task = changed or await self._require_task(task_id)
+        await self._supervisor.effect_succeeded(
+            operation_id,
+            ExternalEffect.STORAGE,
+            {
+                "task_id": task_id,
+                "status": "active",
+                "last_executed_at": executed_at.isoformat(),
+                "next_scheduled_at": next_at.isoformat(),
+                "metadata_etag": receipt.etag,
+            },
+        )
+        return _task_receipt(operation_id, task)
 
     async def cancel(
         self,
@@ -802,6 +1116,23 @@ class TaskService:
                 f"task {task.task_id} does not match its journal request",
             )
 
+    @staticmethod
+    def _verify_recurring_request(
+        task: TaskRecord,
+        operation: OperationRecord,
+        request: RecurringTaskCreateRequest,
+    ) -> None:
+        TaskService._verify_task_request(task, operation, request)
+        if (
+            task.task_type not in {"infinite", "recurring"}
+            or task.schedule != request.schedule
+            or task.timezone != request.timezone
+            or task.status != "active"
+        ):
+            raise ConflictError(
+                f"recurring task {task.task_id} does not match its request",
+            )
+
 
 def _task_id_for(operation: OperationRecord) -> str:
     timestamp = operation.created_at.astimezone(UTC)
@@ -827,6 +1158,13 @@ def _task_metadata(task: TaskRecord, *, status: str) -> TaskMetadata:
         project_id=task.project_id,
         schedule=task.schedule,
         timezone=task.timezone,
+        last_executed_at=task.last_executed_at,
+        next_scheduled_at=task.next_scheduled_at,
+        last_execution_event_id=(
+            str(task.metadata["last_execution_event_id"])
+            if task.metadata.get("last_execution_event_id")
+            else None
+        ),
         created_at=task.created_at,
         completed_at=(
             datetime.fromisoformat(str(completed_at_raw))
@@ -854,6 +1192,8 @@ def _task_receipt(
             else None
         ),
         summary=summary,
+        last_executed_at=task.last_executed_at,
+        next_scheduled_at=task.next_scheduled_at,
     )
 
 

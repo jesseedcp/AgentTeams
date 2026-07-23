@@ -14,6 +14,8 @@ from .tasks import (
     CancelTaskInput,
     CompleteTaskInput,
     CreateFiniteTaskInput,
+    CreateRecurringTaskInput,
+    RecordTaskExecutionInput,
     TaskTools,
 )
 
@@ -22,11 +24,13 @@ __all__ = [
     "CancelTaskInput",
     "CompleteTaskInput",
     "CreateFiniteTaskInput",
+    "CreateRecurringTaskInput",
     "ManagerTool",
     "ManagerToolkit",
     "RESOURCE_TOOL_NAMES",
     "ResourceToolkit",
     "ResourceToolkitFactory",
+    "RecordTaskExecutionInput",
     "TaskArtifactSet",
     "TaskMetadata",
     "TaskTools",

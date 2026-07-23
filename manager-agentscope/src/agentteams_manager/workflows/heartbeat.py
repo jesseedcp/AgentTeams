@@ -1,14 +1,16 @@
-"""Deterministic resource reconciliation heartbeat."""
+"""Deterministic resource and task reconciliation heartbeat."""
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from agentteams_manager.domain.models import TopologySnapshot
+from agentteams_manager.domain.models import TaskRecord, TopologySnapshot
 
 from .resources import ResourceRecoveryReport
+from .tasks import TaskService
 
 
 class ResourceRecovery(Protocol):
@@ -73,4 +75,70 @@ class Heartbeat:
             failed=len(recovery.failed),
             topology_revision=snapshot.revision,
             notifications=notification_count,
+        )
+
+
+class DueTaskReader(Protocol):
+    async def due_schedules(
+        self,
+        now: datetime,
+    ) -> tuple[TaskRecord, ...]: ...
+
+
+class DispatchReport(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    inspected: int = Field(ge=0)
+    dispatched: tuple[str, ...] = ()
+    already_dispatched: tuple[str, ...] = ()
+    pending: tuple[str, ...] = ()
+    late: tuple[str, ...] = ()
+
+
+class TaskHeartbeat:
+    """Dispatch one idempotent occurrence for each due recurring task."""
+
+    def __init__(
+        self,
+        *,
+        tasks: DueTaskReader,
+        service: TaskService,
+        late_grace: timedelta = timedelta(minutes=30),
+    ) -> None:
+        if late_grace < timedelta(0):
+            raise ValueError("late grace must not be negative")
+        self._tasks = tasks
+        self._service = service
+        self._late_grace = late_grace
+
+    async def dispatch_due(self, now: datetime) -> DispatchReport:
+        if now.tzinfo is None or now.utcoffset() is None:
+            raise ValueError("heartbeat time must be timezone-aware")
+        utc_now = now.astimezone(UTC)
+        due = await self._tasks.due_schedules(utc_now)
+        dispatched: list[str] = []
+        already: list[str] = []
+        pending: list[str] = []
+        late: list[str] = []
+        for task in due:
+            if (
+                task.next_scheduled_at is not None
+                and utc_now > task.next_scheduled_at + self._late_grace
+            ):
+                late.append(task.task_id)
+            try:
+                receipt = await self._service.dispatch_recurring(task)
+            except Exception:
+                pending.append(task.task_id)
+                continue
+            if receipt.dispatched:
+                dispatched.append(task.task_id)
+            else:
+                already.append(task.task_id)
+        return DispatchReport(
+            inspected=len(due),
+            dispatched=tuple(dispatched),
+            already_dispatched=tuple(already),
+            pending=tuple(pending),
+            late=tuple(late),
         )

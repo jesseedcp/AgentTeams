@@ -159,7 +159,7 @@ class TaskRepository:
             rows = connection.execute(
                 """
                 SELECT * FROM tasks
-                 WHERE task_type='recurring'
+                 WHERE task_type IN ('infinite', 'recurring')
                    AND status='active'
                    AND next_scheduled_at IS NOT NULL
                    AND next_scheduled_at <= ?

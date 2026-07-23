@@ -29,6 +29,18 @@ class CompleteTaskInput(BaseModel):
     structured_result: dict[str, Any] | None = None
 
 
+class CreateRecurringTaskInput(CreateFiniteTaskInput):
+    schedule: str = Field(min_length=1, max_length=128)
+    timezone: str = Field(min_length=1)
+
+
+class RecordTaskExecutionInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    task_id: str = Field(min_length=1)
+    worker_event_id: str = Field(min_length=1)
+
+
 class CancelTaskInput(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -65,6 +77,33 @@ class TaskTools:
             task_id=request.task_id,
             worker_event_id=request.worker_event_id,
             structured_result=request.structured_result,
+        )
+
+    async def create_recurring(
+        self,
+        request: CreateRecurringTaskInput,
+        *,
+        context: MutationContext,
+    ) -> TaskReceipt:
+        return await self._service.create_recurring(
+            title=request.title,
+            spec=request.specification,
+            assigned_to=request.assigned_to,
+            schedule=request.schedule,
+            timezone=request.timezone,
+            delegated_to_team=request.delegated_to_team,
+            project_id=request.project_id,
+            project_room_id=request.project_room_id,
+            context=context,
+        )
+
+    async def record_execution(
+        self,
+        request: RecordTaskExecutionInput,
+    ) -> TaskReceipt:
+        return await self._service.record_execution(
+            task_id=request.task_id,
+            worker_event_id=request.worker_event_id,
         )
 
     async def cancel(
