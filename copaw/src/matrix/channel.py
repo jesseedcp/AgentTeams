@@ -47,7 +47,6 @@ logger = logging.getLogger("copaw.channels.matrix")
 # qwenpaw installed (it's only executed inside a qwenpaw environment).
 # ---------------------------------------------------------------------------
 try:
-    from copaw.app.channels.base import BaseChannel
     from agentscope_runtime.engine.schemas.agent_schemas import (
         AudioContent,
         ContentType,
@@ -59,10 +58,14 @@ try:
         VideoContent,
     )
 except ImportError:  # pragma: no cover
-    BaseChannel = object  # type: ignore[assignment,misc]
     ContentType = None  # type: ignore[assignment]
     MessageType = None  # type: ignore[assignment]
     RunStatus = None  # type: ignore[assignment]
+
+try:
+    from copaw.app.channels.base import BaseChannel
+except ImportError:  # pragma: no cover
+    BaseChannel = object  # type: ignore[assignment,misc]
 
 
 CHANNEL_KEY = "matrix"
@@ -2234,7 +2237,11 @@ class MatrixChannel(BaseChannel):
         if not self._client:
             return
         # Cancel any existing renewal task for this room
-        existing = self._typing_tasks.pop(room_id, None)
+        typing_tasks = getattr(self, "_typing_tasks", None)
+        if typing_tasks is None:
+            typing_tasks = {}
+            self._typing_tasks = typing_tasks
+        existing = typing_tasks.pop(room_id, None)
         if existing and not existing.done():
             existing.cancel()
         try:
@@ -2499,10 +2506,8 @@ class MatrixChannel(BaseChannel):
 
         for mxid in targets:
             display = self._resolve_display_name(mxid, room_id) or mxid
-            if mxid in body:
-                body = body.replace(mxid, display, 1)
-            elif display not in body:
-                body = f"{display} {body}" if body else display
+            if mxid not in body:
+                body = f"{mxid} {body}" if body else mxid
             mxid_enc = urllib.parse.quote(mxid, safe="")
             anchor = (
                 f'<a href="https://matrix.to/#/{mxid_enc}">'
@@ -2569,7 +2574,6 @@ class MatrixChannel(BaseChannel):
         meta_dict = meta if isinstance(meta, dict) else {}
         thread_root = (
             meta_dict.get(_MATRIX_THREAD_META_KEY)
-            or meta_dict.get(_THREAD_META_ROOT_KEY)
             or meta_dict.get(_MATRIX_OWN_THREAD_ROOT_KEY)
         )
         if not thread_root:
@@ -2579,11 +2583,15 @@ class MatrixChannel(BaseChannel):
             return True
 
         thread_meta = self._with_thread_relation_meta(meta_dict, thread_root)
-        for part in parts:
-            if isinstance(part, str):
-                await self.send(room_id, part, thread_meta)
-            else:
-                await self.send_media(room_id, part, thread_meta)
+        send_parts = getattr(self, "send_content_parts", None)
+        if send_parts is not None:
+            await send_parts(room_id, parts, thread_meta)
+        else:
+            for part in parts:
+                if isinstance(part, str):
+                    await self.send(room_id, part, thread_meta)
+                else:
+                    await self.send_media(room_id, part, thread_meta)
         return True
 
     async def _flush_pending_thread_parts(
@@ -2611,18 +2619,26 @@ class MatrixChannel(BaseChannel):
 
         thread_root = (
             meta_dict.get(_MATRIX_THREAD_META_KEY)
-            or meta_dict.get(_THREAD_META_ROOT_KEY)
             or meta_dict.get(_MATRIX_OWN_THREAD_ROOT_KEY)
         )
         if not thread_root:
             meta_dict[_MATRIX_PENDING_FINAL_MESSAGE_KEY] = final_text
             return
 
-        await self.send(
-            room_id,
-            str(final_text),
-            self._with_thread_relation_meta(meta_dict, thread_root),
+        thread_meta = self._with_thread_relation_meta(
+            meta_dict,
+            thread_root,
         )
+        if isinstance(final_text, str):
+            await self.send(room_id, final_text, thread_meta)
+        else:
+            parts = self._message_to_content_parts(final_text)
+            if parts:
+                await self.send_content_parts(
+                    room_id,
+                    parts,
+                    thread_meta,
+                )
 
     async def _ensure_thread_root(
         self,
@@ -2654,7 +2670,11 @@ class MatrixChannel(BaseChannel):
             if event_id:
                 send_meta[_MATRIX_OWN_THREAD_ROOT_KEY] = event_id
                 send_meta[_MATRIX_PLACEHOLDER_THREAD_ROOT_KEY] = True
-                self._active_thread_roots[to_handle] = event_id
+                roots = getattr(self, "_active_thread_roots", None)
+                if roots is None:
+                    roots = {}
+                    self._active_thread_roots = roots
+                roots[to_handle] = event_id
         except Exception as exc:
             logger.warning(
                 "MatrixChannel: _ensure_thread_root failed for %s: %s",
@@ -2673,7 +2693,6 @@ class MatrixChannel(BaseChannel):
 
         thread_root = (
             meta.get(_MATRIX_THREAD_META_KEY)
-            or meta.get(_THREAD_META_ROOT_KEY)
             or meta.get(_MATRIX_OWN_THREAD_ROOT_KEY)
         )
         if not thread_root:
@@ -2682,7 +2701,8 @@ class MatrixChannel(BaseChannel):
         content["m.relates_to"] = {
             "rel_type": "m.thread",
             "event_id": thread_root,
-            "is_falling_back": False,
+            "is_falling_back": True,
+            "m.in_reply_to": {"event_id": thread_root},
         }
 
     def _is_completed_status(self, status: Any) -> bool:
@@ -2754,7 +2774,6 @@ class MatrixChannel(BaseChannel):
         if self._is_reasoning_message(
             message_type,
         ) or self._is_tool_call_message(message_type):
-            await self._ensure_thread_root(to_handle, send_meta)
             await self._flush_pending_final_message_to_thread(
                 to_handle,
                 send_meta,
@@ -2876,7 +2895,7 @@ class MatrixChannel(BaseChannel):
                 await self._edit_thread_root(
                     to_handle, send_meta, "已完成",
                 )
-            self._active_thread_roots.pop(to_handle, None)
+            getattr(self, "_active_thread_roots", {}).pop(to_handle, None)
         elif pending is not None:
             await self.send_message_content(to_handle, pending, send_meta)
         await self._send_typing(to_handle, False)
@@ -2894,7 +2913,10 @@ class MatrixChannel(BaseChannel):
         err_text: str,
     ) -> None:
         """Suppress user-visible cancellation noise after native /stop."""
-        root_id = self._active_thread_roots.pop(to_handle, None)
+        root_id = getattr(self, "_active_thread_roots", {}).pop(
+            to_handle,
+            None,
+        )
         if root_id:
             fallback_meta = {_MATRIX_OWN_THREAD_ROOT_KEY: root_id}
             status = "已取消" if "Task has been cancelled" in (err_text or "") else "处理异常"
@@ -2925,6 +2947,16 @@ class MatrixChannel(BaseChannel):
             return
 
         room_id = to_handle
+        leader_dm_room = _runtime_config_field("team", "leaderDmRoomId")
+        team_room = _runtime_config_field("team", "teamRoomId")
+        if (
+            team_room
+            and leader_dm_room == room_id
+            and _is_team_leader_identity(self._user_id)
+            and _TEAM_LEADER_MATRIX_USER_ID_RE.search(text)
+            and _TEAM_LEADER_WORKER_ASSIGNMENT_RE.search(text)
+        ):
+            room_id = team_room
 
         # NO_REPLY protocol: agent decided it has nothing to say.
         # Suppress the outgoing message entirely to avoid triggering the
