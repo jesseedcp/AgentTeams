@@ -25,6 +25,8 @@ CREATE TABLE IF NOT EXISTS operation_events (
   created_at TEXT NOT NULL,
   PRIMARY KEY(operation_id, sequence)
 );
+CREATE UNIQUE INDEX IF NOT EXISTS operation_events_global_sequence_idx
+  ON operation_events(sequence);
 
 CREATE TABLE IF NOT EXISTS processed_matrix_events (
   room_id TEXT NOT NULL,

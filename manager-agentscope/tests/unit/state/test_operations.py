@@ -66,3 +66,26 @@ async def test_next_event_sequence_is_durable(tmp_path: Path) -> None:
     )
 
     assert await repository.next_sequence("c" * 32) == 1
+
+
+@pytest.mark.asyncio
+async def test_journal_sequence_is_global_across_operations(
+    tmp_path: Path,
+) -> None:
+    database = Database(tmp_path / "manager.db")
+    await database.open()
+    repository = OperationRepository(database)
+    for operation_id in ("d" * 32, "e" * 32):
+        await repository.create(
+            OperationRecord.new(
+                operation_id=operation_id,
+                kind="create_worker",
+                target_key=f"worker/{operation_id[0]}",
+                request={"name": operation_id[0]},
+            ),
+        )
+
+    first = await repository.next_sequence("d" * 32)
+    second = await repository.next_sequence("e" * 32)
+
+    assert (first, second) == (1, 2)

@@ -181,18 +181,23 @@ class OperationRepository:
         return await self._database.write(write)
 
     async def next_sequence(self, operation_id: str) -> int:
-        def read(connection: sqlite3.Connection) -> int:
+        del operation_id
+
+        def write(connection: sqlite3.Connection) -> int:
             row = connection.execute(
                 """
-                SELECT COALESCE(MAX(sequence), 0) + 1
-                  FROM operation_events
-                 WHERE operation_id=?
+                INSERT INTO key_values(key, value, updated_at)
+                VALUES ('journal_sequence', '1', ?)
+                ON CONFLICT(key) DO UPDATE SET
+                    value=CAST(key_values.value AS INTEGER) + 1,
+                    updated_at=excluded.updated_at
+                RETURNING CAST(value AS INTEGER)
                 """,
-                (operation_id,),
+                (datetime.now(UTC).isoformat(),),
             ).fetchone()
             return int(row[0])
 
-        return await self._database.read(read)
+        return await self._database.write(write)
 
     async def append_event(self, event: JournalEvent) -> None:
         def write(connection: sqlite3.Connection) -> None:
