@@ -1,40 +1,86 @@
-# Management Skills — Quick Reference
+# AgentTeams Manager Typed Tool Guide
 
-Each skill has a full `SKILL.md` in `skills/<name>/`. The `description` field in each SKILL.md tells the system when to load it.
+All management actions use typed AgentScope tools. Skill documents explain
+when to choose them; Python workflows enforce the actual sequence and recovery
+rules.
 
-Available skills: `task-management`, `task-coordination`, `git-delegation-management`, `worker-management`, `agentteams-find-worker`, `project-management`, `channel-management`, `matrix-server-management`, `mcp-server-management`, `model-switch`, `worker-model-switch`, `file-sync-management`
+## Resource tools
 
-## Mandatory Routing
+- `list_workers`, `get_worker`, `create_worker`, `update_worker`
+- `start_worker`, `stop_worker`, `reset_worker`, `delete_worker`
+- `find_worker_candidates`, `import_worker_package`
+- `list_teams`, `get_team`, `create_team`, `update_team`, `delete_team`
+- `delegate_to_team_leader`
+- `list_humans`, `get_human`, `create_human`, `update_human`,
+  `delete_human`
+- `inspect_room`, `create_private_room`, `invite_room_member`,
+  `remove_room_member`, `ban_room_member`, `unban_room_member`
 
-- Load `agentteams-find-worker` when the admin is assigning work but has not specified which existing Worker should handle it, and you need to search Nacos for a suitable Worker to import.
-- Load `agentteams-find-worker` when the admin explicitly says to import a Worker from the market, or gives a direct `nacos://...` package URI.
-- Do not route ordinary Worker creation into `agentteams-find-worker` just because the admin mentions a template-like role. If the admin is simply asking you to create a Worker, use `worker-management` unless they explicitly want market import.
-- Once the admin confirms a specific market/Nacos Worker to import, do not hand-create a replacement through `worker-management` unless search failed before confirmation or the admin explicitly asks for fallback.
+Resource mutations are Controller-backed and return typed reconciliation
+receipts. Room membership tools are Matrix-backed. Never substitute a direct
+HTTP request or generated command.
 
-## Skill Boundary
+## Task, project, storage, and Git tools
 
-- `worker-management` is the primary skill for Worker lifecycle management: create, reset, start, stop, update skills, and other day-to-day Worker operations.
-- `agentteams-find-worker` is an auxiliary skill for `worker-management`, used only when you need Nacos-backed Worker discovery or market import.
-- The normal order is: decide whether the admin needs an ordinary Worker operation or a Nacos-backed import. Ordinary operations stay in `worker-management`; discovery/import scenarios temporarily load `agentteams-find-worker`.
-- After a successful import, control returns to `worker-management` for later lifecycle operations on that Worker.
+- `create_finite_task`, `create_recurring_task`, `get_task`, `list_tasks`
+- `complete_task`, `cancel_task`, `retry_task`
+- `create_project`, `get_project`, `update_project_plan`, `close_project`
+- `sync_artifacts_down`, `sync_artifacts_up`
+- `prepare_git_delegation`, `execute_git_delegation`
 
-## Cross-Skill Combos
+Task and project mutations write durable intent before uploads or messages.
+Artifact sync returns a checksum manifest. Git writes require confirmation and
+an active processing lease.
 
-These workflows span multiple skills. Load them together when you hit these scenarios:
+## Configuration and integration tools
 
-| Scenario | Skill chain | Why |
-|----------|-------------|-----|
-| Worker sends `git-request:` | `git-delegation` → `task-coordination` → `file-sync` | Must create `.processing` marker before git ops, remove after, then sync to MinIO |
-| Admin gives a task | `task-management` → `worker-management` (check status) → `file-sync` (push spec) | If Worker is stopped, wake it first; after writing spec, push to MinIO and notify |
-| Admin starts a multi-worker project | `project-management` → `task-management` → `worker-management` | Create project room, then assign tasks — check each Worker's status before assigning |
-| Switch a Worker's model | `worker-model-switch` → `worker-management` (recreate container) | Script updates config, but container must be recreated to apply |
-| Set up MCP server for Workers | `mcp-server-management` → `worker-management` (notify) | After server is live and verified, notify relevant Workers to file-sync |
-| Worker unresponsive, admin wants recovery | `matrix-server-management` (create new room) → `worker-management` | Create fresh 3-person room to give Worker clean context |
+- `inspect_runtime_configuration`
+- `switch_manager_model`, `switch_worker_model`
+- `list_mcp_servers`, `configure_mcp_server`, `delete_mcp_server`
+- `discover_mcp_tools`, `call_mcp_tool`
+- `publish_worker_service`, `unpublish_worker_service`
 
-> **Model switch cheat sheet:** Manager model → `model-switch`. Worker model → `worker-model-switch`. Never mix them up. Both require a restart after running the script.
->
-> **⚠️ MANDATORY:** When switching any model, you MUST use the corresponding skill script. Do NOT call Higress API directly or manually edit config files. The scripts handle gateway testing, config patching, registry updates, and Worker notification.
+Model changes run a gateway preflight before desired state changes. MCP
+configuration is reconciled through Higress and Controller descriptors.
+`discover_mcp_tools` and `call_mcp_tool` are AgentScope Toolkit operations;
+they do not invoke an external compatibility CLI.
 
----
+## Retained skill catalog
 
-Add local notes below — SSH aliases, API endpoints, environment-specific details that don't belong in SKILL.md.
+The Manager ships exactly these skills:
+
+1. `agentteams-find-worker`
+2. `channel-management`
+3. `file-sync-management`
+4. `git-delegation-management`
+5. `human-management`
+6. `matrix-server-management`
+7. `mcp-server-management`
+8. `mcporter`
+9. `model-switch`
+10. `project-management`
+11. `service-publishing`
+12. `task-coordination`
+13. `task-management`
+14. `team-management`
+15. `worker-management`
+16. `worker-model-switch`
+
+The `mcporter` name is retained for capability compatibility. Its execution
+path is native AgentScope Toolkit discovery and calls.
+
+## Choosing a workflow
+
+- Ordinary Worker lifecycle request: `worker-management`.
+- Market search or package import: `agentteams-find-worker`, then return to
+  `worker-management`.
+- Multi-Worker work: `team-management`, followed by task delegation to the
+  Team Leader.
+- Finite or recurring work: `task-management`; use `task-coordination` for
+  completion and processing-lease coordination.
+- Project DAG or Project Room: `project-management`.
+- Manager model versus Worker model: use the matching model-switch skill.
+- MCP definition or permissions: `mcp-server-management`; MCP discovery/call:
+  `mcporter`.
+- Explicit artifact transfer: `file-sync-management`.
+- Worker service route: `service-publishing`.
