@@ -33,8 +33,8 @@ async def test_room_cannot_have_worker_and_team_bindings(
         teams=(
             TeamResource(
                 name="core",
-                leader="alice",
-                workers=("alice",),
+                leader="core-lead",
+                workers=(),
                 room_id="!shared:example",
             ),
         ),

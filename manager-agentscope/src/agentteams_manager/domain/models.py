@@ -310,4 +310,6 @@ class TopologySnapshot(FrozenStrictModel):
     workers: tuple[WorkerResource, ...] = ()
     teams: tuple[TeamResource, ...] = ()
     humans: tuple[HumanResource, ...] = ()
+    manager_join_targets: tuple[str, ...] = ()
+    forbidden_rooms: tuple[str, ...] = ()
     refreshed_at: datetime

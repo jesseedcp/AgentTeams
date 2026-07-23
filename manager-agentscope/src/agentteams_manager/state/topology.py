@@ -48,6 +48,12 @@ class TopologyRepository:
         rows: list[tuple[str, str, str, str, str | None, str, str]] = []
         human_rows: list[tuple[str, str, int, str, str, str]] = []
         kinds_by_room: dict[str, RoomKind] = {}
+        teams_by_leader = {team.leader: team for team in snapshot.teams}
+        team_worker_names = {
+            worker_name
+            for team in snapshot.teams
+            for worker_name in team.workers
+        }
 
         def add(
             *,
@@ -79,7 +85,10 @@ class TopologyRepository:
                 ),
             )
 
+        workers_by_name = {worker.name: worker for worker in snapshot.workers}
         for worker in snapshot.workers:
+            if worker.name in teams_by_leader or worker.name in team_worker_names:
+                continue
             add(
                 resource_type="worker",
                 resource_name=worker.name,
@@ -89,11 +98,27 @@ class TopologyRepository:
                 payload=worker.model_dump_json(),
             )
         for team in snapshot.teams:
+            leader = workers_by_name.get(team.leader)
             add(
                 resource_type="team",
                 resource_name=team.name,
                 room_kind=RoomKind.LEADER_ROOM,
                 room_id=team.room_id,
+                matrix_user_id=(
+                    leader.matrix_user_id if leader is not None else None
+                ),
+                payload=team.model_dump_json(),
+            )
+            team_room_id = team.spec.get("teamRoomID")
+            add(
+                resource_type="team",
+                resource_name=team.name,
+                room_kind=RoomKind.TEAM_ROOM,
+                room_id=(
+                    str(team_room_id)
+                    if isinstance(team_room_id, str)
+                    else None
+                ),
                 matrix_user_id=None,
                 payload=team.model_dump_json(),
             )
@@ -130,8 +155,30 @@ class TopologyRepository:
                 """,
                 human_rows,
             )
+            connection.execute(
+                """
+                INSERT INTO key_values(key, value, updated_at)
+                VALUES ('topology_revision', ?, ?)
+                ON CONFLICT(key) DO UPDATE SET
+                    value=excluded.value,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    str(snapshot.revision),
+                    snapshot.refreshed_at.isoformat(),
+                ),
+            )
 
         await self._database.write(write)
+
+    async def revision(self) -> int:
+        def read(connection: sqlite3.Connection) -> int:
+            row = connection.execute(
+                "SELECT value FROM key_values WHERE key='topology_revision'",
+            ).fetchone()
+            return int(row["value"]) if row is not None else 0
+
+        return await self._database.read(read)
 
     async def room_binding(self, room_id: str) -> TopologyBinding | None:
         def read(connection: sqlite3.Connection) -> TopologyBinding | None:

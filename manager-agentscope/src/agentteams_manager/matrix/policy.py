@@ -77,7 +77,7 @@ HUMAN_TOOLS = frozenset({"list_workers", "list_tasks", "sync_files"})
 TRUSTED_TOOLS = frozenset({"list_workers", "list_tasks"})
 UNKNOWN_TOOLS: frozenset[str] = frozenset()
 
-_CONFIRM_TOOLS = frozenset(
+CONFIRM_TOOLS = frozenset(
     tool
     for tool in ALL_MANAGER_TOOLS
     if tool.startswith(
@@ -95,6 +95,16 @@ _CONFIRM_TOOLS = frozenset(
             "invite_",
         ),
     )
+)
+READ_ONLY_RESOURCE_TOOLS = frozenset(
+    {
+        "list_workers",
+        "get_worker",
+        "list_teams",
+        "get_team",
+        "list_humans",
+        "get_human",
+    },
 )
 
 
@@ -137,7 +147,7 @@ class RoomPolicyResolver:
                 kind=RoomKind.ADMIN_DM,
                 revision=revision,
                 allowed_tools=ALL_MANAGER_TOOLS,
-                confirm_tools=_CONFIRM_TOOLS,
+                confirm_tools=CONFIRM_TOOLS,
                 allowed_senders=frozenset({event.sender_id}),
             )
 
