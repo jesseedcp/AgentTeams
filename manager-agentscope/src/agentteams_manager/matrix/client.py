@@ -118,6 +118,30 @@ class MatrixClient:
             name="matrix-sync",
         )
 
+    async def wait_until_ready(self, *, timeout: float = 60) -> None:
+        """Wait for the first durable sync or surface an exited sync task."""
+        if self.ready.is_set():
+            return
+        if self._sync_task is None:
+            raise RuntimeError("Matrix sync loop is not running")
+        ready_wait = asyncio.create_task(self.ready.wait())
+        try:
+            done, _ = await asyncio.wait(
+                (ready_wait, self._sync_task),
+                timeout=timeout,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if ready_wait in done and self.ready.is_set():
+                return
+            if self._sync_task in done:
+                await self._sync_task
+            raise TimeoutError(
+                "Matrix did not complete its initial sync",
+            )
+        finally:
+            ready_wait.cancel()
+            await asyncio.gather(ready_wait, return_exceptions=True)
+
     def bind_handler(self, handler: InboundHandler) -> None:
         """Bind the normalized inbound consumer without starting I/O."""
         self._handler = handler

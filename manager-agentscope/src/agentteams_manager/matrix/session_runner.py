@@ -71,6 +71,7 @@ class MatrixSessionRunner:
         media: MediaAdapter | None = None,
         monotonic: Callable[[], float] = time.monotonic,
         edit_interval_seconds: float = 0.5,
+        metrics: Any | None = None,
     ) -> None:
         self._sessions = sessions
         self._matrix = matrix
@@ -79,12 +80,20 @@ class MatrixSessionRunner:
         self._media = media
         self._monotonic = monotonic
         self._edit_interval = edit_interval_seconds
+        self._metrics = metrics
 
     async def handle(
         self,
         event: InboundEvent,
         policy: RoomPolicy,
     ) -> None:
+        if self._metrics is not None:
+            self._metrics.increment(
+                "agentteams_manager_matrix_turns_total",
+            )
+            self._metrics.increment(
+                "agentteams_manager_model_turns_total",
+            )
         command = _confirmation_command(event.body)
         if command is not None:
             await self._handle_confirmation(event, policy, *command)

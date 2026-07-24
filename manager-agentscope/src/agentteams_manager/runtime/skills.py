@@ -95,9 +95,11 @@ class SkillToolkitFactory:
         registry: SkillRegistry,
         *,
         tools: ToolProvider | None = None,
+        metrics: object | None = None,
     ) -> None:
         self._registry = registry
         self._tools = tools
+        self._metrics = metrics
 
     async def for_policy(self, policy: RoomPolicy) -> Toolkit:
         await self._registry.load()
@@ -109,4 +111,5 @@ class SkillToolkitFactory:
         return ManagerToolkit(
             tools=list(registered),
             skills_or_loaders=[self._registry.loader],
+            metrics=self._metrics,
         )

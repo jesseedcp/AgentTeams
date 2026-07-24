@@ -91,7 +91,7 @@ async def test_timeout_moves_operation_to_reconciling(
 async def test_repeated_begin_returns_existing_operation(
     tmp_path: Path,
 ) -> None:
-    supervisor, _, _ = await make_supervisor(tmp_path)
+    supervisor, operations, store = await make_supervisor(tmp_path)
     first = await supervisor.begin(
         operation_id="e" * 32,
         kind=OperationKind.CREATE_WORKER,
@@ -107,6 +107,10 @@ async def test_repeated_begin_returns_existing_operation(
 
     assert first.operation_id == second.operation_id
     assert first.created_at == second.created_at
+    events = await operations.events_for(first.operation_id)
+    assert [event.event_type for event in events] == ["operation_started"]
+    assert len(store.objects) == 1
+    assert events[0].payload["operation"] == first.model_dump(mode="json")
 
 
 @pytest.mark.asyncio
@@ -130,11 +134,14 @@ async def test_before_effect_redacts_nested_secrets(
         },
     )
 
-    encoded = next(iter(store.objects.values())).decode("utf-8")
+    encoded = "\n".join(
+        value.decode("utf-8")
+        for value in store.objects.values()
+    )
     assert "Bearer secret" not in encoded
     assert '"api_key":"secret"' not in encoded
     assert event.payload["request"]["api_key"] == "[REDACTED]"
-    assert len(await operations.events_for(operation.operation_id)) == 1
+    assert len(await operations.events_for(operation.operation_id)) == 2
 
 
 @pytest.mark.asyncio
@@ -164,7 +171,11 @@ async def test_acknowledged_effect_keeps_multistep_operation_running(
     assert [
         event.event_type
         for event in await operations.events_for(operation.operation_id)
-    ] == ["effect_planned", "effect_acknowledged"]
+    ] == [
+        "operation_started",
+        "effect_planned",
+        "effect_acknowledged",
+    ]
 
 
 @pytest.mark.asyncio

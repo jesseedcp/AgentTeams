@@ -39,13 +39,16 @@ def main() -> None:
     configure_logging()
     tracer = build_tracer_from_env()
     config = ManagerConfig.from_env()
-    application = create_application(config, tracer=tracer)
+
+    async def run() -> None:
+        application = await create_application(config, tracer=tracer)
+        await run_application(application)
+
     try:
-        asyncio.run(run_application(application))
+        asyncio.run(run())
     finally:
         tracer.shutdown()
 
 
 if __name__ == "__main__":
     main()
-

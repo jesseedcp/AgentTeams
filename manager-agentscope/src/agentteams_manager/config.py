@@ -109,6 +109,12 @@ class ManagerConfig(BaseModel):
     heartbeat_interval_seconds: int = 1_800
     worker_idle_timeout_seconds: int = 43_200
     yolo: bool = False
+    admin_user_id: str = ""
+    manager_admin_room_id: str = ""
+    runtime_mode: str = "local"
+    higress_admin_url: str | None = None
+    higress_admin_user: str | None = None
+    higress_admin_password: SecretStr | None = None
 
     @classmethod
     def from_env(cls) -> ManagerConfig:
@@ -117,11 +123,18 @@ class ManagerConfig(BaseModel):
         workspace = Path(
             env.get("AGENTTEAMS_MANAGER_WORKSPACE", str(Path.home())),
         ).resolve()
+        matrix_domain = env["AGENTTEAMS_MATRIX_DOMAIN"]
+        raw_admin_user = env.get("AGENTTEAMS_ADMIN_USER", "admin")
+        admin_user_id = (
+            raw_admin_user
+            if raw_admin_user.startswith("@")
+            else f"@{raw_admin_user}:{matrix_domain}"
+        )
         return cls(
             manager_name=env["AGENTTEAMS_MANAGER_NAME"],
             manager_user_id=env["AGENTTEAMS_MANAGER_MATRIX_USER_ID"],
             matrix_url=env["AGENTTEAMS_MATRIX_URL"].rstrip("/"),
-            matrix_domain=env["AGENTTEAMS_MATRIX_DOMAIN"],
+            matrix_domain=matrix_domain,
             matrix_access_token=SecretStr(
                 env["AGENTTEAMS_MANAGER_MATRIX_TOKEN"],
             ),
@@ -171,4 +184,29 @@ class ManagerConfig(BaseModel):
                 ),
             ),
             yolo=env.get("AGENTTEAMS_YOLO") == "1",
+            admin_user_id=admin_user_id,
+            manager_admin_room_id=env[
+                "AGENTTEAMS_MANAGER_ADMIN_ROOM_ID"
+            ],
+            runtime_mode=env.get("AGENTTEAMS_RUNTIME", "local"),
+            higress_admin_url=(
+                env["AGENTTEAMS_AI_GATEWAY_ADMIN_URL"].rstrip("/")
+                if env.get("AGENTTEAMS_AI_GATEWAY_ADMIN_URL")
+                else None
+            ),
+            higress_admin_user=(
+                env.get("AGENTTEAMS_HIGRESS_ADMIN_USER")
+                or env.get("AGENTTEAMS_ADMIN_USER")
+            ),
+            higress_admin_password=(
+                SecretStr(
+                    env.get("AGENTTEAMS_HIGRESS_ADMIN_PASSWORD")
+                    or env["AGENTTEAMS_ADMIN_PASSWORD"],
+                )
+                if (
+                    env.get("AGENTTEAMS_HIGRESS_ADMIN_PASSWORD")
+                    or env.get("AGENTTEAMS_ADMIN_PASSWORD")
+                )
+                else None
+            ),
         )

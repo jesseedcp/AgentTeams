@@ -13,6 +13,7 @@ def test_manager_config_reads_secret_values_without_exposing_them(
         "AGENTTEAMS_MANAGER_NAME": "default",
         "AGENTTEAMS_MANAGER_MATRIX_USER_ID": "@manager:matrix.local",
         "AGENTTEAMS_MANAGER_MATRIX_TOKEN": "matrix-secret",
+        "AGENTTEAMS_MANAGER_ADMIN_ROOM_ID": "!manager:matrix.local",
         "AGENTTEAMS_MANAGER_GATEWAY_KEY": "gateway-secret",
         "AGENTTEAMS_MANAGER_RUNTIME_DOCUMENT_KEY":
             "manager/agentscope-manager.json",

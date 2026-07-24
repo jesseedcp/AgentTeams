@@ -75,6 +75,7 @@ func (b *WorkerEnvBuilder) BuildManager(managerName string, prov *ManagerProvisi
 		"AGENTTEAMS_MANAGER_NAME":                        managerName,
 		"AGENTTEAMS_MANAGER_MATRIX_USER_ID":              prov.MatrixUserID,
 		"AGENTTEAMS_MANAGER_MATRIX_TOKEN":                prov.MatrixToken,
+		"AGENTTEAMS_MANAGER_ADMIN_ROOM_ID":               prov.RoomID,
 		"AGENTTEAMS_MANAGER_GATEWAY_KEY":                 prov.GatewayKey,
 		"AGENTTEAMS_MANAGER_RUNTIME":                     backend.RuntimeAgentScope,
 		"AGENTTEAMS_MANAGER_RUNTIME_DOCUMENT_KEY":        "manager/agentscope-manager.json",
@@ -93,6 +94,13 @@ func (b *WorkerEnvBuilder) BuildManager(managerName string, prov *ManagerProvisi
 	}
 	if b.defaults.AdminUser != "" {
 		env["AGENTTEAMS_ADMIN_USER"] = b.defaults.AdminUser
+		env["AGENTTEAMS_HIGRESS_ADMIN_USER"] = b.defaults.AdminUser
+	}
+	if b.defaults.AdminPassword != "" {
+		env["AGENTTEAMS_HIGRESS_ADMIN_PASSWORD"] = b.defaults.AdminPassword
+	}
+	if b.defaults.HigressAdminURL != "" {
+		env["AGENTTEAMS_AI_GATEWAY_ADMIN_URL"] = b.defaults.HigressAdminURL
 	}
 	if b.defaults.DefaultWorkerRuntime != "" {
 		env["AGENTTEAMS_DEFAULT_WORKER_RUNTIME"] = b.defaults.DefaultWorkerRuntime

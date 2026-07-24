@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import inspect
 import json
+import logging
 import os
 import tempfile
 from collections.abc import Awaitable, Callable
@@ -16,6 +17,8 @@ from typing import Protocol
 
 from agentteams_manager.config import RuntimeDocument
 from agentteams_manager.domain.models import ObjectReceipt
+
+logger = logging.getLogger(__name__)
 
 
 class RuntimeObjectStorage(Protocol):
@@ -110,24 +113,88 @@ class ConfigWatcher:
         cache_path: Path,
         registry: RuntimeRegistry,
         prepare: RuntimePrepare | None = None,
+        poll_interval_seconds: float = 5,
+        initial_timeout_seconds: float = 60,
     ) -> None:
         if not key:
             raise ValueError("runtime document key must not be empty")
+        if poll_interval_seconds <= 0:
+            raise ValueError("poll interval must be positive")
+        if initial_timeout_seconds <= 0:
+            raise ValueError("initial timeout must be positive")
         self._storage = storage
         self._key = key
         self._cache_path = cache_path.resolve()
         self._registry = registry
         self._prepare = prepare
+        self._poll_interval = poll_interval_seconds
+        self._initial_timeout = initial_timeout_seconds
+        self._initial_revision = registry.revision
         self._etag: str | None = None
         self._poll_lock = asyncio.Lock()
+        self._poll_task: asyncio.Task[None] | None = None
+        self._ready = False
 
     @property
     def observed_etag(self) -> str | None:
         return self._etag
 
+    @property
+    def ready(self) -> bool:
+        return self._ready
+
+    async def start(self) -> None:
+        """Activate one Controller generation before serving Matrix turns."""
+        if self._poll_task is not None:
+            return
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + self._initial_timeout
+        while True:
+            await self.poll_once()
+            if (
+                self._registry.revision > self._initial_revision
+                and not self._registry.degraded
+            ):
+                self._ready = True
+                break
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                raise RuntimeError(
+                    "initial runtime document was not activated",
+                )
+            await asyncio.sleep(min(self._poll_interval, remaining))
+        self._poll_task = asyncio.create_task(
+            self._run(),
+            name="manager-runtime-config",
+        )
+
+    async def stop(self) -> None:
+        task, self._poll_task = self._poll_task, None
+        if task is not None:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+        self._ready = False
+
+    async def _run(self) -> None:
+        while True:
+            await asyncio.sleep(self._poll_interval)
+            try:
+                await self.poll_once()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("Manager runtime polling failed")
+
     async def poll_once(self) -> ConfigChange | None:
         async with self._poll_lock:
-            receipt = await self._storage.head(self._key)
+            try:
+                receipt = await self._storage.head(self._key)
+            except Exception as exc:
+                self._registry.mark_degraded(exc)
+                return None
             if receipt is None:
                 self._registry.mark_degraded(
                     FileNotFoundError(self._key),
@@ -164,7 +231,6 @@ class ConfigWatcher:
                 _atomic_write(self._cache_path, _canonical(document))
                 self._registry.activate(change)
             except Exception as exc:
-                self._etag = receipt.etag
                 self._registry.mark_degraded(exc)
                 return None
             self._etag = receipt.etag

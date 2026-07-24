@@ -248,6 +248,41 @@ async def test_success_false_and_response_body_are_not_treated_as_success() -> N
     await http.aclose()
 
 
+@pytest.mark.asyncio
+async def test_admin_credentials_create_and_refresh_console_session() -> None:
+    login_count = 0
+    request_count = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal login_count, request_count
+        if request.url.path == "/session/login":
+            login_count += 1
+            return httpx.Response(
+                200,
+                headers={"Set-Cookie": f"SESSION=session-{login_count}; Path=/"},
+                json={"success": True},
+            )
+        request_count += 1
+        if request_count == 1:
+            return httpx.Response(401, json={"success": False})
+        assert request.headers["cookie"] == "SESSION=session-2"
+        return httpx.Response(200, json={"success": True})
+
+    http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    client = HigressClient(
+        console_url="http://console:8001",
+        gateway_domain="aigw-local.agentteams.io",
+        admin_user="admin",
+        admin_password=SecretStr("secret"),
+        client=http,
+    )
+
+    await client.delete_server("github")
+
+    assert login_count == 2
+    await http.aclose()
+
+
 @pytest.mark.parametrize(
     ("url", "transport"),
     (

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Collection
+from http.cookies import SimpleCookie
 from typing import Any, Literal, Self
 from urllib.parse import urlsplit
 
@@ -149,7 +150,9 @@ class HigressClient:
         *,
         console_url: str,
         gateway_domain: str,
-        session_cookie: SecretStr,
+        session_cookie: SecretStr | None = None,
+        admin_user: str | None = None,
+        admin_password: SecretStr | None = None,
         client: httpx.AsyncClient | None = None,
         timeout: float = 15,
     ) -> None:
@@ -173,11 +176,23 @@ class HigressClient:
             or gateway.port is not None
         ):
             raise ValueError("gateway domain must be a bare hostname")
-        if not session_cookie.get_secret_value():
-            raise ValueError("Higress session cookie must not be empty")
+        has_cookie = bool(
+            session_cookie and session_cookie.get_secret_value(),
+        )
+        has_credentials = bool(
+            admin_user
+            and admin_password
+            and admin_password.get_secret_value(),
+        )
+        if not has_cookie and not has_credentials:
+            raise ValueError(
+                "Higress session cookie or admin credentials are required",
+            )
         self._console_url = console_url.rstrip("/")
         self._gateway_domain = gateway_domain
         self._session_cookie = session_cookie
+        self._admin_user = admin_user
+        self._admin_password = admin_password
         self._client = client or httpx.AsyncClient()
         self._owns_client = client is None
         self._timeout = timeout
@@ -377,23 +392,22 @@ class HigressClient:
         json_body: dict[str, object] | None = None,
         accepted_statuses: set[int] | None = None,
     ) -> object:
-        try:
-            response = await self._client.request(
+        await self._ensure_session()
+        response = await self._send(
+            method,
+            path,
+            params=params,
+            json_body=json_body,
+        )
+        if response.status_code == 401 and self._admin_password is not None:
+            self._session_cookie = None
+            await self._ensure_session()
+            response = await self._send(
                 method,
-                f"{self._console_url}{path}",
+                path,
                 params=params,
-                json=json_body,
-                headers={
-                    "Cookie": self._session_cookie.get_secret_value(),
-                    "Accept": "application/json",
-                },
-                timeout=self._timeout,
+                json_body=json_body,
             )
-        except httpx.HTTPError as exc:
-            raise HigressTransportError(
-                f"Higress {method} {path} transport failed "
-                f"({type(exc).__name__})",
-            ) from None
         accepted = accepted_statuses or set()
         if not 200 <= response.status_code < 300:
             if response.status_code in accepted:
@@ -415,6 +429,75 @@ class HigressClient:
                 f"Higress {method} {path} returned success=false",
             )
         return payload
+
+    async def _ensure_session(self) -> None:
+        if self._session_cookie is not None:
+            return
+        if self._admin_user is None or self._admin_password is None:
+            raise HigressTransportError(
+                "Higress Console session is unavailable",
+            )
+        try:
+            response = await self._client.post(
+                f"{self._console_url}/session/login",
+                json={
+                    "username": self._admin_user,
+                    "password": self._admin_password.get_secret_value(),
+                },
+                timeout=self._timeout,
+            )
+        except httpx.HTTPError as exc:
+            raise HigressTransportError(
+                "Higress Console login transport failed "
+                f"({type(exc).__name__})",
+            ) from None
+        if not 200 <= response.status_code < 300:
+            raise HigressProtocolError(
+                "Higress Console login failed with HTTP "
+                f"{response.status_code}",
+            )
+        cookie = SimpleCookie()
+        for value in response.headers.get_list("set-cookie"):
+            cookie.load(value)
+        serialized = "; ".join(
+            f"{name}={morsel.value}"
+            for name, morsel in cookie.items()
+        )
+        if not serialized:
+            raise HigressProtocolError(
+                "Higress Console login returned no session cookie",
+            )
+        self._session_cookie = SecretStr(serialized)
+
+    async def _send(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, str] | None,
+        json_body: dict[str, object] | None,
+    ) -> httpx.Response:
+        if self._session_cookie is None:
+            raise HigressTransportError(
+                "Higress Console session is unavailable",
+            )
+        try:
+            return await self._client.request(
+                method,
+                f"{self._console_url}{path}",
+                params=params,
+                json=json_body,
+                headers={
+                    "Cookie": self._session_cookie.get_secret_value(),
+                    "Accept": "application/json",
+                },
+                timeout=self._timeout,
+            )
+        except httpx.HTTPError as exc:
+            raise HigressTransportError(
+                f"Higress {method} {path} transport failed "
+                f"({type(exc).__name__})",
+            ) from None
 
 
 def _parse_backend_url(value: str):

@@ -69,6 +69,8 @@ func TestWorkerEnvBuilderBuildManagerUsesAgentScopeContract(t *testing.T) {
 		AIGatewayURL:         "http://aigw.example.com:8080",
 		MatrixURL:            "http://matrix.example.com:8080",
 		AdminUser:            "admin",
+		AdminPassword:        "admin-password",
+		HigressAdminURL:      "http://higress.example.com:8001",
 		Runtime:              "docker",
 		DefaultWorkerRuntime: "copaw",
 		SkillsAPIURL:         "nacos://skills.example.com:8848/public",
@@ -77,6 +79,7 @@ func TestWorkerEnvBuilderBuildManagerUsesAgentScopeContract(t *testing.T) {
 	env := builder.BuildManager("manager", &ManagerProvisionResult{
 		MatrixUserID:   "@manager:matrix.example.com",
 		MatrixToken:    "matrix-token",
+		RoomID:         "!manager-room:matrix.example.com",
 		GatewayKey:     "gateway-key",
 		MatrixPassword: "matrix-password",
 		MinIOPassword:  "secret",
@@ -93,6 +96,7 @@ func TestWorkerEnvBuilderBuildManagerUsesAgentScopeContract(t *testing.T) {
 		"AGENTTEAMS_MANAGER_NAME":                        "manager",
 		"AGENTTEAMS_MANAGER_MATRIX_USER_ID":              "@manager:matrix.example.com",
 		"AGENTTEAMS_MANAGER_MATRIX_TOKEN":                "matrix-token",
+		"AGENTTEAMS_MANAGER_ADMIN_ROOM_ID":               "!manager-room:matrix.example.com",
 		"AGENTTEAMS_MANAGER_GATEWAY_KEY":                 "gateway-key",
 		"AGENTTEAMS_MANAGER_RUNTIME":                     "agentscope",
 		"AGENTTEAMS_MANAGER_RUNTIME_DOCUMENT_KEY":        "manager/agentscope-manager.json",
@@ -106,6 +110,9 @@ func TestWorkerEnvBuilderBuildManagerUsesAgentScopeContract(t *testing.T) {
 		"AGENTTEAMS_RUNTIME":                             "docker",
 		"AGENTTEAMS_DEFAULT_WORKER_RUNTIME":              "copaw",
 		"AGENTTEAMS_ADMIN_USER":                          "admin",
+		"AGENTTEAMS_HIGRESS_ADMIN_USER":                  "admin",
+		"AGENTTEAMS_HIGRESS_ADMIN_PASSWORD":              "admin-password",
+		"AGENTTEAMS_AI_GATEWAY_ADMIN_URL":                "http://higress.example.com:8001",
 		"SKILLS_API_URL":                                 "nacos://skills.example.com:8848/public",
 	} {
 		if got := env[key]; got != want {

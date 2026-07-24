@@ -212,6 +212,8 @@ type WorkerEnvDefaults struct {
 	AIGatewayURL         string
 	MatrixURL            string
 	AdminUser            string
+	AdminPassword        string
+	HigressAdminURL      string
 	Runtime              string // "docker" for embedded, "k8s" for incluster
 	DefaultWorkerRuntime string
 	YoloMode             bool // AGENTTEAMS_YOLO=1 — propagated to managers and workers
@@ -410,6 +412,8 @@ func LoadConfig() *Config {
 			AIGatewayURL:         envOrDefault("AGENTTEAMS_AI_GATEWAY_URL", "http://aigw-local.agentteams.io:8080"),
 			MatrixURL:            envOrDefault("AGENTTEAMS_MATRIX_URL", "http://matrix-local.agentteams.io:8080"),
 			AdminUser:            os.Getenv("AGENTTEAMS_ADMIN_USER"),
+			AdminPassword:        os.Getenv("AGENTTEAMS_ADMIN_PASSWORD"),
+			HigressAdminURL:      envOrDefault("AGENTTEAMS_AI_GATEWAY_ADMIN_URL", "http://127.0.0.1:8001"),
 			Runtime:              kubeMode,
 			DefaultWorkerRuntime: os.Getenv("AGENTTEAMS_DEFAULT_WORKER_RUNTIME"),
 			YoloMode:             envBool("AGENTTEAMS_YOLO"),
@@ -435,6 +439,7 @@ func LoadConfig() *Config {
 			cfg.WorkerEnv.MatrixURL = replaceHost(cfg.WorkerEnv.MatrixURL, ctrlHost)
 			cfg.WorkerEnv.FSEndpoint = replaceHost(cfg.WorkerEnv.FSEndpoint, ctrlHost)
 			cfg.WorkerEnv.AIGatewayURL = replaceHost(cfg.WorkerEnv.AIGatewayURL, ctrlHost)
+			cfg.WorkerEnv.HigressAdminURL = replaceHost(cfg.WorkerEnv.HigressAdminURL, ctrlHost)
 		}
 	}
 	// S3/MinIO API is never on the Higress HTTP gateway port (8080). Misconfigured

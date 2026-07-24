@@ -125,3 +125,54 @@ async def test_prepare_failure_keeps_previous_generation(
     assert registry.degraded is True
     assert registry.last_error == "RuntimeError"
     assert not (tmp_path / "runtime.json").exists()
+
+
+@pytest.mark.asyncio
+async def test_watcher_lifecycle_requires_initial_remote_generation(
+    tmp_path: Path,
+) -> None:
+    storage = MinioClient(FakeS3(), bucket="agentteams")
+    registry = RuntimeRegistry(_runtime(0, "fallback"))
+    watcher = ConfigWatcher(
+        storage=storage,
+        key="manager/agentscope-manager.json",
+        cache_path=tmp_path / "agentscope-manager.json",
+        registry=registry,
+        poll_interval_seconds=0.01,
+        initial_timeout_seconds=0.05,
+    )
+
+    with pytest.raises(RuntimeError, match="initial runtime document"):
+        await watcher.start()
+
+    assert not watcher.ready
+    await watcher.stop()
+
+
+@pytest.mark.asyncio
+async def test_watcher_lifecycle_polls_and_stops(
+    tmp_path: Path,
+) -> None:
+    storage = MinioClient(FakeS3(), bucket="agentteams")
+    remote = _runtime(1, "qwen-next")
+    await storage.put_json_if_version(
+        "manager/agentscope-manager.json",
+        remote.model_dump(mode="json"),
+        expected_etag=None,
+    )
+    registry = RuntimeRegistry(_runtime(0, "fallback"))
+    watcher = ConfigWatcher(
+        storage=storage,
+        key="manager/agentscope-manager.json",
+        cache_path=tmp_path / "agentscope-manager.json",
+        registry=registry,
+        poll_interval_seconds=0.01,
+        initial_timeout_seconds=0.1,
+    )
+
+    await watcher.start()
+
+    assert watcher.ready
+    assert registry.revision == 1
+    await watcher.stop()
+    assert not watcher.ready

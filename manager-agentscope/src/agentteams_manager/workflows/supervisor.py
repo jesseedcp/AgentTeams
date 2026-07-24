@@ -64,6 +64,7 @@ class OperationSupervisor:
         self._reconcilers = dict(reconcilers)
         self._target_locks: dict[str, asyncio.Lock] = {}
         self._locks_guard = asyncio.Lock()
+        self._journal_guard = asyncio.Lock()
 
     async def begin(
         self,
@@ -73,40 +74,100 @@ class OperationSupervisor:
         target_key: str,
         request: dict[str, object],
     ) -> OperationRecord:
-        existing = await self._operations.get(operation_id)
-        if existing is not None:
-            if (
-                existing.kind is not kind
-                or existing.target_key != target_key
-                or existing.request != request
-            ):
-                raise ConflictError(
-                    f"operation ID collision for {operation_id}",
+        lock = await self._lock_for(f"operation/{operation_id}")
+        async with lock:
+            existing = await self._operations.get(operation_id)
+            if existing is not None:
+                self._validate_identity(
+                    existing,
+                    kind=kind,
+                    target_key=target_key,
+                    request=request,
                 )
-            return existing
-        record = OperationRecord.new(
-            operation_id=operation_id,
-            kind=kind,
-            target_key=target_key,
-            request=request,
-        )
-        try:
-            return await self._operations.create(record)
-        except Exception:
-            raced = await self._operations.get(operation_id)
-            if raced is None:
-                raise
-            if (
-                raced.kind is not kind
-                or raced.target_key != target_key
-                or raced.request != request
+                await self._ensure_operation_started(existing)
+                return existing
+            record = OperationRecord.new(
+                operation_id=operation_id,
+                kind=kind,
+                target_key=target_key,
+                request=request,
+            )
+            try:
+                record = await self._operations.create(record)
+            except Exception:
+                raced = await self._operations.get(operation_id)
+                if raced is None:
+                    raise
+                self._validate_identity(
+                    raced,
+                    kind=kind,
+                    target_key=target_key,
+                    request=request,
+                )
+                record = raced
+            await self._ensure_operation_started(record)
+            return record
+
+    @staticmethod
+    def _validate_identity(
+        operation: OperationRecord,
+        *,
+        kind: OperationKind,
+        target_key: str,
+        request: dict[str, object],
+    ) -> None:
+        if (
+            operation.kind is not kind
+            or operation.target_key != target_key
+            or operation.request != request
+        ):
+            raise ConflictError(
+                f"operation ID collision for {operation.operation_id}",
+            )
+
+    async def _ensure_operation_started(
+        self,
+        operation: OperationRecord,
+    ) -> None:
+        async with self._journal_guard:
+            events = await self._operations.events_for(
+                operation.operation_id,
+            )
+            if any(
+                event.event_type == "operation_started"
+                for event in events
             ):
-                raise ConflictError(
-                    f"operation ID collision for {operation_id}",
-                ) from None
-            return raced
+                return
+            sequence = await self._operations.next_sequence(
+                operation.operation_id,
+            )
+            event = JournalEvent(
+                operation_id=operation.operation_id,
+                sequence=sequence,
+                event_type="operation_started",
+                payload={
+                    "operation": operation.model_dump(mode="json"),
+                },
+                created_at=self._clock.now(),
+            )
+            await self._journal.append(event)
+            await self._operations.append_event(event)
+            await self._operations.mark_event_applied(event.sequence)
 
     async def before_effect(
+        self,
+        operation_id: str,
+        effect: ExternalEffect,
+        request: dict[str, object],
+    ) -> JournalEvent:
+        async with self._journal_guard:
+            return await self._before_effect(
+                operation_id,
+                effect,
+                request,
+            )
+
+    async def _before_effect(
         self,
         operation_id: str,
         effect: ExternalEffect,
@@ -142,6 +203,7 @@ class OperationSupervisor:
                 expected={OperationStatus.PREPARED},
                 target=OperationStatus.DISPATCHED,
             )
+        await self._operations.mark_event_applied(event.sequence)
         return event
 
     async def effect_succeeded(
@@ -150,7 +212,20 @@ class OperationSupervisor:
         effect: ExternalEffect,
         receipt: dict[str, object],
     ) -> OperationRecord:
-        await self._record_outcome(
+        async with self._journal_guard:
+            return await self._effect_succeeded(
+                operation_id,
+                effect,
+                receipt,
+            )
+
+    async def _effect_succeeded(
+        self,
+        operation_id: str,
+        effect: ExternalEffect,
+        receipt: dict[str, object],
+    ) -> OperationRecord:
+        event = await self._record_outcome(
             operation_id,
             "effect_succeeded",
             effect,
@@ -183,6 +258,7 @@ class OperationSupervisor:
         }:
             target_expected = {current.status}
         elif current.status is OperationStatus.SUCCEEDED:
+            await self._operations.mark_event_applied(event.sequence)
             return current
         else:
             raise ConflictError(
@@ -194,7 +270,9 @@ class OperationSupervisor:
             target=OperationStatus.SUCCEEDED,
             result=receipt,
         )
-        return changed or await self._require(operation_id)
+        result = changed or await self._require(operation_id)
+        await self._operations.mark_event_applied(event.sequence)
+        return result
 
     async def effect_acknowledged(
         self,
@@ -203,7 +281,20 @@ class OperationSupervisor:
         receipt: dict[str, object],
     ) -> OperationRecord:
         """Record one successful step without terminating the operation."""
-        await self._record_outcome(
+        async with self._journal_guard:
+            return await self._effect_acknowledged(
+                operation_id,
+                effect,
+                receipt,
+            )
+
+    async def _effect_acknowledged(
+        self,
+        operation_id: str,
+        effect: ExternalEffect,
+        receipt: dict[str, object],
+    ) -> OperationRecord:
+        event = await self._record_outcome(
             operation_id,
             "effect_acknowledged",
             effect,
@@ -211,6 +302,7 @@ class OperationSupervisor:
         )
         current = await self._require(operation_id)
         if current.status is OperationStatus.SUCCEEDED:
+            await self._operations.mark_event_applied(event.sequence)
             return current
         if current.status is OperationStatus.PREPARED:
             current = (
@@ -232,8 +324,11 @@ class OperationSupervisor:
                 target=OperationStatus.RUNNING,
                 result=receipt,
             )
-            return changed or await self._require(operation_id)
+            result = changed or await self._require(operation_id)
+            await self._operations.mark_event_applied(event.sequence)
+            return result
         if current.status is OperationStatus.RUNNING:
+            await self._operations.mark_event_applied(event.sequence)
             return current
         raise ConflictError(
             f"cannot acknowledge operation from {current.status}",
@@ -246,7 +341,20 @@ class OperationSupervisor:
         reason: str,
     ) -> OperationRecord:
         """Persist a definite external failure as a terminal operation."""
-        await self._record_outcome(
+        async with self._journal_guard:
+            return await self._effect_failed(
+                operation_id,
+                effect,
+                reason,
+            )
+
+    async def _effect_failed(
+        self,
+        operation_id: str,
+        effect: ExternalEffect,
+        reason: str,
+    ) -> OperationRecord:
+        event = await self._record_outcome(
             operation_id,
             "effect_failed",
             effect,
@@ -254,6 +362,7 @@ class OperationSupervisor:
         )
         current = await self._require(operation_id)
         if current.status is OperationStatus.FAILED:
+            await self._operations.mark_event_applied(event.sequence)
             return current
         if current.status is OperationStatus.SUCCEEDED:
             raise ConflictError("cannot fail a succeeded operation")
@@ -270,7 +379,9 @@ class OperationSupervisor:
                 target=OperationStatus.FAILED,
                 result={"effect": effect.value, "reason": str(redact(reason))},
             )
-            return changed or await self._require(operation_id)
+            result = changed or await self._require(operation_id)
+            await self._operations.mark_event_applied(event.sequence)
+            return result
         if current.status in {
             OperationStatus.DISPATCHED,
             OperationStatus.ACKNOWLEDGED,
@@ -298,7 +409,9 @@ class OperationSupervisor:
             target=OperationStatus.FAILED,
             result={"effect": effect.value, "reason": str(redact(reason))},
         )
-        return changed or await self._require(operation_id)
+        result = changed or await self._require(operation_id)
+        await self._operations.mark_event_applied(event.sequence)
+        return result
 
     async def effect_ambiguous(
         self,
@@ -306,7 +419,20 @@ class OperationSupervisor:
         effect: ExternalEffect,
         reason: str,
     ) -> OperationRecord:
-        await self._record_outcome(
+        async with self._journal_guard:
+            return await self._effect_ambiguous(
+                operation_id,
+                effect,
+                reason,
+            )
+
+    async def _effect_ambiguous(
+        self,
+        operation_id: str,
+        effect: ExternalEffect,
+        reason: str,
+    ) -> OperationRecord:
+        event = await self._record_outcome(
             operation_id,
             "effect_ambiguous",
             effect,
@@ -314,6 +440,7 @@ class OperationSupervisor:
         )
         current = await self._require(operation_id)
         if current.status is OperationStatus.RECONCILING:
+            await self._operations.mark_event_applied(event.sequence)
             return current
         expected = {
             OperationStatus.PREPARED,
@@ -334,7 +461,9 @@ class OperationSupervisor:
                 "ambiguous_reason": str(redact(reason)),
             },
         )
-        return changed or await self._require(operation_id)
+        result = changed or await self._require(operation_id)
+        await self._operations.mark_event_applied(event.sequence)
+        return result
 
     async def recover_all(self) -> RecoveryReport:
         operations = await self._operations.list_recoverable()

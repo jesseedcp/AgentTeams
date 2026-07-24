@@ -1,11 +1,17 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+import hashlib
 from pathlib import Path
 
 import pytest
 
 from agentteams_manager.clients.minio import MinioClient
+from agentteams_manager.domain.models import (
+    ExternalEffect,
+    OperationKind,
+    OperationStatus,
+)
 from agentteams_manager.state.database import Database
 from agentteams_manager.state.notifications import NotificationRepository
 from agentteams_manager.workflows.matrix_resources import ChannelResolver
@@ -88,3 +94,64 @@ async def test_send_once_resolves_primary_and_deduplicates(
     assert first == second
     assert first.room_id == "!primary:example"
     assert len(matrix.visible) == 1
+
+
+@pytest.mark.asyncio
+async def test_resume_notification_reuses_recorded_matrix_transaction(
+    tmp_path: Path,
+) -> None:
+    database = Database(tmp_path / "manager.db")
+    await database.open()
+    storage = MinioClient(FakeS3(), bucket="agentteams")
+    matrix = Matrix()
+    clock = FixedClock()
+    supervisor = TaskSupervisor(clock)
+    source_operation_id = "b" * 32
+    notification_id = hashlib.sha256(
+        f"notification\0{source_operation_id}".encode(),
+    ).hexdigest()[:32]
+    txn_id = f"agentteams:{notification_id}:0"
+    operation = await supervisor.begin(
+        operation_id=notification_id,
+        kind=OperationKind.SEND_NOTIFICATION,
+        target_key="matrix-notification/!primary:example",
+        request={
+            "source_operation_id": source_operation_id,
+            "recipient": "@admin:example",
+            "room_id": "!primary:example",
+            "text": "Recovered notification",
+            "txn_id": txn_id,
+        },
+    )
+    await supervisor.before_effect(
+        notification_id,
+        ExternalEffect.MATRIX,
+        {"operation": "send_notification"},
+    )
+    operation = await supervisor.effect_ambiguous(
+        notification_id,
+        ExternalEffect.MATRIX,
+        "connection_lost",
+    )
+    service = NotificationService(
+        notifications=NotificationRepository(database),
+        resolver=ChannelResolver(
+            channels=Channels(),
+            matrix=matrix,
+            manager_admin_room="!admin:example",
+        ),
+        matrix=matrix,
+        supervisor=supervisor,
+        memory=DailyMemory(storage=storage, clock=clock),
+        clock=clock,
+        admin_user_id="@admin:example",
+    )
+
+    receipt = await service.resume_operation(operation)
+
+    assert receipt.event_id == "$notification"
+    assert matrix.attempts == [txn_id]
+    assert (
+        supervisor.operations[notification_id].status
+        is OperationStatus.SUCCEEDED
+    )

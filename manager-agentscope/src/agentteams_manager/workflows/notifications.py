@@ -9,13 +9,14 @@ from typing import Protocol
 from pydantic import BaseModel, ConfigDict, Field
 
 from agentteams_manager.clients.minio import ObjectVersionConflict
-from agentteams_manager.domain.errors import ConflictError
+from agentteams_manager.domain.errors import ConflictError, RecoveryError
 from agentteams_manager.domain.ids import matrix_transaction_id
 from agentteams_manager.domain.models import (
     ExternalEffect,
     NotificationRecord,
     ObjectReceipt,
     OperationKind,
+    OperationRecord,
     OperationStatus,
     TaskRecord,
 )
@@ -199,19 +200,6 @@ class NotificationService:
         )
         room_id = existing.room_id if existing else await self.resolve_room()
         txn_id = matrix_transaction_id(notification_id, 0)
-        now = self._clock.now().astimezone(UTC)
-        record = await self._notifications.prepare(
-            NotificationRecord(
-                notification_id=notification_id,
-                source_operation_id=source_operation_id,
-                recipient=self._admin_user_id,
-                room_id=room_id,
-                text=text,
-                txn_id=txn_id,
-                status="prepared",
-                created_at=now,
-            ),
-        )
         operation = await self._supervisor.begin(
             operation_id=notification_id,
             kind=OperationKind.SEND_NOTIFICATION,
@@ -224,6 +212,52 @@ class NotificationService:
                 "txn_id": txn_id,
             },
         )
+        return await self._deliver(operation)
+
+    async def resume_operation(
+        self,
+        operation: OperationRecord,
+    ) -> NotificationReceipt:
+        """Resume one journal-restored Matrix notification intent."""
+        if operation.kind is not OperationKind.SEND_NOTIFICATION:
+            raise ValueError("operation is not a Matrix notification")
+        return await self._deliver(operation)
+
+    async def _deliver(
+        self,
+        operation: OperationRecord,
+    ) -> NotificationReceipt:
+        intent = _notification_intent(operation)
+        notification_id = operation.operation_id
+        source_operation_id = intent["source_operation_id"]
+        recipient = intent["recipient"]
+        room_id = intent["room_id"]
+        text = intent["text"]
+        txn_id = intent["txn_id"]
+        record = await self._notifications.prepare(
+            NotificationRecord(
+                notification_id=notification_id,
+                source_operation_id=source_operation_id,
+                recipient=recipient,
+                room_id=room_id,
+                text=text,
+                txn_id=txn_id,
+                status="prepared",
+                created_at=operation.created_at,
+            ),
+        )
+        if operation.status is OperationStatus.SUCCEEDED:
+            event_id = operation.result.get("event_id")
+            if not isinstance(event_id, str) or not event_id:
+                raise RecoveryError(
+                    "succeeded notification has no Matrix event receipt",
+                )
+            record = await self._notifications.mark_sent(
+                notification_id,
+                event_id=event_id,
+                sent_at=self._clock.now().astimezone(UTC),
+            )
+            return _notification_receipt(record)
         if record.status == "sent":
             if record.event_id is None:
                 raise ConflictError("sent notification has no Matrix event")
@@ -260,7 +294,7 @@ class NotificationService:
                 room_id,
                 text,
                 txn_id=txn_id,
-                mentions=(self._admin_user_id,),
+                mentions=(recipient,),
             )
         except Exception as exc:
             await self._supervisor.effect_ambiguous(
@@ -320,6 +354,38 @@ def _notification_id(source_operation_id: str) -> str:
     return hashlib.sha256(
         f"notification\0{source_operation_id}".encode("utf-8"),
     ).hexdigest()[:32]
+
+
+def _notification_intent(
+    operation: OperationRecord,
+) -> dict[str, str]:
+    required = (
+        "source_operation_id",
+        "recipient",
+        "room_id",
+        "text",
+        "txn_id",
+    )
+    intent: dict[str, str] = {}
+    for key in required:
+        value = operation.request.get(key)
+        if not isinstance(value, str) or not value:
+            raise RecoveryError(
+                f"notification operation has invalid {key}",
+            )
+        intent[key] = value
+    expected_id = _notification_id(intent["source_operation_id"])
+    if operation.operation_id != expected_id:
+        raise RecoveryError("notification operation ID does not match source")
+    if operation.target_key != (
+        f"matrix-notification/{intent['room_id']}"
+    ):
+        raise RecoveryError("notification operation room does not match target")
+    if intent["txn_id"] != matrix_transaction_id(operation.operation_id, 0):
+        raise RecoveryError(
+            "notification operation has an unstable transaction ID",
+        )
+    return intent
 
 
 def _notification_receipt(

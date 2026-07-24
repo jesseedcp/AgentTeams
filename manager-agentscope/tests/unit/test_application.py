@@ -67,23 +67,23 @@ async def test_application_starts_in_dependency_order() -> None:
     await application.start()
 
     assert application.start_log == [
+        "health",
         "database",
         "recovery",
         "config_watcher",
         "matrix",
         "heartbeat",
-        "health",
     ]
     assert application.readiness.ready
 
     await application.stop()
     assert log[-6:] == [
-        "stop:health",
         "stop:heartbeat",
         "stop:matrix",
         "stop:config_watcher",
         "save:sessions",
         "stop:database",
+        "stop:health",
     ]
 
 

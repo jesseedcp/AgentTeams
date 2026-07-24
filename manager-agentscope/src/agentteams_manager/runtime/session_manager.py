@@ -201,3 +201,15 @@ class RoomSessionManager:
         for room_id, session in tuple(self._cache.items()):
             async with session.lock:
                 await self._save(room_id, session)
+
+    async def close_all(self) -> None:
+        """Persist and retire every cached Agent generation."""
+        for room_id, session in tuple(self._cache.items()):
+            async with session.lock:
+                await self._save(room_id, session)
+                retire = getattr(self._factory, "retire", None)
+                if retire is not None:
+                    result = retire(session.agent)
+                    if inspect.isawaitable(result):
+                        await result
+        self._cache.clear()

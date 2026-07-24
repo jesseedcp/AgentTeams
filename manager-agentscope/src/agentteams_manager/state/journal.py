@@ -38,9 +38,12 @@ class SnapshotMetadata(BaseModel):
 
 
 def event_key(prefix: str, event: JournalEvent) -> str:
-    return (
-        f"{prefix}/manager/journal/{event.operation_id}/"
-        f"{event.sequence:020d}.json"
+    return _prefixed(
+        prefix,
+        (
+            f"manager/journal/{event.operation_id}/"
+            f"{event.sequence:020d}.json"
+        ),
     )
 
 
@@ -53,11 +56,11 @@ class S3Journal:
 
     @property
     def journal_prefix(self) -> str:
-        return f"{self._prefix}/manager/journal/"
+        return _prefixed(self._prefix, "manager/journal/")
 
     @property
     def snapshot_prefix(self) -> str:
-        return f"{self._prefix}/manager/snapshots"
+        return _prefixed(self._prefix, "manager/snapshots")
 
     async def append(self, event: JournalEvent) -> str:
         """Write one event exactly once."""
@@ -123,7 +126,6 @@ class S3Journal:
             if_none_match=False,
         )
         return metadata
-
     async def download_latest_snapshot(
         self,
     ) -> tuple[SnapshotMetadata, bytes] | None:
@@ -142,3 +144,7 @@ class S3Journal:
             )
         return metadata, data
 
+
+def _prefixed(prefix: str, key: str) -> str:
+    normalized = prefix.strip("/")
+    return f"{normalized}/{key}" if normalized else key

@@ -80,15 +80,29 @@ def current_tool_invocation() -> ToolInvocationContext:
 class ManagerToolkit(Toolkit):
     """Toolkit that exposes the real AgentScope tool-call ID to workflows."""
 
+    def __init__(self, *args: Any, metrics: Any | None = None, **kwargs: Any):
+        super().__init__(*args, **kwargs)
+        self._metrics = metrics
+
     async def call_tool(
         self,
         tool_call: ToolCallBlock,
         state: AgentState,
     ) -> AsyncGenerator[ToolChunk | ToolResponse, None]:
         token = _TOOL_CALL_ID.set(tool_call.id)
+        if self._metrics is not None:
+            self._metrics.increment(
+                "agentteams_manager_tool_calls_total",
+            )
         try:
             async for item in super().call_tool(tool_call, state):
                 yield item
+        except Exception:
+            if self._metrics is not None:
+                self._metrics.increment(
+                    "agentteams_manager_tool_errors_total",
+                )
+            raise
         finally:
             _TOOL_CALL_ID.reset(token)
 

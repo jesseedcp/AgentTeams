@@ -245,6 +245,11 @@ class MCPRegistry:
         del self._generations[revision]
         del self._references[revision]
 
+    async def close(self) -> None:
+        """Close every generation after room sessions have been retired."""
+        for revision in sorted(self._generations, reverse=True):
+            await self.close_generation(revision)
+
     def _client_for(
         self,
         server_name: str,

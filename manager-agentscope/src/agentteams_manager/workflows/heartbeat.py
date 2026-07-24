@@ -225,6 +225,68 @@ class IntegrationRecoveryRunner(Protocol):
     ) -> IntegrationRecoveryReport: ...
 
 
+class NotificationRecoveryReport(BaseModel):
+    """Typed result of exactly-once notification recovery."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    inspected: int = Field(ge=0)
+    reconciled: tuple[str, ...] = ()
+    pending: tuple[str, ...] = ()
+    failed: tuple[str, ...] = ()
+    needs_attention: tuple[str, ...] = ()
+
+
+class NotificationRecovery:
+    """Resume only durable Matrix notification operations."""
+
+    def __init__(
+        self,
+        *,
+        operations: TaskOperationReader,
+        notifications: OperationResumer,
+    ) -> None:
+        self._operations = operations
+        self._notifications = notifications
+
+    async def reconcile_pending_notifications(
+        self,
+    ) -> NotificationRecoveryReport:
+        operations = tuple(
+            operation
+            for operation in await self._operations.list_recoverable()
+            if operation.kind is OperationKind.SEND_NOTIFICATION
+        )
+        reconciled: list[str] = []
+        pending: list[str] = []
+        failed: list[str] = []
+        needs_attention: list[str] = []
+        for operation in operations:
+            try:
+                await self._notifications.resume_operation(operation)
+            except AmbiguousEffectError:
+                pending.append(operation.operation_id)
+            except RecoveryError:
+                needs_attention.append(operation.operation_id)
+            except Exception:
+                failed.append(operation.operation_id)
+            else:
+                reconciled.append(operation.operation_id)
+        return NotificationRecoveryReport(
+            inspected=len(operations),
+            reconciled=tuple(reconciled),
+            pending=tuple(pending),
+            failed=tuple(failed),
+            needs_attention=tuple(needs_attention),
+        )
+
+
+class NotificationRecoveryRunner(Protocol):
+    async def reconcile_pending_notifications(
+        self,
+    ) -> NotificationRecoveryReport: ...
+
+
 class LeaseReclaimer(Protocol):
     async def reclaim_expired(self, now: datetime) -> object: ...
 
@@ -326,6 +388,11 @@ class HeartbeatReport(BaseModel):
     integration_pending: int = Field(default=0, ge=0)
     integration_failed: int = Field(default=0, ge=0)
     integration_needs_attention: int = Field(default=0, ge=0)
+    notification_inspected: int = Field(default=0, ge=0)
+    notification_reconciled: int = Field(default=0, ge=0)
+    notification_pending: int = Field(default=0, ge=0)
+    notification_failed: int = Field(default=0, ge=0)
+    notification_needs_attention: int = Field(default=0, ge=0)
     snapshot_created: bool = False
 
 
@@ -345,6 +412,7 @@ class Heartbeat:
         snapshotter: SnapshotScheduler | None = None,
         runtime_watcher: RuntimeWatcher | None = None,
         integration_recovery: IntegrationRecoveryRunner | None = None,
+        notification_recovery: NotificationRecoveryRunner | None = None,
     ) -> None:
         self._recovery = recovery
         self._topology = topology
@@ -356,6 +424,7 @@ class Heartbeat:
         self._snapshotter = snapshotter
         self._runtime_watcher = runtime_watcher
         self._integration_recovery = integration_recovery
+        self._notification_recovery = notification_recovery
 
     async def run_once(self) -> HeartbeatReport:
         runtime_change = (
@@ -374,6 +443,12 @@ class Heartbeat:
             await self._task_recovery.reconcile_pending_tasks()
             if self._task_recovery is not None
             else TaskRecoveryReport(inspected=0)
+        )
+        notification_recovery = (
+            await self._notification_recovery
+            .reconcile_pending_notifications()
+            if self._notification_recovery is not None
+            else NotificationRecoveryReport(inspected=0)
         )
         now = datetime.now(UTC)
         lease_report = (
@@ -445,6 +520,15 @@ class Heartbeat:
             integration_failed=len(integration_recovery.failed),
             integration_needs_attention=len(
                 integration_recovery.needs_attention,
+            ),
+            notification_inspected=notification_recovery.inspected,
+            notification_reconciled=len(
+                notification_recovery.reconciled,
+            ),
+            notification_pending=len(notification_recovery.pending),
+            notification_failed=len(notification_recovery.failed),
+            notification_needs_attention=len(
+                notification_recovery.needs_attention,
             ),
             snapshot_created=snapshot_created,
         )

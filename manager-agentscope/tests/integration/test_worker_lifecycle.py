@@ -148,12 +148,13 @@ async def test_worker_create_is_journaled_through_greeting(
     assert operation.kind is OperationKind.CREATE_WORKER
     assert operation.status is OperationStatus.SUCCEEDED
     assert [event.event_type for event in events] == [
+        "operation_started",
         "effect_planned",
         "effect_acknowledged",
         "effect_planned",
         "effect_succeeded",
     ]
-    assert len(journal_store.objects) == 4
+    assert len(journal_store.objects) == 5
     assert matrix.transactions == [
         f"agentteams:{context.operation_id}:0",
     ]
