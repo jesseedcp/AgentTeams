@@ -4,6 +4,11 @@ from .git_delegation import (
     GitDelegationService,
     ProcessingLeaseService,
 )
+from .integrations import (
+    IntegrationService,
+    ModelSwitchReceipt,
+    ModelSwitchRequest,
+)
 from .matrix_resources import MatrixResourceService
 from .notifications import DailyMemory, NotificationService
 from .projects import ProjectReceipt, ProjectService
@@ -27,6 +32,7 @@ from .tasks import (
 
 __all__ = [
     "GitDelegationService",
+    "IntegrationService",
     "DailyMemory",
     "OperationSupervisor",
     "NotificationService",
@@ -34,6 +40,8 @@ __all__ = [
     "ProjectReceipt",
     "ProjectService",
     "MutationContext",
+    "ModelSwitchReceipt",
+    "ModelSwitchRequest",
     "MatrixResourceService",
     "ResourceHeartbeat",
     "ResourceRecoveryReport",

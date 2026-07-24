@@ -302,6 +302,46 @@ class _HumanPayload(BaseModel):
         )
 
 
+class ManagerResource(BaseModel):
+    """Secret-free Controller view of one Manager."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    name: str
+    phase: str
+    model: str
+    runtime: str
+    room_id: str | None = None
+    matrix_user_id: str | None = None
+    version: str | None = None
+    message: str | None = None
+
+
+class _ManagerPayload(BaseModel):
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
+
+    name: str
+    phase: str = "Pending"
+    model: str = ""
+    runtime: str = ""
+    room_id: str = Field(default="", alias="roomID")
+    matrix_user_id: str = Field(default="", alias="matrixUserID")
+    version: str = ""
+    message: str = ""
+
+    def domain(self) -> ManagerResource:
+        return ManagerResource(
+            name=self.name,
+            phase=self.phase,
+            model=self.model,
+            runtime=self.runtime,
+            room_id=self.room_id or None,
+            matrix_user_id=self.matrix_user_id or None,
+            version=self.version or None,
+            message=self.message or None,
+        )
+
+
 class _WorkerList(BaseModel):
     model_config = ConfigDict(extra="forbid")
     workers: tuple[_WorkerPayload, ...]
@@ -317,6 +357,12 @@ class _TeamList(BaseModel):
 class _HumanList(BaseModel):
     model_config = ConfigDict(extra="forbid")
     humans: tuple[_HumanPayload, ...]
+    total: int
+
+
+class _ManagerList(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    managers: tuple[_ManagerPayload, ...]
     total: int
 
 
@@ -596,6 +642,47 @@ class AgtClient:
 
     async def delete_human(self, name: str) -> None:
         await self._delete("human", name)
+
+    async def get_manager(self, name: str) -> ManagerResource | None:
+        raw = await self._get(("managers",), name)
+        return (
+            self._parse(_ManagerPayload, raw).domain()
+            if raw
+            else None
+        )
+
+    async def list_managers(self) -> tuple[ManagerResource, ...]:
+        raw = await self._json(
+            ("agt", "get", "managers", "-o", "json"),
+        )
+        parsed = self._parse(_ManagerList, raw)
+        return tuple(item.domain() for item in parsed.managers)
+
+    async def update_manager_model(
+        self,
+        name: str,
+        model: str,
+    ) -> ManagerResource:
+        _validate_name(name)
+        if not model:
+            raise ValueError("Manager model must not be empty")
+        await self._command(
+            (
+                "agt",
+                "update",
+                "manager",
+                "--name",
+                name,
+                "--model",
+                model,
+            ),
+        )
+        manager = await self.get_manager(name)
+        if manager is None:
+            raise AgtProtocolError(
+                f"updated Manager {name!r} is not readable",
+            )
+        return manager
 
     async def _delete(self, kind: str, name: str) -> None:
         _validate_name(name)

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -146,6 +146,7 @@ class RoomSessionManager:
         inputs: Any,
         *,
         tool_event_id: str | None = None,
+        on_event: Callable[[AgentEvent, AgentState], None] | None = None,
     ) -> AsyncIterator[AgentEvent]:
         """Run one native AgentScope input under the room session lock."""
         lock = await self._lock_for(event.room_id)
@@ -163,6 +164,8 @@ class RoomSessionManager:
                     async for item in session.agent.reply_stream(
                         inputs=inputs,
                     ):
+                        if on_event is not None:
+                            on_event(item, session.agent.state)
                         yield item
             finally:
                 session.last_event_id = event.event_id

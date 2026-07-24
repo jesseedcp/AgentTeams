@@ -1,6 +1,11 @@
 """Policy-bound AgentScope management tools."""
 
 from .base import ManagerTool, ManagerToolkit
+from .configuration import (
+    CONFIGURATION_TOOL_NAMES,
+    ConfigurationToolkit,
+    ConfigurationToolkitFactory,
+)
 from .resources import (
     RESOURCE_TOOL_NAMES,
     ChannelResolver,
@@ -35,6 +40,7 @@ from .tasks import (
 
 __all__ = [
     "ChannelResolver",
+    "CONFIGURATION_TOOL_NAMES",
     "AddProjectTaskInput",
     "CancelTaskInput",
     "CloseProjectInput",
@@ -42,6 +48,8 @@ __all__ = [
     "CreateFiniteTaskInput",
     "CreateProjectInput",
     "CreateRecurringTaskInput",
+    "ConfigurationToolkit",
+    "ConfigurationToolkitFactory",
     "FileSyncReceipt",
     "FileSyncService",
     "GitDelegationInput",

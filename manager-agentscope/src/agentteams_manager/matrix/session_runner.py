@@ -13,6 +13,7 @@ from agentscope.event import (
     UserConfirmResultEvent,
 )
 from agentscope.message import TextBlock, UserMsg
+from agentscope.state import AgentState
 
 from agentteams_manager.domain.ids import (
     matrix_transaction_id,
@@ -173,11 +174,26 @@ class MatrixSessionRunner:
         last_edit_at = 0.0
         pending: PendingConfirmation | None = None
 
+        def remember_confirmation(
+            agent_event: object,
+            state: AgentState,
+        ) -> None:
+            nonlocal pending
+            if not isinstance(agent_event, RequireUserConfirmEvent):
+                return
+            pending = PendingConfirmation(
+                reply_id=agent_event.reply_id,
+                event_id=event.event_id,
+                tool_calls=tuple(agent_event.tool_calls),
+            )
+            set_pending_confirmation(state, pending)
+
         async for agent_event in self._sessions.run_input(
             event,
             policy,
             inputs,
             tool_event_id=tool_event_id,
+            on_event=remember_confirmation,
         ):
             projection = await projector.accept(agent_event)
             if isinstance(agent_event, TextBlockDeltaEvent) and projection.text:
@@ -208,18 +224,6 @@ class MatrixSessionRunner:
                     sequence += 1
                     last_sent_text = projection.text
                     last_edit_at = now
-            if isinstance(agent_event, RequireUserConfirmEvent):
-                pending = PendingConfirmation(
-                    reply_id=agent_event.reply_id,
-                    event_id=event.event_id,
-                    tool_calls=tuple(agent_event.tool_calls),
-                )
-                session = await self._sessions.get_or_create(
-                    event.room_id,
-                    policy,
-                )
-                set_pending_confirmation(session.agent.state, pending)
-
         final = projector.snapshot().text
         if final and sent_event_id is None:
             sent_event_id = await self._matrix.send_text(

@@ -158,6 +158,46 @@ async def test_update_worker_preserves_explicit_empty_arrays() -> None:
     )
 
 
+@pytest.mark.asyncio
+async def test_update_manager_model_uses_typed_cli_and_reads_result() -> None:
+    process = FakeProcess()
+    process.queue_error("", returncode=0)
+    process.queue_json(
+        {
+            "name": "default",
+            "phase": "Running",
+            "model": "new-model",
+            "runtime": "qwenpaw",
+            "matrixUserID": "@manager:local",
+            "roomID": "!admin:local",
+        },
+    )
+
+    manager = await AgtClient(process).update_manager_model(
+        "default",
+        "new-model",
+    )
+
+    assert manager.model == "new-model"
+    assert process.calls[-2][0] == (
+        "agt",
+        "update",
+        "manager",
+        "--name",
+        "default",
+        "--model",
+        "new-model",
+    )
+    assert process.argv == (
+        "agt",
+        "get",
+        "managers",
+        "default",
+        "-o",
+        "json",
+    )
+
+
 @pytest.mark.parametrize(
     "package_uri",
     (

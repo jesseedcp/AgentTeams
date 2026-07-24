@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -106,9 +107,12 @@ async def test_confirmation_continues_same_reply(tmp_path: Path) -> None:
         admin_user_id="@admin:local",
     )
 
-    await runner.handle(
-        _event("delete alice", "$delete"),
-        _policy(),
+    await asyncio.wait_for(
+        runner.handle(
+            _event("delete alice", "$delete"),
+            _policy(),
+        ),
+        timeout=1,
     )
 
     prompt = matrix.sent[-1]
