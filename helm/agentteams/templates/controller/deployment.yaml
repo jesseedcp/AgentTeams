@@ -152,6 +152,10 @@ spec:
             {{- /* Manager CRD-driven deployment */}}
             - name: AGENTTEAMS_MANAGER_ENABLED
               value: {{ .Values.manager.enabled | quote }}
+            - name: AGENTTEAMS_MANAGER_RUNTIME
+              value: {{ .Values.manager.runtime | default "agentscope" | quote }}
+            - name: AGENTTEAMS_MANAGER_IMAGE
+              value: {{ include "agentteams.manager.image" . | quote }}
             - name: AGENTTEAMS_MANAGER_SPEC
               value: {{ include "agentteams.manager.spec" . | quote }}
             {{- /* Element Web URL (for Gateway route initialization) */}}

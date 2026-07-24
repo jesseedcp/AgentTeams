@@ -13,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	authenticationv1client "k8s.io/client-go/kubernetes/typed/authentication/v1"
 	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/rest"
@@ -374,6 +375,9 @@ func (k *K8sBackend) Create(ctx context.Context, req CreateRequest) (*WorkerResu
 		ExtraVolumeMounts:  extraVolumeMounts,
 		HostAliases:        buildHostAliases(req.ExtraHosts),
 	})
+	if req.Runtime == RuntimeAgentScope {
+		configureAgentScopeManagerHealth(&pod.Spec.Containers[0])
+	}
 
 	if req.Owner != nil {
 		if k.scheme == nil {
@@ -398,6 +402,41 @@ func (k *K8sBackend) Create(ctx context.Context, req CreateRequest) (*WorkerResu
 		Status:    StatusStarting,
 		RawStatus: rawK8sPhase(created.Status.Phase),
 	}, nil
+}
+
+func configureAgentScopeManagerHealth(container *corev1.Container) {
+	const (
+		portName = "manager-health"
+		port     = 18799
+	)
+
+	ports := make([]corev1.ContainerPort, 0, len(container.Ports)+1)
+	for _, existing := range container.Ports {
+		if existing.Name == portName || existing.ContainerPort == port {
+			continue
+		}
+		ports = append(ports, existing)
+	}
+	container.Ports = append(ports, corev1.ContainerPort{
+		Name:          portName,
+		ContainerPort: port,
+	})
+	container.LivenessProbe = &corev1.Probe{
+		ProbeHandler: corev1.ProbeHandler{
+			HTTPGet: &corev1.HTTPGetAction{
+				Path: "/healthz",
+				Port: intstr.FromString(portName),
+			},
+		},
+	}
+	container.ReadinessProbe = &corev1.Probe{
+		ProbeHandler: corev1.ProbeHandler{
+			HTTPGet: &corev1.HTTPGetAction{
+				Path: "/readyz",
+				Port: intstr.FromString(portName),
+			},
+		},
+	}
 }
 
 func (k *K8sBackend) Delete(ctx context.Context, name string) error {

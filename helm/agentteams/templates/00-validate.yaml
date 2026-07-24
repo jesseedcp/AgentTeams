@@ -16,6 +16,11 @@ Validate public values at render time. Supported combinations:
 {{- fail (printf "unsupported matrix.mode %q: only \"managed\" is supported" (.Values.matrix.mode | default "")) -}}
 {{- end -}}
 
+{{- $managerRuntime := .Values.manager.runtime | default "agentscope" -}}
+{{- if ne $managerRuntime "agentscope" -}}
+{{- fail (printf "unsupported manager.runtime %q: only \"agentscope\" is supported" $managerRuntime) -}}
+{{- end -}}
+
 {{- $gatewayProvider := .Values.gateway.provider | default "" -}}
 {{- $gatewayMode := .Values.gateway.mode | default "" -}}
 {{- if eq $gatewayProvider "higress" -}}

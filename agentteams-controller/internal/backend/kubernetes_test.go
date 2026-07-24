@@ -733,6 +733,79 @@ func TestK8sCreateResolvesImageFromRuntime(t *testing.T) {
 	}
 }
 
+func TestK8sCreateAgentScopeManagerHealthProbes(t *testing.T) {
+	client := newFakeK8sCoreClient()
+	b := NewK8sBackendWithClient(client, K8sConfig{
+		Namespace:      "agentteams",
+		ManagerImage:   "agentteams/manager:latest",
+		WorkerImage:    "agentteams/worker-agent:latest",
+		WorkerCPU:      "1000m",
+		WorkerMemory:   "2Gi",
+		ControllerName: testControllerName,
+	}, "agentteams-worker-", nil)
+
+	if _, err := b.Create(context.Background(), CreateRequest{
+		Name:    "manager",
+		Runtime: RuntimeAgentScope,
+	}); err != nil {
+		t.Fatalf("Create AgentScope Manager failed: %v", err)
+	}
+
+	managerPod, err := b.client.Pods("agentteams").Get(
+		context.Background(),
+		"agentteams-worker-manager",
+		metav1.GetOptions{},
+	)
+	if err != nil {
+		t.Fatalf("Get Manager pod failed: %v", err)
+	}
+	managerContainer := managerPod.Spec.Containers[0]
+	if len(managerContainer.Ports) != 1 {
+		t.Fatalf("Manager ports = %+v, want one health port", managerContainer.Ports)
+	}
+	if got := managerContainer.Ports[0]; got.Name != "manager-health" ||
+		got.ContainerPort != 18799 {
+		t.Fatalf("Manager health port = %+v", got)
+	}
+	if managerContainer.LivenessProbe == nil ||
+		managerContainer.LivenessProbe.HTTPGet == nil {
+		t.Fatal("Manager liveness probe is missing")
+	}
+	if got := managerContainer.LivenessProbe.HTTPGet; got.Path != "/healthz" ||
+		got.Port.StrVal != "manager-health" {
+		t.Fatalf("Manager liveness probe = %+v", got)
+	}
+	if managerContainer.ReadinessProbe == nil ||
+		managerContainer.ReadinessProbe.HTTPGet == nil {
+		t.Fatal("Manager readiness probe is missing")
+	}
+	if got := managerContainer.ReadinessProbe.HTTPGet; got.Path != "/readyz" ||
+		got.Port.StrVal != "manager-health" {
+		t.Fatalf("Manager readiness probe = %+v", got)
+	}
+
+	if _, err := b.Create(context.Background(), CreateRequest{
+		Name:    "worker",
+		Runtime: RuntimeOpenClaw,
+	}); err != nil {
+		t.Fatalf("Create Worker failed: %v", err)
+	}
+	workerPod, err := b.client.Pods("agentteams").Get(
+		context.Background(),
+		"agentteams-worker-worker",
+		metav1.GetOptions{},
+	)
+	if err != nil {
+		t.Fatalf("Get Worker pod failed: %v", err)
+	}
+	workerContainer := workerPod.Spec.Containers[0]
+	if len(workerContainer.Ports) != 0 ||
+		workerContainer.LivenessProbe != nil ||
+		workerContainer.ReadinessProbe != nil {
+		t.Fatalf("Worker unexpectedly received Manager probes: %+v", workerContainer)
+	}
+}
+
 // ── Integration tests: K8sBackend.Create + PodTemplate + ownerRefs ───────
 
 // testControllerName is the canonical ControllerName used across integration
