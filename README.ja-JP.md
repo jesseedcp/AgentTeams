@@ -12,15 +12,15 @@
 
 **AgentTeams は、透明性の高い Human-in-the-Loop のタスク連携を Matrix ルームで実現する、オープンソースの協調型マルチエージェント OS です。**
 
-**Manager-Workers アーキテクチャ**により、Manager Agent を通じて複数の Worker Agent を連携させ、複雑なタスクを完了できます。すべての会話は Matrix ルームで可視化され、いつでも介入できます。
+**Manager-Workers アーキテクチャ**により、AgentScope 2.0 Manager を通じて複数の Worker Agent を連携させ、複雑なタスクを完了できます。すべての会話は Matrix ルームで可視化され、いつでも介入できます。
 
-チャットルームにいる AI チームのようなものです。Manager に必要なことを伝えると、Worker が起動し、すべてがリアルタイムで進行する様子を見ることができます。
+Manager ランタイムは AgentScope 2.0 に固定されています。Worker は OpenClaw、CoPaw、Hermes、QwenPaw、OpenHuman から選択できます。
 
 ## 主な特徴
 
 - 🧬 **Manager-Workers アーキテクチャ**: 個々の Worker Claw を人間が監視する必要がなくなり、Agent が Agent を管理することを実現します。
 
-- 🤝 **マルチランタイム協調**: OpenClaw、QwenPaw、Hermes の Worker が同じ IM ルーム内で共存します。決定論的な Agent（OpenClaw/QwenPaw）をリーダーとしてタスクを編成し、Hermes Worker に自律的なコード実行を担当させる — それぞれのランタイムが得意なことを担当します。
+- 🤝 **マルチランタイム協調**: OpenClaw、CoPaw、Hermes、QwenPaw、OpenHuman の Worker が同じ IM ルーム内で共存し、AgentScope Manager がライフサイクルと協調関係を一元管理します。
 
 - 📦 **MinIO 共有ファイルシステム**: Agent 間の情報共有のための共有ファイルシステムを導入し、マルチエージェント連携シナリオにおけるトークン消費を大幅に削減します。
 
@@ -29,6 +29,8 @@
 - ☎️ **Element IM クライアント + Tuwunel IM サーバー（共に Matrix プロトコルベース）**: DingTalk/Lark 統合の手間や企業承認ワークフローを排除します。IM 環境でモデルサービスの「快適さ」を素早く体験でき、ネイティブの OpenClaw IM 統合との互換性も維持します。
 
 ## ニュース
+
+> 以下はアップストリームの履歴です。本プロジェクトの現在の Manager は AgentScope 2.0 のみで、OpenClaw、CoPaw、Hermes、QwenPaw、OpenHuman は Worker ランタイムです。
 
 - **2026-05-27**: [Release Notes](https://github.com/agentscope-ai/AgentTeams/releases/tag/v1.1.2) — AgentTeams v1.1.2：インストーラのデフォルト Worker ランタイムを QwenPaw に変更し keep-all アップグレードフローをサポート、Team に人間コーディネーターを追加し Team Leader の協調ツールを刷新、Nacos リモートスキル対応と `sts-agentteams` / `ai-registry` STS 認証、Worker の CR 名と Runtime 名の分離、コントローラーの reconcile メトリクスと正常終了を追加。
 - **2026-05-07**: [Release Notes](https://github.com/agentscope-ai/AgentTeams/releases/tag/v1.1.1) | [Changelog](changelog/v1.1.1.md) — AgentTeams v1.1.1：Worker/Manager/Team CRD と Team Leader 上の宣言的 MCP（破壊的変更）、CR の `spec.env` カスタム環境変数、Token Plan・Qwen Cloud international・`qwen3.6-plus` モデル、コントローラー RBAC の名前空間スコープ化、Worker パッケージの `SOUL.md` 任意化。
@@ -61,14 +63,26 @@
 
 ### インストール
 
+未リリースの `main` コミットを実行する場合は、古い公開イメージを
+取得しないように現在のソースをビルドしてください：
+
+```bash
+git clone https://github.com/jesseedcp/AgentTeams.git
+cd AgentTeams
+make install-interactive
+```
+
+以下のワンラインインストーラーは、対応するコンテナイメージが公開済みの
+タグ向けです。
+
 **macOS / Linux:**
 ```bash
-bash <(curl -sSL https://raw.githubusercontent.com/agentscope-ai/AgentTeams/main/install/agentteams-install.sh)
+bash <(curl -sSL https://raw.githubusercontent.com/jesseedcp/AgentTeams/main/install/agentteams-install.sh)
 ```
 
 **Windows（PowerShell 7+ 推奨）:**
 ```powershell
-Set-ExecutionPolicy Bypass -Scope Process -Force; $wc=New-Object Net.WebClient; $wc.Encoding=[Text.Encoding]::UTF8; iex $wc.DownloadString('https://raw.githubusercontent.com/agentscope-ai/AgentTeams/main/install/agentteams-install.ps1')
+Set-ExecutionPolicy Bypass -Scope Process -Force; $wc=New-Object Net.WebClient; $wc.Encoding=[Text.Encoding]::UTF8; iex $wc.DownloadString('https://raw.githubusercontent.com/jesseedcp/AgentTeams/main/install/agentteams-install.ps1')
 ```
 
 インストーラーが以下の手順をガイドします：
@@ -89,22 +103,22 @@ Set-ExecutionPolicy Bypass -Scope Process -Force; $wc=New-Object Net.WebClient; 
 
 ```bash
 # 最新版にアップグレード（データはすべて保持）
-bash <(curl -sSL https://raw.githubusercontent.com/agentscope-ai/AgentTeams/main/install/agentteams-install.sh)
+bash <(curl -sSL https://raw.githubusercontent.com/jesseedcp/AgentTeams/main/install/agentteams-install.sh)
 
 # 特定バージョンにアップグレード
-AGENTTEAMS_VERSION=v1.0.5 bash <(curl -sSL https://raw.githubusercontent.com/agentscope-ai/AgentTeams/main/install/agentteams-install.sh)
+AGENTTEAMS_VERSION=vX.Y.Z bash <(curl -sSL https://raw.githubusercontent.com/jesseedcp/AgentTeams/main/install/agentteams-install.sh)
 ```
 
 ## アンインストール
 
 **macOS / Linux:**
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/agentscope-ai/AgentTeams/main/install/agentteams-install.sh) uninstall
+bash <(curl -fsSL https://raw.githubusercontent.com/jesseedcp/AgentTeams/main/install/agentteams-install.sh) uninstall
 ```
 
 **Windows (PowerShell):**
 ```powershell
-Set-ExecutionPolicy Bypass -Scope Process -Force; $wc=New-Object Net.WebClient; $wc.Encoding=[Text.Encoding]::UTF8; $s=$wc.DownloadString('https://raw.githubusercontent.com/agentscope-ai/AgentTeams/main/install/agentteams-install.ps1'); & ([scriptblock]::Create($s)) uninstall
+Set-ExecutionPolicy Bypass -Scope Process -Force; $wc=New-Object Net.WebClient; $wc.Encoding=[Text.Encoding]::UTF8; $s=$wc.DownloadString('https://raw.githubusercontent.com/jesseedcp/AgentTeams/main/install/agentteams-install.ps1'); & ([scriptblock]::Create($s)) uninstall
 ```
 
 すべての AgentTeams コンテナ（Manager、Worker、docker-proxy）、Docker ボリューム、ネットワーク、env ファイル、ワークスペースディレクトリ、インストールログが削除されます。
@@ -170,16 +184,16 @@ helm install agentteams higress.io/agentteams \
 | `credentials.llmProvider` | 任意 | LLM プロバイダー名、デフォルトは `openai-compat` |
 | `credentials.defaultModel` | 任意 | デフォルトモデル、デフォルトは `gpt-5.4` |
 | `credentials.llmBaseUrl` | 任意 | OpenAI 互換のベース URL（例: `https://api.deepseek.com/v1`）。公式 OpenAI API を使用する場合は空のまま |
-| `manager.runtime` | 任意 | Manager エージェントランタイム: `openclaw`（デフォルト）、`copaw`、または `hermes` |
-| `worker.defaultRuntime` | 任意 | Worker デフォルトランタイム: `openclaw`（デフォルト）、`copaw`、または `hermes` |
+| `manager.runtime` | 任意 | Manager ランタイム。`agentscope` 固定（AgentScope 2.0） |
+| `worker.defaultRuntime` | 任意 | Worker デフォルトランタイム: `openclaw`、`copaw`、`hermes`、`qwenpaw`、または `openhuman` |
 
 <details>
-<summary>代替ランタイムの使用（QwenPaw Manager + Hermes Workers）</summary>
+<summary>代替 Worker ランタイムの使用（AgentScope Manager + Hermes Workers）</summary>
 
 ```bash
 helm install agentteams higress.io/agentteams \
   -n agentteams-system --create-namespace --devel \
-  --set manager.runtime=copaw \
+  --set manager.runtime=agentscope \
   --set worker.defaultRuntime=hermes \
   --set credentials.llmApiKey=<your-api-key> \
   --set credentials.llmBaseUrl=https://your-provider.example.com/v1 \
@@ -188,7 +202,7 @@ helm install agentteams higress.io/agentteams \
   --set gateway.publicURL=http://localhost:18080
 ```
 
-各コンポーネントのイメージはランタイムに基づいて自動的に選択されます（Manager: `agentteams-manager` / `agentteams-manager-copaw`、Worker: `agentteams-worker` / `agentteams-copaw-worker` / `agentteams-hermes-worker`）。
+Manager は常に `agentteams-manager`（AgentScope 2.0）です。Worker イメージは選択したランタイムに応じて自動的に選ばれます。
 
 </details>
 
@@ -291,11 +305,13 @@ Alice: フロントエンドのバリデーションも更新しました。
 
 ## マルチランタイム協調
 
-AgentTeams は 3 つの Worker ランタイムをサポートし、**同じ IM ルーム内で共存・協調**できます：
+AgentTeams は 5 つの Worker ランタイムをサポートし、**同じ IM ルーム内で共存・協調**できます：
 
 - **OpenClaw**（Node.js）— 豊富なスキルエコシステムを持つ汎用 Agent、タスクオーケストレーションやツール呼び出しに最適
+- **CoPaw**（Python）— Matrix と共有ストレージを統合した軽量な対話型 Worker
 - **QwenPaw**（Python）— 軽量ランタイム、ブラウザ自動化やクイックタスクに適している
 - **Hermes**（[hermes-agent](https://github.com/NousResearch/hermes-agent)）— ターミナルサンドボックス、自己改善スキル、永続メモリを備えた自律コーディング Agent
+- **OpenHuman**（Rust）— ネイティブ Matrix チャネルを使う低オーバーヘッド Worker
 
 各ランタイムは異なるタスクに優れています。推奨パターン：決定論的な Agent（OpenClaw/QwenPaw）をリーダーとしてタスク分解と割り当てを行い、Hermes Worker に自律的なコード実行を担当させる。すべてのランタイムは同じルーム内で Matrix `m.mentions` を介して通信し、完全に可視で、いつでも介入可能です。
 
@@ -307,27 +323,25 @@ agt update worker --runtime hermes
 ## アーキテクチャ
 
 ```
-┌───────────────────────────────────────────────┐
-│            agentteams-controller                  │
-│  Higress │ Tuwunel │ MinIO │ Element Web      │
-└──────────────────┬────────────────────────────┘
-                   │ Matrix + HTTP Files
-┌──────────────────┴──────────┐
-│     agentteams-manager-agent     │
-│     Manager (OpenClaw/       │
-│       QwenPaw)               │
-└──────────────────┬──────────┘
-                   │
-┌──────────────────┼────────────────────────────┐
-│                  │                            │
-▼                  ▼                            ▼
-Worker Alice    Worker Bob              Worker Charlie
-(OpenClaw)      (QwenPaw)               (Hermes)
+┌──────────────────────────────────────────────────────┐
+│                 agentteams-controller                │
+│        Higress │ Tuwunel │ MinIO │ Element Web       │
+└─────────────────────────┬────────────────────────────┘
+                          │ typed API + Matrix + storage
+┌─────────────────────────▼────────────────────────────┐
+│              Manager — AgentScope 2.0                │
+└─────────────────────────┬────────────────────────────┘
+                          │ creates and coordinates
+┌─────────────────────────▼────────────────────────────┐
+│ OpenClaw │ CoPaw │ Hermes │ QwenPaw │ OpenHuman     │
+│                    Worker runtimes                    │
+└──────────────────────────────────────────────────────┘
 ```
 
 | コンポーネント | 役割 |
 |-----------|------|
 | agentteams-controller | Kubernetes ネイティブコントロールプレーン、Worker/Team/Manager CR を調整 |
+| AgentScope 2.0 Manager | 対話型オーケストレーション、ポリシー検証、タスク/チームワークフロー、Matrix ストリーミング応答 |
 | Higress AI ゲートウェイ | LLM プロキシ、MCP Server ホスティング、認証情報管理 |
 | Tuwunel（Matrix） | すべての Agent + 人間のコミュニケーション用セルフホスト IM サーバー |
 | Element Web | ブラウザクライアント、ゼロ設定 |
@@ -380,7 +394,7 @@ Agent チームを観察・制御するための組み込みダッシュボー�
 ## トラブルシューティング
 
 ```bash
-docker exec -it agentteams-manager cat /var/log/agentteams/manager-agent.log
+docker logs --tail 200 agentteams-manager
 ```
 
 よくある問題については [docs/zh-cn/faq.md](docs/zh-cn/faq.md) を参照してください。
@@ -398,7 +412,7 @@ python scripts/export-debug-log.py --range 1h
 
 > "debug-log/ 内の JSONL ファイルを読み込み、Matrix メッセージログと Agent セッションログを合わせて分析してください。AgentTeams のコードベースと照合し、[バグの内容を記述] の根本原因を特定してください。"
 
-AI の分析結果を [バグレポート](https://github.com/agentscope-ai/AgentTeams/issues/new?template=bug_report.yml) に含めてください。
+AI の分析結果を [バグレポート](https://github.com/jesseedcp/AgentTeams/issues/new?template=bug_report.yml) に含めてください。
 
 ## ビルド & テスト
 
@@ -419,7 +433,7 @@ make help
 ## コミュニティ
 
 - [Discord](https://discord.gg/NVjNA4BAVw)
-- [GitHub Issues](https://github.com/agentscope-ai/AgentTeams/issues)
+- [GitHub Issues](https://github.com/jesseedcp/AgentTeams/issues)
 
 ## ライセンス
 

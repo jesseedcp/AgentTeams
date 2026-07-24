@@ -35,6 +35,9 @@ spec:
                 soul:
                   type: string
                   description: Custom SOUL.md content
+                identity:
+                  type: string
+                  description: Managed content for the SOUL.md Identity & Personality section
                 agents:
                   type: string
                   description: Custom AGENTS.md content

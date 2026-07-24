@@ -186,7 +186,6 @@ type SyncTeamLeaderAssetsRequest struct {
 type DeployerConfig struct {
 	AgentConfig     *agentconfig.Generator
 	OSS             oss.StorageClient
-	Executor        *executor.Shell
 	Packages        *executor.PackageResolver
 	Legacy          *LegacyCompat
 	AgentFSDir      string // embedded: /root/agentteams-fs/agents
@@ -206,7 +205,6 @@ type DeployerConfig struct {
 type Deployer struct {
 	agentConfig       *agentconfig.Generator
 	oss               oss.StorageClient
-	executor          *executor.Shell
 	packages          *executor.PackageResolver
 	legacy            *LegacyCompat
 	agentFSDir        string
@@ -225,7 +223,6 @@ func NewDeployer(cfg DeployerConfig) *Deployer {
 	return &Deployer{
 		agentConfig:       cfg.AgentConfig,
 		oss:               cfg.OSS,
-		executor:          cfg.Executor,
 		packages:          cfg.Packages,
 		legacy:            cfg.Legacy,
 		agentFSDir:        cfg.AgentFSDir,
@@ -743,31 +740,323 @@ func (d *Deployer) SyncTeamLeaderAssets(ctx context.Context, req SyncTeamLeaderA
 	return nil
 }
 
-// PushOnDemandSkills pushes on-demand skills to a worker.
-// Built-in skills are pushed via push-worker-skills.sh. Remote skills are
-// fetched from source registries (currently nacos://) and mirrored to OSS.
+// PushOnDemandSkills publishes image-owned, on-demand skills directly from
+// the Controller and fetches remote skills from their declared registries.
+// Controller desired state is authoritative; the AgentScope Manager never
+// mutates a JSON registry or invokes a legacy distribution script.
 func (d *Deployer) PushOnDemandSkills(ctx context.Context, workerName string, skills []string, remoteSkills []v1beta1.RemoteSkillSource) error {
-	logger := log.FromContext(ctx)
-	if len(skills) == 0 && len(remoteSkills) == 0 {
-		return nil
+	if d.oss == nil {
+		return fmt.Errorf("push Worker skills: object storage is unavailable")
 	}
 
 	agentPrefix := fmt.Sprintf("agents/%s", workerName)
+	ordered, desired, err := d.validateManagedSkills(skills, remoteSkills)
+	if err != nil {
+		return err
+	}
+	previous, exists, err := d.loadManagedSkills(ctx, workerName)
+	if err != nil {
+		return err
+	}
+	if len(desired) == 0 && !exists {
+		return nil
+	}
+
+	for _, skillName := range previous {
+		if _, keep := desired[skillName]; keep {
+			continue
+		}
+		prefix := agentPrefix + "/skills/" + skillName + "/"
+		if err := d.oss.DeletePrefix(ctx, prefix); err != nil {
+			return fmt.Errorf("remove stale managed skill %q: %w", skillName, err)
+		}
+	}
+
 	if err := d.pushRemoteSkills(ctx, workerName, agentPrefix, remoteSkills); err != nil {
 		return err
 	}
 
-	if len(skills) == 0 || d.executor == nil {
+	for _, skillName := range ordered {
+		if err := d.pushOnDemandSkill(ctx, agentPrefix, skillName); err != nil {
+			return fmt.Errorf(
+				"push on-demand skill %q to Worker %q: %w",
+				skillName,
+				workerName,
+				err,
+			)
+		}
+	}
+	return d.storeManagedSkills(ctx, workerName, desired)
+}
+
+const managedSkillsSchemaVersion = 1
+
+type managedSkillsDocument struct {
+	SchemaVersion int      `json:"schemaVersion"`
+	Skills        []string `json:"skills"`
+}
+
+func (d *Deployer) validateManagedSkills(
+	skills []string,
+	remoteSkills []v1beta1.RemoteSkillSource,
+) ([]string, map[string]struct{}, error) {
+	builtin := make(map[string]struct{}, len(skills))
+	desired := make(map[string]struct{}, len(skills))
+	for _, skillName := range skills {
+		if _, duplicate := builtin[skillName]; duplicate {
+			continue
+		}
+		if _, err := d.onDemandSkillSource(skillName); err != nil {
+			return nil, nil, fmt.Errorf(
+				"validate on-demand skill %q: %w",
+				skillName,
+				err,
+			)
+		}
+		builtin[skillName] = struct{}{}
+		desired[skillName] = struct{}{}
+	}
+
+	for _, source := range remoteSkills {
+		if len(source.Skills) == 0 {
+			return nil, nil, fmt.Errorf(
+				"remoteSkills source %q has empty skills list",
+				source.Source,
+			)
+		}
+		if _, _, err := parseNacosRemoteSource(source.Source); err != nil {
+			return nil, nil, fmt.Errorf(
+				"invalid remoteSkills.source %q: %w",
+				source.Source,
+				err,
+			)
+		}
+		if _, err := mapRemoteSkillAuthType(source.AuthType); err != nil {
+			return nil, nil, fmt.Errorf(
+				"invalid remoteSkills.authType for source %q: %w",
+				source.Source,
+				err,
+			)
+		}
+		for _, skill := range source.Skills {
+			skillName := strings.TrimSpace(skill.Name)
+			if !validOnDemandSkillName(skillName) {
+				return nil, nil, fmt.Errorf(
+					"remote skill %q has an invalid storage name",
+					skill.Name,
+				)
+			}
+			if skill.Version != "" && skill.Label != "" {
+				return nil, nil, fmt.Errorf(
+					"remote skill %q in source %q cannot set both version and label",
+					skillName,
+					source.Source,
+				)
+			}
+			if _, duplicate := desired[skillName]; duplicate {
+				return nil, nil, fmt.Errorf(
+					"managed skill name %q is declared more than once",
+					skillName,
+				)
+			}
+			desired[skillName] = struct{}{}
+		}
+	}
+
+	ordered := make([]string, 0, len(builtin))
+	for skillName := range builtin {
+		ordered = append(ordered, skillName)
+	}
+	sort.Strings(ordered)
+	return ordered, desired, nil
+}
+
+func (d *Deployer) loadManagedSkills(
+	ctx context.Context,
+	workerName string,
+) ([]string, bool, error) {
+	key := managedSkillsStateKey(workerName)
+	data, err := d.oss.GetObject(ctx, key)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, false, nil
+		}
+		return nil, false, fmt.Errorf("read managed skill state: %w", err)
+	}
+	var document managedSkillsDocument
+	if err := json.Unmarshal(data, &document); err != nil {
+		return nil, true, fmt.Errorf("decode managed skill state: %w", err)
+	}
+	if document.SchemaVersion != managedSkillsSchemaVersion {
+		return nil, true, fmt.Errorf(
+			"unsupported managed skill state schemaVersion %d",
+			document.SchemaVersion,
+		)
+	}
+	seen := make(map[string]struct{}, len(document.Skills))
+	for _, skillName := range document.Skills {
+		if !validOnDemandSkillName(skillName) {
+			return nil, true, fmt.Errorf(
+				"managed skill state contains invalid name %q",
+				skillName,
+			)
+		}
+		seen[skillName] = struct{}{}
+	}
+	ordered := make([]string, 0, len(seen))
+	for skillName := range seen {
+		ordered = append(ordered, skillName)
+	}
+	sort.Strings(ordered)
+	return ordered, true, nil
+}
+
+func (d *Deployer) storeManagedSkills(
+	ctx context.Context,
+	workerName string,
+	desired map[string]struct{},
+) error {
+	key := managedSkillsStateKey(workerName)
+	if len(desired) == 0 {
+		if err := d.oss.DeleteObject(ctx, key); err != nil {
+			return fmt.Errorf("remove empty managed skill state: %w", err)
+		}
 		return nil
 	}
-	scriptPath := "/opt/agentteams/agent/skills/worker-management/scripts/push-worker-skills.sh"
-	if _, err := os.Stat(scriptPath); os.IsNotExist(err) {
-		logger.Info("push-worker-skills.sh not found (incluster mode), skipping on-demand skill push",
-			"worker", workerName, "skills", skills)
-		return nil
+	skills := make([]string, 0, len(desired))
+	for skillName := range desired {
+		skills = append(skills, skillName)
 	}
-	_, err := d.executor.RunSimple(ctx, scriptPath, "--worker", workerName, "--no-notify")
-	return err
+	sort.Strings(skills)
+	data, err := json.MarshalIndent(
+		managedSkillsDocument{
+			SchemaVersion: managedSkillsSchemaVersion,
+			Skills:        skills,
+		},
+		"",
+		"  ",
+	)
+	if err != nil {
+		return fmt.Errorf("encode managed skill state: %w", err)
+	}
+	data = append(data, '\n')
+	if err := d.oss.PutObject(ctx, key, data); err != nil {
+		return fmt.Errorf("write managed skill state: %w", err)
+	}
+	return nil
+}
+
+func managedSkillsStateKey(workerName string) string {
+	return "controller/worker-skills/" + workerName + "/state.json"
+}
+
+func (d *Deployer) pushOnDemandSkill(
+	ctx context.Context,
+	agentPrefix string,
+	skillName string,
+) error {
+	source, err := d.onDemandSkillSource(skillName)
+	if err != nil {
+		return err
+	}
+	targetPrefix := agentPrefix + "/skills/" + skillName + "/"
+	if err := d.oss.DeletePrefix(ctx, targetPrefix); err != nil {
+		return fmt.Errorf("clear previous skill payload: %w", err)
+	}
+
+	published := 0
+	err = filepath.WalkDir(
+		source,
+		func(path string, entry fs.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if entry.IsDir() {
+				return nil
+			}
+			if entry.Type()&os.ModeSymlink != 0 {
+				return nil
+			}
+			info, err := entry.Info()
+			if err != nil {
+				return err
+			}
+			if !info.Mode().IsRegular() {
+				return nil
+			}
+			relativePath, err := filepath.Rel(source, path)
+			if err != nil {
+				return err
+			}
+			key := agentPrefix + "/skills/" + skillName + "/" +
+				filepath.ToSlash(relativePath)
+			if err := d.oss.PutFile(ctx, path, key); err != nil {
+				return fmt.Errorf("publish %s: %w", key, err)
+			}
+			published++
+			return nil
+		},
+	)
+	if err != nil {
+		return err
+	}
+	if published == 0 {
+		return fmt.Errorf("skill source contains no regular files")
+	}
+	log.FromContext(ctx).Info(
+		"on-demand Worker skill published",
+		"skill", skillName,
+		"target", agentPrefix,
+		"files", published,
+	)
+	return nil
+}
+
+func (d *Deployer) onDemandSkillSource(skillName string) (string, error) {
+	if !validOnDemandSkillName(skillName) {
+		return "", fmt.Errorf("invalid built-in skill name")
+	}
+	if d.managerAgentDir == "" {
+		return "", fmt.Errorf("Controller image has no Manager asset directory")
+	}
+	source := filepath.Join(
+		d.managerAgentDir,
+		"worker-skills",
+		skillName,
+	)
+	info, err := os.Stat(source)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", fmt.Errorf("skill is not bundled in the Controller image")
+		}
+		return "", err
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("skill source is not a directory")
+	}
+	if info, err := os.Stat(filepath.Join(source, "SKILL.md")); err != nil ||
+		!info.Mode().IsRegular() {
+		return "", fmt.Errorf("skill source has no regular SKILL.md")
+	}
+	return source, nil
+}
+
+func validOnDemandSkillName(name string) bool {
+	if len(name) == 0 || len(name) > 128 {
+		return false
+	}
+	for index, char := range name {
+		isLower := char >= 'a' && char <= 'z'
+		isDigit := char >= '0' && char <= '9'
+		if isLower || isDigit {
+			continue
+		}
+		if char == '-' && index > 0 && index < len(name)-1 {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func (d *Deployer) PrepareWorkerDeps(ctx context.Context, req WorkerDepsPrepareRequest) error {
@@ -996,6 +1285,13 @@ func (d *Deployer) pushRemoteSkills(ctx context.Context, workerName, agentPrefix
 
 			src := filepath.Join(tmpDir, skill.Name) + "/"
 			dst := agentPrefix + "/skills/" + skill.Name + "/"
+			if err := d.oss.DeletePrefix(ctx, dst); err != nil {
+				return fmt.Errorf(
+					"clear previous remote skill %q payload: %w",
+					skill.Name,
+					err,
+				)
+			}
 			if err := d.oss.Mirror(ctx, src, dst, oss.MirrorOptions{Overwrite: true}); err != nil {
 				return fmt.Errorf("mirror remote skill %q from %q to OSS: %w", skill.Name, source.Source, err)
 			}
@@ -1080,7 +1376,16 @@ func (d *Deployer) CleanLegacyPasswordFiles(ctx context.Context, names []string)
 
 func (d *Deployer) CleanupOSSData(ctx context.Context, workerName string) error {
 	agentPrefix := fmt.Sprintf("agents/%s/", workerName)
-	return d.oss.DeletePrefix(ctx, agentPrefix)
+	if err := d.oss.DeletePrefix(ctx, agentPrefix); err != nil {
+		return fmt.Errorf("delete agent data: %w", err)
+	}
+	if err := d.oss.DeletePrefix(
+		ctx,
+		"controller/worker-skills/"+workerName+"/",
+	); err != nil {
+		return fmt.Errorf("delete managed skill state: %w", err)
+	}
+	return nil
 }
 
 // EnsureTeamStorage creates the shared storage directories for a team.
@@ -1183,6 +1488,15 @@ func (d *Deployer) DeployManagerConfig(ctx context.Context, req ManagerDeployReq
 			}
 			content = string(data)
 		}
+		if name == "SOUL.md" && strings.TrimSpace(req.Spec.Identity) != "" {
+			content, err = mergeManagerIdentity(
+				content,
+				req.Spec.Identity,
+			)
+			if err != nil {
+				return fmt.Errorf("merge Manager identity: %w", err)
+			}
+		}
 		key := "manager/" + name
 		if err := d.oss.PutObject(ctx, key, []byte(content)); err != nil {
 			return fmt.Errorf("publish Manager prompt %s: %w", name, err)
@@ -1243,6 +1557,30 @@ func (d *Deployer) DeployManagerConfig(ctx context.Context, req ManagerDeployReq
 		return fmt.Errorf("activate Manager runtime document: %w", err)
 	}
 	return nil
+}
+
+func mergeManagerIdentity(soul, identity string) (string, error) {
+	const identityHeader = "## Identity & Personality"
+	start := strings.Index(soul, identityHeader)
+	value := strings.TrimSpace(identity)
+	if value == "" {
+		return "", fmt.Errorf("Manager identity is empty")
+	}
+	if start < 0 {
+		prefix := strings.TrimRight(soul, " \t\r\n")
+		if prefix == "" {
+			return identityHeader + "\n\n" + value + "\n", nil
+		}
+		return prefix + "\n\n" + identityHeader + "\n\n" + value + "\n", nil
+	}
+	contentStart := start + len(identityHeader)
+	nextSection := strings.Index(soul[contentStart:], "\n## ")
+	prefix := strings.TrimRight(soul[:contentStart], " \t\r\n")
+	if nextSection < 0 {
+		return prefix + "\n\n" + value + "\n", nil
+	}
+	suffixStart := contentStart + nextSection
+	return prefix + "\n\n" + value + "\n" + soul[suffixStart:], nil
 }
 
 // --- Internal helpers ---

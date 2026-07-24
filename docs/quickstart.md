@@ -16,10 +16,10 @@ This guide walks you through installing AgentTeams, creating your first Agent te
 
 ### 1.1 Run the installer
 
-**Option A: One-line install**
+**Option A: One-line install for a published image tag**
 
 ```bash
-bash <(curl -sSL https://raw.githubusercontent.com/agentscope-ai/AgentTeams/main/install/agentteams-install.sh)
+bash <(curl -sSL https://raw.githubusercontent.com/jesseedcp/AgentTeams/main/install/agentteams-install.sh)
 ```
 
 Follow the interactive prompts to configure:
@@ -29,9 +29,14 @@ Follow the interactive prompts to configure:
 - Domain names (press Enter to accept defaults)
 - GitHub PAT (optional)
 
-**Option B: Using Make (for developers who cloned the repo)**
+Use Option B for an unreleased `main` commit so the AgentScope Manager image is
+built from the checked-out source.
+
+**Option B: Using Make (recommended for current source)**
 
 ```bash
+git clone https://github.com/jesseedcp/AgentTeams.git
+cd AgentTeams
 # Minimal install — only LLM key required, all defaults applied
 AGENTTEAMS_LLM_API_KEY="sk-xxx" make install
 ```
@@ -47,9 +52,10 @@ The default **embedded** install starts two main containers (see [architecture.m
 | Container | Role |
 |-----------|------|
 | **`agentteams-controller`** | Bundles Higress, Tuwunel, MinIO, Element Web, and the Go controller (REST API on port **8090** inside the Docker network). |
-| **`agentteams-manager`** | Lightweight Manager Agent only (OpenClaw **or** QwenPaw when `AGENTTEAMS_MANAGER_RUNTIME=copaw`). |
+| **`agentteams-manager`** | Lightweight AgentScope 2.0 Manager with typed tools and SQLite/MinIO recovery. |
 
-Worker containers (`agentteams-worker-*`, `agentteams-copaw-worker-*`, `agentteams-hermes-worker-*`) are created when you add Workers.
+Worker containers are created when you add Workers. OpenClaw, CoPaw, Hermes,
+QwenPaw, and OpenHuman runtimes are supported independently of the Manager.
 
 **Declarative CLI (no chat required):** The `agt` binary is available **inside** `agentteams-controller` and `agentteams-manager`. For quick checks and provisioning from the host:
 
@@ -74,7 +80,10 @@ Login with your admin credentials.
 - [ ] Login with admin credentials succeeds
 - [ ] Higress Console at http://localhost:18001 (gateway **host** port defaults to **18080**; Matrix/Element use that gateway for `*-local.agentteams.io` hostnames)
 - [ ] MinIO is reachable **inside** the controller container (embedded install does **not** publish MinIO console on the host by default): `docker exec agentteams-controller curl -sf http://127.0.0.1:9000/minio/health/live`
-- [ ] (OpenClaw Manager only) OpenClaw control UI at http://127.0.0.1:18888
+- [ ] Manager readiness returns success: `curl -fsS http://127.0.0.1:18888/readyz`
+
+Port `18888` is the loopback mapping for AgentScope health and metrics, not an
+interactive runtime console.
 
 ---
 
@@ -203,7 +212,7 @@ Alice and Manager should incorporate both the original and supplementary require
 
 ## Step 5: Observe Heartbeat
 
-**POC Case 5: Heartbeat triggers Manager inquiry**
+**POC Case 5: Deterministic Manager heartbeat**
 
 ### 5.1 Assign a longer task
 
@@ -211,16 +220,18 @@ Send a task that takes some time to complete.
 
 ### 5.2 Wait for heartbeat cycle
 
-The Manager Agent runs a heartbeat check periodically (triggered by OpenClaw's built-in heartbeat mechanism). During the heartbeat:
-- Manager checks each Worker's Room for recent activity
-- For Workers with assigned tasks, Manager asks for status
-- The inquiry is visible in the Room
+The AgentScope Manager runs a Python heartbeat scheduler without a model call.
+During each cycle it refreshes Controller/Matrix topology, resumes incomplete
+resource and task operations, dispatches due recurring tasks exactly once,
+activates valid runtime generations between turns, and sends any unsent
+terminal-failure notification to the Admin DM.
 
 ### Verification Checklist
 
-- [ ] Manager sends a status inquiry message in Alice's Room
-- [ ] Alice responds with current progress
-- [ ] Human admin can see the entire exchange in the Room
+- [ ] `http://127.0.0.1:18888/readyz` remains ready
+- [ ] Manager metrics increment `agentteams_manager_heartbeats_total`
+- [ ] A deliberately interrupted operation resumes without duplicating its external effect
+- [ ] Any terminal failure is delivered once to the Admin DM
 
 ---
 
@@ -350,7 +361,7 @@ You have successfully completed all 10 verification steps for AgentTeams. Your A
 To completely remove AgentTeams and all its data:
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/agentscope-ai/AgentTeams/main/install/agentteams-install.sh) uninstall
+bash <(curl -fsSL https://raw.githubusercontent.com/jesseedcp/AgentTeams/main/install/agentteams-install.sh) uninstall
 ```
 
 This matches `install/agentteams-install.sh uninstall`: it stops and removes **`agentteams-manager`**, all **`agentteams-worker-*`** (and other worker) containers, **`agentteams-controller`** (embedded Higress / Tuwunel / MinIO / Element Web), optional **`agentteams-docker-proxy`**, the **`agentteams-data`** Docker volume, your **`agentteams-manager.env`** file, the workspace directory, the **`agentteams-net`** network, and the install log.

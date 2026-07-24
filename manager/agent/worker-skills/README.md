@@ -1,72 +1,75 @@
-# Worker Skills 仓库
+# Worker 按需技能目录
 
-这个目录是所有可分配给 Worker 的 skills 的中央仓库。Manager 负责管理这些 skills 的定义，并通过 `push-worker-skills.sh` 将其分发给特定 Worker。
+这个目录保存 AgentTeams 随镜像发布、可按需分配给 Worker 的技能。它是
+Controller 的只读发布源，不是 AgentScope Manager 的运行时工作区。
+
+## 工作方式
+
+1. 用户或 AgentScope Manager 通过 Worker/Team 资源的 `spec.skills` 声明技能。
+2. Controller 校验技能名，并从本目录读取对应内容。
+3. Controller 将技能发布到 MinIO 的
+   `agents/<worker>/skills/<skill-name>/`。
+4. Worker 的同步机制将技能拉取到本地。
+
+Controller 资源是期望状态的唯一来源。Manager 不修改 JSON registry，也不调用
+技能分发脚本。Controller 用
+`controller/worker-skills/<worker>/state.json` 记录自己发布的技能集合；更新或
+清空 `spec.skills` 时，会删除已经取消分配的 Controller-managed 技能。自定义
+package 不应与这些技能重名。
 
 ## 目录结构
 
-```
+```text
 worker-skills/
-├── README.md                  # 本文件
+├── README.md
 └── <skill-name>/
-    └── SKILL.md               # Skill 的说明（必须包含 frontmatter，见下）
-    └── scripts/               # （可选）Skill 附带的脚本
+    ├── SKILL.md
+    └── scripts/        # 可选
 ```
 
-## SKILL.md 格式要求
-
-每个 `SKILL.md` **必须**以 YAML frontmatter 开头，包含 `assign_when` 字段：
+每个技能必须包含普通文件 `SKILL.md`。推荐使用以下 frontmatter：
 
 ```yaml
 ---
 name: <skill-name>
-description: <一句话说明这个 skill 做什么>
-assign_when: <描述：什么样的 Worker 应该拥有此 skill，Manager 据此自动决定是否分配>
+description: <一句话说明>
+assign_when: <什么职责的 Worker 需要这个技能>
 ---
 ```
 
-字段说明：
-- `description`：简要说明 skill 的功能，供 Manager 和 human 快速了解
-- `assign_when`：用自然语言描述 Worker 的**角色特征**或**职责范围**，Manager 在创建 Worker 时据此判断是否分配；不要写技术实现细节，只描述"什么样的人需要这个工具"
+技能名只能包含小写字母、数字和内部连字符，最长 128 个字符。符号链接不会被
+发布。
 
-## 如何新增自定义 Skill
-
-1. 在 `~/worker-skills/<skill-name>/` 下创建 skill 目录（Manager workspace 与 MinIO 通过 `push-worker-skills.sh` 同步，直接写这里即可持久化）
-2. 编写 `SKILL.md`，**开头必须包含 frontmatter**（`name` + `assign_when`），后续正文说明使用方式
-3. 如需脚本，放在 `<skill-name>/scripts/` 下
-4. 使用 `push-worker-skills.sh --worker <name> --add-skill <skill-name>` 分配给 Worker
-
-## 如何分配/更新 Skills
+## 分配技能
 
 ```bash
-# 给指定 Worker 分配新 skill
-bash /opt/agentteams/agent/skills/worker-management/scripts/push-worker-skills.sh \
-  --worker <name> --add-skill <skill-name>
+# 创建 Worker 时分配
+agt create worker --name alice --skills github-operations
 
-# 推送某个 skill 的更新到所有持有该 skill 的 Worker
-bash /opt/agentteams/agent/skills/worker-management/scripts/push-worker-skills.sh \
-  --skill <skill-name>
+# 替换已有 Worker 的按需技能列表
+agt update worker --name alice --skills git-delegation
 
-# 查看当前 Worker skill 分配情况
-cat ~/workers-registry.json
+# 查看 Controller 中的期望状态
+agt get workers alice -o json
 ```
 
-## 注意
+AgentScope Manager 的 `create_worker`、`update_worker`、`create_team` 和
+`update_team` typed tools 使用同一套 Controller API。
 
-- 内置 skills（`file-sync`、`task-progress`、`project-participation`、`mcporter`、`find-skills`）由 Worker 镜像自动分配，无需通过此目录管理
-- 此目录中的 skills 由 Manager 统一维护，Worker 不能修改自己的 skills
-- Worker 的 on-demand skill 分配记录在 `~/workers-registry.json`
+远程动态技能使用资源的 `spec.remoteSkills`，不放入本目录。
 
-## 内置 Skills
+## 新增目录内技能
 
-| Skill | 说明 |
-|-------|------|
-| `file-sync` | Worker 与 MinIO 的文件同步 |
-| `task-progress` | 任务执行进度跟踪 |
-| `project-participation` | 多 Worker 项目协作 |
-| `mcporter` | MCP Server 工具调用 |
-| `find-skills` | 从 Agent Skills 生态系统发现和安装技能 |
+1. 新建 `<skill-name>/SKILL.md`，需要时再添加脚本或参考文件。
+2. 为 Controller 发布逻辑补充测试。
+3. 重建并发布 Controller 镜像；运行中的 Controller 不接受对本目录的动态写入。
 
-### find-skills 配置
+Worker 镜像自带的基础技能由各 runtime 模板维护，不需要在 `spec.skills` 中重复
+声明。
 
-环境变量：
-- `SKILLS_API_URL`：技能注册中心地址（可选，默认 `nacos://market.agentteams.io:80/public`；使用 `nacos://host[:port][/namespace]` 切换到其他 Nacos，端口默认 `8848`，namespace 从 URL path 解析）
+当前目录内的按需技能：
+
+| Skill | 用途 |
+| --- | --- |
+| `github-operations` | GitHub 仓库、Issue、PR 等操作 |
+| `git-delegation` | 受控的 Git 任务委派 |

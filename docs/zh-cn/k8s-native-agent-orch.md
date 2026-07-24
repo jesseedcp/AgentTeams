@@ -87,7 +87,7 @@ metadata:
   name: alice
 spec:
   model: claude-sonnet-4-6           # 必填：LLM 模型
-  runtime: copaw                     # openclaw | copaw | hermes（默认随安装/CR）
+  runtime: copaw                     # openclaw | copaw | hermes | qwenpaw | openhuman
   skills: [github-operations]        # 平台内置技能
   mcpServers:                        # 通过 mcporter 调用的 MCP Server
     - name: github
@@ -104,7 +104,7 @@ spec:
   #   groupAllowExtra: ["@human:domain"]
 ```
 
-每个 Worker 对应：一个 Docker 容器（或 K8s Pod）+ 一个 Matrix 通信账号 + 一块 MinIO 命名空间 + 一个 Gateway Consumer Token。未指定 `spec.image` 时由环境变量 `AGENTTEAMS_WORKER_IMAGE` / `AGENTTEAMS_COPAW_WORKER_IMAGE` / `AGENTTEAMS_HERMES_WORKER_IMAGE`（或 Chart 默认值）决定默认镜像。
+每个 Worker 对应：一个 Docker 容器（或 K8s Pod）+ 一个 Matrix 通信账号 + 一块 MinIO 命名空间 + 一个 Gateway Consumer Token。未指定 `spec.image` 时，Controller 会从 `AGENTTEAMS_WORKER_IMAGE`、`AGENTTEAMS_COPAW_WORKER_IMAGE`、`AGENTTEAMS_HERMES_WORKER_IMAGE`、`AGENTTEAMS_QWENPAW_WORKER_IMAGE` 或 `AGENTTEAMS_OPENHUMAN_WORKER_IMAGE`（或对应 Chart 默认值）中选择运行时镜像。
 
 #### Team — 协作单元
 
@@ -177,7 +177,9 @@ metadata:
   name: default                       # 嵌入式部署常见主实例名
 spec:
   model: claude-sonnet-4-6            # 必填
-  runtime: openclaw                   # openclaw | copaw
+  runtime: agentscope                 # Manager 唯一支持的运行时
+  # identity: |                       # 经管理员确认的身份与性格
+  #   名称：Atlas
   # soul: | …                         # 可选：覆盖 SOUL.md
   # agents: | …                       # 可选：覆盖 AGENTS.md
   skills: [worker-management]         # 按需启用的 Manager skills
@@ -192,7 +194,7 @@ spec:
   # state: Running                    # Running | Sleeping | Stopped
 ```
 
-`Manager` 与 `Worker`/`Team`/`Human` 同属 `agentteams.io/v1beta1`，由同一套 Controller Reconcile。**是否依赖「对话式 Manager Agent」取决于你的使用方式**：只用 `agt` CLI / REST API / YAML 编排时，可以不通过聊天入口；默认一键安装仍会拉起 Manager 容器，其期望配置可通过该 CR 声明并持续调和。
+`Manager` 与 `Worker`/`Team`/`Human` 同属 `agentteams.io/v1beta1`，由同一套 Controller Reconcile。生产 Manager 固定使用 AgentScope 2.0，Worker 运行时选择与它相互独立。**是否依赖「对话式 Manager Agent」取决于你的使用方式**：只用 `agt` CLI / REST API / YAML 编排时，可以不通过聊天入口；默认一键安装仍会拉起 Manager 容器，其期望配置可通过该 CR 声明并持续调和。
 
 **kubectl 短名（安装 CRD 后）**：`wk`、`tm`、`hm`、`mgr`。
 
@@ -560,7 +562,7 @@ AgentTeams 的设计深受 Kubernetes 影响，以下是核心概念的对应关
 
 ```bash
 # 一键安装，包含所有基础设施
-bash <(curl -sSL https://raw.githubusercontent.com/agentscope-ai/AgentTeams/main/install/agentteams-install.sh)
+bash <(curl -sSL https://raw.githubusercontent.com/jesseedcp/AgentTeams/main/install/agentteams-install.sh)
 ```
 
 最低要求：2 CPU + 4 GB RAM + Docker。你会得到 **`agentteams-controller`**（基础设施 + controller）以及独立的 **`agentteams-manager`**；创建 Worker 后会出现更多容器。

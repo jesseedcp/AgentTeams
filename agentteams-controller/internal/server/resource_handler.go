@@ -872,6 +872,7 @@ func (h *ResourceHandler) CreateManager(w http.ResponseWriter, r *http.Request) 
 			Runtime:       backend.ResolveManagerRuntime(req.Runtime),
 			Image:         req.Image,
 			Soul:          req.Soul,
+			Identity:      req.Identity,
 			Agents:        req.Agents,
 			Skills:        req.Skills,
 			McpServers:    req.McpServers,
@@ -968,6 +969,9 @@ func (h *ResourceHandler) UpdateManager(w http.ResponseWriter, r *http.Request) 
 		}
 		if req.Soul != "" {
 			mgr.Spec.Soul = req.Soul
+		}
+		if req.Identity != "" {
+			mgr.Spec.Identity = req.Identity
 		}
 		if req.Agents != "" {
 			mgr.Spec.Agents = req.Agents
@@ -1123,6 +1127,7 @@ func managerToResponse(m *v1beta1.Manager) ManagerResponse {
 		Model:        m.Spec.Model,
 		Runtime:      m.Spec.Runtime,
 		Image:        m.Spec.Image,
+		Identity:     m.Spec.Identity,
 		MatrixUserID: m.Status.MatrixUserID,
 		RoomID:       m.Status.RoomID,
 		Version:      m.Status.Version,

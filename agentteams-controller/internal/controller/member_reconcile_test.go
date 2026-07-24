@@ -549,8 +549,8 @@ func TestReconcileMemberConfigQwenPawWritesRuntimeConfigOnly(t *testing.T) {
 	if len(req.TeamMembers) != 2 || req.TeamMembers[0].RuntimeName != "leader-runtime" || req.TeamMembers[1].RuntimeName != "worker-a" {
 		t.Fatalf("runtime config missing team roster: %#v", req.TeamMembers)
 	}
-	if deployPkg, writeInline, deployConfig, pushSkills, _ := deployer.CallCounts(); deployPkg != 0 || writeInline != 0 || deployConfig != 0 || pushSkills != 0 {
-		t.Fatalf("qwenpaw must skip legacy deploy path, got package=%d inline=%d config=%d skills=%d",
+	if deployPkg, writeInline, deployConfig, pushSkills, _ := deployer.CallCounts(); deployPkg != 0 || writeInline != 0 || deployConfig != 0 || pushSkills != 1 {
+		t.Fatalf("qwenpaw must use runtime config plus common skill publication, got package=%d inline=%d config=%d skills=%d",
 			deployPkg, writeInline, deployConfig, pushSkills)
 	}
 }
@@ -605,8 +605,8 @@ func TestReconcileMemberConfigEdgeWritesRemoteManagedRuntimeConfigOnly(t *testin
 	if req.AIGatewayURL != "http://aigw.internal/v1/claude" {
 		t.Fatalf("AIGatewayURL=%q", req.AIGatewayURL)
 	}
-	if deployPkg, writeInline, deployConfig, pushSkills, _ := deployer.CallCounts(); deployPkg != 0 || writeInline != 0 || deployConfig != 0 || pushSkills != 0 {
-		t.Fatalf("edge worker must skip legacy deploy path, got package=%d inline=%d config=%d skills=%d",
+	if deployPkg, writeInline, deployConfig, pushSkills, _ := deployer.CallCounts(); deployPkg != 0 || writeInline != 0 || deployConfig != 0 || pushSkills != 1 {
+		t.Fatalf("edge worker must use runtime config plus common skill reconciliation, got package=%d inline=%d config=%d skills=%d",
 			deployPkg, writeInline, deployConfig, pushSkills)
 	}
 }
@@ -641,6 +641,42 @@ func TestReconcileMemberConfigNonQwenPawKeepsLegacyPath(t *testing.T) {
 	if deployPkg, writeInline, deployConfig, pushSkills, _ := deployer.CallCounts(); deployPkg != 1 || writeInline != 1 || deployConfig != 1 || pushSkills != 1 {
 		t.Fatalf("legacy deploy path call counts package=%d inline=%d config=%d skills=%d, want all 1",
 			deployPkg, writeInline, deployConfig, pushSkills)
+	}
+}
+
+func TestReconcileMemberConfigReturnsSkillPublicationFailure(t *testing.T) {
+	deployer := mocks.NewMockDeployer()
+	deployer.PushOnDemandSkillsFn = func(
+		context.Context,
+		string,
+		[]string,
+		[]v1beta1.RemoteSkillSource,
+	) error {
+		return errors.New("object storage unavailable")
+	}
+	state := &MemberState{
+		ProvResult: &service.WorkerProvisionResult{},
+	}
+	member := MemberContext{
+		Name:        "worker-a",
+		RuntimeName: "worker-a",
+		Role:        RoleStandalone,
+		Spec: v1beta1.WorkerSpec{
+			Runtime: "qwenpaw",
+			Skills:  []string{"github-operations"},
+		},
+	}
+
+	err := ReconcileMemberConfig(
+		context.Background(),
+		MemberDeps{Deployer: deployer},
+		member,
+		state,
+	)
+	if err == nil ||
+		!strings.Contains(err.Error(), "push Worker skills") ||
+		!strings.Contains(err.Error(), "object storage unavailable") {
+		t.Fatalf("error=%v, want skill publication failure", err)
 	}
 }
 

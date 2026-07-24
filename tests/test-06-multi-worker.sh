@@ -27,7 +27,7 @@ log_section "Create Worker Bob"
 DM_ROOM=$(matrix_find_dm_room "${ADMIN_TOKEN}" "${MANAGER_USER}" 2>/dev/null || true)
 assert_not_empty "${DM_ROOM}" "DM room with Manager found"
 
-# Wait for Manager Agent to be fully ready (OpenClaw gateway + joined DM room)
+# Wait for AgentScope Manager readiness and DM-room membership.
 wait_for_manager_agent_ready 300 "${DM_ROOM}" "${ADMIN_TOKEN}" || {
     log_fail "Manager Agent not ready in time"
     test_teardown "06-multi-worker"
@@ -35,9 +35,9 @@ wait_for_manager_agent_ready 300 "${DM_ROOM}" "${ADMIN_TOKEN}" || {
     exit 1
 }
 
-# test-05 can leave CoPaw Manager finishing heartbeat / pending-worker cleanup
-# replies in the admin DM. Let that prior turn go quiet before measuring Bob's
-# create-worker ack/provisioning SLA; the post-request waits below stay strict.
+# test-05 can leave the AgentScope Manager finishing a heartbeat or task
+# recovery reply in the admin DM. Let that prior turn go quiet before
+# measuring Bob's create-worker acknowledgement/provisioning SLA.
 if ! matrix_wait_for_sender_quiet "${ADMIN_TOKEN}" "${DM_ROOM}" "@manager" 20 180; then
     log_fail "Manager DM did not become quiet before Bob create request"
     test_teardown "06-multi-worker"

@@ -13,9 +13,21 @@ MANIFEST = ROOT / "tests" / "manager-skill-parity.json"
 LEGACY_MANAGER_PATHS = (
     "/root/manager-workspace",
     "openclaw gateway",
+    "copaw channels send",
     "copaw app",
     "redis-server",
+    "state.json",
+    "workers-registry.json",
+    "pending-workers.json",
+    "worker-openclaw.json.tmpl",
     "yolo-mode",
+)
+LEGACY_MANAGER_SCRIPT_PATH = re.compile(
+    r"(?:/opt/agentteams/agent/skills|manager/agent/skills)/[^\s`]+/scripts",
+    re.IGNORECASE,
+)
+MCPORTER_COMMAND = re.compile(
+    r"(?im)^\s*(?:`{0,3})mcporter\s+(?:list|call)\b"
 )
 
 
@@ -95,3 +107,5 @@ def test_skill_payload_has_no_legacy_manager_execution_surface() -> None:
     )
     for legacy in LEGACY_MANAGER_PATHS:
         assert legacy.casefold() not in text, legacy
+    assert LEGACY_MANAGER_SCRIPT_PATH.search(text) is None
+    assert MCPORTER_COMMAND.search(text) is None

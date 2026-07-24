@@ -1493,9 +1493,8 @@ type ManagerWelcomeRequest struct {
 // SendManagerWelcome delivers the first-boot onboarding prompt that asks
 // the Manager Agent to greet the admin and collect identity preferences
 // (name / language / communication style). It is the new-architecture
-// replacement for the legacy in-container welcome flow that lived in
-// `start-manager-agent.sh` (lines 535-608) and only ran when
-// AGENTTEAMS_RUNTIME != "k8s".
+// replacement for the former in-container welcome flow. Keeping onboarding in
+// the Controller makes behavior identical across Docker and Kubernetes.
 //
 // Idempotency is the caller's responsibility — the controller guards
 // re-send via Manager.Status.WelcomeSent. This method only checks that
@@ -1533,8 +1532,8 @@ const llmAuthProbePromptTemplate = `{"model":%q,"messages":[{"role":"user","cont
 // Together these are exactly what the Manager Agent needs in order to
 // successfully compose its first reply to the welcome prompt. Joining
 // the Admin DM Room (~5-10s after container start) is strictly faster
-// than gateway propagation (~40-45s, the gap the legacy
-// `start-manager-agent.sh` papered over with `sleep 45`); sending the
+// than gateway propagation (~40-45s, which the previous flow handled with a
+// fixed delay); sending the
 // welcome on the join signal alone would deliver a prompt the manager
 // receives but cannot reply to, and the onboarding turn would be
 // silently lost.
@@ -1642,11 +1641,9 @@ func (p *Provisioner) SendManagerWelcomeMessage(ctx context.Context, req Manager
 	return nil
 }
 
-// renderManagerWelcomeBody returns the verbatim onboarding prompt the
-// Manager Agent receives on first boot. Kept identical in spirit to the
-// legacy `_welcome_msg` heredoc in `manager/scripts/init/start-manager-agent.sh`
-// so the resulting agent behavior (greeting + 4-question Q&A + write
-// SOUL.md + touch ~/soul-configured) is unchanged across architectures.
+// renderManagerWelcomeBody returns the onboarding prompt the AgentScope
+// Manager receives on first boot. Identity persistence crosses the typed tool
+// boundary and is reconciled through the Manager resource.
 func renderManagerWelcomeBody(language, timezone string) string {
 	return fmt.Sprintf(`This is an automated message from the AgentTeams setup. This is a fresh installation.
 
@@ -1663,9 +1660,9 @@ Please begin the onboarding conversation:
 2. The user has selected "%s" as their preferred language during installation. Use this language for your greeting and all subsequent communication.
 3. The user's timezone is %s. Based on this timezone, you may infer their likely region and suggest additional language options.
 4. Ask them: a) What would they like to call you? b) Communication style preference? c) Any behavior guidelines? d) Confirm default language
-5. After they reply, write their preferences to ~/SOUL.md
-6. Confirm what you wrote, and ask if they would like to adjust anything
-7. Once confirmed, run: touch ~/soul-configured
+5. Summarize the proposed identity and ask the admin to confirm or adjust it
+6. Once confirmed, call update_manager_identity with the agreed name, communication style, behavior guidelines, and default language
+7. Report success only after the tool returns a newer active prompt revision
 
 The human admin will start chatting shortly.`, language, timezone, language, timezone)
 }

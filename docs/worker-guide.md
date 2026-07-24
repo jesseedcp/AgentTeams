@@ -67,9 +67,9 @@ The Manager will provide all the specific values in its reply.
 docker logs agentteams-worker-alice
 
 # Common issues:
-# - "openclaw.json not found": Manager hasn't created config yet
+# - "openclaw.json not found": Controller reconciliation has not generated this OpenClaw Worker's config yet
 # - "mc: command not found": Image build issue
-# - Connection refused: Manager container not running or ports not exposed
+# - Connection refused: Controller infrastructure is unavailable or its service ports are not exposed
 ```
 
 ### Worker can't connect to Matrix

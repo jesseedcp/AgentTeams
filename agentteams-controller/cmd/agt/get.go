@@ -298,6 +298,7 @@ type workerResp struct {
 	Message        string          `json:"message,omitempty"`
 	Team           string          `json:"team,omitempty"`
 	Role           string          `json:"role,omitempty"`
+	Skills         []string        `json:"skills,omitempty"`
 	McpServers     []mcpServerSpec `json:"mcpServers,omitempty"`
 }
 
@@ -359,6 +360,7 @@ type managerResp struct {
 	Model        string          `json:"model,omitempty"`
 	Runtime      string          `json:"runtime,omitempty"`
 	Image        string          `json:"image,omitempty"`
+	Identity     string          `json:"identity,omitempty"`
 	MatrixUserID string          `json:"matrixUserID,omitempty"`
 	RoomID       string          `json:"roomID,omitempty"`
 	Version      string          `json:"version,omitempty"`
@@ -449,8 +451,9 @@ func managerDetail(m managerResp) []KeyValue {
 		{"Name", m.Name},
 		{"Phase", or(m.Phase, "Pending")},
 		{"Model", m.Model},
-		{"Runtime", or(m.Runtime, "openclaw")},
+		{"Runtime", or(m.Runtime, "agentscope")},
 		{"Image", m.Image},
+		{"Identity", m.Identity},
 		{"MatrixUserID", m.MatrixUserID},
 		{"RoomID", m.RoomID},
 		{"Version", m.Version},

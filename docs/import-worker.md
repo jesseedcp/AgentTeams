@@ -184,7 +184,7 @@ worker-package.zip
 }
 ```
 
-`worker.runtime` (`openclaw`, `copaw`, or `hermes`) is honored by `agt apply worker --zip`
+`worker.runtime` (`openclaw`, `copaw`, `hermes`, `qwenpaw`, or `openhuman`) is honored by `agt apply worker --zip`
 and overridden by an explicit `--runtime` flag. When neither is set the controller
 falls back to its default runtime (`openclaw`).
 
@@ -245,16 +245,17 @@ bash agentteams-import.sh worker --name my-worker --zip migration-my-worker-2026
 The `agt` CLI inside the container will:
 1. Parse `manifest.json` from the ZIP
 2. Build a custom Worker image from the Dockerfile (if present)
-3. Register a Matrix account and create a communication room
-4. Create a MinIO user with scoped permissions
-5. Configure Higress Gateway consumer and route authorization
-6. Generate openclaw.json and push all config to MinIO
-7. Update the Manager's workers-registry.json
-8. Send a message to the Manager to start the Worker container
+3. Submit the desired Worker resource to the Controller
+4. Register a Matrix account and create a communication room
+5. Create scoped MinIO and Higress credentials
+6. Generate the runtime-specific config and push durable assets to MinIO
+7. Start and reconcile the Worker container
 
 ### Step 5: Verify
 
-After the script completes, check the Worker in Element Web. The Manager will start the container and the Worker should appear online within a minute.
+After the script completes, run `agt get workers my-worker -o json` and check
+the Worker in Element Web. The Controller starts the container and the Worker
+should appear online within a minute.
 
 ### What Gets Migrated
 
@@ -381,7 +382,7 @@ bash agentteams-import.sh -f <resource.yaml>   # forwards to agentteams-apply.sh
 | `--model <model>` | LLM model ID | `qwen3.5-plus` |
 | `--skills <s1,s2>` | Comma-separated built-in skills | — |
 | `--mcp-servers <m1,m2>` | Comma-separated MCP servers | — |
-| `--runtime <runtime>` | Agent runtime (`openclaw`\|`copaw`\|`hermes`) | `openclaw` |
+| `--runtime <runtime>` | Worker runtime (`openclaw`\|`copaw`\|`hermes`\|`qwenpaw`\|`openhuman`) | `openclaw` |
 | `--yes` | Skip interactive confirmations (swallowed by wrapper when unsupported) | off |
 
 **YAML mode** (`-f`): delegates to `agentteams-apply.sh` (only `-f` is required; extra unsupported flags are rejected by `agt apply`).
@@ -429,5 +430,5 @@ You can edit the Dockerfile in the extracted ZIP and retry.
 
 1. Check Worker container logs: `docker logs agentteams-worker-<name>`
 2. Verify the Worker appears in Element Web in its dedicated room
-3. Ensure the Manager's `workers-registry.json` has the correct entry
+3. Run `agt get workers <name> -o json` and verify the Controller resource
 4. Try sending `@<worker-name>:<matrix-domain> hello` in the Worker's room

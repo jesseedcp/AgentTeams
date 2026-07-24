@@ -384,7 +384,6 @@ func ReconcileMemberConfig(ctx context.Context, d MemberDeps, m MemberContext, s
 	if state.ProvResult == nil {
 		return nil
 	}
-	logger := log.FromContext(ctx)
 	effectiveRuntime := backend.ResolveRuntime(m.Spec.Runtime, d.DefaultRuntime)
 	var aiGatewayURL string
 	if m.ModelProviderInfo != nil {
@@ -433,6 +432,9 @@ func ReconcileMemberConfig(ctx context.Context, d MemberDeps, m MemberContext, s
 		}); err != nil {
 			return fmt.Errorf("deploy runtime config: %w", err)
 		}
+		if err := pushMemberSkills(ctx, d.Deployer, m); err != nil {
+			return err
+		}
 		return nil
 	}
 
@@ -464,8 +466,24 @@ func ReconcileMemberConfig(ctx context.Context, d MemberDeps, m MemberContext, s
 		return fmt.Errorf("deploy worker config: %w", err)
 	}
 
-	if err := d.Deployer.PushOnDemandSkills(ctx, m.RuntimeName, m.Spec.Skills, m.Spec.RemoteSkills); err != nil {
-		logger.Info("skill push failed", "error", err)
+	if err := pushMemberSkills(ctx, d.Deployer, m); err != nil {
+		return err
+	}
+	return nil
+}
+
+func pushMemberSkills(
+	ctx context.Context,
+	deployer service.WorkerDeployer,
+	member MemberContext,
+) error {
+	if err := deployer.PushOnDemandSkills(
+		ctx,
+		member.RuntimeName,
+		member.Spec.Skills,
+		member.Spec.RemoteSkills,
+	); err != nil {
+		return fmt.Errorf("push Worker skills: %w", err)
 	}
 	return nil
 }
@@ -1890,9 +1908,9 @@ func ReconcileMemberExpose(ctx context.Context, d MemberDeps, m MemberContext, s
 }
 
 // ReconcileMemberDelete performs full infra/container/storage cleanup for a
-// member. Does NOT remove finalizers or touch the legacy Manager groupAllowFrom
-// / workers registry — those concerns belong to the owning reconciler because
-// they have different rules for standalone vs team contexts.
+// member. Does NOT remove finalizers or compatibility registry entries — those
+// concerns belong to the owning reconciler because they have different rules
+// for standalone vs team contexts.
 func ReconcileMemberDelete(ctx context.Context, d MemberDeps, m MemberContext) error {
 	logger := log.FromContext(ctx)
 	logger.Info("deleting member", "name", m.Name, "role", m.Role)

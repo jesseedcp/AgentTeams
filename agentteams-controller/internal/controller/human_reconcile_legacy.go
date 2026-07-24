@@ -11,9 +11,9 @@ import (
 //
 // This is a best-effort, non-fatal operation: it runs last in the phase
 // chain and its errors are logged but never returned, matching the
-// pre-refactor behavior. The registry is consumed by manager-side skills
-// (e.g. list-humans) and its absence is acceptable — the Matrix room
-// membership is the authoritative source of truth.
+// pre-refactor behavior. The registry remains only as an import/diagnostics
+// compatibility projection and its absence is acceptable — the Human
+// resource and Matrix room membership remain authoritative.
 //
 // No-op when Legacy is nil (incluster/cloud mode) or not Enabled().
 func (r *HumanReconciler) reconcileHumanLegacy(ctx context.Context, s *humanScope) {

@@ -275,12 +275,10 @@ matrix_wait_for_reply_since() {
 # logged via log_info so the test artifact still captures the agent's
 # progressive ack messages.
 #
-# WHY this exists in addition to matrix_wait_for_reply: some Manager runtimes
-# (notably CoPaw) reply progressively — the very first DM ack may be a generic
-# "let me set that up" without yet naming the Worker, with the Worker name
-# appearing in a follow-up reply 5-30s later. Tests that need to assert on
-# specific content (e.g. the Worker's name) should use this helper rather than
-# locking onto the first ack.
+# WHY this exists in addition to matrix_wait_for_reply: AgentScope reply_stream
+# may emit progress before the final content that names the Worker. Tests that
+# assert specific content should keep reading rather than lock onto the first
+# acknowledgement.
 matrix_wait_for_reply_matching() {
     local token="$1"
     local room_id="$2"

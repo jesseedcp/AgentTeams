@@ -12,6 +12,8 @@ from .heartbeat import (
 )
 from .integrations import (
     IntegrationService,
+    ManagerIdentityReceipt,
+    ManagerIdentityRequest,
     ModelSwitchReceipt,
     ModelSwitchRequest,
 )
@@ -50,6 +52,8 @@ __all__ = [
     "ProjectReceipt",
     "ProjectService",
     "MutationContext",
+    "ManagerIdentityReceipt",
+    "ManagerIdentityRequest",
     "ModelSwitchReceipt",
     "ModelSwitchRequest",
     "MatrixResourceService",

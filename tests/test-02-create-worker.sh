@@ -38,7 +38,7 @@ fi
 
 assert_not_empty "${DM_ROOM}" "DM room with Manager exists"
 
-# Wait for Manager Agent to be fully ready (OpenClaw gateway + joined DM room)
+# Wait for AgentScope Manager readiness and DM-room membership.
 wait_for_manager_agent_ready 300 "${DM_ROOM}" "${ADMIN_TOKEN}" || {
     log_fail "Manager Agent not ready in time"
     test_teardown "02-create-worker"
@@ -83,14 +83,10 @@ log_info "Waiting for Manager to create Worker Alice..."
 
 # Wait for a Manager DM reply that explicitly names 'alice'.
 #
-# Why we tolerate progressive replies: some Manager runtimes (notably CoPaw)
-# emit one or more interim acks before the reply that actually names the
-# Worker — for example "I need to set up the GitHub MCP server first" when the
-# admin's request bundles a precondition like "she should have access to
-# GitHub MCP". The follow-up reply ("...let me create Worker 'alice'...")
-# arrives 5-30s later. matrix_wait_for_reply_matching keeps reading new
-# Manager messages until one matches 'alice' (or until the 5min timeout),
-# while still logging the interim acks so the test artifact captures them.
+# AgentScope streams progress and may emit an acknowledgement before the reply
+# that names the Worker. Keep reading Manager messages until one matches
+# 'alice' (or until the timeout), while retaining interim replies in the test
+# artifact.
 REPLY=$(matrix_wait_for_reply_matching "${ADMIN_TOKEN}" "${DM_ROOM}" "@manager" "alice" 300 \
     "${ADMIN_TOKEN}" "${DM_ROOM}" "Please check if the worker creation request has been processed.")
 
@@ -101,10 +97,10 @@ log_info "Manager reply (first 500 chars): $(echo "${REPLY}" | head -c 500)"
 assert_not_empty "${REPLY}" "Manager replied to create worker request mentioning 'alice'"
 assert_contains_i "${REPLY}" "alice" "Reply mentions worker name 'alice'"
 
-# Show error logs on failure for debugging
+# Show AgentScope Manager logs on failure for debugging
 if ! echo "${REPLY}" | grep -qi "alice" 2>/dev/null; then
-    log_info "--- Manager Agent Error Log ---"
-    exec_in_agent tail -10 /var/log/agentteams/manager-agent-error.log 2>/dev/null || true
+    log_info "--- AgentScope Manager Log ---"
+    docker logs --tail 20 "${TEST_AGENT_CONTAINER}" 2>&1 || true
 fi
 
 log_section "Verify Infrastructure"
@@ -124,7 +120,7 @@ ALICE_LOGIN=$(matrix_login "alice" "" 2>/dev/null || echo "{}")
 # by trying to find the user in room membership
 
 # Check Higress consumer.
-# Manager (especially copaw runtime) often replies progressively: the first
+# AgentScope reply_stream often replies progressively: the first
 # reply just acknowledges the request ("I'll create alice…"), and the actual
 # `agt create worker` call happens in subsequent turns and can take longer
 # under CI LLM latency. So the consumer may not exist immediately when

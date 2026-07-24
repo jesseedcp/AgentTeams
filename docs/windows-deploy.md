@@ -109,7 +109,7 @@ Other OpenAI-compatible model services (such as OpenAI, DeepSeek, etc.) are also
 2. In the PowerShell window, copy and paste the following command, then press Enter:
 
 ```powershell
-Set-ExecutionPolicy Bypass -Scope Process -Force; $wc=New-Object Net.WebClient; $wc.Encoding=[Text.Encoding]::UTF8; iex $wc.DownloadString('https://raw.githubusercontent.com/agentscope-ai/AgentTeams/main/install/agentteams-install.ps1')
+Set-ExecutionPolicy Bypass -Scope Process -Force; $wc=New-Object Net.WebClient; $wc.Encoding=[Text.Encoding]::UTF8; iex $wc.DownloadString('https://raw.githubusercontent.com/jesseedcp/AgentTeams/main/install/agentteams-install.ps1')
 ```
 
 > **Note**: This command temporarily allows the current PowerShell window to execute scripts (without affecting system security policy), then downloads and runs the AgentTeams installation script from the network.
@@ -262,12 +262,11 @@ The script will prompt for the following configurations one by one. **Just press
 | Gateway Host Port | 18080 | Higress gateway port |
 | Higress Console Port | 18001 | Management console |
 | Element Web Port | 18088 | IM client access port |
-| OpenClaw Console Port | 18888 | Agent console |
+| Manager Health Port | 18888 | Loopback mapping for AgentScope health and metrics |
 | Matrix Domain | matrix-local.agentteams.io:18080 | Matrix server domain |
 | Element Web Domain | matrix-client-local.agentteams.io | IM client domain |
 | AI Gateway Domain | aigw-local.agentteams.io | AI gateway domain |
 | File System Domain | fs-local.agentteams.io | MinIO file system domain |
-| OpenClaw Console Domain | console-local.agentteams.io | Agent console domain |
 
 > **Note**: These domains are automatically resolved to `127.0.0.1` for local deployment, no manual DNS or hosts file configuration needed.
 
@@ -396,7 +395,7 @@ If you selected "Allow external access" during installation, you can manage your
 When a new version is released, simply re-run the installation command in PowerShell to upgrade in-place:
 
 ```powershell
-Set-ExecutionPolicy Bypass -Scope Process -Force; $wc=New-Object Net.WebClient; $wc.Encoding=[Text.Encoding]::UTF8; iex $wc.DownloadString('https://raw.githubusercontent.com/agentscope-ai/AgentTeams/main/install/agentteams-install.ps1')
+Set-ExecutionPolicy Bypass -Scope Process -Force; $wc=New-Object Net.WebClient; $wc.Encoding=[Text.Encoding]::UTF8; iex $wc.DownloadString('https://raw.githubusercontent.com/jesseedcp/AgentTeams/main/install/agentteams-install.ps1')
 ```
 
 When the installation script detects an existing installation, it will prompt you to choose:
@@ -409,7 +408,7 @@ When the installation script detects an existing installation, it will prompt yo
 To upgrade to a specific version:
 
 ```powershell
-$env:AGENTTEAMS_VERSION="v1.0.5"; Set-ExecutionPolicy Bypass -Scope Process -Force; $wc=New-Object Net.WebClient; $wc.Encoding=[Text.Encoding]::UTF8; iex $wc.DownloadString('https://raw.githubusercontent.com/agentscope-ai/AgentTeams/main/install/agentteams-install.ps1')
+$env:AGENTTEAMS_VERSION="v1.0.5"; Set-ExecutionPolicy Bypass -Scope Process -Force; $wc=New-Object Net.WebClient; $wc.Encoding=[Text.Encoding]::UTF8; iex $wc.DownloadString('https://raw.githubusercontent.com/jesseedcp/AgentTeams/main/install/agentteams-install.ps1')
 ```
 
 ---
@@ -419,7 +418,7 @@ $env:AGENTTEAMS_VERSION="v1.0.5"; Set-ExecutionPolicy Bypass -Scope Process -For
 Run the following command in PowerShell to stop and remove all AgentTeams containers, Docker volumes, and configuration files:
 
 ```powershell
-Set-ExecutionPolicy Bypass -Scope Process -Force; Invoke-Expression "& { $(Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/agentscope-ai/AgentTeams/main/install/agentteams-install.ps1' -UseBasicParsing).Content } uninstall"
+Set-ExecutionPolicy Bypass -Scope Process -Force; Invoke-Expression "& { $(Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/jesseedcp/AgentTeams/main/install/agentteams-install.ps1' -UseBasicParsing).Content } uninstall"
 ```
 
 This mirrors `install/agentteams-install.sh uninstall`: **`agentteams-controller`**, **`agentteams-manager`**, Worker containers, optional **`agentteams-docker-proxy`**, the data volume, env file, network, etc.
@@ -480,7 +479,7 @@ This mirrors `install/agentteams-install.sh uninstall`: **`agentteams-controller
    ```
 4. View detailed Agent logs:
    ```powershell
-   docker exec agentteams-manager cat /var/log/agentteams/manager-agent.log
+   docker logs --tail 200 agentteams-manager
    ```
 
 ### Port Already in Use
@@ -520,6 +519,7 @@ After installation, in addition to Element Web, you can access the following con
 |---------|-----|---------|
 | Element Web | http://127.0.0.1:18088 | IM client to chat with Agents |
 | Higress Console | http://localhost:18001 | AI gateway management, LLM switching, credential management |
-| OpenClaw Console | http://localhost:18888 | Agent runtime management (local access only) |
+| Manager readiness | http://localhost:18888/readyz | AgentScope readiness (local access only) |
+| Manager metrics | http://localhost:18888/metrics | Prometheus text metrics (local access only) |
 
 > **Tip**: You can also ask Manager to help you configure LLM providers in Element Web chat, without manually operating the Higress console.

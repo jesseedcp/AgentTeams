@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- Start from AgentTeams upstream commit `2540c968a642845c4b9382afd75d8c80ed861137`.
+- Start from AgentTeams upstream commit `0ff89f07a205b82cd81d18385c7095ec352a083f`.
 - Copy a curated upstream source snapshot into `jesseedcp/AgentTeams`: retain
   Controller, Helm, installers, documentation/test foundations, Matrix,
   MinIO/OSS, Higress, Element, infrastructure assets, and all five Worker
@@ -87,7 +87,7 @@ Verify:
 ```bash
 git rev-list --max-parents=0 HEAD
 git cat-file -p HEAD
-git merge-base --is-ancestor 2540c968a642845c4b9382afd75d8c80ed861137 HEAD
+git merge-base --is-ancestor 0ff89f07a205b82cd81d18385c7095ec352a083f HEAD
 git ls-remote --heads jesseedcp main
 ```
 
@@ -103,7 +103,7 @@ history.
 
 Implementation must continually compare behavior with these paths at the
 pinned upstream commit. Excluded files remain reference evidence at
-`agentscope-ai/AgentTeams@2540c968a642845c4b9382afd75d8c80ed861137`;
+`agentscope-ai/AgentTeams@0ff89f07a205b82cd81d18385c7095ec352a083f`;
 they are not copied into the new root snapshot:
 
 - `manager/agent/AGENTS.md`

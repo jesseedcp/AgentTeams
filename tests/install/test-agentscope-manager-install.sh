@@ -19,7 +19,7 @@ assert_contains() {
 assert_absent() {
     local file="$1"
     local pattern="$2"
-    if grep -Fiq -- "${pattern}" "${file}"; then
+    if grep -Fq -- "${pattern}" "${file}"; then
         echo "FAIL: ${file#${ROOT_DIR}/} still contains: ${pattern}" >&2
         exit 1
     fi

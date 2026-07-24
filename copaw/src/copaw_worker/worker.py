@@ -664,7 +664,10 @@ class Worker:
     # ------------------------------------------------------------------
 
     async def _on_files_pulled(self, pulled_files: list[str]) -> None:
-        """Re-bridge config when Manager-managed files change (openclaw.json).
+        """Re-bridge when Controller-managed configuration changes.
+
+        The Controller publishes openclaw.json as the cross-runtime Worker
+        contract.
         SOUL.md, AGENTS.md are Worker-managed and not pulled; use local copies."""
         # Re-sync skills if any skill file changed
         if any(f.startswith("skills/") for f in pulled_files):

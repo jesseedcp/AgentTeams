@@ -311,8 +311,8 @@ func TestReconcileMemberDeleteUsesCRNameForCredentialDelete(t *testing.T) {
 // registryEntry is the minimal subset of service.workersRegistry we need to
 // inspect in tests — duplicated locally because the registry shape (and
 // WorkerRegistryEntry fields we care about) are stable JSON contracts that
-// Manager-side tooling also consumes. Keeping this in sync with the JSON
-// tags in service.WorkerRegistryEntry is deliberate.
+// legacy import and diagnostics consumers also read. Keeping this in sync
+// with the JSON tags in service.WorkerRegistryEntry is deliberate.
 type registryEntry struct {
 	MatrixUserID string   `json:"matrix_user_id"`
 	RoomID       string   `json:"room_id"`
@@ -350,9 +350,6 @@ func newTestLegacy(t *testing.T) (*service.LegacyCompat, *ossfake.Memory) {
 		OSS:          fake,
 		MatrixDomain: "matrix.local",
 		ManagerName:  "manager",
-		// Leave AgentFSDir empty so LegacyCompat skips the local shared-mount
-		// write that would otherwise require creating a real directory.
-		AgentFSDir: "",
 	})
 	return legacy, fake
 }
@@ -360,8 +357,7 @@ func newTestLegacy(t *testing.T) (*service.LegacyCompat, *ossfake.Memory) {
 // TestReconcileLegacyMember_BuildsEntry is the regression guard for the
 // test-18 failure: TeamReconciler must populate workers-registry.json with
 // role=team_leader / worker and team_id=<team name> for each team member so
-// manager-side skills (find-worker.sh, push-worker-skills.sh, etc.) can
-// continue to resolve team members by name.
+// the compatibility projection represents team members consistently.
 func TestReconcileLegacyMember_BuildsEntry(t *testing.T) {
 	legacy, fake := newTestLegacy(t)
 	r := &TeamReconciler{Legacy: legacy}
@@ -497,8 +493,8 @@ func TestLegacyChannelPolicy_BuildsFinalAllowLists(t *testing.T) {
 }
 
 // TestRemoveLegacyMember_DeletesEntry covers the stale-cleanup and
-// handleDelete paths: once removed, the entry disappears so manager-side
-// skills no longer see a ghost worker.
+// handleDelete paths: once removed, compatibility readers no longer see a
+// ghost worker.
 func TestRemoveLegacyMember_DeletesEntry(t *testing.T) {
 	legacy, fake := newTestLegacy(t)
 	r := &TeamReconciler{Legacy: legacy}

@@ -3,13 +3,49 @@
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+STATIC_ONLY=false
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --static-only)
+            STATIC_ONLY=true
+            ;;
+        *)
+            echo "Unknown argument: $1" >&2
+            echo "Usage: $0 [--static-only]" >&2
+            exit 2
+            ;;
+    esac
+    shift
+done
+
+# Avoid probing Docker merely by sourcing the shared helpers during a static
+# release check. Runtime mode still auto-detects the real containers.
+if [ "${STATIC_ONLY}" = "true" ]; then
+    export TEST_CONTROLLER_CONTAINER="${TEST_CONTROLLER_CONTAINER:-static-only}"
+    export TEST_AGENT_CONTAINER="${TEST_AGENT_CONTAINER:-static-only}"
+fi
+
 source "${SCRIPT_DIR}/lib/test-helpers.sh"
 
-test_setup "28-agentscope-manager-parity"
+if [ "${STATIC_ONLY}" = "true" ]; then
+    log_section "Starting: 28-agentscope-manager-parity (static only)"
+else
+    test_setup "28-agentscope-manager-parity"
+fi
 
 log_section "Declared Skill Parity"
 
-if PROJECT_ROOT="${PROJECT_ROOT}" python3 - <<'PY'
+PYTHON_BIN="${PYTHON_BIN:-}"
+if [ -z "${PYTHON_BIN}" ] && command -v python3 >/dev/null 2>&1; then
+    PYTHON_BIN="$(command -v python3)"
+elif [ -z "${PYTHON_BIN}" ] && command -v python >/dev/null 2>&1; then
+    PYTHON_BIN="$(command -v python)"
+fi
+
+if [ -z "${PYTHON_BIN}" ]; then
+    log_fail "A host Python interpreter is available for the static parity gate"
+elif PROJECT_ROOT="${PROJECT_ROOT}" "${PYTHON_BIN}" - <<'PY'
 import json
 import os
 import pathlib
@@ -51,6 +87,161 @@ else
     log_fail "All 16 retained skills have typed-tool documents and evidence"
 fi
 
+if [ -z "${PYTHON_BIN}" ]; then
+    log_fail "Current Manager docs contain no retired runtime instructions"
+elif PROJECT_ROOT="${PROJECT_ROOT}" "${PYTHON_BIN}" - <<'PY'
+import os
+import pathlib
+import re
+
+root = pathlib.Path(os.environ["PROJECT_ROOT"])
+
+production_files = [
+    root / "README.md",
+    root / "README.zh-CN.md",
+    root / "README.ja-JP.md",
+    root / "AGENTS.md",
+    root / "Makefile",
+    root / "changelog/current.md",
+]
+for relative in ("install", "helm", ".github"):
+    production_files.extend(
+        path
+        for path in (root / relative).rglob("*")
+        if path.is_file()
+    )
+for relative in (
+    "architecture.md",
+    "zh-cn/architecture.md",
+    "manager-guide.md",
+    "zh-cn/manager-guide.md",
+    "agentscope-manager-operations.md",
+    "zh-cn/agentscope-manager-operations.md",
+    "development.md",
+    "zh-cn/development.md",
+    "quickstart.md",
+    "zh-cn/quickstart.md",
+    "faq.md",
+    "zh-cn/faq.md",
+    "cms-integration.md",
+    "zh-cn/cms-integration.md",
+    "import-worker.md",
+    "zh-cn/import-worker.md",
+    "declarative-resource-management.md",
+    "zh-cn/declarative-resource-management.md",
+):
+    production_files.append(root / "docs" / relative)
+
+retired_claims = (
+    "manager runtime: openclaw",
+    "manager runtime: copaw",
+    "agentteams-manager-copaw",
+    "agentteams_force_legacy",
+    "openclaw gateway restart",
+)
+violations: list[str] = []
+for path in production_files:
+    if not path.is_file():
+        continue
+    text = path.read_text(encoding="utf-8", errors="replace").casefold()
+    for claim in retired_claims:
+        if claim in text:
+            violations.append(f"{path.relative_to(root)}: {claim}")
+
+manager_docs = [
+    root / "manager/agent/AGENTS.md",
+    root / "manager/agent/SOUL.md",
+    root / "manager/agent/TOOLS.md",
+    *(root / "manager/agent/skills").rglob("*.md"),
+]
+retired_manager_literals = (
+    "openclaw gateway",
+    "copaw channels send",
+    "state.json",
+    "workers-registry.json",
+    "pending-workers.json",
+    "worker-openclaw.json.tmpl",
+)
+script_path = re.compile(
+    r"(?:/opt/agentteams/agent/skills|manager/agent/skills)/[^\s`]+/scripts",
+    re.IGNORECASE,
+)
+mcporter_command = re.compile(
+    r"(?im)^\s*(?:`{0,3})mcporter\s+(?:list|call)\b"
+)
+for path in manager_docs:
+    text = path.read_text(encoding="utf-8", errors="replace")
+    folded = text.casefold()
+    for literal in retired_manager_literals:
+        if literal in folded:
+            violations.append(f"{path.relative_to(root)}: {literal}")
+    if script_path.search(text):
+        violations.append(f"{path.relative_to(root)}: retired Manager skill script path")
+    if mcporter_command.search(text):
+        violations.append(f"{path.relative_to(root)}: mcporter executable command")
+
+controller_owned_distribution_docs = [
+    root / "manager/agent/worker-skills/README.md",
+    root / "manager/scripts/init/start-mc-mirror.sh",
+    root / "agentteams-controller/internal/service/deployer.go",
+    root / "docs/import-worker.md",
+    root / "docs/zh-cn/import-worker.md",
+    root / "docs/declarative-resource-management.md",
+    root / "docs/zh-cn/declarative-resource-management.md",
+]
+for path in controller_owned_distribution_docs:
+    text = path.read_text(encoding="utf-8", errors="replace").casefold()
+    if "push-worker-skills.sh" in text:
+        violations.append(
+            f"{path.relative_to(root)}: deleted Manager skill distribution script"
+        )
+    if "manager's workers-registry.json" in text:
+        violations.append(
+            f"{path.relative_to(root)}: Manager registry presented as desired state"
+        )
+    if "manager 的 workers-registry.json" in text:
+        violations.append(
+            f"{path.relative_to(root)}: Manager registry presented as desired state"
+        )
+
+exporter_source = (root / "scripts/export-debug-log.py").read_text(
+    encoding="utf-8",
+)
+exporter_options = set(
+    re.findall(
+        r'parser\.add_argument\(\s*"(--[a-z0-9-]+)"',
+        exporter_source,
+    )
+)
+for relative in (
+    "docs/agentscope-manager-operations.md",
+    "docs/zh-cn/agentscope-manager-operations.md",
+):
+    path = root / relative
+    text = path.read_text(encoding="utf-8")
+    command = re.search(
+        r"python scripts/export-debug-log\.py\s*\\\n.*?\n```",
+        text,
+        re.DOTALL,
+    )
+    if command is None:
+        violations.append(f"{relative}: debug export command is missing")
+        continue
+    for option in re.findall(r"--[a-z0-9-]+", command.group(0)):
+        if option not in exporter_options:
+            violations.append(
+                f"{relative}: unsupported debug export option {option}"
+            )
+
+if violations:
+    raise AssertionError("\n".join(sorted(set(violations))))
+PY
+then
+    log_pass "Current Manager docs contain no retired runtime instructions"
+else
+    log_fail "Current Manager docs contain no retired runtime instructions"
+fi
+
 STALE_SOURCE_PATHS=(
     "manager/scripts/systemctl-shim.sh"
     "manager/scripts/setup-host-symlinks.sh"
@@ -65,6 +256,12 @@ for path in "${STALE_SOURCE_PATHS[@]}"; do
     fi
 done
 assert_eq "" "${STALE_SOURCE_FOUND}" "Legacy Manager runtime source payload is absent"
+
+if [ "${STATIC_ONLY}" = "true" ]; then
+    test_teardown "28-agentscope-manager-parity (static only)"
+    test_summary
+    exit $?
+fi
 
 log_section "Running AgentScope Image"
 

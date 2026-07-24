@@ -3,8 +3,8 @@
 #
 # Verifies the `--skills` flag on `agt create worker` and
 # `agt update worker` flows through the controller and is reflected in
-# the source-of-truth registry at agents/manager/workers-registry.json,
-# and that the corresponding skill files land in agents/<name>/skills/.
+# the Controller Worker resource, and that the corresponding skill files
+# land in agents/<name>/skills/.
 #
 # Built-in baseline skills (file-sync, etc.) are always pushed for every
 # Worker regardless of --skills; the flag controls *on-demand* skills
@@ -21,7 +21,6 @@ test_setup "24-skills-management"
 
 TEST_WORKER="test-skl-$$"
 STORAGE_PREFIX="${STORAGE_PREFIX:-${TEST_STORAGE_PREFIX:-agentteams/agentteams-storage}}"
-REGISTRY_KEY="${STORAGE_PREFIX}/agents/manager/workers-registry.json"
 
 _cleanup() {
     log_info "Cleaning up: ${TEST_WORKER}"
@@ -35,11 +34,11 @@ trap _cleanup EXIT
 
 minio_setup
 
-# Helper: read worker entry from registry and return .skills as JSON array
-_worker_skills_in_registry() {
+# Helper: read desired skills from the Controller-owned Worker resource.
+_worker_skills_from_controller() {
     local worker="$1"
-    exec_in_manager mc cat "${REGISTRY_KEY}" 2>/dev/null \
-        | jq -c --arg w "${worker}" '.workers[$w].skills // empty' 2>/dev/null
+    exec_in_agent agt get workers "${worker}" -o json 2>/dev/null \
+        | jq -c '.skills // empty' 2>/dev/null
 }
 
 # ============================================================
@@ -65,24 +64,23 @@ else
 fi
 
 # ============================================================
-# Section 2: Registry reflects initial skills
+# Section 2: Controller desired state and published skills
 # ============================================================
-log_section "Verify Registry After Create"
+log_section "Verify Controller State After Create"
 
-# Give the controller a moment after provisioning to write the registry entry
 DEADLINE=$(( $(date +%s) + 60 ))
 INITIAL_SKILLS=""
 while [ "$(date +%s)" -lt "${DEADLINE}" ]; do
-    INITIAL_SKILLS=$(_worker_skills_in_registry "${TEST_WORKER}")
+    INITIAL_SKILLS=$(_worker_skills_from_controller "${TEST_WORKER}")
     [ -n "${INITIAL_SKILLS}" ] && [ "${INITIAL_SKILLS}" != "null" ] && break
     sleep 5
 done
 
-log_info "Initial skills in registry: ${INITIAL_SKILLS}"
+log_info "Initial skills in Controller: ${INITIAL_SKILLS}"
 if echo "${INITIAL_SKILLS}" | jq -e 'index("github-operations")' >/dev/null 2>&1; then
-    log_pass "Registry contains 'github-operations' for ${TEST_WORKER}"
+    log_pass "Controller contains 'github-operations' for ${TEST_WORKER}"
 else
-    log_fail "Registry missing 'github-operations' (got: ${INITIAL_SKILLS})"
+    log_fail "Controller missing 'github-operations' (got: ${INITIAL_SKILLS})"
 fi
 
 # Built-in baseline skill should be present in MinIO regardless of --skills
@@ -93,9 +91,9 @@ else
 fi
 
 if minio_file_exists "agents/${TEST_WORKER}/skills/github-operations/SKILL.md"; then
-    log_info "On-demand skill 'github-operations' already present in MinIO"
+    log_pass "On-demand skill 'github-operations' present in MinIO"
 else
-    log_info "On-demand skill 'github-operations' not yet present in MinIO (manager-side skill sync is out of scope)"
+    log_fail "On-demand skill 'github-operations' missing in MinIO"
 fi
 
 if wait_for_worker_container "${TEST_WORKER}" 180; then
@@ -119,12 +117,12 @@ else
     log_fail "agt update failed (exit=${UPDATE_EXIT}): ${UPDATE_OUTPUT}"
 fi
 
-# Wait for the controller to re-reconcile and rewrite the registry
-log_info "Waiting for registry to reflect skill change..."
+# Wait for the Controller to persist the replacement desired state.
+log_info "Waiting for Controller state to reflect skill change..."
 DEADLINE=$(( $(date +%s) + 120 ))
 UPDATED_SKILLS=""
 while [ "$(date +%s)" -lt "${DEADLINE}" ]; do
-    UPDATED_SKILLS=$(_worker_skills_in_registry "${TEST_WORKER}")
+    UPDATED_SKILLS=$(_worker_skills_from_controller "${TEST_WORKER}")
     if echo "${UPDATED_SKILLS}" | jq -e 'index("git-delegation")' >/dev/null 2>&1 \
         && ! echo "${UPDATED_SKILLS}" | jq -e 'index("github-operations")' >/dev/null 2>&1; then
         break
@@ -132,29 +130,41 @@ while [ "$(date +%s)" -lt "${DEADLINE}" ]; do
     sleep 5
 done
 
-log_info "Updated skills in registry: ${UPDATED_SKILLS}"
+log_info "Updated skills in Controller: ${UPDATED_SKILLS}"
+
+# Resource updates are visible before reconciliation necessarily finishes.
+SKILL_RECONCILED=false
+DEADLINE=$(( $(date +%s) + 60 ))
+while [ "$(date +%s)" -lt "${DEADLINE}" ]; do
+    if minio_file_exists "agents/${TEST_WORKER}/skills/git-delegation/SKILL.md" \
+        && ! minio_file_exists "agents/${TEST_WORKER}/skills/github-operations/SKILL.md"; then
+        SKILL_RECONCILED=true
+        break
+    fi
+    sleep 5
+done
 
 # ============================================================
 # Section 4: Verify post-update state
 # ============================================================
-log_section "Verify Registry After Update"
+log_section "Verify Controller State After Update"
 
 if echo "${UPDATED_SKILLS}" | jq -e 'index("git-delegation")' >/dev/null 2>&1; then
-    log_pass "Registry contains 'git-delegation' after update"
+    log_pass "Controller contains 'git-delegation' after update"
 else
-    log_fail "Registry missing 'git-delegation' after update (got: ${UPDATED_SKILLS})"
+    log_fail "Controller missing 'git-delegation' after update (got: ${UPDATED_SKILLS})"
 fi
 
 if echo "${UPDATED_SKILLS}" | jq -e 'index("github-operations")' >/dev/null 2>&1; then
-    log_fail "Registry still contains 'github-operations' after replacement update"
+    log_fail "Controller still contains 'github-operations' after replacement update"
 else
-    log_pass "Replaced skill 'github-operations' no longer in registry"
+    log_pass "Replaced skill 'github-operations' no longer in Controller state"
 fi
 
-if minio_file_exists "agents/${TEST_WORKER}/skills/git-delegation/SKILL.md"; then
-    log_info "On-demand skill 'git-delegation' present in MinIO after update"
+if [ "${SKILL_RECONCILED}" = "true" ]; then
+    log_pass "Controller replaced the published on-demand skill in MinIO"
 else
-    log_info "On-demand skill 'git-delegation' not yet present in MinIO after update (manager-side skill sync is out of scope)"
+    log_fail "Published skill state did not converge to only 'git-delegation'"
 fi
 
 # Worker container should still be running (skills update must not crash it).

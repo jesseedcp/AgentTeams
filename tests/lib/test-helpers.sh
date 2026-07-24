@@ -418,6 +418,49 @@ wait_agent_matrix_allow_contains() {
     return 1
 }
 
+# wait_manager_team_binding <team_name> <leader_matrix_id> [timeout_seconds]
+# Polls the AgentScope Manager's Controller-materialized topology until the
+# team leader room is bound to the expected Matrix identity. Unlike the
+# retired Manager openclaw.json allow-list, this is the authorization input
+# consumed by RoomPolicyResolver.
+wait_manager_team_binding() {
+    local team_name="$1"
+    local leader_matrix_id="$2"
+    local timeout="${3:-120}"
+    local elapsed=0
+    local expected="leader_room|${leader_matrix_id}"
+    local last=""
+    while [ "${elapsed}" -lt "${timeout}" ]; do
+        last=$(exec_in_agent python -c '
+import sqlite3
+import sys
+
+connection = sqlite3.connect(
+    "file:/var/lib/agentteams-manager/state/manager.db?mode=ro",
+    uri=True,
+)
+row = connection.execute(
+    """
+    SELECT room_kind, matrix_user_id
+      FROM topology
+     WHERE resource_type = ?
+       AND resource_name = ?
+       AND room_kind = ?
+    """,
+    ("team", sys.argv[1], "leader_room"),
+).fetchone()
+print("|".join("" if value is None else str(value) for value in row) if row else "")
+' "${team_name}" 2>/dev/null || true)
+        if [ "${last}" = "${expected}" ]; then
+            return 0
+        fi
+        sleep 5
+        elapsed=$((elapsed + 5))
+    done
+    echo "wait_manager_team_binding: team=${team_name} timed out after ${timeout}s, last='${last}', want='${expected}'" >&2
+    return 1
+}
+
 # get_worker_room_id <worker_name>
 # Echoes the worker's .roomID from the API, or empty on failure.
 # Works for both standalone workers and team members, since

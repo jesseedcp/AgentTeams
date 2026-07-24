@@ -495,7 +495,6 @@ $script:Messages = @{
     "install.openai_compat.success" = @{ zh = "OpenAI 兼容提供商创建成功"; en = "OpenAI-compatible provider created successfully" }
 
     # --- Welcome message ---
-    "install.welcome_msg.soul_configured" = @{ zh = "Soul 已配置（找到 soul-configured 标记），跳过 onboarding 消息"; en = "Soul already configured (soul-configured marker found), skipping onboarding message" }
     "install.welcome_msg.logging_in" = @{ zh = "正在以 {0} 身份登录以发送欢迎消息..."; en = "Logging in as {0} to send welcome message..." }
     "install.welcome_msg.login_failed" = @{ zh = "警告: 以 {0} 身份登录失败，跳过欢迎消息"; en = "WARNING: Failed to login as {0}, skipping welcome message" }
     "install.welcome_msg.finding_room" = @{ zh = "正在查找与 Manager 的 DM 房间..."; en = "Finding DM room with Manager..." }
@@ -2596,9 +2595,9 @@ function Install-Manager {
         $ctrlArgs += @("-v", "${wsDockerPath}:/root/agentteams-fs/agents/manager")
         Write-Log (Get-Msg "host_share.sharing" -f $config.HOST_SHARE_DIR)
 
-        # Externally exposed ports — only the gateway / Higress console / Element Web,
-        # since the manager console is now spawned inside its own container by the
-        # controller (port mapping is handled there).
+        # Externally exposed ports — only the gateway, Higress console, and
+        # Element Web. The Controller maps the AgentScope Manager health port
+        # separately on loopback.
         $ctrlArgs += @("-p", "${portPrefix}$($config.PORT_GATEWAY):8080")
         $ctrlArgs += @("-p", "${portPrefix}$($config.PORT_CONSOLE):8001")
         $ctrlArgs += @("-p", "${portPrefix}$($config.PORT_ELEMENT_WEB):8088")

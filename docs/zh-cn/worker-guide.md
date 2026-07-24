@@ -67,9 +67,9 @@ Manager 会在回复中提供所有具体参数值。
 docker logs agentteams-worker-alice
 
 # 常见问题：
-# - "openclaw.json not found"：Manager 尚未创建配置文件
+# - "openclaw.json not found"：Controller 调和尚未生成此 OpenClaw Worker 的配置
 # - "mc: command not found"：镜像构建问题
-# - Connection refused：Manager 容器未运行或端口未暴露
+# - Connection refused：Controller 基础设施不可用或服务端口未暴露
 ```
 
 ### Worker 无法连接 Matrix

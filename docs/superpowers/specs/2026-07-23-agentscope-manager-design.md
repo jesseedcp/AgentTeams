@@ -4,7 +4,7 @@
 
 状态：设计已确认，进入实现
 
-上游基线：`agentscope-ai/AgentTeams` `main`，提交 `2540c968a642845c4b9382afd75d8c80ed861137`
+上游基线：`agentscope-ai/AgentTeams` `main`，提交 `0ff89f07a205b82cd81d18385c7095ec352a083f`
 
 AgentScope 基线：`agentscope-ai/agentscope` `v2.0.4.post1`
 

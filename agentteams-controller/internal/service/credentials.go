@@ -27,11 +27,10 @@ type WorkerCredentials struct {
 	// MatrixToken is the access token returned by the most recent matrix.Login.
 	// Persisted so that subsequent RefreshManagerCredentials calls can reuse
 	// the cached token instead of issuing a fresh login on every controller
-	// reconcile. Without this, every reconcile produced a brand-new token,
-	// the controller pushed it into the manager's openclaw.json (shared
-	// filesystem mount), and openclaw detected the change → gateway restart
-	// → matrix client torn down. May be empty on first boot or when the old
-	// token has been invalidated; callers must re-login in that case.
+	// reconcile. Without this, every reconcile would rotate the runtime
+	// credential and tear down the Manager's Matrix sync session. May be empty
+	// on first boot or when the old token has been invalidated; callers must
+	// re-login in that case.
 	MatrixToken string
 }
 

@@ -4,6 +4,15 @@ on:
   pull_request:
     paths:
       - 'helm/**'
+      - 'hack/local-k8s-up.sh'
+      - 'openhuman/scripts/openhuman-worker-entrypoint.sh'
+      - 'tests/check-agentteams-rename-defaults.sh'
+      - 'tests/check-helm-agentteams.sh'
+  push:
+    branches: [main]
+    paths:
+      - 'helm/**'
+      - 'hack/local-k8s-up.sh'
       - 'openhuman/scripts/openhuman-worker-entrypoint.sh'
       - 'tests/check-agentteams-rename-defaults.sh'
       - 'tests/check-helm-agentteams.sh'

@@ -146,6 +146,7 @@ spec:
                               properties:
                                 name:
                                   type: string
+                                  pattern: '^[a-z0-9]([a-z0-9-]{0,126}[a-z0-9])?$'
                                 version:
                                   type: string
                                 label:
@@ -308,9 +309,10 @@ spec:
                         type: array
                         items:
                           type: string
+                          pattern: '^[a-z0-9]([a-z0-9-]{0,126}[a-z0-9])?$'
                           not:
                             pattern: '^nacos://'
-                        description: AgentTeams built-in skills to enable (remote registry skills must use remoteSkills)
+                        description: AgentTeams image-owned on-demand skills to enable (remote registry skills must use remoteSkills)
                       remoteSkills:
                         type: array
                         description: Remote skills fetched from source registries.
@@ -336,6 +338,7 @@ spec:
                                 properties:
                                   name:
                                     type: string
+                                    pattern: '^[a-z0-9]([a-z0-9-]{0,126}[a-z0-9])?$'
                                   version:
                                     type: string
                                   label:

@@ -775,15 +775,15 @@ def push_local(sync: FileSync, since: float = 0) -> list[str]:
     mtime > `since` (epoch seconds), then content-compares before uploading.
     When since=0 (first run), scans all eligible files.
 
-    Excludes Manager-managed files only. AGENTS.md, SOUL.md, .copaw/sessions/
+    Excludes Controller-managed files only. AGENTS.md, SOUL.md, .copaw/sessions/
     are Worker-managed and are pushed (including session backup).
     """
-    # Manager-managed files that should never be pushed back
+    # Controller-managed files that should never be pushed back
     _EXCLUDE_FILES = {
         "openclaw.json",
         "mcporter-servers.json",
     }
-    # Manager-managed files at specific relative paths (not just root)
+    # Controller-managed files at specific relative paths (not just root)
     _EXCLUDE_PATHS = {
         "config/mcporter.json",
         ".copaw/workspaces/default/config/mcporter.json",

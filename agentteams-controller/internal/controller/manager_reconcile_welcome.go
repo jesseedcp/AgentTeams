@@ -14,7 +14,7 @@ import (
 
 // welcomeRequeueInterval is how long to wait before re-checking when the
 // Manager Matrix user has not yet joined the Admin DM room. Kept short
-// because the gap between container start and OpenClaw's first /sync
+// because the gap between container start and the Manager's first /sync
 // auto-join is typically a few seconds; longer than this makes the
 // admin's Element Web window sit empty for an uncomfortable time on
 // fresh installs. The cost of the 5s loop is one ListRoomMembers HTTP
@@ -25,11 +25,8 @@ const welcomeRequeueInterval = 5 * time.Second
 // reconcileManagerWelcome delivers the first-boot onboarding prompt that
 // asks the Manager Agent to greet the admin and ask the four identity
 // questions (name / language / style / behavior). It is the
-// new-architecture replacement for the legacy in-container welcome flow
-// that lived in `start-manager-agent.sh` and only ran when
-// AGENTTEAMS_RUNTIME != "k8s". The legacy path remains untouched for
-// docker single-container deploys; in k8s / embedded mode the controller
-// owns this responsibility because:
+// Controller-owned replacement for the former in-container welcome flow. The
+// Controller owns this responsibility on every deployment surface because:
 //
 //   - it has admin Matrix credentials cached in TuwunelClient already;
 //   - it knows when the DM Room was just created (via Status.WelcomeSent);
@@ -53,7 +50,7 @@ const welcomeRequeueInterval = 5 * time.Second
 //
 //  2. Skip if no RoomID — provisioning hasn't reached Step 4 yet.
 //
-//  3. Skip if container not Running/Ready (no point if OpenClaw isn't
+//  3. Skip if container not Running/Ready (no point if the Manager isn't
 //     up to receive the message anyway).
 //
 //  4. Two side-effect-free readiness gates, polled on every requeue
@@ -61,14 +58,14 @@ const welcomeRequeueInterval = 5 * time.Second
 //
 //     a. IsManagerJoinedDM — the manager Matrix user must have actually
 //     joined the Admin DM room before we send. Otherwise the welcome
-//     lands in the room's historical timeline, which OpenClaw / hermes /
-//     copaw drop during their first-boot catch-up sync.
+//     lands in the room's historical timeline, which the Manager treats as
+//     first-boot catch-up rather than a new request.
 //
 //     b. IsManagerLLMAuthReady — Higress's WASM key-auth filter must
 //     have finished syncing the manager's consumer credential. This
 //     activation is asynchronous and takes ~40-45s on first install
-//     (the legacy `start-manager-agent.sh` papered over it with a
-//     `sleep 45` after Higress setup). Auto-join (~10s) lands long
+//     (the previous flow used a fixed delay after Higress setup). Auto-join
+//     (~10s) lands long
 //     before auth propagation (~45s), so gating on join alone would
 //     deliver the welcome while the manager's first
 //     /v1/chat/completions call is still 401ing — the prompt arrives,

@@ -25,7 +25,9 @@ This understanding shapes all your behavior and decisions:
 ## Identity & Personality
 
 > This section is filled in during your first conversation with the human admin.
-> Until it is configured, greet the admin, run the onboarding Q&A, then overwrite this section with the agreed identity.
+> Until it is configured, greet the admin, run the onboarding Q&A, ask for
+> confirmation, then call `update_manager_identity`. Never edit this file
+> directly; the Controller publishes the confirmed identity atomically.
 
 (not yet configured)
 

@@ -244,6 +244,39 @@ async def test_update_manager_model_uses_typed_cli_and_reads_result() -> None:
     )
 
 
+@pytest.mark.asyncio
+async def test_update_manager_identity_uses_typed_cli_and_reads_result() -> None:
+    process = FakeProcess()
+    process.queue_error("", returncode=0)
+    process.queue_json(
+        {
+            "name": "default",
+            "phase": "Running",
+            "model": "qwen3.6-plus",
+            "runtime": "agentscope",
+            "identity": "- Name: Lin",
+            "matrixUserID": "@manager:local",
+            "roomID": "!admin:local",
+        },
+    )
+
+    manager = await AgtClient(process).update_manager_identity(
+        "default",
+        "- Name: Lin",
+    )
+
+    assert manager.identity == "- Name: Lin"
+    assert process.calls[-2][0] == (
+        "agt",
+        "update",
+        "manager",
+        "--name",
+        "default",
+        "--identity",
+        "- Name: Lin",
+    )
+
+
 @pytest.mark.parametrize(
     "package_uri",
     (

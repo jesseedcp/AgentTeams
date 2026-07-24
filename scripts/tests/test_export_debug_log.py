@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 
 import importlib.util
+import json
+import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / "export-debug-log.py"
@@ -89,6 +92,87 @@ class FormatEventTest(unittest.TestCase):
         self.assertEqual(record["body"], "****")
         self.assertEqual(record["url"], "http://****/image.png")
         self.assertEqual(record["relates_to"]["token"], "****")
+
+
+class AgentScopeSessionExportTest(unittest.TestCase):
+    def test_detects_agentscope_manager_database(self):
+        def fake_exec(container, command):
+            self.assertEqual(container, "agentteams-manager")
+            if "AGENTTEAMS_WORKER_NAME" in command:
+                return ""
+            if (
+                "/var/lib/agentteams-manager/state/manager.db"
+                in command
+            ):
+                return "yes\n"
+            return "no\n"
+
+        with patch.object(
+            export_debug_log,
+            "docker_exec",
+            side_effect=fake_exec,
+        ):
+            runtime, path = export_debug_log.detect_runtime(
+                "agentteams-manager",
+            )
+
+        self.assertEqual(runtime, "agentscope")
+        self.assertEqual(
+            path,
+            "/var/lib/agentteams-manager/state/manager.db",
+        )
+
+    def test_exports_redacted_agentscope_context_as_jsonl(self):
+        payload = [
+            {
+                "room_id": "!admin:matrix.example",
+                "policy_revision": 4,
+                "last_event_id": "$event",
+                "updated_at": "2026-07-24T12:00:00+00:00",
+                "state": {
+                    "session_id": "session-1",
+                    "summary": "alice@example.com",
+                    "context": [
+                        {
+                            "name": "Manager",
+                            "role": "assistant",
+                            "created_at": "2026-07-24T11:59:00+00:00",
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": "token=syt_abcdefghijklmnopqrstuvwxyz",
+                                },
+                            ],
+                        },
+                    ],
+                },
+            },
+        ]
+        with tempfile.TemporaryDirectory() as temporary:
+            out_dir = Path(temporary)
+            with patch.object(
+                export_debug_log,
+                "docker_exec",
+                return_value=json.dumps(payload),
+            ):
+                sessions, events = (
+                    export_debug_log.export_agentscope_sessions(
+                        "agentteams-manager",
+                        "/var/lib/agentteams-manager/state/manager.db",
+                        0,
+                        out_dir,
+                        True,
+                    )
+                )
+
+            exported = next(out_dir.glob("*.jsonl")).read_text(
+                encoding="utf-8",
+            )
+
+        self.assertEqual((sessions, events), (1, 1))
+        self.assertIn('"runtime": "agentscope"', exported)
+        self.assertNotIn("alice@example.com", exported)
+        self.assertNotIn("syt_abcdefghijklmnopqrstuvwxyz", exported)
 
 
 if __name__ == "__main__":

@@ -344,10 +344,6 @@ func (r *WorkerReconciler) reconcileDelete(ctx context.Context, w *v1beta1.Worke
 	_ = ReconcileMemberDelete(ctx, deps, mctx)
 
 	if r.Legacy != nil && r.Legacy.Enabled() {
-		workerMatrixID := r.Provisioner.MatrixUserID(w.Name)
-		if err := r.Legacy.UpdateManagerGroupAllowFrom(workerMatrixID, false); err != nil {
-			logger.Error(err, "failed to update Manager groupAllowFrom (non-fatal)")
-		}
 		if err := r.Legacy.RemoveFromWorkersRegistry(mctx.RuntimeName); err != nil {
 			logger.Error(err, "failed to remove from workers registry (non-fatal)")
 		}
@@ -363,44 +359,32 @@ func (r *WorkerReconciler) reconcileDelete(ctx context.Context, w *v1beta1.Worke
 	return reconcile.Result{}, nil
 }
 
-// reconcileLegacy writes the worker to the legacy workers-registry and grants
-// the standalone worker publish rights into the Manager's group DM room.
+// reconcileLegacy mirrors the Worker into the compatibility registry used by
+// older Worker-side tooling. AgentScope Manager authorization comes directly
+// from Controller topology and does not use an OpenClaw groupAllowFrom file.
 func (r *WorkerReconciler) reconcileLegacy(ctx context.Context, w *v1beta1.Worker, state *MemberState) {
 	r.reconcileLegacyWithContext(ctx, w, r.workerMemberContext(w), state)
 }
 
-func (r *WorkerReconciler) reconcileLegacyWithContext(ctx context.Context, w *v1beta1.Worker, mctx MemberContext, state *MemberState) {
+func (r *WorkerReconciler) reconcileLegacyWithContext(ctx context.Context, w *v1beta1.Worker, mctx MemberContext, _ *MemberState) {
 	if r.Legacy == nil || !r.Legacy.Enabled() {
 		return
 	}
 	logger := log.FromContext(ctx)
 	runtimeName := mctx.RuntimeName
 
-	role, inTeam, err := r.decoupledTeamRoleForWorker(ctx, w.Namespace, w.Name)
+	_, inTeam, err := r.decoupledTeamRoleForWorker(ctx, w.Namespace, w.Name)
 	if err != nil {
 		logger.Error(err, "failed to check decoupled Team membership before legacy worker update (non-fatal)", "worker", w.Name)
 	}
 	if inTeam {
 		// Decoupled Team members are still reconciled by WorkerReconciler for
 		// Worker CR lifecycle/config, but TeamReconciler owns legacy
-		// team-scoped artifacts: workers-registry role/team_id rows,
-		// Manager allow-list membership, and member channel policy overlays.
+		// team-scoped artifacts: workers-registry role/team_id rows and member
+		// channel policy overlays.
 		// Writing standalone legacy state here races with TeamReconciler and
 		// can make CI/user-visible config oscillate.
-		if role != RoleTeamLeader {
-			if err := r.Legacy.UpdateManagerGroupAllowFrom(r.Legacy.MatrixUserID(runtimeName), false); err != nil {
-				logger.Error(err, "failed to revoke standalone Manager groupAllowFrom for Team worker (non-fatal)", "worker", w.Name, "runtimeName", runtimeName)
-			}
-		}
 		return
-	}
-
-	// WorkerReconciler only handles standalone workers. Grant group-DM
-	// publish rights for the standalone worker.
-	if state.ProvResult != nil {
-		if err := r.Legacy.UpdateManagerGroupAllowFrom(state.ProvResult.MatrixUserID, true); err != nil {
-			logger.Error(err, "failed to update Manager groupAllowFrom (non-fatal)")
-		}
 	}
 
 	if err := r.Legacy.UpdateWorkersRegistry(service.WorkerRegistryEntry{

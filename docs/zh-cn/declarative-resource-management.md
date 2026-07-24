@@ -80,12 +80,12 @@ spec:
 |------|------|------|--------|------|
 | `metadata.name` | string | 是 | — | Worker 名称，全局唯一 |
 | `spec.model` | string | 是 | — | LLM 模型 ID，如 `claude-sonnet-4-6`、`qwen3.5-plus` |
-| `spec.runtime` | string | 否 | `openclaw` | Agent 运行时：`openclaw`、`copaw` 或 `hermes` |
-| `spec.image` | string | 否 | — | 自定义镜像；留空则使用 `AGENTTEAMS_WORKER_IMAGE` / `AGENTTEAMS_COPAW_WORKER_IMAGE` / `AGENTTEAMS_HERMES_WORKER_IMAGE`（默认 `agentteams/agentteams-worker:latest` / `agentteams/agentteams-copaw-worker:latest` / `agentteams/agentteams-hermes-worker:latest`） |
+| `spec.runtime` | string | 否 | `openclaw` | Worker 运行时：`openclaw`、`copaw`、`hermes`、`qwenpaw` 或 `openhuman` |
+| `spec.image` | string | 否 | — | 自定义镜像；留空时由 Controller 选择对应运行时的镜像（`AGENTTEAMS_WORKER_IMAGE`、`AGENTTEAMS_COPAW_WORKER_IMAGE`、`AGENTTEAMS_HERMES_WORKER_IMAGE`、`AGENTTEAMS_QWENPAW_WORKER_IMAGE` 或 `AGENTTEAMS_OPENHUMAN_WORKER_IMAGE`） |
 | `spec.identity` | string | 否 | — | Worker 公开身份（OpenClaw：生成 IDENTITY.md；QwenPaw：按实现合并入 SOUL.md） |
 | `spec.soul` | string | 否 | — | Worker 人格与价值观设定，用于生成 SOUL.md |
 | `spec.agents` | string | 否 | — | Agent 行为规则，用于生成 AGENTS.md |
-| `spec.skills` | []string | 否 | — | 内置 skills 列表，由 Manager 统一分发 |
+| `spec.skills` | []string | 否 | — | 由 Controller 发布的镜像内置按需 skills |
 | `spec.mcpServers` | []string | 否 | — | 内置 MCP Servers 列表，通过 Higress 网关授权 |
 | `spec.package` | string | 否 | — | 自定义包 URI：`file://`、`http(s)://`、`nacos://`，或上传后由 Controller 解析的 `packages/{name}.zip` |
 | `spec.expose` | []object | 否 | — | 通过 Higress 网关暴露的端口列表（见 [服务发布](#服务发布)） |
@@ -103,9 +103,11 @@ spec:
 
 ### 内置 Skills 与自定义 Skills
 
-`spec.skills` 指的是 AgentTeams 平台内置的能力，由 Manager 通过 `push-worker-skills.sh` 分发到 Worker 的 MinIO 空间。
+`spec.skills` 指的是 AgentTeams 镜像内置、可按需分配的能力。Controller 以资源为权威期望状态，并把选中的技能发布到 Worker 的 MinIO 空间。
 
-如果需要自定义 Skills，通过 `spec.package` 引入一个包含 `skills/` 目录的 ZIP 包。内置 skills 和自定义 skills 会合并推送，互不冲突。
+如果需要自定义 Skills，通过 `spec.package` 引入一个包含 `skills/` 目录的 ZIP
+包。自定义 skill 不能与镜像内置 skill 重名：Controller 会完整拥有并精确调和
+`spec.skills` 中每个 skill 的整个存储前缀。
 
 ### 带自定义包的 Worker
 
@@ -133,7 +135,7 @@ spec:
 3. 创建 MinIO 用户和 Bucket，配置 Higress 网关授权
 4. 生成 `openclaw.json` 配置（含 `groupAllowFrom` 权限矩阵）
 5. 推送所有配置文件（SOUL.md、skills、crons 等）到 MinIO
-6. 更新 `workers-registry.json`
+6. 更新供旧版导入和诊断使用的 Controller 兼容投影
 7. 启动 Worker 容器
 
 ### Worker 状态
@@ -241,7 +243,7 @@ spec:
 |------|------|------|------|
 | `workers[].name` | string | 是 | Worker 名称 |
 | `workers[].model` | string | 否 | LLM 模型 |
-| `workers[].runtime` | string | 否 | Agent 运行时（`openclaw`、`copaw` 或 `hermes`） |
+| `workers[].runtime` | string | 否 | Worker 运行时（`openclaw`、`copaw`、`hermes`、`qwenpaw` 或 `openhuman`） |
 | `workers[].image` | string | 否 | 自定义 Docker 镜像 |
 | `workers[].identity` | string | 否 | Worker 公开身份信息（生成 IDENTITY.md） |
 | `workers[].soul` | string | 否 | Worker 人格与价值观设定（生成 SOUL.md） |
@@ -261,7 +263,7 @@ Team Leader 本质上是一个 Worker 容器，但有以下区别：
 - 拥有 canonical Team Leader skills：`team-coordination` 负责协作策略，`project-management` 负责 Project 状态和 ready node 解析，`task-management` 负责委派 Worker 任务
 - 新建 Team Leader workspace 不再安装旧的 `team-project-management`、`team-task-coordination`、`team-task-management` 兼容别名；已经复制过这些别名的旧 workspace 会保留本地文件，直到显式升级或重建
 - 不拥有 `worker-management`、`mcp-server-management` 等 Manager 独占 skill
-- 在 `workers-registry.json` 中标记为 `role: "team_leader"`
+- 由 Controller 资源 API 暴露为 `role: "team_leader"`
 - 采用委派优先原则——始终将任务分配给团队 Worker，自己不执行领域任务
 
 ### Team Leader 的 AGENTS.md 组装
@@ -376,7 +378,10 @@ metadata:
   name: default
 spec:
   model: qwen3.5-plus
-  runtime: openclaw
+  runtime: agentscope
+  identity: |
+    名称：Atlas
+    风格：简洁、主动，以证据为准
   soul: |
     # Manager — 以协调为主
   agents: |
@@ -399,9 +404,10 @@ spec:
 |------|------|------|--------|------|
 | `metadata.name` | string | 是 | — | Manager 资源名（主实例常为 `default`） |
 | `spec.model` | string | 是 | — | LLM 模型 ID |
-| `spec.runtime` | string | 否 | `openclaw` | `openclaw` 或 `copaw`（**不支持**将 Hermes 作为 Manager 运行时） |
+| `spec.runtime` | string | 否 | `agentscope` | Manager 运行时；仅支持 `agentscope` |
 | `spec.image` | string | 否 | — | 自定义 Manager 镜像；留空则用部署默认值 |
 | `spec.soul` | string | 否 | — | 自定义 SOUL.md |
+| `spec.identity` | string | 否 | — | 经管理员确认并写入 SOUL 身份区块的身份与性格说明 |
 | `spec.agents` | string | 否 | — | 自定义 AGENTS.md |
 | `spec.skills` | []string | 否 | — | 启用的按需 skills |
 | `spec.mcpServers` | []string | 否 | — | 经网关授权的 MCP |
@@ -514,7 +520,7 @@ Human 的权限通过两个机制实现：
 2. 按 permissionLevel 计算需要修改的 Agent 列表
 3. 更新每个 Agent 的 `openclaw.json` 中的 `groupAllowFrom`
 4. 邀请 Human 进入对应 Room
-5. 更新 `humans-registry.json`
+5. 更新供旧版导入和诊断使用的 Controller 兼容投影
 6. 推送更新后的配置到 MinIO，通知 Agent 执行 `file-sync`
 7. 发送欢迎邮件（如配置了 SMTP 和 email）
 
@@ -613,7 +619,7 @@ Nacos URI 格式：`nacos://[user:pass@]host:port/{namespace}/{agentspec-name}[/
 }
 ```
 
-`worker.runtime`（`openclaw`、`copaw` 或 `hermes`）会被 `agt apply worker --zip` 读取，
+`worker.runtime`（`openclaw`、`copaw`、`hermes`、`qwenpaw` 或 `openhuman`）会被 `agt apply worker --zip` 读取，
 显式 `--runtime` 优先级更高。
 
 ## 操作方式

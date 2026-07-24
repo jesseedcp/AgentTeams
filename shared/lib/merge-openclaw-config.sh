@@ -3,8 +3,8 @@
 #
 # Design principle (local-first):
 #   Local (Worker disk) is the authoritative base. Periodic pulls from MinIO only
-#   overlay Manager-managed slices so the Worker keeps its own customizations.
-#   Remote (MinIO/Manager) overwrites only: models, gateway, and channels (deep
+#   overlay Controller-managed slices so the Worker keeps its own customizations.
+#   Remote (MinIO/Controller) overwrites only: models, gateway, and channels (deep
 #   merge where remote wins on conflicting keys).
 #   All other top-level fields (tools, agents, mcp, etc.) stay from local.
 #   Merge rules:

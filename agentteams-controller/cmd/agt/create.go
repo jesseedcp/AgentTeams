@@ -370,11 +370,12 @@ func createHumanCmd() *cobra.Command {
 
 func createManagerCmd() *cobra.Command {
 	var (
-		name    string
-		model   string
-		runtime string
-		image   string
-		soul    string
+		name     string
+		model    string
+		runtime  string
+		image    string
+		identity string
+		soul     string
 	)
 
 	cmd := &cobra.Command{
@@ -399,6 +400,7 @@ func createManagerCmd() *cobra.Command {
 			}
 			setIfNotEmpty(req, "runtime", runtime)
 			setIfNotEmpty(req, "image", image)
+			setIfNotEmpty(req, "identity", identity)
 			setIfNotEmpty(req, "soul", soul)
 
 			client := NewAPIClient()
@@ -415,6 +417,7 @@ func createManagerCmd() *cobra.Command {
 	cmd.Flags().StringVar(&model, "model", "", "LLM model ID (required)")
 	cmd.Flags().StringVar(&runtime, "runtime", "", "Manager runtime (agentscope)")
 	cmd.Flags().StringVar(&image, "image", "", "Container image override")
+	cmd.Flags().StringVar(&identity, "identity", "", "Manager identity section")
 	cmd.Flags().StringVar(&soul, "soul", "", "Manager SOUL.md content")
 	return cmd
 }

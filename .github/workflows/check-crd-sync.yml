@@ -5,6 +5,11 @@ on:
     paths:
       - 'agentteams-controller/config/crd/**'
       - 'helm/agentteams/crds/**'
+  push:
+    branches: [main]
+    paths:
+      - 'agentteams-controller/config/crd/**'
+      - 'helm/agentteams/crds/**'
   workflow_dispatch: ~
 
 jobs:

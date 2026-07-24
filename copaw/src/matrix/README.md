@@ -1,96 +1,60 @@
-# AgentTeams CoPaw Overlay
+# AgentTeams CoPaw Worker Matrix Overlay
 
-**Shared overlay files used by both Manager and Worker to enhance CoPaw v1.0.0.**
+This directory contains the Matrix channel overlay installed into both the
+standard and lite CoPaw Worker environments.
 
-## Overview
-
-This directory contains AgentTeams-enhanced files that replace CoPaw's built-in modules during Docker image build. These enhancements are already submitted as PRs to CoPaw upstream but not yet released in v1.0.0.
+It is Worker-only. The AgentScope Manager has its own Matrix adapter under
+`manager-agentscope/src/agentteams_manager/matrix/` and must not import this
+overlay.
 
 ## Files
 
-### `channel.py` + `__init__.py`
-Replaces `copaw/app/channels/matrix/` with enhanced Matrix channel:
+### `channel.py` and `__init__.py`
 
-- **E2EE Support**: End-to-end encryption via matrix-nio + libolm
-- **History Buffering**: Accumulates non-mentioned messages in group rooms for context
-- **Smart Mention Handling**: Strips @mention prefix for slash commands, supports display names
-- **Markdown Rendering**: Converts Markdown to HTML using markdown-it-py
-- **DM Detection**: Reliable DM vs group room detection via Matrix API
-- **Typing Indicators**: Auto-renewal during long-running operations
+The overlay adds:
+
+- end-to-end encryption through `matrix-nio` and `libolm`;
+- bounded group-room history buffering;
+- display-name and structured mention handling;
+- Markdown-to-HTML rendering;
+- direct-room detection;
+- typing-indicator renewal for long operations.
 
 ### `config.py`
-Replaces `copaw/config/config.py` with enhanced configuration system:
 
-- **OneBot v11 Support**: `OneBotConfig` for NapCat/go-cqhttp/Lagrange
-- **Matrix Mention Pills**: `mention_pill_in_body` and `outbound_structured_mentions`
-- **Agent Order Persistence**: `agent_order` field for UI state
-- **Video Analysis**: `view_video` builtin tool
+The configuration overlay adds AgentTeams-required CoPaw fields, including
+Matrix mention controls, OneBot settings, stable agent ordering, and video
+analysis configuration.
 
 ## Installation
 
-Both Manager and Worker Dockerfiles replace the built-in CoPaw files:
+`copaw/Dockerfile` replaces the corresponding CoPaw modules in both Worker
+virtual environments:
 
 ```dockerfile
-# Manager: manager/Dockerfile.copaw
-COPY --from=copaw-worker src/matrix/ /tmp/matrix-overlay/
-RUN SITE=$(python3 -c "import copaw; import os; print(os.path.dirname(copaw.__file__))") \
-    && rm -rf "$SITE/app/channels/matrix" \
-    && cp -a /tmp/matrix-overlay "$SITE/app/channels/matrix" \
-    && if [ -f /tmp/matrix-overlay/config.py ]; then \
-         cp /tmp/matrix-overlay/config.py "$SITE/config/config.py"; \
-       fi
-
-# Worker: copaw/Dockerfile
-COPY src/matrix/ /tmp/matrix-overlay/
-RUN COPAW_SITE=/opt/venv/copaw/lib/python3.11/site-packages/copaw \
-    && rm -rf "$COPAW_SITE/app/channels/matrix" \
-    && cp -a /tmp/matrix-overlay "$COPAW_SITE/app/channels/matrix" \
-    && if [ -f /tmp/matrix-overlay/config.py ]; then \
-         cp /tmp/matrix-overlay/config.py "$COPAW_SITE/config/config.py"; \
-       fi
+for SITE in \
+  /opt/venv/standard/lib/python3.11/site-packages \
+  /opt/venv/lite/lib/python3.11/site-packages; do
+  rm -rf "$SITE/copaw/app/channels/matrix"
+  mkdir -p "$SITE/copaw/app/channels/matrix"
+  cp src/matrix/channel.py src/matrix/__init__.py \
+    "$SITE/copaw/app/channels/matrix/"
+done
 ```
 
-## Configuration
-
-Manager and Worker use identical code but different configurations:
-
-```json
-{
-  "channels": {
-    "matrix": {
-      "enabled": true,
-      "homeserver": "http://localhost:8080",
-      "access_token": "...",
-      "encryption": true,
-      "allow_from": ["@manager:hs.example"],
-      "group_allow_from": ["@worker1:hs.example", "@worker2:hs.example"],
-      "history_limit": 50,
-      "vision_enabled": true,
-      "mention_pill_in_body": false,
-      "outbound_structured_mentions": true
-    },
-    "onebot": {
-      "enabled": false,
-      "ws_host": "0.0.0.0",
-      "ws_port": 6199
-    }
-  }
-}
-```
-
-## Status
-
-**Pending upstream release (CoPaw v1.1.0+).**
-
-Once the PRs are merged and released:
-1. Update `copaw/pyproject.toml` to use the new version
-2. Remove the overlay logic from both Dockerfiles
-3. Delete this directory
+The Controller remains authoritative for the Worker Matrix identity and
+allow-lists. The CoPaw bridge translates the generated Worker
+`openclaw.json` into the native CoPaw configuration consumed by this channel.
 
 ## Maintenance
 
-When updating overlay files:
+When changing the overlay:
 
-1. Edit files in `copaw/src/matrix/`
-2. Rebuild both images: `make build-manager-copaw build-copaw-worker`
-3. Both Manager and Worker will use the updated versions
+1. update or add tests under `copaw/tests/`;
+2. run the CoPaw Worker test suite;
+3. rebuild `agentteams/copaw-worker`;
+4. verify both standard and lite modes.
+
+Do not add a Manager build path here. Once upstream CoPaw contains every
+required field and behavior, remove the overlay after verifying equivalent
+Worker behavior.

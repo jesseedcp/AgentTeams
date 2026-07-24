@@ -85,7 +85,7 @@ metadata:
   name: alice
 spec:
   model: claude-sonnet-4-6           # required: LLM model
-  runtime: copaw                     # openclaw | copaw | hermes (default from install / CR)
+  runtime: copaw                     # openclaw | copaw | hermes | qwenpaw | openhuman
   skills: [github-operations]        # platform built-in skills
   mcpServers:                        # MCP servers callable via mcporter
     - name: github
@@ -102,7 +102,7 @@ spec:
   #   groupAllowExtra: ["@human:domain"]
 ```
 
-Each Worker maps to: a Docker container (or K8s Pod) + Matrix account + MinIO namespace + Gateway Consumer token. If `spec.image` is omitted, defaults come from `AGENTTEAMS_WORKER_IMAGE` / `AGENTTEAMS_COPAW_WORKER_IMAGE` / `AGENTTEAMS_HERMES_WORKER_IMAGE` (or chart defaults).
+Each Worker maps to: a Docker container (or K8s Pod) + Matrix account + MinIO namespace + Gateway Consumer token. If `spec.image` is omitted, the controller selects the runtime-specific image from `AGENTTEAMS_WORKER_IMAGE`, `AGENTTEAMS_COPAW_WORKER_IMAGE`, `AGENTTEAMS_HERMES_WORKER_IMAGE`, `AGENTTEAMS_QWENPAW_WORKER_IMAGE`, or `AGENTTEAMS_OPENHUMAN_WORKER_IMAGE` (or the matching chart default).
 
 #### Team — collaboration unit
 
@@ -175,7 +175,9 @@ metadata:
   name: default                       # common name for the primary instance in embedded installs
 spec:
   model: claude-sonnet-4-6            # required
-  runtime: openclaw                   # openclaw | copaw
+  runtime: agentscope                 # the only supported Manager runtime
+  # identity: |                       # admin-confirmed identity/personality
+  #   Name: Atlas
   # soul: | …                         # optional SOUL.md override
   # agents: | …                       # optional AGENTS.md override
   skills: [worker-management]         # on-demand Manager skills
@@ -190,7 +192,7 @@ spec:
   # state: Running                    # Running | Sleeping | Stopped
 ```
 
-`Manager` is the same API group/version as `Worker` / `Team` / `Human` and is reconciled by the same controller. **Whether you “need” chat with the Manager Agent is a usage choice**: CLI / REST / YAML-only workflows avoid the chat entrypoint; default installs still run a Manager container whose desired config can be declared and reconciled via this CR.
+`Manager` is the same API group/version as `Worker` / `Team` / `Human` and is reconciled by the same controller. Its production runtime is AgentScope 2.0; Worker runtime choices are independent. **Whether you “need” chat with the Manager Agent is a usage choice**: CLI / REST / YAML-only workflows avoid the chat entrypoint; default installs still run a Manager container whose desired config can be declared and reconciled via this CR.
 
 **kubectl short names** (after CRDs are installed): `wk`, `tm`, `hm`, `mgr`.
 
@@ -495,7 +497,7 @@ See **section 3.3** for how the controller reconciles; this section is only *how
 ### 8.1 Embedded (dev / small teams)
 
 ```bash
-bash <(curl -sSL https://raw.githubusercontent.com/agentscope-ai/AgentTeams/main/install/agentteams-install.sh)
+bash <(curl -sSL https://raw.githubusercontent.com/jesseedcp/AgentTeams/main/install/agentteams-install.sh)
 ```
 
 Rough minimum: 2 CPU, 4 GB RAM, Docker/Podman. You get **`agentteams-controller`** (infra + controller) plus a separate **`agentteams-manager`** container; Workers appear as additional containers when created.

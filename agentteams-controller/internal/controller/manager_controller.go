@@ -25,10 +25,10 @@ import (
 // ManagerEmbeddedConfig holds embedded-mode settings for the Manager Agent
 // container (workspace mount, host share, extra env from the controller's env).
 type ManagerEmbeddedConfig struct {
-	WorkspaceDir       string            // host path for /var/lib/agentteams-manager
-	HostShareDir       string            // host path for /host-share
-	ExtraEnv           map[string]string // infrastructure env vars forwarded to agent
-	ManagerConsolePort string            // host port for manager console (default: 18888)
+	WorkspaceDir      string            // host path for /var/lib/agentteams-manager
+	HostShareDir      string            // host path for /host-share
+	ExtraEnv          map[string]string // infrastructure env vars forwarded to agent
+	ManagerHealthPort string            // loopback host port for health/metrics (default: 18888)
 }
 
 // ManagerReconciler reconciles Manager resources.
@@ -59,9 +59,8 @@ type ManagerReconciler struct {
 	// UserLanguage / UserTimezone are install-time hints (AGENTTEAMS_LANGUAGE /
 	// TZ) used only to render the first-boot Manager onboarding prompt
 	// in reconcileManagerWelcome. Empty strings fall back to the same
-	// defaults the legacy `start-manager-agent.sh` welcome heredoc used
-	// (zh / Asia/Shanghai), which keeps observable behavior identical
-	// when an admin upgrades from the legacy single-container manager.
+	// historical defaults (zh / Asia/Shanghai), keeping first-boot behavior
+	// stable across deployment surfaces.
 	UserLanguage string
 	UserTimezone string
 }

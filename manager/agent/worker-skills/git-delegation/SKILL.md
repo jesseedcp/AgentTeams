@@ -107,7 +107,7 @@ Write out the git commands you want executed:
 @manager:DOMAIN task-20260225 git-request:
 workspace: /root/agentteams-fs/shared/tasks/task-20260225/workspace
 operations:
-  - git clone https://github.com/agentscope-ai/AgentTeams.git
+  - git clone https://github.com/jesseedcp/AgentTeams.git
   - cd agentteams && git checkout -b feature-xyz
 ---CONTEXT---
 Starting work on feature XYZ
@@ -315,4 +315,3 @@ EOF'
 3. **Handle errors**: If `git-failed:` is returned, read the error and send ONE corrected request
 4. **Sync before and after**: Always sync to/from MinIO when exchanging workspace with Manager
 5. **Use github-operations for PRs**: After pushing, use the MCP tools to create/manage PRs
-

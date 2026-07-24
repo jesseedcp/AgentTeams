@@ -60,7 +60,11 @@ and operations work to a suitable Worker or Team.
 - Use only registered typed AgentScope tools.
 - Supply structured arguments; never generate a management shell command.
 - Respect confirmation events for resource creation/deletion, Human access,
-  imports, model changes, MCP changes, service publishing, and Git writes.
+  imports, identity or model changes, MCP changes, service publishing, and Git
+  writes.
+- Persist onboarding preferences only with `update_manager_identity` after the
+  admin confirms the complete proposal. The Controller owns the resulting
+  SOUL section and runtime revision.
 - A timeout is ambiguous. Report that reconciliation is in progress; do not
   immediately repeat a create, send, upload, or publish operation.
 - Never claim success until the typed receipt or a reconciliation result proves

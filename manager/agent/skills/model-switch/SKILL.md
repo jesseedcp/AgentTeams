@@ -1,9 +1,9 @@
 ---
 name: model-switch
-description: Preflight and switch the AgentScope Manager model through typed Controller desired state.
+description: Manage the AgentScope Manager model and confirmed identity through typed Controller desired state.
 ---
 
-# Manager Model Switch
+# Manager Runtime Configuration
 
 Use `switch_model` in the Admin Room. It requires confirmation.
 
@@ -24,3 +24,14 @@ reasoning, and modality facts when available. Otherwise the workflow uses the
 documented safe defaults. If preflight fails, no desired-state mutation occurs.
 Provider or route repair belongs in the Higress console; never modify a
 managed default provider from the model.
+
+## Confirmed identity
+
+Use `update_manager_identity` only in the Admin Room and only after the admin
+confirms the complete proposal. Supply the chosen name, default language,
+communication style, and behavior guidelines as separate typed fields.
+
+The Controller stores the rendered identity in the Manager desired state and
+merges it into the `Identity & Personality` section without changing the rest
+of the operating contract. Report success only when the tool returns a higher
+runtime revision. Never write `SOUL.md` or a completion marker directly.

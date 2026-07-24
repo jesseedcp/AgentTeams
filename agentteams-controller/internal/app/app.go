@@ -61,8 +61,7 @@ type App struct {
 	authMw    *authpkg.Middleware
 	namespace string
 
-	// Executors
-	shell    *executor.Shell
+	// Package resolver
 	packages *executor.PackageResolver
 
 	// STS (optional, only when the credential-provider sidecar is configured)
@@ -292,7 +291,6 @@ func (a *App) initInfraClients(_ context.Context) error {
 
 	a.matrix = matrix.NewTuwunelClient(cfg.MatrixConfig(), nil)
 	a.agentGen = agentconfig.NewGenerator(cfg.AgentConfig())
-	a.shell = executor.NewShell(cfg.SkillsDir)
 	a.packages = executor.NewPackageResolver("/tmp/import")
 
 	// Credential provider sidecar — required for ai-gateway / external OSS /
@@ -556,21 +554,15 @@ func (a *App) initServiceLayer(_ context.Context) error {
 	a.envBuilder = service.NewWorkerEnvBuilder(cfg.WorkerEnv)
 
 	if a.oss != nil {
-		agentFSDir := ""
-		if cfg.KubeMode == "embedded" {
-			agentFSDir = cfg.AgentFSDir()
-		}
 		a.legacy = service.NewLegacyCompat(service.LegacyConfig{
 			OSS:          a.oss,
 			MatrixDomain: cfg.MatrixDomain,
-			AgentFSDir:   agentFSDir,
 		})
 	}
 
 	a.deployer = service.NewDeployer(service.DeployerConfig{
 		AgentConfig:     a.agentGen,
 		OSS:             a.oss,
-		Executor:        a.shell,
 		Packages:        a.packages,
 		Legacy:          a.legacy,
 		AgentFSDir:      cfg.AgentFSDir(),
@@ -669,10 +661,10 @@ func (a *App) initReconcilers(_ context.Context) error {
 		}
 		if a.cfg.KubeMode == "embedded" {
 			mgrReconciler.EmbeddedConfig = &controller.ManagerEmbeddedConfig{
-				WorkspaceDir:       a.cfg.ManagerWorkspaceDir,
-				HostShareDir:       a.cfg.HostShareDir,
-				ExtraEnv:           a.cfg.ManagerAgentEnv(),
-				ManagerConsolePort: a.cfg.ManagerConsolePort,
+				WorkspaceDir:      a.cfg.ManagerWorkspaceDir,
+				HostShareDir:      a.cfg.HostShareDir,
+				ExtraEnv:          a.cfg.ManagerAgentEnv(),
+				ManagerHealthPort: a.cfg.ManagerHealthPort,
 			}
 		}
 		if err := mgrReconciler.SetupWithManager(a.mgr); err != nil {

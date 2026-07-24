@@ -13,6 +13,7 @@ from agentteams_manager.clients.model_gateway import (
 from agentteams_manager.domain.models import WorkerResource
 from agentteams_manager.workflows.integrations import (
     IntegrationService,
+    ManagerIdentityRequest,
     ModelSwitchRequest,
 )
 from agentteams_manager.workflows.resources import MutationContext
@@ -210,4 +211,142 @@ async def test_manager_model_recovery_uses_persisted_preflight() -> None:
     assert receipt.model == "new"
     assert receipt.runtime_revision == 2
     assert gateway.calls == 1
+    assert agt.updates == 1
+
+
+@pytest.mark.asyncio
+async def test_manager_identity_waits_for_a_new_prompt_revision() -> None:
+    class IdentityAgt:
+        def __init__(self) -> None:
+            self.manager = ManagerResource(
+                name="manager",
+                phase="Running",
+                model="qwen3.6-plus",
+                runtime="agentscope",
+                identity="",
+            )
+            self.updates = 0
+
+        async def update_manager_identity(
+            self,
+            name: str,
+            identity: str,
+        ) -> ManagerResource:
+            self.updates += 1
+            self.manager = self.manager.model_copy(
+                update={"identity": identity},
+            )
+            return self.manager
+
+    class IdentityRegistry:
+        revision = 1
+
+    class IdentityWatcher:
+        def __init__(self, registry) -> None:
+            self.registry = registry
+
+        async def poll_once(self):
+            self.registry.revision = 2
+
+    agt = IdentityAgt()
+    registry = IdentityRegistry()
+    service = IntegrationService(
+        agt=agt,
+        gateway=Gateway(),
+        supervisor=TaskSupervisor(Clock()),
+        clock=Clock(),
+        manager_name="manager",
+        registry=registry,
+        watcher=IdentityWatcher(registry),
+        sleep=lambda _: None,
+    )
+
+    receipt = await service.update_manager_identity(
+        ManagerIdentityRequest(
+            name="Lin",
+            communication_style="Concise and direct",
+            behavior_guidelines=(
+                "State evidence before conclusions",
+            ),
+            default_language="zh-CN",
+        ),
+        context=_context(),
+    )
+
+    assert receipt.manager == "manager"
+    assert receipt.name == "Lin"
+    assert receipt.runtime_revision == 2
+    assert agt.updates == 1
+    assert "- Name: Lin" in agt.manager.identity
+
+
+@pytest.mark.asyncio
+async def test_manager_identity_recovery_does_not_repeat_observed_update() -> None:
+    class RecoveringIdentityAgt:
+        def __init__(self) -> None:
+            self.manager = ManagerResource(
+                name="manager",
+                phase="Running",
+                model="qwen3.6-plus",
+                runtime="agentscope",
+                identity="",
+            )
+            self.updates = 0
+
+        async def get_manager(self, name: str) -> ManagerResource:
+            assert name == "manager"
+            return self.manager
+
+        async def update_manager_identity(
+            self,
+            name: str,
+            identity: str,
+        ) -> ManagerResource:
+            self.updates += 1
+            self.manager = self.manager.model_copy(
+                update={"identity": identity},
+            )
+            raise TimeoutError("lost Controller acknowledgement")
+
+    class RecoveringIdentityRegistry:
+        revision = 1
+
+    class RecoveringIdentityWatcher:
+        def __init__(self, registry) -> None:
+            self.registry = registry
+
+        async def poll_once(self) -> None:
+            self.registry.revision = 2
+
+    agt = RecoveringIdentityAgt()
+    registry = RecoveringIdentityRegistry()
+    supervisor = TaskSupervisor(Clock())
+    service = IntegrationService(
+        agt=agt,
+        gateway=Gateway(),
+        supervisor=supervisor,
+        clock=Clock(),
+        manager_name="manager",
+        registry=registry,
+        watcher=RecoveringIdentityWatcher(registry),
+        sleep=lambda _: None,
+    )
+    request = ManagerIdentityRequest(
+        name="Lin",
+        communication_style="Concise and direct",
+        behavior_guidelines=("State evidence before conclusions",),
+        default_language="zh-CN",
+    )
+
+    with pytest.raises(TimeoutError):
+        await service.update_manager_identity(
+            request,
+            context=_context(),
+        )
+    operation = next(iter(supervisor.operations.values()))
+
+    receipt = await service.resume_operation(operation)
+
+    assert receipt.name == "Lin"
+    assert receipt.runtime_revision == 2
     assert agt.updates == 1

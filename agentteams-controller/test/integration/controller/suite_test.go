@@ -111,7 +111,6 @@ func TestMain(m *testing.M) {
 		OSS:          testOSS,
 		MatrixDomain: testMatrixDomain,
 		ManagerName:  testManagerName,
-		AgentFSDir:   agentFSDir,
 	})
 
 	workerReconciler := &controller.WorkerReconciler{

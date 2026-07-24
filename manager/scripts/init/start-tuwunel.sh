@@ -26,7 +26,7 @@ export CONDUWUIT_CACHE_CAPACITY_MODIFIER="${CONDUWUIT_CACHE_CAPACITY_MODIFIER:-2
 export CONDUWUIT_DELETE_ROOMS_AFTER_LEAVE="${CONDUWUIT_DELETE_ROOMS_AFTER_LEAVE:-true}"
 export CONDUWUIT_FORGET_FORCED_UPON_LEAVE="${CONDUWUIT_FORGET_FORCED_UPON_LEAVE:-true}"
 
-# User creation is handled by start-manager-agent.sh via Registration API
-# (single-step registration, no UIAA flow needed)
+# User creation is handled by the Controller through the Registration API
+# (single-step registration, no UIAA flow needed).
 
 exec tuwunel

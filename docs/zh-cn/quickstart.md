@@ -14,10 +14,10 @@
 
 ### 1.1 运行安装脚本
 
-**方式 A：一键安装**
+**方式 A：安装已发布镜像的版本标签**
 
 ```bash
-bash <(curl -sSL https://raw.githubusercontent.com/agentscope-ai/AgentTeams/main/install/agentteams-install.sh)
+bash <(curl -sSL https://raw.githubusercontent.com/jesseedcp/AgentTeams/main/install/agentteams-install.sh)
 ```
 
 按照交互提示配置：
@@ -27,9 +27,14 @@ bash <(curl -sSL https://raw.githubusercontent.com/agentscope-ai/AgentTeams/main
 - 域名（直接回车使用默认值）
 - GitHub PAT（可选）
 
-**方式 B：使用 Make（适合已克隆仓库的开发者）**
+尚未发布镜像的 `main` 提交应使用方式 B，确保 AgentScope Manager 镜像来自
+当前检出的源码。
+
+**方式 B：使用 Make（当前源码推荐）**
 
 ```bash
+git clone https://github.com/jesseedcp/AgentTeams.git
+cd AgentTeams
 # 最简安装 —— 只需 LLM Key，其余全部使用默认值
 AGENTTEAMS_LLM_API_KEY="sk-xxx" make install
 ```
@@ -45,9 +50,10 @@ AGENTTEAMS_LLM_API_KEY="sk-xxx" make install
 | 容器 | 职责 |
 |------|------|
 | **`agentteams-controller`** | 内嵌 Higress、Tuwunel、MinIO、Element Web 与 Go controller（REST API 在容器网络内 **8090** 端口）。 |
-| **`agentteams-manager`** | 仅运行 Manager Agent（默认 OpenClaw；若安装时选择 `AGENTTEAMS_MANAGER_RUNTIME=copaw` 则为 QwenPaw Manager 镜像）。 |
+| **`agentteams-manager`** | 轻量 AgentScope 2.0 Manager，提供 typed 工具和 SQLite/MinIO 恢复。 |
 
-创建 Worker 后会出现 `agentteams-worker-*`、`agentteams-copaw-worker-*`、`agentteams-hermes-worker-*` 等容器。
+创建 Worker 后会出现独立容器。Worker 可选择 OpenClaw、CoPaw、Hermes、
+QwenPaw 或 OpenHuman，和 Manager 运行时相互独立。
 
 **声明式 CLI（无需在 IM 里打字）：** `agt` 在 **`agentteams-controller`** 与 **`agentteams-manager`** 内均可用。宿主机上快速示例：
 
@@ -72,7 +78,9 @@ YAML 批量管理请使用 `install/agentteams-apply.sh`（将文件拷入 `agen
 - [ ] 使用管理员凭据登录成功
 - [ ] Higress 控制台：http://localhost:18001（网关默认映射到宿主机 **18080**；Matrix / Element 的 `*-local.agentteams.io` 经该网关访问）
 - [ ] MinIO 在 **controller 容器内**可访问（嵌入式安装默认**不**把 MinIO 控制台端口发布到宿主机）：`docker exec agentteams-controller curl -sf http://127.0.0.1:9000/minio/health/live`
-- [ ] （仅 OpenClaw Manager）OpenClaw 控制 UI：http://127.0.0.1:18888
+- [ ] Manager 就绪检查成功：`curl -fsS http://127.0.0.1:18888/readyz`
+
+`18888` 是 AgentScope 健康检查和指标的回环映射端口，不是交互式运行时控制台。
 
 ---
 
@@ -193,7 +201,7 @@ Alice 和 Manager 应当将原始需求和补充需求都纳入最终结果。
 
 ---
 
-## 第五步：观察心跳机制
+## 第五步：观察确定性心跳
 
 ### 5.1 分配一个耗时较长的任务
 
@@ -201,16 +209,17 @@ Alice 和 Manager 应当将原始需求和补充需求都纳入最终结果。
 
 ### 5.2 等待心跳周期
 
-Manager Agent 会定期执行心跳检查（由 OpenClaw 内置心跳机制触发）。心跳期间：
-- Manager 检查每个 Worker 房间的最近活动
-- 对于有分配任务的 Worker，Manager 询问进度
-- 询问消息在房间中对所有人可见
+AgentScope Manager 由 Python 调度器定期执行心跳，整个过程不调用模型。每轮会刷新
+Controller/Matrix 拓扑、恢复未完成的资源与任务操作、对到期的周期任务执行一次且仅
+一次的分发、在会话轮次之间启用合法的新运行时版本，并把尚未发送的终态失败通知
+投递到管理员私聊。
 
 ### 验证清单
 
-- [ ] Manager 在 Alice 的房间中发送了状态询问消息
-- [ ] Alice 回复了当前进度
-- [ ] 人工管理员可以在房间中看到完整的交流过程
+- [ ] `http://127.0.0.1:18888/readyz` 持续返回就绪
+- [ ] Manager 指标 `agentteams_manager_heartbeats_total` 持续增加
+- [ ] 人为中断的操作可以恢复，且不会重复外部副作用
+- [ ] 终态失败只向管理员私聊投递一次
 
 ---
 
@@ -332,7 +341,7 @@ Alice 使用 `mcporter` 调用 Higress 托管的 GitHub MCP Server。MCP Server 
 彻底移除 AgentTeams 及其数据：
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/agentscope-ai/AgentTeams/main/install/agentteams-install.sh) uninstall
+bash <(curl -fsSL https://raw.githubusercontent.com/jesseedcp/AgentTeams/main/install/agentteams-install.sh) uninstall
 ```
 
 与 `install/agentteams-install.sh uninstall` 行为一致：停止并删除 **`agentteams-manager`**、所有 **`agentteams-worker-*`**（及其他 Worker）容器、**`agentteams-controller`**（内嵌 Higress / Tuwunel / MinIO / Element Web）、可选 **`agentteams-docker-proxy`**、**`agentteams-data`** 数据卷、**`agentteams-manager.env`**、工作空间目录、**`agentteams-net`** 网络及安装日志。

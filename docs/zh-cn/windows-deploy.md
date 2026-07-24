@@ -109,7 +109,7 @@ AgentTeams 需要一个大模型 API Key 来驱动 Agent 的智能行为。推�
 2. 在 PowerShell 窗口中，复制并粘贴以下命令，按回车执行：
 
 ```powershell
-Set-ExecutionPolicy Bypass -Scope Process -Force; $wc=New-Object Net.WebClient; $wc.Encoding=[Text.Encoding]::UTF8; iex $wc.DownloadString('https://raw.githubusercontent.com/agentscope-ai/AgentTeams/main/install/agentteams-install.ps1')
+Set-ExecutionPolicy Bypass -Scope Process -Force; $wc=New-Object Net.WebClient; $wc.Encoding=[Text.Encoding]::UTF8; iex $wc.DownloadString('https://raw.githubusercontent.com/jesseedcp/AgentTeams/main/install/agentteams-install.ps1')
 ```
 
 > **说明**：此命令会临时允许当前 PowerShell 窗口执行脚本（不影响系统安全策略），然后从网络下载并运行 AgentTeams 安装脚本。
@@ -267,7 +267,7 @@ LLM API Key: ****
 | 网关主机端口 | 18080 | Higress 网关端口 |
 | Higress 控制台端口 | 18001 | 管理控制台 |
 | Element Web 端口 | 18088 | IM 客户端访问端口 |
-| OpenClaw 控制台端口 | 18888 | Agent 控制台 |
+| Manager 健康端口 | 18888 | AgentScope 健康检查和指标的回环映射 |
 | Matrix 域名 | matrix-local.agentteams.io:18080 | Matrix 服务器域名 |
 | Element Web 域名 | matrix-client-local.agentteams.io | IM 客户端域名 |
 | AI 网关域名 | aigw-local.agentteams.io | AI 网关域名 |
@@ -402,7 +402,7 @@ Manager 会自动完成以下工作：
 每次有新版本发布时，在 PowerShell 中重新执行安装命令即可原地升级：
 
 ```powershell
-Set-ExecutionPolicy Bypass -Scope Process -Force; $wc=New-Object Net.WebClient; $wc.Encoding=[Text.Encoding]::UTF8; iex $wc.DownloadString('https://raw.githubusercontent.com/agentscope-ai/AgentTeams/main/install/agentteams-install.ps1')
+Set-ExecutionPolicy Bypass -Scope Process -Force; $wc=New-Object Net.WebClient; $wc.Encoding=[Text.Encoding]::UTF8; iex $wc.DownloadString('https://raw.githubusercontent.com/jesseedcp/AgentTeams/main/install/agentteams-install.ps1')
 ```
 
 安装脚本检测到已有安装时，会提示选择：
@@ -415,7 +415,7 @@ Set-ExecutionPolicy Bypass -Scope Process -Force; $wc=New-Object Net.WebClient; 
 如需升级到指定版本：
 
 ```powershell
-$env:AGENTTEAMS_VERSION="v1.0.5"; Set-ExecutionPolicy Bypass -Scope Process -Force; $wc=New-Object Net.WebClient; $wc.Encoding=[Text.Encoding]::UTF8; iex $wc.DownloadString('https://raw.githubusercontent.com/agentscope-ai/AgentTeams/main/install/agentteams-install.ps1')
+$env:AGENTTEAMS_VERSION="v1.0.5"; Set-ExecutionPolicy Bypass -Scope Process -Force; $wc=New-Object Net.WebClient; $wc.Encoding=[Text.Encoding]::UTF8; iex $wc.DownloadString('https://raw.githubusercontent.com/jesseedcp/AgentTeams/main/install/agentteams-install.ps1')
 ```
 
 ---
@@ -425,7 +425,7 @@ $env:AGENTTEAMS_VERSION="v1.0.5"; Set-ExecutionPolicy Bypass -Scope Process -For
 在 PowerShell 中执行以下命令，将停止并删除所有 AgentTeams 容器、Docker 卷和配置文件：
 
 ```powershell
-Set-ExecutionPolicy Bypass -Scope Process -Force; Invoke-Expression "& { $(Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/agentscope-ai/AgentTeams/main/install/agentteams-install.ps1' -UseBasicParsing).Content } uninstall"
+Set-ExecutionPolicy Bypass -Scope Process -Force; Invoke-Expression "& { $(Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/jesseedcp/AgentTeams/main/install/agentteams-install.ps1' -UseBasicParsing).Content } uninstall"
 ```
 
 > 与 `install/agentteams-install.sh uninstall` 一致：会移除 **`agentteams-controller`**、**`agentteams-manager`**、Worker 容器、可选 **`agentteams-docker-proxy`**、数据卷、env、网络等。
@@ -486,7 +486,7 @@ Set-ExecutionPolicy Bypass -Scope Process -Force; Invoke-Expression "& { $(Invok
    ```
 4. 查看 Agent 详细日志：
    ```powershell
-   docker exec agentteams-manager cat /var/log/agentteams/manager-agent.log
+   docker logs --tail 200 agentteams-manager
    ```
 
 ### 端口被占用
@@ -526,6 +526,7 @@ Select-String "AGENTTEAMS_ADMIN_PASSWORD" "$env:USERPROFILE\agentteams-manager.e
 |--------|------|------|
 | Element Web | http://127.0.0.1:18088 | IM 客户端，与 Agent 对话 |
 | Higress 控制台 | http://localhost:18001 | AI 网关管理、LLM 切换、凭证管理 |
-| OpenClaw 控制台 | http://localhost:18888 | Agent 运行时管理（仅本机访问） |
+| Manager 就绪检查 | http://localhost:18888/readyz | AgentScope 就绪状态（仅本机访问） |
+| Manager 指标 | http://localhost:18888/metrics | Prometheus 文本指标（仅本机访问） |
 
 > **提示**：你也可以在 Element Web 聊天中让 Manager 帮你配置 LLM 提供商，无需手动操作 Higress 控制台。

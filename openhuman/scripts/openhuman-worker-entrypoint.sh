@@ -278,7 +278,7 @@ export OPENHUMAN_CORE_TOKEN="${OPENHUMAN_CORE_TOKEN:-$(openssl rand -hex 32 2>/d
 SYNC_LOCAL_PID=$!
 log "Local->Remote sync started (PID: ${SYNC_LOCAL_PID})"
 
-# Remote → Local: pull Manager-managed files every 5 minutes
+# Remote → Local: pull Controller-managed files every 5 minutes
 (
     while true; do
         sleep 300

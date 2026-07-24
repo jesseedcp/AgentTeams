@@ -353,6 +353,7 @@ class ManagerResource(BaseModel):
     matrix_user_id: str | None = None
     version: str | None = None
     message: str | None = None
+    identity: str = ""
     mcp_servers: tuple[MCPServerDocument, ...] = ()
 
 
@@ -367,6 +368,7 @@ class _ManagerPayload(BaseModel):
     matrix_user_id: str = Field(default="", alias="matrixUserID")
     version: str = ""
     message: str = ""
+    identity: str = ""
     mcp_servers: tuple[MCPServerDocument, ...] = Field(
         default=(),
         alias="mcpServers",
@@ -382,6 +384,7 @@ class _ManagerPayload(BaseModel):
             matrix_user_id=self.matrix_user_id or None,
             version=self.version or None,
             message=self.message or None,
+            identity=self.identity,
             mcp_servers=self.mcp_servers,
         )
 
@@ -738,6 +741,36 @@ class AgtClient:
         if manager is None:
             raise AgtProtocolError(
                 f"updated Manager {name!r} is not readable",
+            )
+        return manager
+
+    async def update_manager_identity(
+        self,
+        name: str,
+        identity: str,
+    ) -> ManagerResource:
+        _validate_name(name)
+        if not identity.strip():
+            raise ValueError("Manager identity must not be empty")
+        await self._command(
+            (
+                "agt",
+                "update",
+                "manager",
+                "--name",
+                name,
+                "--identity",
+                identity,
+            ),
+        )
+        manager = await self.get_manager(name)
+        if manager is None:
+            raise AgtProtocolError(
+                f"updated Manager {name!r} is not readable",
+            )
+        if manager.identity != identity:
+            raise AgtProtocolError(
+                f"Manager {name!r} identity did not converge",
             )
         return manager
 

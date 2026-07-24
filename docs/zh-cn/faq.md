@@ -1,7 +1,5 @@
 # 常见问题
 
-> **使用 AgentTeams v1.0.9 或更早版本？** v1.1.0 架构发生了重大变化。旧版单容器架构的常见问题请参阅 [常见问题（旧架构）](faq-legacy.md)。
-
 - [如何查看当前 AgentTeams 版本](#如何查看当前-agentteams-版本)
 - [新架构说明（v1.1.0+）](#新架构说明v110)
 - [如何使用 agt CLI 管理资源](#如何使用-agt-cli-管理资源)
@@ -55,7 +53,7 @@ docker exec agentteams-controller agt version
 安装时指定版本：
 
 ```bash
-AGENTTEAMS_VERSION=v1.1.0 bash <(curl -sSL https://raw.githubusercontent.com/agentscope-ai/AgentTeams/main/install/agentteams-install.sh)
+AGENTTEAMS_VERSION=v1.1.0 bash <(curl -sSL https://raw.githubusercontent.com/jesseedcp/AgentTeams/main/install/agentteams-install.sh)
 ```
 
 ---
@@ -242,11 +240,12 @@ GitHub 凭据应作为 MCP Server 凭据配置，不要复制到 Worker 容器�
 `AGENTTEAMS_GITHUB_TOKEN`：
 
 ```bash
-AGENTTEAMS_GITHUB_TOKEN=ghp_xxx bash <(curl -sSL https://raw.githubusercontent.com/agentscope-ai/AgentTeams/main/install/agentteams-install.sh)
+AGENTTEAMS_GITHUB_TOKEN=ghp_xxx bash <(curl -sSL https://raw.githubusercontent.com/jesseedcp/AgentTeams/main/install/agentteams-install.sh)
 ```
 
-该变量存在时，AgentTeams 会自动配置 GitHub MCP Server，并生成 Manager 侧
-`mcporter` 配置。之后在 Worker YAML manifest 中声明 GitHub MCP 能力：
+该变量存在时，AgentTeams 会自动配置网关侧 GitHub MCP Server。Controller 会向
+AgentScope Manager 投影不含密钥的原生 MCP 描述，并向 Worker 投影适配各运行时
+的 `mcporter` 配置。之后在 Worker YAML manifest 中声明 GitHub MCP 能力：
 
 ```yaml
 apiVersion: agentteams.io/v1beta1
@@ -296,8 +295,6 @@ Attempted: higress/agentteams-embedded:v1.1.0 and higress/agentteams-embedded:la
 2. **从源码本地构建**：克隆仓库后执行 `make install-embedded`。
 3. **覆盖镜像**：设置 `AGENTTEAMS_INSTALL_EMBEDDED_IMAGE` 为自定义镜像。
 
-> 如果你有意使用旧版单容器架构（v1.0.9 或更早），设置 `AGENTTEAMS_FORCE_LEGACY=1`。注意此选项仅适用于打包了基础设施服务的镜像。
-
 ---
 
 ## Manager Agent 启动超时或失败
@@ -327,7 +324,7 @@ Controller 会自动启动 Manager 容器。如果 `docker ps` 中看不到 Mana
 建议到原安装目录重新执行安装命令，选择**删除重装**：
 
 ```bash
-bash <(curl -sSL https://raw.githubusercontent.com/agentscope-ai/AgentTeams/main/install/agentteams-install.sh)
+bash <(curl -sSL https://raw.githubusercontent.com/jesseedcp/AgentTeams/main/install/agentteams-install.sh)
 ```
 
 安装脚本检测到已有安装时会询问处理方式，选择删除后重装即可清除脏数据。
@@ -414,9 +411,9 @@ Element 要求填写自定义 homeserver 时，不要填写 Element Web UI 的�
 
 ## 如何接入第三方、本地或多供应商模型
 
-AgentTeams 不会直接读取你的 `~/.openclaw/openclaw.json` 供应商定义。模型流量会经过
-AgentTeams AI Gateway。OpenClaw/QwenPaw 通常只看到一个名为 `agentteams-gateway` 的
-provider；Higress 再根据请求里的模型名路由到真实上游供应商。
+AgentTeams 不会直接读取宿主机的 provider 文件。模型流量会经过 AgentTeams
+AI Gateway。AgentScope Manager 使用受管的 `agentteams-gateway` 路由；
+Higress 再根据请求模型名路由到真实上游供应商。
 
 ### 第三方 OpenAI 兼容 API
 
@@ -576,13 +573,15 @@ OpenRouter 示例：
 
 ## 如何切换 Worker 的运行时
 
-AgentTeams v1.1.0+ 支持三种 Worker 运行时：
+AgentTeams 支持五种 Worker 运行时：
 
 | 运行时 | 语言 | 适用场景 |
 |--------|------|----------|
 | OpenClaw | Node.js | 通用场景，成熟生态 |
-| QwenPaw | Python | Python 原生工作流、数据科学（旧称 **CoPaw**） |
+| CoPaw | Python | 轻量对话及浏览器工作流 |
 | Hermes | Python | 自主编程，开发任务 |
+| QwenPaw | Python | Python 原生工作流、数据科学 |
+| OpenHuman | Rust | 低开销的原生 Matrix 执行 |
 
 ### 创建时指定
 
@@ -617,19 +616,16 @@ Manager 会通过 worker-management 技能触发容器重建。Worker 的 Matrix
 
 ## 为什么 QwenPaw 仍然使用 `copaw` 作为 runtime 值或镜像名
 
-`QwenPaw` 是原 `CoPaw` 运行时的对外展示名称。为了兼容已有安装，部分内部名称会继续保留
-`copaw`，包括 Worker CRD 的 runtime 值、`agentteams-copaw-worker` 这类镜像名，以及
-`AGENTTEAMS_MANAGER_RUNTIME=copaw` 这类环境变量值。
-
-除非 chart、controller 和镜像已经明确支持新的值，否则不要把这些内部值改成
-`qwenpaw`。保留 `copaw` 是为了避免破坏已有配置、Helm values、镜像拉取和升级路径。
+`copaw` 继续作为 Worker 专用兼容值和镜像系列存在；`qwenpaw` 也是明确支持
+的 Worker 运行时。Manager 不使用这两个值，
+`AGENTTEAMS_MANAGER_RUNTIME` 固定为 `agentscope`。
 
 ---
 
 ## 如何接入自己实现的 agent 作为 Worker
 
-不能直接通过新增任意 `spec.runtime` 值来接入。当前 Worker CRD 只接受
-`openclaw`、`copaw` 或 `hermes` 三种运行时。
+不能直接通过新增任意 `spec.runtime` 值来接入。Worker CRD 接受
+`openclaw`、`copaw`、`hermes`、`qwenpaw` 和 `openhuman`。
 
 大多数自定义 Worker 场景应通过 Worker package 或自定义镜像完成：把角色提示词、
 skills、依赖和可选 Dockerfile 打包，或在保留受支持 runtime 的前提下设置自定义
@@ -696,19 +692,15 @@ Manager 或 Worker 输出的路径通常是容器内部路径。如果你在宿�
 
 这是正常现象，说明底层的 Agent 引擎正在执行任务。AgentTeams 设定的单次任务超时时间为 30 分钟，Agent 最长会持续执行 30 分钟。
 
-如果想查看 Agent 的执行细节，可以进入 Manager 或 Worker 容器，查看 session 日志：
+要安全查看 Manager 状态，可导出 AgentScope 会话和 Matrix 时间线：
 
 ```bash
-# Manager
-docker exec -it agentteams-manager ls .openclaw/agents/main/sessions/
-
-# Worker（将 <worker-name> 替换为实际容器名）
-docker exec -it <worker-name> ls .openclaw/agents/main/sessions/
+python scripts/export-debug-log.py --range 1h \
+  --container agentteams-manager
 ```
 
-该目录下的 `.jsonl` 文件实时写入，记录了完整的 Agent 执行过程，包括 LLM 调用、工具使用、推理步骤等。
-
-> **注意**：Hermes 运行时的 Worker，session 数据存储在 `~/.hermes/state.db` 中。
+导出器以只读方式读取 Manager SQLite 并输出默认脱敏的 JSONL。不传容器过滤时，
+它也会识别各 Worker 运行时的会话布局。
 
 ---
 
@@ -718,9 +710,8 @@ docker exec -it <worker-name> ls .openclaw/agents/main/sessions/
 
 ### 1. 检查是否正在工作
 
-**如果一直不回复，且没有显示"输入中"**，绝大多数原因是 **Agent 正在工作**。
-
-OpenClaw 限制"输入中"状态最多持续 **2 分钟**，工作超过 2 分钟就不会再显示"输入中"了。
+**如果一直不回复，且没有显示“输入中”**，Agent 可能仍在工作、正在恢复结果
+不确定的操作，或等待依赖。
 
 **如何确认消息已入队列**：
 - 发送消息后，查看消息右边是否有一个 **m 小图标**
@@ -735,22 +726,15 @@ OpenClaw 限制"输入中"状态最多持续 **2 分钟**，工作超过 2 分�
 
 ### 3. 检查 Session 状态
 
-可能是 session 损坏了。进入 Manager 或 Worker 容器，使用 OpenClaw TUI 查看：
+检查 Manager 就绪状态并导出相关房间状态：
 
 ```bash
-# Manager
-docker exec -it agentteams-manager openclaw tui
-
-# Worker（将 <worker-name> 替换为实际容器名）
-docker exec -it <worker-name> openclaw tui
+curl -fsS http://127.0.0.1:18888/readyz
+python scripts/export-debug-log.py --range 1h
 ```
 
-进入 TUI 后：
-1. 输入 `/sessions` 查看所有 session
-2. 切换到对应聊天记录的 session
-3. 尝试对话，观察是否有报错
-
-如果 session 确实损坏了，可以尝试在 Element 等 Matrix 客户端中对应的会话里直接输入 `/new` 重置会话，看是否恢复正常。
+AgentScope Manager 会话按 Matrix 房间保存，重启容器不会清空。如果确实需要全新
+上下文，请新建一个已授权 Matrix 房间，不要删除数据库。
 
 ---
 
@@ -774,18 +758,15 @@ docker logs agentteams-controller
 
 ### 2. 检查 Session 状态
 
-可能是 session 损坏了。进入 Manager 容器，使用 OpenClaw TUI 查看：
+检查 AgentScope 就绪端点和容器日志：
 
 ```bash
-docker exec -it agentteams-manager openclaw tui
+curl -fsS http://127.0.0.1:18888/readyz
+docker logs agentteams-manager
 ```
 
-进入 TUI 后：
-1. 输入 `/sessions` 查看所有 session
-2. 切换到对应聊天记录的 session
-3. 尝试对话，观察是否有报错
-
-如果 session 确实损坏了，可以尝试在 Element 等 Matrix 客户端中对应的会话里直接输入 `/new` 重置会话，看是否恢复正常。
+JSON 响应会指出未就绪的依赖。使用 `scripts/export-debug-log.py` 将其与 Matrix
+时间线和 AgentScope 会话关联分析。
 
 ### 3. 检查 Higress AI 网关日志
 
@@ -832,8 +813,9 @@ docker exec -it agentteams-controller cat /var/log/agentteams/higress-gateway.lo
 # Manager Agent 日志（stdout/stderr）
 docker logs agentteams-manager
 
-# Manager Agent session 日志（详细执行过程）
-docker exec -it agentteams-manager ls .openclaw/agents/main/sessions/
+# Manager Agent 健康状态和指标
+curl -fsS http://127.0.0.1:18888/readyz
+curl -fsS http://127.0.0.1:18888/metrics
 
 # Controller / 基础设施日志
 docker logs agentteams-controller
@@ -845,84 +827,27 @@ docker exec -it agentteams-controller cat /var/log/agentteams/higress-gateway.lo
 docker exec -it agentteams-controller cat /var/log/agentteams/higress-console.log
 ```
 
-OpenClaw Control UI（可视化 session 检查），打开：
-
-```
-http://localhost:18888
-```
+`18888` 是 AgentScope 健康检查和指标的回环映射端口，不是运行时控制台。
 
 ---
 
 ## 如何对接飞书/钉钉/企业微信/Discord/Telegram
 
-AgentTeams Manager 基于 OpenClaw 构建，原生支持多种消息渠道。要对接其他渠道：
+AgentScope Manager 当前只有一个生产对话适配器：Matrix，Element 是内置客户端。
+不要向 Manager 工作空间添加 OpenClaw channel 文件，它不会被加载。
 
-**方法一：直接修改配置**
-
-Manager 的工作目录是宿主机上的 `~/agentteams-manager`，里面的 `openclaw.json` 可以直接编辑。参照 [OpenClaw 渠道文档](https://docs.openclaw.ai) 中各平台的配置格式进行配置。
-
-修改后重启 Manager 容器使配置生效：
-
-```bash
-docker restart agentteams-manager
-```
-
-**方法二：让 Manager 学习你现有的 OpenClaw 配置**
-
-如果你已经在其他地方使用 OpenClaw 接入了其他渠道，可以让 Manager 读取你现有的配置：
-
-- **告诉 Manager 文件位置**：在 Element Web 中告诉 Manager 你的 OpenClaw 配置文件路径（例如 "我的 OpenClaw 配置在 `/home/user/my-openclaw.json`"），Manager 会直接读取。
-- **通过附件发送**：在 Element Web 或其他 Matrix 客户端中，把配置文件作为附件上传发送给 Manager，Manager 会接收并读取。
-
-然后让 Manager 帮你在它的配置里添加相同的渠道。
+接入其他平台需要新的认证适配器，把入站事件转换到同一个房间权限契约，并保持
+确认、幂等、线程、媒体和发送者鉴权。这是扩展开发点，不是只改配置即可启用的
+功能。
 
 ---
 
-## 会话管理（通过 IM 指令）
+## 通过 IM 管理会话和模型
 
-AgentTeams 基于 OpenClaw，通过 Matrix 渠道（Element Web）与 Agent 通信。OpenClaw 支持**斜杠命令**，你可以直接在聊天中以独立消息的形式发送这些指令，由 Gateway 在模型处理前解析执行。
+AgentScope Manager 不实现 OpenClaw gateway 斜杠命令。请在已授权房间中使用自然
+语言。模型变更通过需要确认的 `switch_model` typed 工具完成；身份变更通过
+`update_manager_identity` 完成。
 
-**注意：** 大多数命令必须以**独立消息**发送，且以 `/` 开头。不要在同一则消息中混入其他文字。
-
-**群聊中使用：** 可以在同一条消息中组合 @提及和斜杠命令，例如 `@Worker /compact` 或 `@Worker /new`。@提及确保命令发送给正确的 Agent，斜杠命令仍由 Gateway 正常处理。
-
-以下以 OpenClaw（Manager 和 OpenClaw Worker）为例列出可用命令。**QwenPaw** Worker 使用不同的命令集，详见 [QwenPaw 命令参考](https://copaw.agentscope.io/docs/commands)。
-
-### 会话重置与压缩
-
-| 指令 | 说明 |
-|------|------|
-| `/reset` 或 `/new` | 重置当前会话，开启全新对话。Agent 会回复简短问候以确认。 |
-| `/new <model>` | 重置会话并可选择切换模型。支持模型别名、`provider/model` 或提供商名称。 |
-| `/compact [instructions]` | 手动压缩对话上下文。在长任务前或切换话题时使用，以释放上下文窗口。 |
-
-### 模型选择
-
-| 指令 | 说明 |
-|------|------|
-| `/model` 或 `/models` | 显示紧凑的模型选择器（编号列表）。 |
-| `/model list` | 与 `/model` 相同。 |
-| `/model <数字>` | 按选择器中的编号选择模型。 |
-| `/model <provider/model>` | 切换到指定模型，例如 `/model openai/gpt-5.2` 或 `/model anthropic/claude-opus-4-5`。 |
-| `/model status` | 显示详细的模型/认证/端点状态。 |
-
-### 其他常用指令
-
-| 指令 | 说明 |
-|------|------|
-| `/status` | 显示当前状态（包含提供商用量/配额，如已启用）。 |
-| `/help` | 显示帮助。 |
-| `/commands` | 列出可用命令。 |
-| `/stop` | 中止当前 Agent 运行。 |
-
-### 会话指令（可选）
-
-以下指令用于控制会话行为。作为独立消息发送时会持久生效；也可内联在消息中，但不会持久化：
-
-- `/think <off|minimal|low|medium|high|xhigh>` — 控制思考/推理级别。
-- `/verbose on|full|off` — 切换详细输出（用于调试）。
-- `/reasoning on|off|stream` — 切换是否单独发送推理消息。
-- `/elevated on|off|ask|full` — 控制 exec 审批行为。
-- `/queue` — 查看或配置队列设置（防抖、上限等）。
-
-**参考：** [OpenClaw 斜杠命令](https://docs.openclaw.ai/tools/slash-commands)
+AgentScope 状态按 Matrix 房间保存，重启容器会恢复。确实需要空白对话上下文时，
+请新建已授权 Matrix 房间。Worker 是否支持斜杠命令取决于该 Worker 自己的运行时，
+不适用于 Manager。

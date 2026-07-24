@@ -79,7 +79,7 @@ while [ ! -f "${WORKSPACE}/openclaw.json" ] || [ ! -f "${WORKSPACE}/SOUL.md" ] \
       || [ ! -f "${WORKSPACE}/AGENTS.md" ]; do
     RETRY=$((RETRY + 1))
     if [ "${RETRY}" -gt 6 ]; then
-        log "ERROR: openclaw.json, SOUL.md or AGENTS.md not found after retries. Manager may not have created this Worker's config yet."
+        log "ERROR: openclaw.json, SOUL.md or AGENTS.md not found after retries. Controller may not have published this Worker's config yet."
         exit 1
     fi
     log "Waiting for config files to appear in MinIO (attempt ${RETRY}/6)..."
@@ -177,7 +177,7 @@ log "HOME set to ${HOME} (workspace files will be synced to MinIO)"
 #       agent itself writes.
 #
 #   Remote -> Local: on-demand pull via file-sync skill (triggered by Manager @mention)
-#     + 5-minute fallback pull of Manager-managed paths as safety net
+#     + 5-minute fallback pull of Controller-managed paths as safety net
 #       The fallback refreshes ${PULL_MARKER} so the change-triggered loop
 #       does not misinterpret freshly-pulled openclaw.json/skills mtimes as
 #       agent edits and spin forever on no-op pushes.
@@ -213,7 +213,7 @@ log "HOME set to ${HOME} (workspace files will be synced to MinIO)"
 ) &
 log "Local->Remote change-triggered sync started (PID: $!)"
 
-# Remote -> Local: fallback pull of Manager-managed files (safety net, every 5m)
+# Remote -> Local: fallback pull of Controller-managed files (safety net, every 5m)
 # Normal operation relies on on-demand pulls via file-sync skill when Manager @mentions.
 # openclaw.json uses local-first merge (see merge-openclaw-config.sh): existing
 # workspace config is the base; MinIO only overlays models, gateway, channels, plugins rules.
@@ -234,14 +234,14 @@ log "Local->Remote change-triggered sync started (PID: $!)"
         touch "${PULL_MARKER}"
     done
 ) &
-log "Remote->Local fallback sync started (Manager-managed files only, every 5m, PID: $!)"
+log "Remote->Local fallback sync started (Controller-managed files only, every 5m, PID: $!)"
 
 # ============================================================
 # Step 4: Configure mcporter (MCP tool CLI)
 # Config at ./config/mcporter.json (mcporter default path, no --config needed)
 # Symlink at ~/mcporter-servers.json for backward compatibility
-# The file may not exist at startup but will appear when Manager
-# configures MCP servers and Worker runs file-sync.
+# The file may not exist at startup but will appear after the Manager configures
+# MCP servers through the Controller and the Worker runs file-sync.
 # ============================================================
 MCPORTER_DEFAULT="${WORKSPACE}/config/mcporter.json"
 MCPORTER_COMPAT="${WORKSPACE}/mcporter-servers.json"

@@ -306,6 +306,247 @@ func TestDeployWorkerConfigMergesMcporterConfigPreservingExternalMCP(t *testing.
 	}
 }
 
+func TestPushOnDemandSkillsPublishesControllerCatalogSkill(t *testing.T) {
+	ctx := context.Background()
+	managerDir := filepath.Join(t.TempDir(), "manager")
+	skillDir := filepath.Join(
+		managerDir,
+		"worker-skills",
+		"github-operations",
+	)
+	if err := os.MkdirAll(filepath.Join(skillDir, "references"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(skillDir, "SKILL.md"),
+		[]byte("---\nname: github-operations\n---\n"),
+		0o644,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(skillDir, "references", "usage.md"),
+		[]byte("# Usage\n"),
+		0o644,
+	); err != nil {
+		t.Fatal(err)
+	}
+	replacementDir := filepath.Join(
+		managerDir,
+		"worker-skills",
+		"git-delegation",
+	)
+	if err := os.MkdirAll(replacementDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(replacementDir, "SKILL.md"),
+		[]byte("---\nname: git-delegation\n---\n"),
+		0o644,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	store := ossfake.NewMemory()
+	deployer := NewDeployer(DeployerConfig{
+		OSS:             store,
+		ManagerAgentDir: managerDir,
+	})
+
+	if err := deployer.PushOnDemandSkills(
+		ctx,
+		"alice",
+		[]string{"github-operations"},
+		nil,
+	); err != nil {
+		t.Fatalf("PushOnDemandSkills: %v", err)
+	}
+
+	for key, want := range map[string]string{
+		"agents/alice/skills/github-operations/SKILL.md":            "---\nname: github-operations\n---\n",
+		"agents/alice/skills/github-operations/references/usage.md": "# Usage\n",
+	} {
+		got, err := store.GetObject(ctx, key)
+		if err != nil {
+			t.Fatalf("get %s: %v", key, err)
+		}
+		if string(got) != want {
+			t.Fatalf("%s=%q, want %q", key, got, want)
+		}
+	}
+	if err := store.PutObject(
+		ctx,
+		"agents/alice/skills/github-operations/obsolete.txt",
+		[]byte("stale"),
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := deployer.PushOnDemandSkills(
+		ctx,
+		"alice",
+		[]string{"github-operations"},
+		nil,
+	); err != nil {
+		t.Fatalf("refresh managed skill: %v", err)
+	}
+	if _, err := store.GetObject(
+		ctx,
+		"agents/alice/skills/github-operations/obsolete.txt",
+	); !os.IsNotExist(err) {
+		t.Fatalf("obsolete skill payload still exists: %v", err)
+	}
+
+	if err := deployer.PushOnDemandSkills(
+		ctx,
+		"alice",
+		[]string{"git-delegation"},
+		nil,
+	); err != nil {
+		t.Fatalf("replace managed skill: %v", err)
+	}
+	if _, err := store.GetObject(
+		ctx,
+		"agents/alice/skills/github-operations/SKILL.md",
+	); !os.IsNotExist(err) {
+		t.Fatalf("replaced github-operations still exists: %v", err)
+	}
+	if _, err := store.GetObject(
+		ctx,
+		"agents/alice/skills/git-delegation/SKILL.md",
+	); err != nil {
+		t.Fatalf("replacement git-delegation missing: %v", err)
+	}
+	manifest, err := store.GetObject(
+		ctx,
+		"controller/worker-skills/alice/state.json",
+	)
+	if err != nil {
+		t.Fatalf("managed skill state missing: %v", err)
+	}
+	if got, want := string(manifest), "{\n  \"schemaVersion\": 1,\n  \"skills\": [\n    \"git-delegation\"\n  ]\n}\n"; got != want {
+		t.Fatalf("managed skill state=%q, want %q", got, want)
+	}
+}
+
+func TestPushOnDemandSkillsRejectsUnknownAndUnsafeNames(t *testing.T) {
+	ctx := context.Background()
+	managerDir := filepath.Join(t.TempDir(), "manager")
+	if err := os.MkdirAll(
+		filepath.Join(managerDir, "worker-skills"),
+		0o755,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, skillName := range []string{"missing", "../outside", "MixedCase"} {
+		t.Run(skillName, func(t *testing.T) {
+			deployer := NewDeployer(DeployerConfig{
+				OSS:             ossfake.NewMemory(),
+				ManagerAgentDir: managerDir,
+			})
+			err := deployer.PushOnDemandSkills(
+				ctx,
+				"alice",
+				[]string{skillName},
+				nil,
+			)
+			if err == nil {
+				t.Fatalf(
+					"PushOnDemandSkills(%q) succeeded unexpectedly",
+					skillName,
+				)
+			}
+		})
+	}
+
+	deployer := NewDeployer(DeployerConfig{
+		OSS:             ossfake.NewMemory(),
+		ManagerAgentDir: managerDir,
+	})
+	err := deployer.PushOnDemandSkills(
+		ctx,
+		"alice",
+		nil,
+		[]v1beta1.RemoteSkillSource{{
+			Source: "nacos://registry.example.com/public",
+			Skills: []v1beta1.RemoteSkill{{Name: "../outside"}},
+		}},
+	)
+	if err == nil || !strings.Contains(err.Error(), "invalid storage name") {
+		t.Fatalf("unsafe remote skill error=%v", err)
+	}
+}
+
+func TestPushOnDemandSkillsRemovesClearedAssignment(t *testing.T) {
+	ctx := context.Background()
+	store := ossfake.NewMemory()
+	if err := store.PutObject(
+		ctx,
+		"agents/alice/skills/github-operations/SKILL.md",
+		[]byte("old"),
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.PutObject(
+		ctx,
+		"controller/worker-skills/alice/state.json",
+		[]byte("{\"schemaVersion\":1,\"skills\":[\"github-operations\"]}"),
+	); err != nil {
+		t.Fatal(err)
+	}
+	deployer := NewDeployer(DeployerConfig{OSS: store})
+
+	if err := deployer.PushOnDemandSkills(
+		ctx,
+		"alice",
+		nil,
+		nil,
+	); err != nil {
+		t.Fatalf("clear managed skills: %v", err)
+	}
+	for _, key := range []string{
+		"agents/alice/skills/github-operations/SKILL.md",
+		"controller/worker-skills/alice/state.json",
+	} {
+		if _, err := store.GetObject(ctx, key); !os.IsNotExist(err) {
+			t.Fatalf("%s still exists after clear: %v", key, err)
+		}
+	}
+}
+
+func TestCleanupOSSDataRemovesManagedSkillState(t *testing.T) {
+	ctx := context.Background()
+	store := ossfake.NewMemory()
+	for _, key := range []string{
+		"agents/alice/SOUL.md",
+		"controller/worker-skills/alice/state.json",
+		"controller/worker-skills/bob/state.json",
+	} {
+		if err := store.PutObject(ctx, key, []byte("data")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	deployer := NewDeployer(DeployerConfig{OSS: store})
+
+	if err := deployer.CleanupOSSData(ctx, "alice"); err != nil {
+		t.Fatalf("CleanupOSSData: %v", err)
+	}
+	for _, key := range []string{
+		"agents/alice/SOUL.md",
+		"controller/worker-skills/alice/state.json",
+	} {
+		if _, err := store.GetObject(ctx, key); !os.IsNotExist(err) {
+			t.Fatalf("%s still exists after cleanup: %v", key, err)
+		}
+	}
+	if _, err := store.GetObject(
+		ctx,
+		"controller/worker-skills/bob/state.json",
+	); err != nil {
+		t.Fatalf("another Worker's state was removed: %v", err)
+	}
+}
+
 func TestDeployMemberRuntimeConfigWritesAgentScopedYaml(t *testing.T) {
 	ctx := context.Background()
 	store := ossfake.NewMemory()
@@ -1413,5 +1654,80 @@ func TestPrepareWorkerDepsWritesObjectStorageLayout(t *testing.T) {
 	}
 	if strings.Contains(text, "INVALID-KEY") {
 		t.Fatalf("env file should ignore invalid env keys:\n%s", text)
+	}
+}
+
+func TestMergeManagerIdentityPreservesTheManagerContract(t *testing.T) {
+	base := `# Manager Agent
+
+## Identity & Personality
+
+(not yet configured)
+
+## Core Nature
+
+Keep delegating through typed tools.
+`
+	identity := `- Name: Lin
+- Default language: Chinese
+- Communication style: concise
+- Behavior guidelines: state evidence before conclusions`
+
+	merged, err := mergeManagerIdentity(base, identity)
+	if err != nil {
+		t.Fatalf("mergeManagerIdentity: %v", err)
+	}
+	for _, expected := range []string{
+		"## Identity & Personality",
+		"- Name: Lin",
+		"## Core Nature",
+		"Keep delegating through typed tools.",
+	} {
+		if !strings.Contains(merged, expected) {
+			t.Fatalf("merged SOUL.md is missing %q:\n%s", expected, merged)
+		}
+	}
+	if strings.Contains(merged, "(not yet configured)") {
+		t.Fatalf("placeholder identity survived merge:\n%s", merged)
+	}
+}
+
+func TestMergeManagerIdentityAddsSectionToCustomSoul(t *testing.T) {
+	base := `# Custom Manager
+
+Keep the user's custom operating contract.
+`
+	merged, err := mergeManagerIdentity(base, "- Name: Lin")
+	if err != nil {
+		t.Fatalf("mergeManagerIdentity: %v", err)
+	}
+	for _, expected := range []string{
+		"# Custom Manager",
+		"Keep the user's custom operating contract.",
+		"## Identity & Personality",
+		"- Name: Lin",
+	} {
+		if !strings.Contains(merged, expected) {
+			t.Fatalf("merged custom SOUL.md is missing %q:\n%s", expected, merged)
+		}
+	}
+}
+
+func TestMergeManagerIdentityReplacesTerminalSection(t *testing.T) {
+	base := `# Custom Manager
+
+## Identity & Personality
+
+(not yet configured)
+`
+	merged, err := mergeManagerIdentity(base, "- Name: Lin")
+	if err != nil {
+		t.Fatalf("mergeManagerIdentity: %v", err)
+	}
+	if strings.Contains(merged, "(not yet configured)") {
+		t.Fatalf("placeholder identity survived merge:\n%s", merged)
+	}
+	if !strings.HasSuffix(merged, "- Name: Lin\n") {
+		t.Fatalf("terminal identity was not replaced:\n%s", merged)
 	}
 }

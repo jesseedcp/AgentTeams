@@ -172,7 +172,7 @@ type Worker struct {
 type WorkerSpec struct {
 	Model         string                     `json:"model"`
 	ModelProvider string                     `json:"modelProvider,omitempty"` // APIG Model API name for per-worker LLM provider
-	Runtime       string                     `json:"runtime,omitempty"`       // openclaw | copaw | hermes | qwenpaw (default: openclaw)
+	Runtime       string                     `json:"runtime,omitempty"`       // openclaw | copaw | hermes | qwenpaw | openhuman (default: openclaw)
 	Image         string                     `json:"image,omitempty"`         // custom Docker image
 	WorkerName    string                     `json:"workerName,omitempty"`    // business/runtime identity (Matrix localpart, OSS path key)
 	Identity      string                     `json:"identity,omitempty"`
@@ -756,6 +756,7 @@ type ManagerSpec struct {
 	Runtime       string                     `json:"runtime,omitempty"`       // agentscope (the only Manager runtime)
 	Image         string                     `json:"image,omitempty"`         // custom Docker image
 	Soul          string                     `json:"soul,omitempty"`          // custom SOUL.md content
+	Identity      string                     `json:"identity,omitempty"`      // managed Identity & Personality section
 	Agents        string                     `json:"agents,omitempty"`        // custom AGENTS.md content
 	Skills        []string                   `json:"skills,omitempty"`        // retained Manager skills advertised in the active revision
 	McpServers    []MCPServer                `json:"mcpServers,omitempty"`    // MCP servers callable natively through AgentScope
@@ -791,7 +792,6 @@ func (s ManagerSpec) DesiredState() string {
 		return *s.State
 	}
 	return "Running"
-
 }
 
 type ManagerConfig struct {
@@ -813,10 +813,9 @@ type ManagerStatus struct {
 	// WelcomeSent records whether the controller has already delivered the
 	// first-boot onboarding prompt to the Admin DM room. Used as the
 	// idempotency guard for reconcileManagerWelcome — once true the
-	// controller will not re-send even if the manager container is later
-	// recreated. The Manager Agent's own `~/soul-configured` file remains
-	// the orthogonal marker that the agent has finished the resulting
-	// onboarding Q&A.
+	// controller will not re-send even if the Manager container is recreated.
+	// Completion of the Q&A is represented by spec.identity, which the typed
+	// Manager workflow updates after Admin confirmation.
 	WelcomeSent bool `json:"welcomeSent,omitempty"`
 }
 

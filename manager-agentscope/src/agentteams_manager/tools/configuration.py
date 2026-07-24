@@ -16,12 +16,17 @@ from agentteams_manager.tools.base import (
 )
 from agentteams_manager.workflows.integrations import (
     IntegrationService,
+    ManagerIdentityRequest,
     ModelSwitchRequest,
 )
 from agentteams_manager.workflows.resources import MutationContext
 
 CONFIGURATION_TOOL_NAMES = frozenset(
-    {"switch_model", "switch_worker_model"},
+    {
+        "switch_model",
+        "switch_worker_model",
+        "update_manager_identity",
+    },
 )
 
 
@@ -31,6 +36,10 @@ class _ManagerModelInput(ModelSwitchRequest):
 
 class _WorkerModelInput(ModelSwitchRequest):
     worker: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")
+
+
+class _ManagerIdentityInput(ManagerIdentityRequest):
+    pass
 
 
 ContextProvider = Callable[
@@ -74,6 +83,15 @@ class ConfigurationToolkit:
                 request_model=_WorkerModelInput,
                 handler=self._switch_worker,
             ),
+            self._tool(
+                name="update_manager_identity",
+                description=(
+                    "Persist the confirmed Manager name, language, "
+                    "communication style, and behavior guidelines."
+                ),
+                request_model=_ManagerIdentityInput,
+                handler=self._update_manager_identity,
+            ),
         )
         return tuple(
             tool
@@ -92,6 +110,10 @@ class ConfigurationToolkit:
                             RoomKind.ADMIN_DM,
                             RoomKind.LEADER_ROOM,
                         }
+                    )
+                    or (
+                        tool.name == "update_manager_identity"
+                        and self._policy.kind is RoomKind.ADMIN_DM
                     )
                 )
             )
@@ -150,6 +172,16 @@ class ConfigurationToolkit:
         return await self._service.switch_worker_model(
             worker=item.worker,
             request=ModelSwitchRequest.model_validate(values),
+            context=await self._context(),
+        )
+
+    async def _update_manager_identity(
+        self,
+        request: BaseModel,
+    ) -> object:
+        item = _ManagerIdentityInput.model_validate(request)
+        return await self._service.update_manager_identity(
+            ManagerIdentityRequest.model_validate(item.model_dump()),
             context=await self._context(),
         )
 

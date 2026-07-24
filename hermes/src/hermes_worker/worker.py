@@ -386,9 +386,9 @@ class Worker:
     # ------------------------------------------------------------------
 
     def _copy_mcporter_config(self) -> None:
-        """Mirror the Manager-managed mcporter config into HERMES_HOME.
+        """Mirror the Controller-managed mcporter config into HERMES_HOME.
 
-        Hermes-agent doesn't ship its own mcporter, but the Manager publishes
+        Hermes-agent doesn't ship its own mcporter, but the Controller publishes
         ``config/mcporter.json`` for workers that opt-in via skills.  Place a
         copy in the worker's home so any tool that walks ``./config/`` finds it.
         """

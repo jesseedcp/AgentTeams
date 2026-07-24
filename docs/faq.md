@@ -1,7 +1,5 @@
 # FAQ
 
-> **Using AgentTeams v1.0.9 or earlier?** The architecture changed significantly in v1.1.0. For the legacy single-container architecture, see [FAQ (Legacy Architecture)](faq-legacy.md).
-
 - [How to check the current AgentTeams version](#how-to-check-the-current-agentteams-version)
 - [Understanding the new architecture (v1.1.0+)](#understanding-the-new-architecture-v110)
 - [How to use the agt CLI to manage resources](#how-to-use-the-agt-cli-to-manage-resources)
@@ -56,7 +54,7 @@ explicit `AGENTTEAMS_VERSION`.
 To install a specific version, use the `AGENTTEAMS_VERSION` environment variable during installation:
 
 ```bash
-AGENTTEAMS_VERSION=v1.1.0 bash <(curl -sSL https://raw.githubusercontent.com/agentscope-ai/AgentTeams/main/install/agentteams-install.sh)
+AGENTTEAMS_VERSION=v1.1.0 bash <(curl -sSL https://raw.githubusercontent.com/jesseedcp/AgentTeams/main/install/agentteams-install.sh)
 ```
 
 ---
@@ -244,12 +242,13 @@ During installation, set or enter `AGENTTEAMS_GITHUB_TOKEN` when the installer a
 for the optional GitHub Personal Access Token:
 
 ```bash
-AGENTTEAMS_GITHUB_TOKEN=ghp_xxx bash <(curl -sSL https://raw.githubusercontent.com/agentscope-ai/AgentTeams/main/install/agentteams-install.sh)
+AGENTTEAMS_GITHUB_TOKEN=ghp_xxx bash <(curl -sSL https://raw.githubusercontent.com/jesseedcp/AgentTeams/main/install/agentteams-install.sh)
 ```
 
-When this variable is present, AgentTeams configures the GitHub MCP Server and
-generates Manager-side `mcporter` configuration automatically. After that,
-declare the GitHub MCP capability in the Worker manifest:
+When this variable is present, AgentTeams configures the gateway-side GitHub
+MCP Server. The Controller projects a secret-free native MCP descriptor to the
+AgentScope Manager and runtime-specific `mcporter` configuration to Workers.
+After that, declare the GitHub MCP capability in the Worker manifest:
 
 ```yaml
 apiVersion: agentteams.io/v1beta1
@@ -301,8 +300,6 @@ This means the embedded image is not available in the registry for your requeste
 2. **Build locally from source**: Clone the repo and run `make install-embedded`.
 3. **Override the image**: Set `AGENTTEAMS_INSTALL_EMBEDDED_IMAGE` to a custom image.
 
-> If you intentionally want to use the legacy single-container architecture (v1.0.9 or earlier), set `AGENTTEAMS_FORCE_LEGACY=1`. Note this only works with images that bundle the infrastructure services.
-
 ---
 
 ## Manager Agent startup timeout or failure
@@ -332,7 +329,7 @@ Increase Docker VM memory to at least 4 GB: Docker Desktop → Settings → Reso
 Re-run the install command and choose **delete and reinstall**:
 
 ```bash
-bash <(curl -sSL https://raw.githubusercontent.com/agentscope-ai/AgentTeams/main/install/agentteams-install.sh)
+bash <(curl -sSL https://raw.githubusercontent.com/jesseedcp/AgentTeams/main/install/agentteams-install.sh)
 ```
 
 When the installer detects an existing installation, it will ask how to proceed. Choosing delete will wipe the stale data and start fresh.
@@ -428,10 +425,10 @@ Alternatively, you can click the Worker's avatar and open a **direct message** (
 
 ## How to connect third-party, local, or multi-provider models
 
-AgentTeams does not read your `~/.openclaw/openclaw.json` provider definitions
-directly. Model traffic goes through the AgentTeams AI Gateway. OpenClaw/QwenPaw
-usually sees one provider named `agentteams-gateway`; Higress then routes each
-requested model name to the real upstream provider.
+AgentTeams does not read host-side provider files directly. Model traffic goes
+through the AgentTeams AI Gateway. The AgentScope Manager uses the managed
+`agentteams-gateway` route; Higress maps the requested model name to the real
+upstream provider.
 
 ### Third-party OpenAI-compatible APIs
 
@@ -602,13 +599,15 @@ Higress select the matching provider route.
 
 ## How to switch a Worker's runtime
 
-AgentTeams v1.1.0+ supports three Worker runtimes:
+AgentTeams supports five Worker runtimes:
 
 | Runtime | Language | Best For |
 |---------|----------|----------|
 | OpenClaw | Node.js | General-purpose, mature ecosystem |
-| QwenPaw | Python | Python-native workflows, data science (legacy name **CoPaw**) |
+| CoPaw | Python | Lightweight conversational and browser workflows |
 | Hermes | Python | Autonomous coding, development tasks |
+| QwenPaw | Python | Python-native workflows and data science |
+| OpenHuman | Rust | Low-overhead native Matrix execution |
 
 ### At creation time
 
@@ -643,22 +642,16 @@ Manager will use the worker-management skill to trigger a container recreation. 
 
 ## Why does QwenPaw still use `copaw` in runtime values or image names
 
-`QwenPaw` is the user-facing name of the Python runtime that was previously
-called `CoPaw`. Some internal compatibility names intentionally remain `copaw`,
-including the Worker CRD runtime value, image names such as
-`agentteams-copaw-worker`, and environment values such as
-`AGENTTEAMS_MANAGER_RUNTIME=copaw`.
-
-Do not change these internal values to `qwenpaw` unless the chart, controller,
-and images explicitly support that new value. They are kept stable to avoid
-breaking existing installations, Helm values, and image pull paths.
+`copaw` remains a Worker-only compatibility value and image family.
+`qwenpaw` is also an explicitly supported Worker runtime. The Manager does not
+use either value: `AGENTTEAMS_MANAGER_RUNTIME` is fixed to `agentscope`.
 
 ---
 
 ## Can I connect my own agent implementation as a Worker
 
-Not by adding an arbitrary new `spec.runtime` value. The Worker CRD currently
-accepts only `openclaw`, `copaw`, or `hermes` as runtimes.
+Not by adding an arbitrary new `spec.runtime` value. The Worker CRD accepts
+`openclaw`, `copaw`, `hermes`, `qwenpaw`, and `openhuman`.
 
 For most custom Worker needs, package your role prompt, skills, dependencies,
 and optional Dockerfile as a Worker package, or set a custom image while keeping
@@ -732,19 +725,16 @@ container path.
 
 This is normal — it means the underlying Agent engine is actively executing. AgentTeams sets a 30-minute timeout per task, so an agent can stay in this state for up to 30 minutes while working.
 
-To see what the agent is actually doing, exec into the Manager or Worker container and check the session logs:
+To inspect the Manager safely, export its AgentScope state and Matrix timeline:
 
 ```bash
-# For Manager
-docker exec -it agentteams-manager ls .openclaw/agents/main/sessions/
-
-# For a Worker (replace <worker-name> with the actual container name)
-docker exec -it <worker-name> ls .openclaw/agents/main/sessions/
+python scripts/export-debug-log.py --range 1h \
+  --container agentteams-manager
 ```
 
-The `.jsonl` files in that directory are written in real time and contain the full agent execution trace — LLM calls, tool use, reasoning steps, etc.
-
-> **Note**: For Hermes-runtime Workers, session data is stored at `~/.hermes/state.db` instead.
+The exporter reads the Manager SQLite database in read-only mode and emits
+redacted JSONL. It also detects supported Worker session layouts when no
+container filter is supplied.
 
 ---
 
@@ -754,9 +744,8 @@ If Manager or Worker doesn't respond to your messages, check these common causes
 
 ### 1. Check if the agent is working
 
-**If there's no response and no "typing" indicator**, the agent is almost certainly **busy working**.
-
-OpenClaw limits the "typing" indicator to a maximum of **2 minutes**. If the agent's task takes longer than 2 minutes, the typing indicator stops showing even though the agent is still working.
+**If there's no response and no "typing" indicator**, the agent may still be
+working, recovering an ambiguous operation, or waiting on a dependency.
 
 **How to confirm your message is queued**:
 - After sending a message, look for a small **"m" icon** on the right side of your message
@@ -771,22 +760,16 @@ OpenClaw limits the "typing" indicator to a maximum of **2 minutes**. If the age
 
 ### 3. Check session status
 
-The session might be corrupted. Enter the Manager or Worker container and use the OpenClaw TUI to investigate:
+Check Manager readiness and export the affected room state:
 
 ```bash
-# Manager
-docker exec -it agentteams-manager openclaw tui
-
-# Worker (replace <worker-name> with actual container name)
-docker exec -it <worker-name> openclaw tui
+curl -fsS http://127.0.0.1:18888/readyz
+python scripts/export-debug-log.py --range 1h
 ```
 
-In the TUI:
-1. Type `/sessions` to list all sessions
-2. Switch to the session for the relevant chat
-3. Try sending a message and observe if there are any errors
-
-If the session is corrupted, try sending `/new` as a standalone message in the corresponding chat in Element (or other Matrix client) to reset the session and see if that restores normal behavior.
+AgentScope Manager sessions are keyed by Matrix room. Restarting the container
+does not erase them. If a genuinely fresh conversation is required, create a
+new authorized Matrix room rather than deleting the database.
 
 ---
 
@@ -810,18 +793,16 @@ docker logs agentteams-controller
 
 ### 2. Check session status
 
-The session might be corrupted. Enter the Manager container and use the OpenClaw TUI to investigate:
+Check the AgentScope readiness endpoint and container logs:
 
 ```bash
-docker exec -it agentteams-manager openclaw tui
+curl -fsS http://127.0.0.1:18888/readyz
+docker logs agentteams-manager
 ```
 
-In the TUI:
-1. Type `/sessions` to list all sessions
-2. Switch to the session for the relevant chat
-3. Try sending a message and observe if there are any errors
-
-If the session is corrupted, try sending `/new` as a standalone message in the corresponding chat in Element (or other Matrix client) to reset the session and see if that restores normal behavior.
+The JSON response names the dependency that is not ready. Use
+`scripts/export-debug-log.py` to correlate that with the Matrix timeline and
+stored AgentScope session.
 
 ### 3. Check Higress AI Gateway log
 
@@ -877,8 +858,9 @@ In the new architecture (v1.1.0+), the Manager runs as a separate container:
 # Manager Agent logs (stdout/stderr)
 docker logs agentteams-manager
 
-# Manager Agent session logs (detailed execution trace)
-docker exec -it agentteams-manager ls .openclaw/agents/main/sessions/
+# Manager Agent health and metrics
+curl -fsS http://127.0.0.1:18888/readyz
+curl -fsS http://127.0.0.1:18888/metrics
 
 # Controller / infrastructure logs
 docker logs agentteams-controller
@@ -890,84 +872,32 @@ docker exec -it agentteams-controller cat /var/log/agentteams/higress-gateway.lo
 docker exec -it agentteams-controller cat /var/log/agentteams/higress-console.log
 ```
 
-For OpenClaw Control UI (visual session inspection), open:
-
-```
-http://localhost:18888
-```
+Port `18888` is the loopback mapping for AgentScope health and metrics. It is
+not a runtime console.
 
 ---
 
 ## How to connect Feishu/DingTalk/WeCom/Discord/Telegram
 
-AgentTeams Manager is built on OpenClaw, which supports multiple messaging channels out of the box. To connect additional channels:
+The AgentScope Manager currently has one production conversation adapter:
+Matrix. Element is the bundled client. Do not add an OpenClaw channel file to
+the Manager workspace; it is not loaded.
 
-**Method 1: Edit config directly**
-
-The Manager's working directory is `~/agentteams-manager` (on your host). Edit `openclaw.json` in that directory to add channel configuration. Refer to [OpenClaw channel documentation](https://docs.openclaw.ai) for the specific config format for each platform.
-
-After editing, restart the Manager container for changes to take effect:
-
-```bash
-docker restart agentteams-manager
-```
-
-**Method 2: Let Manager learn from your existing OpenClaw config**
-
-If you already use OpenClaw with other channels (e.g., in your personal setup), you can let Manager read your existing config:
-
-- **Tell Manager where the file is**: In Element Web, tell Manager the path to your OpenClaw config file (e.g., "My OpenClaw config is at `/home/user/my-openclaw.json`"). Manager will read it directly.
-- **Send the file as attachment**: In Element Web or any Matrix client, upload your config file as an attachment and send it to Manager. Manager will receive and read it.
-
-Then ask Manager to help configure the same channels in its own config.
+Additional platforms require a new authenticated adapter that converts inbound
+events to the same room-policy contract and preserves confirmation,
+idempotency, threading, media, and sender authorization. This is an extension
+point, not a configuration-only feature.
 
 ---
 
-## Session management via IM
+## Session and model management via IM
 
-AgentTeams uses OpenClaw with the Matrix channel (Element Web). OpenClaw supports **slash commands** that you can send directly in the chat as standalone messages. These commands are processed by the Gateway before the model sees them.
+The AgentScope Manager does not implement OpenClaw gateway slash commands.
+Use normal language in an authorized room. Model changes are performed by the
+confirmed `switch_model` typed tool, and identity changes by
+`update_manager_identity`.
 
-**Important:** Most commands must be sent as a **standalone** message that starts with `/`. Do not mix them with other text in the same message.
-
-**In group rooms:** You can combine an @mention with a slash command in the same message, e.g. `@Worker /compact` or `@Worker /new`. The @mention ensures the command reaches the right agent, and the slash command is still processed by the Gateway as usual.
-
-The following commands apply to OpenClaw (Manager and OpenClaw Workers). **QwenPaw** Workers use a different command set — see [QwenPaw Commands](https://copaw.agentscope.io/docs/commands) for details.
-
-### Session reset and compaction
-
-| Command | Description |
-|---------|-------------|
-| `/reset` or `/new` | Reset the current session and start a fresh conversation. The agent replies with a short hello to confirm. |
-| `/new <model>` | Reset and optionally switch to a different model. Accepts model alias, `provider/model`, or provider name. |
-| `/compact [instructions]` | Manually compact the conversation context. Use before long tasks or when switching topics to free up context window. |
-
-### Model selection
-
-| Command | Description |
-|---------|-------------|
-| `/model` or `/models` | Show a compact model picker (numbered list). |
-| `/model list` | Same as `/model`. |
-| `/model <number>` | Select a model by its number from the picker. |
-| `/model <provider/model>` | Switch to a specific model, e.g. `/model openai/gpt-5.2` or `/model anthropic/claude-opus-4-5`. |
-| `/model status` | Show detailed model/auth/endpoint status. |
-
-### Other useful commands
-
-| Command | Description |
-|---------|-------------|
-| `/status` | Show current status (including provider usage/quota when available). |
-| `/help` | Show help. |
-| `/commands` | List available commands. |
-| `/stop` | Abort the current agent run. |
-
-### Session directives (optional)
-
-These directives control session behavior. Send as standalone messages to persist; they can also appear inline in a message but won't persist:
-
-- `/think <off|minimal|low|medium|high|xhigh>` — Control thinking/reasoning level.
-- `/verbose on|full|off` — Toggle verbose output (for debugging).
-- `/reasoning on|off|stream` — Toggle separate reasoning messages.
-- `/elevated on|off|ask|full` — Control exec approval behavior.
-- `/queue` — View or configure queue settings (debounce, cap, etc.).
-
-**Reference:** [OpenClaw Slash Commands](https://docs.openclaw.ai/tools/slash-commands)
+AgentScope state is stored per Matrix room. A container restart restores that
+state. Use a new authorized Matrix room when you intentionally need an empty
+conversation context. Worker slash commands, when available, depend on that
+Worker's selected runtime and do not apply to the Manager.

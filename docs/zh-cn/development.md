@@ -31,10 +31,11 @@ make build-worker
 make build-agentteams-controller
 make build-embedded
 
-# 其他 Manager / Worker 运行时
-make build-manager-copaw
+# Worker 运行时（Manager 始终使用 AgentScope）
 make build-copaw-worker
 make build-hermes-worker
+make build-qwenpaw-worker
+make build-openhuman-worker
 
 # 使用指定版本标签构建
 make build VERSION=0.1.0
@@ -298,13 +299,11 @@ export no_proxy="localhost,127.0.0.1,::1,local,169.254/16"
 AGENTTEAMS_LLM_API_KEY="your-key" make test SKIP_BUILD=1
 ```
 
-## 容器运行时 Socket（直接创建 Worker）
+## 容器运行时 Socket
 
-当 Manager 容器启动时挂载了宿主机的容器运行时 socket，它可以直接创建 Worker 容器——本地部署无需人工干预。
-
-### 工作原理
-
-Manager 在启动时检测 socket 并设置 `AGENTTEAMS_CONTAINER_RUNTIME=socket`。`container-api.sh` 脚本通过 Docker 兼容的 REST API 提供创建/启动/停止 Worker 容器的函数（同时支持 Docker 和 Podman）。
+嵌入式部署由 **Controller** 而不是 Manager 持有 Docker/Podman socket，并在
+协调 typed 资源后创建 Worker 容器。AgentScope Manager 只通过 `AgtClient`
+访问 Controller。
 
 ### Socket 路径
 
@@ -314,28 +313,10 @@ Manager 在启动时检测 socket 并设置 `AGENTTEAMS_CONTAINER_RUNTIME=socket
 | Podman（rootful，Linux） | `/run/podman/podman.sock` | `-v /run/podman/podman.sock:/var/run/docker.sock --security-opt label=disable` |
 | Podman（macOS machine） | VM 内：`/run/podman/podman.sock` | 与 rootful 相同（VM 在 `/var/run/docker.sock` 提供符号链接） |
 
-### 示例：手动启动并挂载 Socket
-
-```bash
-# Docker
-docker run -d --name agentteams-manager \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  -e AGENTTEAMS_WORKER_IMAGE=agentteams/worker-agent:latest \
-  ... \
-  agentteams/manager:latest
-
-# Podman
-podman run -d --name agentteams-manager \
-  -v /run/podman/podman.sock:/var/run/docker.sock \
-  --security-opt label=disable \
-  -e AGENTTEAMS_WORKER_IMAGE=agentteams/worker-agent:latest \
-  ... \
-  agentteams/manager:latest
-```
-
 ### 测试集成
 
-测试编排器（`tests/run-all-tests.sh`）会自动检测 socket 并在可用时挂载它。
+测试编排器（`tests/run-all-tests.sh`）会检测 socket，并在可用时挂载到嵌入式
+Controller。
 
 ### 安全说明
 
@@ -343,12 +324,17 @@ podman run -d --name agentteams-manager \
 
 ## 关键技术说明
 
-### Node.js 版本
+### AgentScope Manager
 
-OpenClaw 需要 **Node.js >= 22**（内部使用的 `--disable-warning` 标志需要 Node.js 21.3+）。Manager 镜像基于 `openclaw-base` 构建，该基础镜像已包含 Node.js 22。Worker Dockerfile 从构建阶段复制 Node.js 22。
+- Python 3.11+ 与 `agentscope[s3]==2.0.4.post1`。
+- 只运行一个 daemon，不启动 OpenClaw gateway 或 CoPaw 应用。
+- 标准库 SQLite WAL：
+  `/var/lib/agentteams-manager/state/manager.db`。
+- MinIO 不可变 journal 与带校验 SQLite 快照。
+- `18799` 运维 HTTP：`/healthz`、`/readyz`、`/metrics`。
+- Matrix 回合使用 `reply_stream`，配置只在回合之间热加载。
 
-- **Manager**：Node 22 由 `openclaw-base` 提供（基础镜像已内置）。
-- **Worker**：从构建阶段复制的 Node 22 二进制文件替换了 Ubuntu 24.04 apt 的 Node.js 18.x（后者不支持 `--disable-warning`）。
+Worker 镜像保留各自运行时依赖，包括 OpenClaw 所需的 Node.js 22。
 
 ### Higress AI Provider API
 
@@ -370,9 +356,9 @@ OpenClaw 需要 **Node.js >= 22**（内部使用的 `--disable-warning` 标志�
 
 对于 OpenAI 兼容的 Provider（DeepSeek 等），使用 `type=openai` 并在 `rawConfigs.apiUrl` 中指向该 Provider 的端点。这些都在 `manager/scripts/init/setup-higress.sh` 中自动处理。
 
-### OpenClaw 技能格式
+### Manager Skill 格式
 
-SKILL.md 文件**必须**包含 YAML front matter 块，否则 OpenClaw 无法发现它们：
+Manager `SKILL.md` 包含 YAML front matter，并从镜像拥有的 prompt 根目录加载：
 
 ```markdown
 ---
@@ -384,23 +370,8 @@ description: 该技能的用途和使用时机
 ...内容...
 ```
 
-放置在 `<workspace>/skills/<name>/SKILL.md` 的技能会被自动发现（来源：`openclaw-workspace`）。
-
-### OpenClaw 网关配置
-
-`openclaw.json` 必须包含网关配置才能以无头模式运行：
-
-```json
-{
-  "gateway": {
-    "mode": "local",
-    "port": 18799,
-    "auth": { "token": "<some-token>" }
-  }
-}
-```
-
-缺少 `gateway.mode=local` 或 `gateway.auth.token`，OpenClaw 都会拒绝启动。
+只增加文档不会增加能力。必须同时更新已注册 typed 工具、房间权限、确定性
+工作流和 `tests/manager-skill-parity.json`。
 
 ## 代码风格
 
@@ -419,9 +390,9 @@ description: 该技能的用途和使用时机
 
 ```bash
 # Manager Agent
-docker exec agentteams-manager cat /var/log/agentteams/manager-agent.log
-docker exec agentteams-manager cat /var/log/agentteams/manager-agent-error.log  # OpenClaw 网关 stderr（OpenClaw Manager）
-docker exec agentteams-manager bash -c 'cat /tmp/openclaw/openclaw-*.log' | jq .
+docker logs agentteams-manager
+curl -fsS http://127.0.0.1:18888/readyz
+curl -fsS http://127.0.0.1:18888/metrics
 
 # Higress / Homeserver（嵌入式 controller）
 docker exec agentteams-controller cat /var/log/agentteams/higress-console.log
@@ -437,12 +408,11 @@ make replay-log
 # 日志目录：logs/replay/replay-{timestamp}.log
 ```
 
-### 检查 OpenClaw 技能加载情况
+### 检查 Manager skill 对等关系
 
 ```bash
-docker exec agentteams-manager bash -c \
-  'OPENCLAW_CONFIG_PATH=/root/manager-workspace/openclaw.json openclaw skills list --json' \
-  | jq '.skills[] | select(.source == "openclaw-workspace") | {name, eligible, description}'
+python -m json.tool tests/manager-skill-parity.json
+python -m pytest -q manager-agentscope/tests/contract
 ```
 
 ### 进入容器交互式 Shell
@@ -486,7 +456,7 @@ mc ls test/agentteams-storage/ --recursive
 |------|------|----------|
 | `docker build` 期间 `git clone` 卡住 | 构建环境没有代理 | 通过 `DOCKER_BUILD_ARGS` 传递 `--build-arg http_proxy=...` |
 | 健康检查返回 503 | `http_proxy` 拦截了 localhost 请求 | 设置 `no_proxy=localhost,127.0.0.1,::1` |
-| OpenClaw: `SyntaxError: Unexpected reserved word` | Node.js 版本过旧 | 确保 Manager 使用 `openclaw-base` 镜像；Worker 使用构建阶段的 Node.js 22 |
+| OpenClaw Worker: `SyntaxError: Unexpected reserved word` | Node.js 版本过旧 | 确保 OpenClaw Worker 镜像使用构建阶段的 Node.js 22 |
 | OpenClaw: `requires Node >=22.0.0` | 同上 | 同上 |
 | `--disable-warning= is not allowed in NODE_OPTIONS` | Node.js < 21.3（如 Ubuntu apt 的 v18） | 确保 Worker 使用构建阶段的 Node.js 22，而非 apt 安装的版本 |
 | OpenClaw: `gateway.mode=local` required | openclaw.json 中缺少网关配置 | 添加 `"gateway": {"mode": "local", ...}` |

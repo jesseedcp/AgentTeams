@@ -12,11 +12,11 @@
 
 [English](./README.md) | [中文](./README.zh-CN.md) | [日本語](./README.ja-JP.md)
 
-**AgentTeams 是一个开源的协作式多智能体运行平台。让多个 Agent 在一个受控、可审计的房间中协作，人类全程可见、随时可介入。采用 Manager-Workers 架构，Manager 统一调度多个 Workers，专注于企业内的人和 Agent、Agents 之间的协作场景。**
+**AgentTeams 是一个开源的协作式多智能体运行平台。让多个 Agent 在一个受控、可审计的房间中协作，人类全程可见、随时可介入。采用 Manager-Workers 架构，由 AgentScope 2.0 Manager 统一调度多个 Workers，专注于企业内的人和 Agent、Agents 之间的协作场景。**
 
-AgentTeams 不再实现 Agent 运行时本身，而是编排和管理多个 Agent 容器（Manager 和众多 Workers）。
+Manager 运行时固定为 AgentScope 2.0；Worker 执行层可在 OpenClaw、CoPaw、Hermes、QwenPaw 和 OpenHuman 之间选择。
 - 🧑‍💻 **设计了 Manger-Workers 架构**：不用真人去管理每个干活的 Worker Claw，实现由 Agent 管理 Agents。
-- 🤝 **多运行时协作**：OpenClaw、QwenPaw 和 Hermes Worker 在同一个 IM 房间中共存协作。用确定性更高的 Agent（OpenClaw/QwenPaw）做 Leader 编排任务，用 Hermes Worker 执行自主编程——各司其职。
+- 🤝 **多运行时协作**：OpenClaw、CoPaw、Hermes、QwenPaw 和 OpenHuman Worker 可在同一个 IM 房间中共存协作，AgentScope Manager 统一管理它们的生命周期和协作关系。
 - 📚 **引入 MinIO 共享文件系统**：用于 Agent 之间的信息共享，大幅降低多 Agent 协作带来的 Token 消耗。
 - ⛑️ **引入 Higress AI Gateway**：流量入口和各类凭证风险降低了，减少了用户对原生龙虾在安全上的顾虑。
 - 🎨 **使用 Element IM 客户端+Tuwunel IM 服务器（均基于 Matrix 实时通信协议）**：节省钉钉、飞书 IM 的接入和企业内的审批成本，方便用户快速体验在 IM 的交互环境中体验模型服务的"爽感"，同时支持以 OpenClaw 原生的方式接入 IM。
@@ -24,6 +24,8 @@ AgentTeams 不再实现 Agent 运行时本身，而是编排和管理多个 Agen
 ![架构](https://img.alicdn.com/imgextra/i4/O1CN01c1VlDE1zYZ46EW3OA_!!6000000006726-49-tps-9895-8231.webp)
 
 ## 动态
+> 以下条目记录上游项目历史。本项目当前只使用 AgentScope 2.0 作为 Manager；OpenClaw、CoPaw、Hermes、QwenPaw 和 OpenHuman 均为 Worker 运行时。
+
 - **2026-05-27:** [Release Notes](https://github.com/agentscope-ai/AgentTeams/releases/tag/v1.1.2) — AgentTeams v1.1.2：安装器默认改为 QwenPaw 运行时并支持 keep-all 升级；Team 支持人类协调员，Team Leader 协作工具刷新；控制器支持 Nacos 远程技能与 `sts-agentteams` / `ai-registry` STS 凭据；Worker 控制器资源名与运行时名称解耦；新增控制器 reconcile 指标与优雅退出。
 - **2026-05-07:** [Release Notes](https://github.com/agentscope-ai/AgentTeams/releases/tag/v1.1.1) | [Changelog](changelog/v1.1.1.md) — AgentTeams v1.1.1：Worker/Manager/Team CRD 上的声明式 MCP（破坏性变更）并扩展至 Team Leader；CR 支持自定义 `spec.env`；新增 Token Plan、Qwen 国际线路与 `qwen3.6-plus` 模型；Helm 控制器 RBAC 收敛到单命名空间；Worker 包可不含 `SOUL.md`。
 - **2026-04-24:** [English](blog/agentteams-1.1.0-release.md) | [中文](blog/zh-cn/agentteams-1.1.0-release.md) — AgentTeams v1.1.0：Kubernetes 原生控制面、Hermes 自主编程 Agent 运行时、镜像体积减少 1.7 GB，`agt` CLI 替代 shell 脚本。
@@ -59,16 +61,26 @@ AgentTeams 不再实现 Agent 运行时本身，而是编排和管理多个 Agen
 安装步骤：
 以下我们以最简单的本地部署、本地访问来演示安装步骤，不到5分钟就能开始玩龙虾了。
 
+若要运行尚未发布镜像的 `main` 源码，请构建当前仓库，避免拉取旧镜像：
+
+```bash
+git clone https://github.com/jesseedcp/AgentTeams.git
+cd AgentTeams
+make install-interactive
+```
+
+下面的一行安装命令适用于已经发布了对应容器镜像的版本标签。
+
 第一步：打开终端，Mac 系统输入以下安装命令。
 
 ```bash
-bash <(curl -sSL https://raw.githubusercontent.com/agentscope-ai/AgentTeams/main/install/agentteams-install.sh)
+bash <(curl -sSL https://raw.githubusercontent.com/jesseedcp/AgentTeams/main/install/agentteams-install.sh)
 ```
 
 **Windows（建议 PowerShell 7+）输入以下安装命令：**
 
 ```powershell
-Set-ExecutionPolicy Bypass -Scope Process -Force; $wc=New-Object Net.WebClient; $wc.Encoding=[Text.Encoding]::UTF8; iex $wc.DownloadString('https://raw.githubusercontent.com/agentscope-ai/AgentTeams/main/install/agentteams-install.ps1')
+Set-ExecutionPolicy Bypass -Scope Process -Force; $wc=New-Object Net.WebClient; $wc.Encoding=[Text.Encoding]::UTF8; iex $wc.DownloadString('https://raw.githubusercontent.com/jesseedcp/AgentTeams/main/install/agentteams-install.ps1')
 ```
 
 这里，输入 Mac 系统的安装命令。
@@ -92,7 +104,7 @@ Set-ExecutionPolicy Bypass -Scope Process -Force; $wc=New-Object Net.WebClient; 
 
 第九步：GitHub 集成、Skills 注册中心、数据持久化、Docker 卷、Manager 工作空间，按回车键即可，均采用默认配置，无须手动配置。
 
-第十步：选择 Manager Worker 运行时，目前支持 OpenClaw 和 Copaw，未来还将支持 NanoClaw、ZeroClaw 等。
+第十步：选择默认 Worker 运行时，可选 OpenClaw、CoPaw、Hermes、QwenPaw 或 OpenHuman。Manager 始终使用 AgentScope 2.0，不需要选择。
 
 第十一步：等待安装。安装完成。登录密码是自动生成的。
 
@@ -110,14 +122,14 @@ Set-ExecutionPolicy Bypass -Scope Process -Force; $wc=New-Object Net.WebClient; 
 每次更新新版本，您在终端执行以下命令，即可原地升级，默认升级到最新版本：
 
 ```bash
-bash <(curl -sSL https://raw.githubusercontent.com/agentscope-ai/AgentTeams/main/install/agentteams-install.sh)
+bash <(curl -sSL https://raw.githubusercontent.com/jesseedcp/AgentTeams/main/install/agentteams-install.sh)
 ```
 就地升级，数据和配置会保留；全新重新，会删除所有数据。
 
 若要升级到指定版本，请使用以下命令：
 
 ```bash
-AGENTTEAMS_VERSION=v1.0.5 bash <(curl -sSL https://raw.githubusercontent.com/agentscope-ai/AgentTeams/main/install/agentteams-install.sh)
+AGENTTEAMS_VERSION=vX.Y.Z bash <(curl -sSL https://raw.githubusercontent.com/jesseedcp/AgentTeams/main/install/agentteams-install.sh)
 ```
 
 
@@ -125,12 +137,12 @@ AGENTTEAMS_VERSION=v1.0.5 bash <(curl -sSL https://raw.githubusercontent.com/age
 
 **macOS / Linux:**
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/agentscope-ai/AgentTeams/main/install/agentteams-install.sh) uninstall
+bash <(curl -fsSL https://raw.githubusercontent.com/jesseedcp/AgentTeams/main/install/agentteams-install.sh) uninstall
 ```
 
 **Windows (PowerShell):**
 ```powershell
-Set-ExecutionPolicy Bypass -Scope Process -Force; $wc=New-Object Net.WebClient; $wc.Encoding=[Text.Encoding]::UTF8; $s=$wc.DownloadString('https://raw.githubusercontent.com/agentscope-ai/AgentTeams/main/install/agentteams-install.ps1'); & ([scriptblock]::Create($s)) uninstall
+Set-ExecutionPolicy Bypass -Scope Process -Force; $wc=New-Object Net.WebClient; $wc.Encoding=[Text.Encoding]::UTF8; $s=$wc.DownloadString('https://raw.githubusercontent.com/jesseedcp/AgentTeams/main/install/agentteams-install.ps1'); & ([scriptblock]::Create($s)) uninstall
 ```
 
 将移除所有 AgentTeams 容器（Manager、Worker、docker-proxy）、Docker 卷、网络、env 文件、工作空间目录和安装日志。
@@ -196,16 +208,17 @@ helm install agentteams higress.io/agentteams \
 | `credentials.llmProvider` | 可选 | LLM 服务商名，默认 `openai-compat` |
 | `credentials.defaultModel` | 可选 | 默认模型，默认 `gpt-5.4` |
 | `credentials.llmBaseUrl` | 可选 | OpenAI 兼容的 Base URL（例如 `https://api.deepseek.com/v1`）。使用官方 OpenAI API 时留空 |
-| `manager.runtime` | 可选 | Manager Agent 运行时：`openclaw`（默认）、`copaw` 或 `hermes` |
-| `worker.defaultRuntime` | 可选 | Worker 默认运行时：`openclaw`（默认）、`copaw` 或 `hermes` |
+| `credentials.githubToken` | 可选 | 原生 GitHub MCP 引导使用的 GitHub PAT；保存在 Secret 中，只进入 Controller/Manager 链路 |
+| `manager.runtime` | 可选 | Manager 运行时；仅支持 `agentscope` |
+| `worker.defaultRuntime` | 可选 | Worker 默认运行时：`openclaw`（默认）、`copaw`、`hermes`、`qwenpaw` 或 `openhuman` |
 
 <details>
-<summary>使用其他运行时（QwenPaw Manager + Hermes Workers）</summary>
+<summary>使用其他 Worker 运行时</summary>
 
 ```bash
 helm install agentteams higress.io/agentteams \
-  -n agentteams-system --create-namespace --devel \
-  --set manager.runtime=copaw \
+  -n agentteams-system --create-namespace \
+  --set manager.runtime=agentscope \
   --set worker.defaultRuntime=hermes \
   --set credentials.llmApiKey=<your-api-key> \
   --set credentials.llmBaseUrl=https://your-provider.example.com/v1 \
@@ -214,7 +227,9 @@ helm install agentteams higress.io/agentteams \
   --set gateway.publicURL=http://localhost:18080
 ```
 
-各组件镜像会根据运行时自动选择（Manager: `agentteams-manager` / `agentteams-manager-copaw`；Worker: `agentteams-worker` / `agentteams-copaw-worker` / `agentteams-hermes-worker`）。
+Manager 始终使用 `agentteams-manager` 镜像并运行 AgentScope
+2.0.4.post1。Worker 镜像会根据 OpenClaw、CoPaw、Hermes、QwenPaw 或
+OpenHuman 独立选择。
 
 </details>
 
@@ -390,11 +405,13 @@ Alice：前端校验也更新了。
 
 ## 多运行时协作
 
-AgentTeams 支持三种 Worker 运行时，可以**在同一个 IM 房间中共存协作**：
+AgentTeams 支持五种 Worker 运行时，可以**在同一个 IM 房间中共存协作**：
 
 - **OpenClaw**（Node.js）— 通用 Agent 运行时，拥有丰富的 Skills 生态，擅长任务编排和工具调用
+- **CoPaw**（Python）— 轻量对话型 Worker，集成 Matrix 与共享存储
 - **QwenPaw**（Python）— 轻量级运行时，适合浏览器自动化和快速任务
 - **Hermes**（[hermes-agent](https://github.com/NousResearch/hermes-agent)）— 自主编程 Agent，具备终端沙箱、自我进化的 Skill 和持久化记忆
+- **OpenHuman**（Rust）— 使用原生 Matrix 通道、运行开销较低的 Worker
 
 每种运行时各有擅长。推荐模式：用确定性更高的 Agent（OpenClaw/QwenPaw）做 Leader 负责任务分解和调度，用 Hermes Worker 执行自主编程任务。所有运行时通过 Matrix `m.mentions` 在同一个房间内通信——完全可见、随时可干预。
 
@@ -406,27 +423,25 @@ agt update worker --runtime hermes
 ## 架构
 
 ```
-┌───────────────────────────────────────────────┐
-│            agentteams-controller                  │
-│  Higress │ Tuwunel │ MinIO │ Element Web      │
-└──────────────────┬────────────────────────────┘
-                   │ Matrix + HTTP Files
-┌──────────────────┴──────────┐
-│     agentteams-manager-agent     │
-│     Manager (OpenClaw/       │
-│       QwenPaw)               │
-└──────────────────┬──────────┘
-                   │
-┌──────────────────┼────────────────────────────┐
-│                  │                            │
-▼                  ▼                            ▼
-Worker Alice    Worker Bob              Worker Charlie
-(OpenClaw)      (QwenPaw)               (Hermes)
+┌──────────────────────────────────────────────────────┐
+│                 agentteams-controller                │
+│        Higress │ Tuwunel │ MinIO │ Element Web       │
+└─────────────────────────┬────────────────────────────┘
+                          │ 类型化 API + Matrix + 存储
+┌─────────────────────────▼────────────────────────────┐
+│              Manager — AgentScope 2.0                │
+└─────────────────────────┬────────────────────────────┘
+                          │ 创建并协调
+┌─────────────────────────▼────────────────────────────┐
+│ OpenClaw │ CoPaw │ Hermes │ QwenPaw │ OpenHuman     │
+│                     Worker 运行时                     │
+└──────────────────────────────────────────────────────┘
 ```
 
 | 组件 | 职责 |
 |------|------|
 | agentteams-controller | Kubernetes 原生控制平面，协调 Worker/Team/Manager CR |
+| AgentScope 2.0 Manager | 对话式编排、策略校验、任务/团队工作流及 Matrix 流式回复 |
 | Higress AI 网关 | LLM 代理、MCP Server 托管、凭证管理 |
 | Tuwunel (Matrix) | 自建 IM 服务器，承载所有 Agent + 人类通信 |
 | Element Web | 浏览器客户端，零配置 |
@@ -436,7 +451,7 @@ Worker Alice    Worker Bob              Worker Charlie
 如果 Manager 容器启动失败，执行以下命令查看具体原因：
 
 ```bash
-docker exec -it agentteams-manager cat /var/log/agentteams/manager-agent.log
+docker logs --tail 200 agentteams-manager
 ```
 
 更多常见问题（启动超时、局域网访问等）参见 [docs/zh-cn/faq.md](docs/zh-cn/faq.md)。
@@ -454,11 +469,11 @@ python scripts/export-debug-log.py --range 1h
 
 > "读取 debug-log/ 下的 JSONL 文件，同时分析 Matrix 消息日志和 Agent 会话日志。结合 AgentTeams 代码库，定位 [描述你的 bug] 的根因。重点关注 Agent 交互流程、工具调用失败和错误模式。"
 
-将 AI 的分析结果贴到 [Bug Report](https://github.com/agentscope-ai/AgentTeams/issues/new?template=bug_report.yml) 中。
+将 AI 的分析结果贴到 [Bug Report](https://github.com/jesseedcp/AgentTeams/issues/new?template=bug_report.yml) 中。
 
 你也可以让 AI 工具直接提交 Issue 或 PR。先安装 [GitHub CLI](https://cli.github.com/)，执行 `gh auth login` 在浏览器中完成登录，然后将 [OpenClaw GitHub skill](https://github.com/openclaw/openclaw/blob/main/skills/github/SKILL.md) 配置到你的 AI 编程工具（Cursor、Claude Code 等）中。之后直接让它根据分析结果提交 Issue 或 PR 即可。
 
-欢迎[提交 Issue](https://github.com/agentscope-ai/AgentTeams/issues)，或在 [Discord](https://discord.gg/n6mV8xEYUF) / 钉钉群里随时提问。
+欢迎[提交 Issue](https://github.com/jesseedcp/AgentTeams/issues)，或在 [Discord](https://discord.gg/n6mV8xEYUF) / 钉钉群里随时提问。
 
 ## 文档
 

@@ -56,59 +56,6 @@ server {
 }
 NGINX
 
-# Generate Nginx config for Manager Console reverse proxy.
-# OpenClaw runtime: injects gateway token via inline script for auto-login.
-# CoPaw runtime: plain reverse proxy, no token injection needed.
-if [ "${AGENTTEAMS_MANAGER_RUNTIME:-openclaw}" = "openclaw" ]; then
-    OPENCLAW_TOKEN="${AGENTTEAMS_MANAGER_GATEWAY_KEY:-}"
-    cat > /etc/nginx/conf.d/manager-console.conf << NGINX
-# Manager Console (OpenClaw) — reverse proxy to gateway loopback with auto-token injection
-# Injects the gateway token via inline script that sets location.hash with #token=...
-# This is the only reliable method across all openclaw versions — the Control UI
-# reads the token from the URL hash on load (both old and new versions support this).
-# CSP must be stripped to allow the inline script, and proxy headers (Host, X-Real-IP)
-# are omitted to avoid triggering untrusted-proxy detection in the gateway.
-server {
-    listen 18888;
-
-    location / {
-        proxy_pass http://127.0.0.1:18799;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection "upgrade";
-        # Disable upstream compression so sub_filter can modify HTML responses
-        proxy_set_header Accept-Encoding "";
-        proxy_read_timeout 3600s;
-        proxy_send_timeout 3600s;
-
-        # Strip upstream CSP so inline token-injection script can run
-        proxy_hide_header Content-Security-Policy;
-
-        # Auto-inject gateway token via URL hash redirect (works across all openclaw versions)
-        sub_filter_types text/html;
-        sub_filter_once on;
-        sub_filter '</head>' '<script>(function(){var T="${OPENCLAW_TOKEN}";if(!T||location.hash.indexOf("token=")!==-1)return;location.replace(location.pathname+"#token="+T)})();</script></head>';
-    }
-}
-NGINX
-else
-    cat > /etc/nginx/conf.d/manager-console.conf << 'NGINX'
-# Manager Console (CoPaw) — plain reverse proxy to CoPaw app
-server {
-    listen 18888;
-
-    location / {
-        proxy_pass http://127.0.0.1:18799;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_read_timeout 3600s;
-        proxy_send_timeout 3600s;
-    }
-}
-NGINX
-fi
-
 # Generate Nginx config for Higress WASM plugin server (port 8002).
 # This serves /usr/share/nginx/html/plugins/* to Envoy so it can fetch
 # WASM modules (ai-proxy, key-auth, ai-statistics, etc.). Without this,

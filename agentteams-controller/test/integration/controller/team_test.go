@@ -17,9 +17,8 @@ import (
 )
 
 // workersRegistryFile mirrors the JSON shape of workers-registry.json. Only
-// the fields that Manager-side skills rely on are extracted; the registry
-// document itself is write-heavy and its full internal shape lives in
-// internal/service/legacy.go.
+// the compatibility fields needed by migration and diagnostics are extracted;
+// the full internal shape lives in internal/service/legacy.go.
 type workersRegistryFile struct {
 	Version int                             `json:"version"`
 	Workers map[string]workersRegistryEntry `json:"workers"`
@@ -147,9 +146,8 @@ func TestTeamCreate_ProvisionsLeaderAndWorkers(t *testing.T) {
 // tests/test-18-team-config-verify.sh. Before PR #666 removed the child
 // Worker CR per team member, WorkerReconciler.reconcileLegacy used to
 // populate workers-registry.json with role/team_id for each member; after
-// the refactor TeamReconciler must do the same itself or manager-side
-// skills (find-worker, push-worker-skills, update-worker-config, etc.)
-// silently break.
+// the refactor TeamReconciler must maintain the same compatibility projection
+// itself.
 //
 // The contract this test locks in:
 //   - leader has role="team_leader", team_id=<team name>, runtime="copaw"
@@ -304,8 +302,7 @@ func TestTeamCreate_LeaderOnly(t *testing.T) {
 	}
 
 	// workers-registry.json must carry the leader with role=team_leader so
-	// manager-side skills treat a leader-only team the same way they treat a
-	// populated team.
+	// compatibility readers treat a leader-only team like a populated team.
 	assertEventually(t, func() error {
 		if _, ok := readWorkersRegistry(t).Workers[name+"-lead"]; !ok {
 			return fmt.Errorf("registry missing leader %q", name+"-lead")
@@ -377,8 +374,8 @@ func TestTeamUpdate_RemovesStaleWorker(t *testing.T) {
 		t.Errorf("DeprovisionWorker should have been called for stale %s-w2", name)
 	}
 
-	// workers-registry.json must drop the stale entry so manager-side
-	// tooling stops resolving it; the surviving leader + worker stay.
+	// workers-registry.json must drop the stale compatibility entry; the
+	// surviving leader + worker stay.
 	assertEventually(t, func() error {
 		reg := readWorkersRegistry(t)
 		if _, ok := reg.Workers[name+"-w2"]; ok {
@@ -441,8 +438,7 @@ func TestTeamDelete_CleansUpAllMembers(t *testing.T) {
 	}
 
 	// workers-registry.json must no longer reference either member: a deleted
-	// team must not leave ghost rows that manager-side tooling would keep
-	// trying to contact.
+	// team must not leave ghost compatibility rows.
 	assertEventually(t, func() error {
 		reg := readWorkersRegistry(t)
 		if _, ok := reg.Workers[name+"-lead"]; ok {

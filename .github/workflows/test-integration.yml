@@ -1,7 +1,7 @@
 name: Integration Tests
 
 on:
-  pull_request_target:
+  pull_request:
     branches:
       - main
     paths:
@@ -67,15 +67,21 @@ on:
         required: false
         default: 'qwen3.6-plus'
 
+permissions:
+  # Fork PRs stay read-only. The matrix below also removes every shard that
+  # consumes repository or LLM secrets when the PR source is untrusted.
+  contents: read
+  pull-requests: read
+
 env:
   # Tests that do not require a GitHub token, split into five shards for parallel execution
   # Shard A: LLM interaction tests (sequential dependency: 02 creates alice → 03-06 use alice)
-  # Shard B: LLM interaction tests 2 (task assignment with LLM)
-  # Shard C: Controller/CR tests (independent, no cross-test dependencies)
-  # Shard D: Controller/CR tests 2 (team project DAG)
+  # Shard B: LLM interaction tests 2 (task assignment and imported Worker)
+  # Shard C: Controller/CR tests that never call an LLM
+  # Shard D: Controller/CR tests 2 (team project DAG with real LLM Workers)
   SHARD_A_TESTS: "01 02 03 04 05 06"
-  SHARD_B_TESTS: "14"
-  SHARD_C_TESTS: "15 17 18 19 20 22 23 24 25 100"
+  SHARD_B_TESTS: "14 15"
+  SHARD_C_TESTS: "17 18 19 20 22 23 24 25 100"
   SHARD_D_TESTS: "21"
   # Shard E: native GitHub MCP (safe events only), five-Worker runtime matrix,
   # and static AgentScope Manager parity
@@ -92,17 +98,16 @@ jobs:
     timeout-minutes: 2
     outputs:
       openclaw_base: ${{ steps.decide.outputs.openclaw_base }}
+      test_matrix: ${{ steps.test-matrix.outputs.matrix }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
           fetch-depth: 0
 
       - name: Detect openclaw-base changes (PR only)
         id: filter
-        if: github.event_name == 'pull_request_target'
+        if: github.event_name == 'pull_request'
         uses: dorny/paths-filter@v3
         with:
           ref: ${{ github.event.pull_request.head.sha }}
@@ -114,12 +119,31 @@ jobs:
       - name: Decide whether to rebuild openclaw-base
         id: decide
         run: |
-          if [ "${{ github.event_name }}" = "pull_request_target" ]; then
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
             echo "openclaw_base=${{ steps.filter.outputs.openclaw_base }}" >> $GITHUB_OUTPUT
           else
             # push to main / tag / workflow_dispatch: always rebuild
             echo "openclaw_base=true" >> $GITHUB_OUTPUT
           fi
+
+      - name: Select integration test matrix
+        id: test-matrix
+        env:
+          UNTRUSTED_PR: ${{ github.event_name == 'pull_request' && (github.event.pull_request.head.repo.full_name != github.repository || github.actor == 'dependabot[bot]') }}
+        run: |
+          MATRIX='[
+            {"shard":"llm-interaction","filter_env":"SHARD_A_TESTS","worker_runtime":"openclaw","requires_secret":true},
+            {"shard":"llm-interaction-2","filter_env":"SHARD_B_TESTS","worker_runtime":"openclaw","requires_secret":true},
+            {"shard":"controller-cr","filter_env":"SHARD_C_TESTS","worker_runtime":"openclaw","requires_secret":false},
+            {"shard":"controller-cr-2","filter_env":"SHARD_D_TESTS","worker_runtime":"copaw","requires_secret":true},
+            {"shard":"runtime-matrix","filter_env":"SHARD_E_TESTS","worker_runtime":"openclaw","requires_secret":true}
+          ]'
+          if [ "$UNTRUSTED_PR" = "true" ]; then
+            MATRIX=$(echo "$MATRIX" | jq -c '[.[] | select(.requires_secret == false)]')
+          else
+            MATRIX=$(echo "$MATRIX" | jq -c '.')
+          fi
+          echo "matrix={\"include\":$MATRIX}" >> "$GITHUB_OUTPUT"
 
   # Step 1a: Build the shared base image (agentteams-controller)
   build-base:
@@ -128,9 +152,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -176,9 +197,6 @@ jobs:
 
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -225,9 +243,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -299,8 +314,8 @@ jobs:
 
   # Step 3: Run test shards in parallel, each on its own runner with isolated cluster
   integration-tests:
-    needs: build-images
-    if: always() && needs.build-images.result == 'success'
+    needs: [detect-changes, build-images]
+    if: always() && needs.detect-changes.result == 'success' && needs.build-images.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     permissions:
@@ -309,25 +324,7 @@ jobs:
       actions: read
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          # AgentScope is the only Manager runtime. Worker-specific behavior
-          # remains covered by the selected default runtime and shard E.
-          - shard: llm-interaction
-            filter_env: SHARD_A_TESTS
-            worker_runtime: openclaw
-          - shard: llm-interaction-2
-            filter_env: SHARD_B_TESTS
-            worker_runtime: openclaw
-          - shard: controller-cr
-            filter_env: SHARD_C_TESTS
-            worker_runtime: openclaw
-          - shard: controller-cr-2
-            filter_env: SHARD_D_TESTS
-            worker_runtime: copaw
-          - shard: runtime-matrix
-            filter_env: SHARD_E_TESTS
-            worker_runtime: openclaw
+      matrix: ${{ fromJSON(needs.detect-changes.outputs.test_matrix) }}
 
     steps:
       - name: Free Up Disk Space
@@ -343,8 +340,9 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          # The reviewed merge ref is sufficient for the tests. Do not leave
+          # the job token in git config where PR-controlled code can read it.
+          persist-credentials: false
 
       - name: Download all images
         uses: actions/download-artifact@v4
@@ -364,14 +362,16 @@ jobs:
       - name: Run embedded integration tests
         id: tests
         env:
-          AGENTTEAMS_LLM_API_KEY: ${{ secrets.AGENTTEAMS_LLM_API_KEY }}
+          # The installer requires a non-empty value even for Controller-only
+          # shards. Only matrix entries marked secret receive the real key.
+          AGENTTEAMS_LLM_API_KEY: ${{ matrix.requires_secret && secrets.AGENTTEAMS_LLM_API_KEY || 'ci-placeholder-no-llm-calls' }}
           AGENTTEAMS_LLM_PROVIDER: qwen
           AGENTTEAMS_DEFAULT_MODEL: ${{ inputs.model || 'qwen3.6-plus' }}
           AGENTTEAMS_MANAGER_RUNTIME: agentscope
-          # Never expose a repository token to pull_request_target code.
-          # On push/tag/workflow_dispatch, test-12 uses it for read-only native
-          # AgentScope MCP verification.
-          AGENTTEAMS_GITHUB_TOKEN: ${{ github.event_name != 'pull_request_target' && secrets.GITHUB_TOKEN || '' }}
+          # Fork and Dependabot PR code never receives a repository token.
+          # Trusted PRs and non-PR events use it for read-only native AgentScope
+          # GitHub MCP verification in test-12.
+          AGENTTEAMS_GITHUB_TOKEN: ${{ matrix.shard == 'runtime-matrix' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]')) && secrets.GITHUB_TOKEN || '' }}
           # Propagate the worker runtime to worker-creating tests too. Without
           # this the apply-zip path (test-15) silently falls back to openclaw
           # on the copaw and hermes matrix entries because the controller's
@@ -392,7 +392,7 @@ jobs:
       # ============================================================
 
       - name: Download latest release baseline
-        if: github.event_name == 'pull_request_target' && matrix.shard == 'llm-interaction' && matrix.worker_runtime == 'openclaw'
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]' && matrix.shard == 'llm-interaction' && matrix.worker_runtime == 'openclaw'
         continue-on-error: true
         run: |
           mkdir -p baseline-metrics
@@ -412,7 +412,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Generate metrics comparison and post PR comment
-        if: github.event_name == 'pull_request_target' && matrix.shard == 'llm-interaction' && matrix.worker_runtime == 'openclaw'
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]' && matrix.shard == 'llm-interaction' && matrix.worker_runtime == 'openclaw'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -476,7 +476,7 @@ jobs:
           fi
 
       - name: Post failure comment to PR
-        if: github.event_name == 'pull_request_target' && failure()
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]' && failure()
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

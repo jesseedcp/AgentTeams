@@ -1,8 +1,10 @@
 #!/bin/bash
 # start-mc-mirror.sh - Initialize MinIO storage and start periodic Remote->Local sync
 #
-# Manager's own workspace (/root/manager-workspace/) is LOCAL ONLY and not synced to MinIO.
-# MinIO only stores shared data and worker configs (/root/agentteams-fs/).
+# This process runs in the embedded Controller, not in the AgentScope Manager.
+# It mirrors shared Worker/control-plane data under /root/agentteams-fs.
+# Manager persistence lives at /var/lib/agentteams-manager; its Python runtime
+# writes immutable journals and verified snapshots through the S3 API.
 #
 # ── File Sync Design Principle ──────────────────────────────────────────────
 #
@@ -16,7 +18,7 @@
 #     Examples:
 #       - Manager pushes task spec → @mentions Worker → Worker runs file-sync
 #       - Worker pushes task result → @mentions Manager → Manager runs mc mirror
-#       - Manager pushes skill update → push-worker-skills.sh notifies Worker
+#       - Controller publishes desired Worker skills → Worker pulls on notice
 #
 #   This script only provides a 5-minute fallback pull as a safety net, in case
 #   an on-demand pull was missed (e.g., agent didn't follow SKILL.md exactly).
@@ -63,7 +65,7 @@ for dir in agentteams-config/workers agentteams-config/teams agentteams-config/h
 done
 
 # Create local mirror directory (for shared + worker data only)
-# Use absolute path because HOME may point to manager-workspace
+# Use the Controller's explicit shared-data path rather than HOME.
 AGENTTEAMS_FS_ROOT="/root/agentteams-fs"
 mkdir -p "${AGENTTEAMS_FS_ROOT}"
 mkdir -p "${AGENTTEAMS_FS_ROOT}/agentteams-config"

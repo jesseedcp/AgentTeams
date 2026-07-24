@@ -234,6 +234,7 @@ type CreateManagerRequest struct {
 	Runtime       string                             `json:"runtime,omitempty"`
 	Image         string                             `json:"image,omitempty"`
 	Soul          string                             `json:"soul,omitempty"`
+	Identity      string                             `json:"identity,omitempty"`
 	Agents        string                             `json:"agents,omitempty"`
 	Skills        []string                           `json:"skills,omitempty"`
 	McpServers    []v1beta1.MCPServer                `json:"mcpServers,omitempty"`
@@ -249,6 +250,7 @@ type UpdateManagerRequest struct {
 	Runtime       string                             `json:"runtime,omitempty"`
 	Image         string                             `json:"image,omitempty"`
 	Soul          string                             `json:"soul,omitempty"`
+	Identity      string                             `json:"identity,omitempty"`
 	Agents        string                             `json:"agents,omitempty"`
 	Skills        []string                           `json:"skills,omitempty"`
 	McpServers    []v1beta1.MCPServer                `json:"mcpServers,omitempty"`
@@ -265,6 +267,7 @@ type ManagerResponse struct {
 	Model        string              `json:"model,omitempty"`
 	Runtime      string              `json:"runtime,omitempty"`
 	Image        string              `json:"image,omitempty"`
+	Identity     string              `json:"identity,omitempty"`
 	MatrixUserID string              `json:"matrixUserID,omitempty"`
 	RoomID       string              `json:"roomID,omitempty"`
 	Version      string              `json:"version,omitempty"`

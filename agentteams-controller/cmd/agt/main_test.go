@@ -147,11 +147,14 @@ func TestReadMCPServersRejectsUnsafeInput(t *testing.T) {
 	}
 }
 
-func TestGetResponseTypesPreserveMCPServers(t *testing.T) {
-	data := []byte(`{"name":"alice","phase":"Running","mcpServers":[{"name":"jira","url":"https://gateway/mcp/jira","transport":"http"}]}`)
+func TestGetResponseTypesPreserveSkillsAndMCPServers(t *testing.T) {
+	data := []byte(`{"name":"alice","phase":"Running","skills":["github-operations"],"mcpServers":[{"name":"jira","url":"https://gateway/mcp/jira","transport":"http"}]}`)
 	var worker workerResp
 	if err := json.Unmarshal(data, &worker); err != nil {
 		t.Fatalf("decode worker: %v", err)
+	}
+	if len(worker.Skills) != 1 || worker.Skills[0] != "github-operations" {
+		t.Fatalf("worker skills = %#v", worker.Skills)
 	}
 	if len(worker.McpServers) != 1 || worker.McpServers[0].Name != "jira" {
 		t.Fatalf("worker mcpServers = %#v", worker.McpServers)

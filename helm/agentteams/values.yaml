@@ -21,6 +21,7 @@ credentials:
   llmProvider: "openai-compat"
   defaultModel: "gpt-5.4"
   llmBaseUrl: ""              # OpenAI-compatible base URL (e.g. https://api.openai.com/v1)
+  githubToken: ""             # Optional GitHub PAT; injected only into the Controller and AgentScope Manager
 
 # ── Preflight checks ─────────────────────────────────────────────────────
 preflight:
@@ -296,6 +297,9 @@ worker:
       tag: ""                 # defaults to global.imageTag
     hermes:
       repository: higress-registry.cn-hangzhou.cr.aliyuncs.com/agentteams/agentteams-hermes-worker
+      tag: ""                 # defaults to global.imageTag
+    qwenpaw:
+      repository: higress-registry.cn-hangzhou.cr.aliyuncs.com/agentteams/agentteams-qwenpaw-worker
       tag: ""                 # defaults to global.imageTag
     openhuman:
       repository: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/agentteams-openhuman-worker

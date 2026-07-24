@@ -12,15 +12,15 @@
 
 **AgentTeams is an open-source collaborative multi-agent runtime platform. It enables multiple Agents to collaborate in a controlled and auditable room, with full human visibility and intervention capabilities throughout the process.**
 
-Built on a **Manager-Workers architecture**, AgentTeams features a Manager that centrally orchestrates multiple Workers, focusing on collaboration scenarios between humans and Agents, as well as among Agents within enterprise environments.
+Built on a **Manager-Workers architecture**, AgentTeams uses an **AgentScope 2.0 Manager** to centrally orchestrate multiple Workers, focusing on collaboration scenarios between humans and Agents, as well as among Agents within enterprise environments.
 
-AgentTeams does not compete with other Agent runtimes. Instead of implementing Agent logic itself, it orchestrates and manages multiple Agent containers (including the Manager and numerous Workers).
+The Manager runtime is fixed to AgentScope 2.0. Worker execution remains pluggable across OpenClaw, CoPaw, Hermes, QwenPaw, and OpenHuman.
 
 ## Key Features
 
 - 🧬 **Manager-Workers Architecture**: Eliminates the need for human oversight of individual Worker Claws by enabling Agents to manage other Agents.
 
-- 🤝 **Multi-Runtime Collaboration**: OpenClaw, QwenPaw, and Hermes Workers coexist in the same IM room. Use deterministic agents (OpenClaw/QwenPaw) as Leaders to orchestrate tasks, and Hermes Workers for autonomous code execution — each runtime does what it's best at.
+- 🤝 **Multi-Runtime Collaboration**: OpenClaw, CoPaw, Hermes, QwenPaw, and OpenHuman Workers coexist in the same IM room. Select the runtime that best fits each role while the AgentScope Manager keeps orchestration consistent.
 
 - 📦 **MinIO Shared File System**: Introduces a shared file system for inter-Agent information exchange, significantly reducing token consumption in multi-Agent collaboration scenarios.
 
@@ -29,6 +29,8 @@ AgentTeams does not compete with other Agent runtimes. Instead of implementing A
 - ☎️ **Element IM Client + Tuwunel IM Server (both Matrix protocol-based)**: Eliminating DingTalk/Lark integration overhead and enterprise approval workflows. Enables rapid user onboarding to experience the "delight" of model services within an IM environment, while maintaining compatibility with native OpenClaw IM integration.
 
 ## News
+
+> Entries below describe upstream project history. In this project, the current Manager is AgentScope 2.0 only; OpenClaw, CoPaw, Hermes, QwenPaw, and OpenHuman are Worker runtimes.
 
 - **2026-07-17**: [Release Notes](https://github.com/agentscope-ai/AgentTeams/releases/tag/v1.2.0-beta.1) — AgentTeams v1.2.0-beta.1 (prerelease): completes the public rename from the previous project name across images, Kubernetes APIs, Helm, Matrix, storage, and runtime contracts; adds the plugin platform, TeamHarness and WorkerFlow integrations, Matrix AppService and Human SSO, model-provider routing and LLM preflight, plus richer controller observability. Beta installation requires explicit opt-in, while the stable default remains v1.1.2.
 - **2026-05-27**: [Release Notes](https://github.com/agentscope-ai/AgentTeams/releases/tag/v1.1.2) — AgentTeams v1.1.2: QwenPaw-first installer with keep-all upgrade flow, Team human coordinators and refreshed Team Leader coordination tools, Nacos remote skills with `sts-agentteams` / `ai-registry` STS scope, Worker CR-name decoupled from runtime name, controller reconcile metrics and graceful shutdown.
@@ -62,14 +64,26 @@ AgentTeams does not compete with other Agent runtimes. Instead of implementing A
 
 ### Install
 
+To run an unreleased `main` commit, build the exact source instead of pulling a
+previously published image:
+
+```bash
+git clone https://github.com/jesseedcp/AgentTeams.git
+cd AgentTeams
+make install-interactive
+```
+
+The one-line installers below are for tags whose container images have already
+been published.
+
 **macOS / Linux:**
 ```bash
-bash <(curl -sSL https://raw.githubusercontent.com/agentscope-ai/AgentTeams/main/install/agentteams-install.sh)
+bash <(curl -sSL https://raw.githubusercontent.com/jesseedcp/AgentTeams/main/install/agentteams-install.sh)
 ```
 
 **Windows (PowerShell 7+ recommended):**
 ```powershell
-Set-ExecutionPolicy Bypass -Scope Process -Force; $wc=New-Object Net.WebClient; $wc.Encoding=[Text.Encoding]::UTF8; iex $wc.DownloadString('https://raw.githubusercontent.com/agentscope-ai/AgentTeams/main/install/agentteams-install.ps1')
+Set-ExecutionPolicy Bypass -Scope Process -Force; $wc=New-Object Net.WebClient; $wc.Encoding=[Text.Encoding]::UTF8; iex $wc.DownloadString('https://raw.githubusercontent.com/jesseedcp/AgentTeams/main/install/agentteams-install.ps1')
 ```
 
 The installer walks you through:
@@ -90,22 +104,22 @@ Open http://127.0.0.1:18088 in your browser and log in to Element Web. The Manag
 
 ```bash
 # Upgrade to latest (preserves all data)
-bash <(curl -sSL https://raw.githubusercontent.com/agentscope-ai/AgentTeams/main/install/agentteams-install.sh)
+bash <(curl -sSL https://raw.githubusercontent.com/jesseedcp/AgentTeams/main/install/agentteams-install.sh)
 
 # Upgrade to specific version
-AGENTTEAMS_VERSION=v1.0.5 bash <(curl -sSL https://raw.githubusercontent.com/agentscope-ai/AgentTeams/main/install/agentteams-install.sh)
+AGENTTEAMS_VERSION=vX.Y.Z bash <(curl -sSL https://raw.githubusercontent.com/jesseedcp/AgentTeams/main/install/agentteams-install.sh)
 ```
 
 ## Uninstall
 
 **macOS / Linux:**
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/agentscope-ai/AgentTeams/main/install/agentteams-install.sh) uninstall
+bash <(curl -fsSL https://raw.githubusercontent.com/jesseedcp/AgentTeams/main/install/agentteams-install.sh) uninstall
 ```
 
 **Windows (PowerShell):**
 ```powershell
-Set-ExecutionPolicy Bypass -Scope Process -Force; $wc=New-Object Net.WebClient; $wc.Encoding=[Text.Encoding]::UTF8; $s=$wc.DownloadString('https://raw.githubusercontent.com/agentscope-ai/AgentTeams/main/install/agentteams-install.ps1'); & ([scriptblock]::Create($s)) uninstall
+Set-ExecutionPolicy Bypass -Scope Process -Force; $wc=New-Object Net.WebClient; $wc.Encoding=[Text.Encoding]::UTF8; $s=$wc.DownloadString('https://raw.githubusercontent.com/jesseedcp/AgentTeams/main/install/agentteams-install.ps1'); & ([scriptblock]::Create($s)) uninstall
 ```
 
 This removes all AgentTeams containers (Manager, Workers, docker-proxy), Docker volume, network, env file, workspace directory, and install log.
@@ -171,14 +185,15 @@ helm install agentteams higress.io/agentteams \
 | `credentials.llmProvider` | no | LLM provider name, defaults to `openai-compat` |
 | `credentials.defaultModel` | no | Default model, defaults to `gpt-5.4` |
 | `credentials.llmBaseUrl` | no | OpenAI-compatible base URL (e.g. `https://api.deepseek.com/v1`). Leave empty for official OpenAI API |
+| `credentials.githubToken` | no | Optional GitHub PAT for the native GitHub MCP bootstrap; stored in a Secret and injected only into the Controller/Manager path |
 | `preflight.llm.enabled` | no | Run an install/upgrade hook that validates the LLM API key, base URL, and model before the controller starts. Defaults to `true` |
 | `preflight.llm.strict` | no | Fail the Helm install/upgrade when the LLM preflight fails. Defaults to `true`; set to `false` to emit a warning and continue |
 | `preflight.llm.timeoutSeconds` | no | Per-request timeout for the LLM preflight HTTP probe. Defaults to `30` |
 | `preflight.llm.retries` | no | Retry count for transient LLM preflight failures such as rate limits and provider 5xx responses. Defaults to `2` |
 | `preflight.llm.activeDeadlineSeconds` | no | Kubernetes Job active deadline for the preflight hook. Defaults to `120` |
 | `preflight.llm.resources` | no | Optional Kubernetes resource requests/limits for the preflight hook container |
-| `manager.runtime` | no | Manager agent runtime: `openclaw` (default), `copaw`, or `hermes` |
-| `worker.defaultRuntime` | no | Default Worker runtime: `openclaw` (default), `copaw`, or `hermes` |
+| `manager.runtime` | no | Manager runtime; only `agentscope` is supported |
+| `worker.defaultRuntime` | no | Default Worker runtime: `openclaw` (default), `copaw`, `hermes`, `qwenpaw`, or `openhuman` |
 
 Helm installs run an LLM preflight hook by default. The hook sends a minimal OpenAI-compatible `/chat/completions` request using `credentials.llmApiKey`, `credentials.llmBaseUrl`, and `credentials.defaultModel`; invalid keys, unreachable base URLs, unsupported models, quota errors, and provider outages fail the install before the controller starts. To bypass this check for restricted or offline clusters:
 
@@ -192,12 +207,12 @@ helm install agentteams higress.io/agentteams \
 ```
 
 <details>
-<summary>Using alternative runtimes (QwenPaw Manager + Hermes Workers)</summary>
+<summary>Using an alternative Worker runtime</summary>
 
 ```bash
 helm install agentteams higress.io/agentteams \
-  -n agentteams-system --create-namespace --devel \
-  --set manager.runtime=copaw \
+  -n agentteams-system --create-namespace \
+  --set manager.runtime=agentscope \
   --set worker.defaultRuntime=hermes \
   --set credentials.llmApiKey=<your-api-key> \
   --set credentials.llmBaseUrl=https://your-provider.example.com/v1 \
@@ -206,7 +221,9 @@ helm install agentteams higress.io/agentteams \
   --set gateway.publicURL=http://localhost:18080
 ```
 
-The image for each component is automatically selected based on the runtime (`agentteams-manager` / `agentteams-manager-copaw` for Manager; `agentteams-worker` / `agentteams-copaw-worker` / `agentteams-hermes-worker` for Workers).
+The Manager image is always `agentteams-manager` and runs AgentScope
+2.0.4.post1. Worker images are selected independently for OpenClaw, CoPaw,
+Hermes, QwenPaw, or OpenHuman.
 
 </details>
 
@@ -369,11 +386,13 @@ No hidden agent-to-agent calls. Everything is visible and intervenable.
 
 ## Multi-Runtime Collaboration
 
-AgentTeams supports three Worker runtimes that can **coexist in the same IM room**, collaborating on tasks together:
+AgentTeams supports five Worker runtimes that can **coexist in the same IM room**, collaborating on tasks together:
 
 - **OpenClaw** (Node.js) — General-purpose agent with rich skills ecosystem, ideal for task orchestration and tool calling
+- **CoPaw** (Python) — Lightweight conversational Worker with Matrix and shared-storage integration
 - **QwenPaw** (Python) — Lightweight runtime, suited for browser automation and quick tasks
 - **Hermes** ([hermes-agent](https://github.com/NousResearch/hermes-agent)) — Autonomous coding agent with terminal sandbox, self-improving skills, and persistent memory
+- **OpenHuman** (Rust) — Native Matrix Worker optimized for low-overhead execution
 
 Each runtime excels at different tasks. A common pattern: use deterministic agents (OpenClaw/QwenPaw) as Leaders to decompose and assign work, and Hermes Workers for autonomous code execution. All runtimes communicate via Matrix `m.mentions` in the same room — fully visible, fully intervenable.
 
@@ -385,27 +404,25 @@ agt update worker --runtime hermes
 ## Architecture
 
 ```
-┌───────────────────────────────────────────────┐
-│            agentteams-controller                  │
-│  Higress │ Tuwunel │ MinIO │ Element Web      │
-└──────────────────┬────────────────────────────┘
-                   │ Matrix + HTTP Files
-┌──────────────────┴──────────┐
-│     agentteams-manager-agent     │
-│     Manager (OpenClaw/       │
-│       QwenPaw)               │
-└──────────────────┬──────────┘
-                   │
-┌──────────────────┼────────────────────────────┐
-│                  │                            │
-▼                  ▼                            ▼
-Worker Alice    Worker Bob              Worker Charlie
-(OpenClaw)      (QwenPaw)               (Hermes)
+┌──────────────────────────────────────────────────────┐
+│                 agentteams-controller                │
+│        Higress │ Tuwunel │ MinIO │ Element Web       │
+└─────────────────────────┬────────────────────────────┘
+                          │ typed API + Matrix + storage
+┌─────────────────────────▼────────────────────────────┐
+│              Manager — AgentScope 2.0                │
+└─────────────────────────┬────────────────────────────┘
+                          │ creates and coordinates
+┌─────────────────────────▼────────────────────────────┐
+│ OpenClaw │ CoPaw │ Hermes │ QwenPaw │ OpenHuman     │
+│                    Worker runtimes                    │
+└──────────────────────────────────────────────────────┘
 ```
 
 | Component | Role |
 |-----------|------|
 | agentteams-controller | Kubernetes-native control plane, reconciles Worker/Team/Manager CRs |
+| AgentScope 2.0 Manager | Conversational orchestration, policy enforcement, task/team workflows, and streaming Matrix replies |
 | Higress AI Gateway | LLM proxy, MCP Server hosting, credential management |
 | Tuwunel (Matrix) | Self-hosted IM server for all Agent + Human communication |
 | Element Web | Browser client, zero setup |
@@ -435,7 +452,7 @@ Worker Alice    Worker Bob              Worker Charlie
 ## Troubleshooting
 
 ```bash
-docker exec -it agentteams-manager cat /var/log/agentteams/manager-agent.log
+docker logs --tail 200 agentteams-manager
 ```
 
 See [docs/zh-cn/faq.md](docs/zh-cn/faq.md) for common issues.
@@ -453,7 +470,7 @@ Then open the AgentTeams repo in Cursor, Claude Code, or similar AI tool and ask
 
 > "Read the JSONL files in debug-log/. Analyze the Matrix message logs and agent session logs together. Cross-reference with the AgentTeams codebase to identify the root cause of [describe your bug]."
 
-Include the AI's analysis in your [bug report](https://github.com/agentscope-ai/AgentTeams/issues/new?template=bug_report.yml).
+Include the AI's analysis in your [bug report](https://github.com/jesseedcp/AgentTeams/issues/new?template=bug_report.yml).
 
 You can also let the AI tool submit the issue or PR directly. Install [GitHub CLI](https://cli.github.com/), run `gh auth login` to authenticate in your browser, then add the [OpenClaw GitHub skill](https://github.com/openclaw/openclaw/blob/main/skills/github/SKILL.md) to your AI coding tool (Cursor, Claude Code, etc.). After that, just ask it to file the issue or open a PR based on its analysis.
 
@@ -476,7 +493,7 @@ make help
 ## Community
 
 - [Discord](https://discord.gg/NVjNA4BAVw)
-- [GitHub Issues](https://github.com/agentscope-ai/AgentTeams/issues)
+- [GitHub Issues](https://github.com/jesseedcp/AgentTeams/issues)
 
 ## License
 

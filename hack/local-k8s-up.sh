@@ -16,7 +16,6 @@
 #   AGENTTEAMS_NAMESPACE            K8s namespace (default: agentteams)
 #   AGENTTEAMS_SKIP_KIND            Skip kind cluster creation (default: 0)
 #   AGENTTEAMS_SKIP_BUILD           Skip local image build (default: 0, set to 1 to use remote images)
-#   AGENTTEAMS_BUILD_K8S_IMAGE      Build lightweight k8s manager image instead of all-in-one (default: 0)
 #
 # Usage:
 #   AGENTTEAMS_LLM_API_KEY=sk-xxx ./hack/local-k8s-up.sh
@@ -30,7 +29,6 @@ CLUSTER_NAME="${AGENTTEAMS_CLUSTER_NAME:-agentteams}"
 NAMESPACE="${AGENTTEAMS_NAMESPACE:-agentteams}"
 SKIP_KIND="${AGENTTEAMS_SKIP_KIND:-0}"
 SKIP_BUILD="${AGENTTEAMS_SKIP_BUILD:-0}"
-BUILD_K8S_IMAGE="${AGENTTEAMS_BUILD_K8S_IMAGE:-0}"
 CONTROLLER_REPLICAS="${AGENTTEAMS_CONTROLLER_REPLICAS:-1}"
 
 LLM_API_KEY="${AGENTTEAMS_LLM_API_KEY:-}"
@@ -45,6 +43,12 @@ error() { echo -e "\033[31m[AgentTeams K8s ERROR]\033[0m $1" >&2; exit 1; }
 for cmd in kind helm kubectl docker; do
     command -v "$cmd" >/dev/null 2>&1 || error "$cmd is required but not found"
 done
+if [ "$SKIP_BUILD" = "0" ]; then
+    for cmd in ruby python3; do
+        command -v "$cmd" >/dev/null 2>&1 || \
+            error "$cmd is required to build the QwenPaw Worker image"
+    done
+fi
 
 if [ -z "$LLM_API_KEY" ]; then
     error "AGENTTEAMS_LLM_API_KEY is required. Example: AGENTTEAMS_LLM_API_KEY=sk-xxx $0"
@@ -67,11 +71,11 @@ fi
 # ── Step 2: Build & load local images ──────────────────────────────────────
 
 MANAGER_IMAGE="agentteams/manager:local"
-COPAW_MANAGER_IMAGE="agentteams/manager-copaw:local"
 CONTROLLER_IMAGE="agentteams/agentteams-controller:local"
 WORKER_IMAGE="agentteams/worker-agent:local"
 COPAW_WORKER_IMAGE="agentteams/copaw-worker:local"
 HERMES_WORKER_IMAGE="agentteams/hermes-worker:local"
+QWENPAW_WORKER_IMAGE="agentteams/qwenpaw-worker:local"
 OPENHUMAN_WORKER_IMAGE="agentteams/openhuman-worker:local"
 HELM_IMAGE_OVERRIDES=""
 
@@ -80,30 +84,17 @@ if [ "$SKIP_BUILD" = "0" ]; then
 
     # Controller
     log "Building controller image..."
+    rm -rf "${PROJECT_ROOT}/agentteams-controller/agent"
+    cp -R "${PROJECT_ROOT}/manager/agent" "${PROJECT_ROOT}/agentteams-controller/agent"
     docker build -t "$CONTROLLER_IMAGE" -f "${PROJECT_ROOT}/agentteams-controller/Dockerfile" "${PROJECT_ROOT}/agentteams-controller"
 
-    # Manager (choose between all-in-one and k8s-lightweight)
-    if [ "$BUILD_K8S_IMAGE" = "1" ]; then
-        log "Building manager image (lightweight k8s)..."
-        docker build -t "$MANAGER_IMAGE" \
-            --build-arg OPENCLAW_BASE_IMAGE=higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/openclaw-base:20260423-8359cbc \
-            --build-arg AGENTTEAMS_CONTROLLER_IMAGE="$CONTROLLER_IMAGE" \
-            -f "${PROJECT_ROOT}/manager/Dockerfile.k8s" "${PROJECT_ROOT}"
-    else
-        log "Building manager image (all-in-one)..."
-        docker build -t "$MANAGER_IMAGE" \
-            --build-arg OPENCLAW_BASE_IMAGE=higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/openclaw-base:20260423-8359cbc \
-            --build-arg AGENTTEAMS_CONTROLLER_IMAGE="$CONTROLLER_IMAGE" \
-            -f "${PROJECT_ROOT}/manager/Dockerfile" "${PROJECT_ROOT}"
-    fi
-
-    # CoPaw Manager (lightweight Python image with copaw_worker for bridge/sync)
-    log "Building CoPaw manager image..."
-    docker build -t "$COPAW_MANAGER_IMAGE" \
+    # AgentScope 2.x is the single Manager runtime.
+    log "Building AgentScope manager image..."
+    docker build -t "$MANAGER_IMAGE" \
         --build-arg AGENTTEAMS_CONTROLLER_IMAGE="$CONTROLLER_IMAGE" \
-        -f "${PROJECT_ROOT}/manager/Dockerfile.copaw" "${PROJECT_ROOT}"
+        -f "${PROJECT_ROOT}/manager/Dockerfile" "${PROJECT_ROOT}"
 
-    # Worker images (openclaw + copaw)
+    # Worker images (openclaw + copaw + hermes + qwenpaw + openhuman)
     log "Building worker image (openclaw)..."
     docker build -t "$WORKER_IMAGE" \
         --build-arg OPENCLAW_BASE_IMAGE=higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/openclaw-base:20260423-8359cbc \
@@ -123,17 +114,29 @@ if [ "$SKIP_BUILD" = "0" ]; then
         --build-context shared="${PROJECT_ROOT}/shared/lib" \
         -f "${PROJECT_ROOT}/hermes/Dockerfile" "${PROJECT_ROOT}/hermes"
 
+    log "Building worker image (qwenpaw)..."
+    OUT_DIR="${PROJECT_ROOT}/dist/adapters/qwenpaw" \
+        ruby "${PROJECT_ROOT}/plugins/teamharness/adapters/qwenpaw/scripts/build-qwenpaw-plugin.rb" \
+        "${PROJECT_ROOT}/plugins/teamharness/plugin.yaml" >/dev/null
+    OUT_DIR="${PROJECT_ROOT}/dist/adapters/qwenpaw" \
+        ruby "${PROJECT_ROOT}/plugins/workerflow/adapters/qwenpaw/scripts/build-qwenpaw-plugin.rb" \
+        "${PROJECT_ROOT}/plugins/workerflow/plugin.yaml" >/dev/null
+    docker build -t "$QWENPAW_WORKER_IMAGE" \
+        --build-context shared="${PROJECT_ROOT}/shared/lib" \
+        -f "${PROJECT_ROOT}/qwenpaw/Dockerfile" "${PROJECT_ROOT}"
+
     log "Building worker image (openhuman)..."
     docker build -t "$OPENHUMAN_WORKER_IMAGE" \
+        --build-arg AGENTTEAMS_CONTROLLER_IMAGE="$CONTROLLER_IMAGE" \
         -f "${PROJECT_ROOT}/openhuman/Dockerfile" "${PROJECT_ROOT}"
 
     log "Loading images into kind cluster..."
     kind load docker-image "$MANAGER_IMAGE" --name "$CLUSTER_NAME"
-    kind load docker-image "$COPAW_MANAGER_IMAGE" --name "$CLUSTER_NAME"
     kind load docker-image "$CONTROLLER_IMAGE" --name "$CLUSTER_NAME"
     kind load docker-image "$WORKER_IMAGE" --name "$CLUSTER_NAME"
     kind load docker-image "$COPAW_WORKER_IMAGE" --name "$CLUSTER_NAME"
     kind load docker-image "$HERMES_WORKER_IMAGE" --name "$CLUSTER_NAME"
+    kind load docker-image "$QWENPAW_WORKER_IMAGE" --name "$CLUSTER_NAME"
     kind load docker-image "$OPENHUMAN_WORKER_IMAGE" --name "$CLUSTER_NAME"
 
     # Pre-load Docker Hub images that Kind nodes may not be able to pull directly
@@ -161,11 +164,12 @@ if [ "$SKIP_BUILD" = "0" ]; then
             ctr --namespace=k8s.io images import --snapshotter=overlayfs -
     done
 
-    HELM_IMAGE_OVERRIDES="--set manager.image.repository=agentteams/manager-copaw --set manager.image.tag=local --set manager.image.pullPolicy=Never"
+    HELM_IMAGE_OVERRIDES="--set manager.image.repository=agentteams/manager --set manager.image.tag=local --set manager.image.pullPolicy=Never"
     HELM_IMAGE_OVERRIDES="${HELM_IMAGE_OVERRIDES} --set controller.image.repository=agentteams/agentteams-controller --set controller.image.tag=local --set controller.image.pullPolicy=Never"
     HELM_IMAGE_OVERRIDES="${HELM_IMAGE_OVERRIDES} --set worker.defaultImage.openclaw.repository=agentteams/worker-agent --set worker.defaultImage.openclaw.tag=local"
     HELM_IMAGE_OVERRIDES="${HELM_IMAGE_OVERRIDES} --set worker.defaultImage.copaw.repository=agentteams/copaw-worker --set worker.defaultImage.copaw.tag=local"
     HELM_IMAGE_OVERRIDES="${HELM_IMAGE_OVERRIDES} --set worker.defaultImage.hermes.repository=agentteams/hermes-worker --set worker.defaultImage.hermes.tag=local"
+    HELM_IMAGE_OVERRIDES="${HELM_IMAGE_OVERRIDES} --set worker.defaultImage.qwenpaw.repository=agentteams/qwenpaw-worker --set worker.defaultImage.qwenpaw.tag=local"
     HELM_IMAGE_OVERRIDES="${HELM_IMAGE_OVERRIDES} --set worker.defaultImage.openhuman.repository=agentteams/openhuman-worker --set worker.defaultImage.openhuman.tag=local"
 
     log "Local images built and loaded"

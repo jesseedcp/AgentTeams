@@ -84,6 +84,7 @@ COPY manager/agent/worker-agent/ /opt/agentteams/agent/worker-agent/
 COPY manager/agent/copaw-worker-agent/ /opt/agentteams/agent/copaw-worker-agent/
 COPY manager/agent/hermes-worker-agent/ /opt/agentteams/agent/hermes-worker-agent/
 COPY manager/agent/team-leader-agent/ /opt/agentteams/agent/team-leader-agent/
+COPY manager/agent/worker-skills/ /opt/agentteams/agent/worker-skills/
 COPY manager/agent/SOUL.md /opt/agentteams/agent/SOUL.md
 COPY manager/agent/AGENTS.md /opt/agentteams/agent/AGENTS.md
 COPY manager/agent/TOOLS.md /opt/agentteams/agent/TOOLS.md

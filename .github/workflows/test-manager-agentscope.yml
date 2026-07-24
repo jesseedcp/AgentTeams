@@ -1,0 +1,66 @@
+name: AgentScope Manager Tests
+
+on:
+  pull_request:
+    paths:
+      - "manager-agentscope/**"
+      - "manager/agent/**"
+      - "manager/Dockerfile"
+      - "manager/entrypoint.sh"
+      - "scripts/export-debug-log.py"
+      - "scripts/tests/test_export_debug_log.py"
+      - "tests/manager-skill-parity.json"
+      - "tests/test-28-agentscope-manager-parity.sh"
+      - "docs/agentscope-manager-operations.md"
+      - "docs/zh-cn/agentscope-manager-operations.md"
+      - "docs/manager-guide.md"
+      - "docs/zh-cn/manager-guide.md"
+      - ".github/workflows/test-manager-agentscope.yml"
+  push:
+    branches: [main]
+    paths:
+      - "manager-agentscope/**"
+      - "manager/agent/**"
+      - "manager/Dockerfile"
+      - "manager/entrypoint.sh"
+      - "scripts/export-debug-log.py"
+      - "scripts/tests/test_export_debug_log.py"
+      - "tests/manager-skill-parity.json"
+      - "tests/test-28-agentscope-manager-parity.sh"
+      - "docs/agentscope-manager-operations.md"
+      - "docs/zh-cn/agentscope-manager-operations.md"
+      - "docs/manager-guide.md"
+      - "docs/zh-cn/manager-guide.md"
+      - ".github/workflows/test-manager-agentscope.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: manager-agentscope/pyproject.toml
+
+      - name: Install Manager and test dependencies
+        run: python -m pip install -e "./manager-agentscope[test]"
+
+      - name: Verify dependency consistency
+        run: python -m pip check
+
+      - name: Run AgentScope Manager tests
+        run: python -m pytest -q manager-agentscope/tests
+
+      - name: Verify static Manager parity
+        run: PYTHON_BIN=python bash tests/test-28-agentscope-manager-parity.sh --static-only
+
+      - name: Run debug-export compatibility tests
+        run: python -m unittest scripts.tests.test_export_debug_log -v

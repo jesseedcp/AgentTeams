@@ -313,30 +313,31 @@ else
     log "Found existing room: ${ROOM_ID}"
 fi
 
-# Step 3: Wait for Manager agent to be ready
-# Use `openclaw gateway health` inside the container to confirm the gateway is running
-# and processing Matrix events, then verify Manager has joined the DM room.
+# Step 3: Wait for the AgentScope Manager to report ready, then verify its
+# Matrix session has joined the DM room.
 READY_TIMEOUT="${REPLAY_READY_TIMEOUT:-300}"
 READY_ELAPSED=0
 MANAGER_FULL_ID="@${MANAGER_USER}:${MATRIX_DOMAIN}"
 
 log "Waiting for Manager agent to be ready..."
 
-# Phase 1: Wait for OpenClaw gateway to be healthy inside the container
-GATEWAY_READY=false
+# Phase 1: wait for AgentScope recovery, runtime configuration, and Matrix.
+MANAGER_READY=false
 while [ "${READY_ELAPSED}" -lt "${READY_TIMEOUT}" ]; do
-    if docker exec "${MANAGER_CONTAINER}" openclaw gateway health --json 2>/dev/null | grep -q '"ok"' 2>/dev/null; then
-        GATEWAY_READY=true
-        log "Manager OpenClaw gateway is healthy"
+    if docker exec "${MANAGER_CONTAINER}" python -c \
+        'import urllib.request; urllib.request.urlopen("http://127.0.0.1:18799/readyz", timeout=2).read()' \
+        >/dev/null 2>&1; then
+        MANAGER_READY=true
+        log "AgentScope Manager is ready"
         break
     fi
     sleep 5
     READY_ELAPSED=$((READY_ELAPSED + 5))
-    printf "\r\033[36m[replay]\033[0m Waiting for OpenClaw gateway... (%ds/%ds)" "${READY_ELAPSED}" "${READY_TIMEOUT}"
+    printf "\r\033[36m[replay]\033[0m Waiting for AgentScope Manager... (%ds/%ds)" "${READY_ELAPSED}" "${READY_TIMEOUT}"
 done
 
-if [ "${GATEWAY_READY}" != "true" ]; then
-    error "Manager OpenClaw gateway did not become healthy within ${READY_TIMEOUT}s. Check: docker logs ${MANAGER_CONTAINER}"
+if [ "${MANAGER_READY}" != "true" ]; then
+    error "AgentScope Manager did not become ready within ${READY_TIMEOUT}s. Check: docker logs ${MANAGER_CONTAINER}"
 fi
 
 # Phase 2: Wait for Manager to join the DM room (confirms Matrix channel is active)
@@ -354,7 +355,7 @@ while [ "${READY_ELAPSED}" -lt "${READY_TIMEOUT}" ]; do
 done
 
 if ! echo "${MEMBERS}" | grep -q "${MANAGER_FULL_ID}" 2>/dev/null; then
-    error "Manager did not join the room within ${READY_TIMEOUT}s. Gateway is healthy but Matrix channel may not be configured."
+    error "Manager did not join the room within ${READY_TIMEOUT}s. /readyz succeeded but the Matrix room membership is missing."
 fi
 
 # Step 4: Send message

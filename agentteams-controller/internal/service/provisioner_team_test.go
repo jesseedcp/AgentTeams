@@ -840,3 +840,23 @@ func requireRoomState(t *testing.T, matrixClient *fakeTeamMatrix, roomID string)
 	t.Fatalf("room.meta state for %s not found in %+v", roomID, matrixClient.roomStates)
 	return roomStateCall{}
 }
+
+func TestManagerWelcomeUsesTypedIdentityUpdate(t *testing.T) {
+	body := renderManagerWelcomeBody("zh", "Asia/Shanghai")
+
+	if !strings.Contains(body, "update_manager_identity") {
+		t.Fatalf("welcome prompt does not name the typed identity tool:\n%s", body)
+	}
+	for _, forbidden := range []string{
+		"touch ~/soul-configured",
+		"write their preferences to ~/SOUL.md",
+	} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf(
+				"welcome prompt retains legacy instruction %q:\n%s",
+				forbidden,
+				body,
+			)
+		}
+	}
+}

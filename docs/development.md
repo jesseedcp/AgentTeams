@@ -31,10 +31,11 @@ make build-worker
 make build-agentteams-controller
 make build-embedded
 
-# Alternate Manager / Worker runtimes
-make build-manager-copaw
+# Worker runtimes (the Manager is always AgentScope)
 make build-copaw-worker
 make build-hermes-worker
+make build-qwenpaw-worker
+make build-openhuman-worker
 
 # Build with a specific version tag
 make build VERSION=0.1.0
@@ -298,13 +299,12 @@ export no_proxy="localhost,127.0.0.1,::1,local,169.254/16"
 AGENTTEAMS_LLM_API_KEY="your-key" make test SKIP_BUILD=1
 ```
 
-## Container Runtime Socket (Direct Worker Creation)
+## Container Runtime Socket
 
-When the Manager container is started with the host's container runtime socket mounted, it can create Worker containers directly — no human intervention needed for local deployments.
-
-### How It Works
-
-The Manager detects the socket at startup and sets `AGENTTEAMS_CONTAINER_RUNTIME=socket`. The `container-api.sh` script provides functions to create/start/stop Worker containers via the Docker-compatible REST API (works with both Docker and Podman).
+In embedded deployments the **Controller**, not the Manager, owns the
+Docker/Podman socket and creates Worker containers after reconciling typed
+resources. The AgentScope Manager talks only to the Controller through
+`AgtClient`.
 
 ### Socket Paths
 
@@ -314,28 +314,10 @@ The Manager detects the socket at startup and sets `AGENTTEAMS_CONTAINER_RUNTIME
 | Podman (rootful, Linux) | `/run/podman/podman.sock` | `-v /run/podman/podman.sock:/var/run/docker.sock --security-opt label=disable` |
 | Podman (macOS machine) | Inside VM: `/run/podman/podman.sock` | Same as rootful (VM provides symlink at `/var/run/docker.sock`) |
 
-### Example: Manual Start with Socket
-
-```bash
-# Docker
-docker run -d --name agentteams-manager \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  -e AGENTTEAMS_WORKER_IMAGE=agentteams/worker-agent:latest \
-  ... \
-  agentteams/manager:latest
-
-# Podman
-podman run -d --name agentteams-manager \
-  -v /run/podman/podman.sock:/var/run/docker.sock \
-  --security-opt label=disable \
-  -e AGENTTEAMS_WORKER_IMAGE=agentteams/worker-agent:latest \
-  ... \
-  agentteams/manager:latest
-```
-
 ### Test Integration
 
-The test orchestrator (`tests/run-all-tests.sh`) automatically detects the socket and mounts it when available.
+The test orchestrator (`tests/run-all-tests.sh`) detects the socket and mounts
+it into the embedded Controller when available.
 
 ### Security Note
 
@@ -343,12 +325,19 @@ Mounting the container runtime socket gives the container full control over the 
 
 ## Key Technical Notes
 
-### Node.js Version
+### AgentScope Manager
 
-OpenClaw requires **Node.js >= 22** (the `--disable-warning` flag used internally requires Node.js 21.3+). The Manager image is built on `openclaw-base` which already includes Node.js 22. The Worker Dockerfile copies Node.js 22 from a build stage.
+- Python 3.11+ and `agentscope[s3]==2.0.4.post1`.
+- One daemon; no OpenClaw gateway or CoPaw application.
+- Standard-library SQLite WAL at
+  `/var/lib/agentteams-manager/state/manager.db`.
+- Immutable MinIO journal plus checksummed SQLite snapshots.
+- Operational HTTP on `18799`: `/healthz`, `/readyz`, and `/metrics`.
+- Matrix turns use `reply_stream`; configuration hot-reloads only between
+  turns.
 
-- **Manager**: Node 22 is provided by `openclaw-base` (the base image already includes it).
-- **Worker**: Node 22 binary copied from build stage replaces Ubuntu 24.04 apt's Node.js 18.x (which lacks `--disable-warning` support).
+Worker images retain their own runtime dependencies, including Node.js 22 for
+OpenClaw.
 
 ### Higress AI Provider API
 
@@ -370,9 +359,10 @@ When creating a `qwen` type provider via the Higress Console API, you must inclu
 
 For OpenAI-compatible providers (DeepSeek, etc.), use `type=openai` with `rawConfigs.apiUrl` pointing to the provider's endpoint. This is all handled automatically in `manager/scripts/init/setup-higress.sh`.
 
-### OpenClaw Skills Format
+### Manager Skills Format
 
-SKILL.md files **must** include a YAML front matter block, otherwise OpenClaw will not discover them:
+Manager `SKILL.md` files include YAML front matter and are loaded from the
+image-owned prompt root:
 
 ```markdown
 ---
@@ -384,23 +374,9 @@ description: What this skill does and when to use it
 ...content...
 ```
 
-Skills placed in `<workspace>/skills/<name>/SKILL.md` are auto-discovered (source: `openclaw-workspace`).
-
-### OpenClaw Gateway Config
-
-The `openclaw.json` must include gateway configuration for headless operation:
-
-```json
-{
-  "gateway": {
-    "mode": "local",
-    "port": 18799,
-    "auth": { "token": "<some-token>" }
-  }
-}
-```
-
-Without `gateway.mode=local`, OpenClaw refuses to start. Without `gateway.auth.token`, it also refuses.
+Adding guidance alone does not add a capability. Update the registered typed
+tool, room policy, deterministic workflow, and
+`tests/manager-skill-parity.json` together.
 
 ## Code Style
 
@@ -419,9 +395,9 @@ Container name is `agentteams-manager` (via `make install`) or `agentteams-manag
 
 ```bash
 # Manager Agent
-docker exec agentteams-manager cat /var/log/agentteams/manager-agent.log
-docker exec agentteams-manager cat /var/log/agentteams/manager-agent-error.log  # OpenClaw gateway stderr (OpenClaw Manager)
-docker exec agentteams-manager bash -c 'cat /tmp/openclaw/openclaw-*.log' | jq .
+docker logs agentteams-manager
+curl -fsS http://127.0.0.1:18888/readyz
+curl -fsS http://127.0.0.1:18888/metrics
 
 # Higress / homeserver (embedded controller)
 docker exec agentteams-controller cat /var/log/agentteams/higress-console.log
@@ -437,12 +413,11 @@ make replay-log
 # Logs directory: logs/replay/replay-{timestamp}.log
 ```
 
-### Check OpenClaw Skills Loading
+### Check Manager skill parity
 
 ```bash
-docker exec agentteams-manager bash -c \
-  'OPENCLAW_CONFIG_PATH=/root/manager-workspace/openclaw.json openclaw skills list --json' \
-  | jq '.skills[] | select(.source == "openclaw-workspace") | {name, eligible, description}'
+python -m json.tool tests/manager-skill-parity.json
+python -m pytest -q manager-agentscope/tests/contract
 ```
 
 ### Interactive Shell in Container
@@ -486,7 +461,7 @@ mc ls test/agentteams-storage/ --recursive
 |---------|-------|-----|
 | `git clone` hangs during `docker build` | No proxy in build env | Pass `--build-arg http_proxy=...` via `DOCKER_BUILD_ARGS` |
 | Health checks return 503 | `http_proxy` capturing localhost requests | Set `no_proxy=localhost,127.0.0.1,::1` |
-| OpenClaw: `SyntaxError: Unexpected reserved word` | Node.js too old | Ensure Manager uses `openclaw-base` image; Worker uses Node.js 22 from build stage |
+| OpenClaw Worker: `SyntaxError: Unexpected reserved word` | Node.js too old | Ensure the OpenClaw Worker image uses Node.js 22 from the build stage |
 | OpenClaw: `requires Node >=22.0.0` | Same as above | Same as above |
 | `--disable-warning= is not allowed in NODE_OPTIONS` | Node.js < 21.3 (e.g., Ubuntu apt's v18) | Ensure Worker uses Node.js 22 from build stage, not apt |
 | OpenClaw: `gateway.mode=local` required | Missing gateway config in openclaw.json | Add `"gateway": {"mode": "local", ...}` |

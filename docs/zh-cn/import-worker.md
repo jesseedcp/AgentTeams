@@ -182,7 +182,7 @@ worker-package.zip
 }
 ```
 
-`worker.runtime`（`openclaw`、`copaw` 或 `hermes`）会被 `agt apply worker --zip` 读取，
+`worker.runtime`（`openclaw`、`copaw`、`hermes`、`qwenpaw` 或 `openhuman`）会被 `agt apply worker --zip` 读取，
 显式传入的 `--runtime` 参数优先级更高。两者都没设置时由 controller 兜底（默认 `openclaw`）。
 
 ## 场景一：迁移独立运行的 OpenClaw
@@ -242,16 +242,16 @@ bash agentteams-import.sh worker --name my-worker --zip migration-my-worker-2026
 容器内的 `agt` CLI 会依次执行：
 1. 解析 ZIP 中的 `manifest.json`
 2. 从 Dockerfile 构建自定义 Worker 镜像（如有）
-3. 注册 Matrix 账号并创建通信 Room
-4. 创建 MinIO 用户并配置权限策略
-5. 配置 Higress Gateway Consumer 和路由授权
-6. 生成 openclaw.json 并推送所有配置到 MinIO
-7. 更新 Manager 的 workers-registry.json
-8. 发送消息通知 Manager 启动 Worker 容器
+3. 将 Worker 期望资源提交给 Controller
+4. 注册 Matrix 账号并创建通信 Room
+5. 创建有范围限制的 MinIO 与 Higress 凭据
+6. 生成对应运行时配置并把持久化资产推送到 MinIO
+7. 启动并持续调和 Worker 容器
 
 ### 第 5 步：验证
 
-脚本完成后，在 Element Web 中查看 Worker 状态。Manager 会启动容器，Worker 应在一分钟内上线。
+脚本完成后，先运行 `agt get workers my-worker -o json`，再到 Element Web
+查看 Worker 状态。Controller 会启动容器，Worker 应在一分钟内上线。
 
 ### 迁移内容对照表
 
@@ -378,7 +378,7 @@ bash agentteams-import.sh -f <resource.yaml>   # 转发到 agentteams-apply.sh�
 | `--model <模型>` | LLM 模型 ID | `qwen3.5-plus` |
 | `--skills <s1,s2>` | 逗号分隔的内置技能 | — |
 | `--mcp-servers <m1,m2>` | 逗号分隔的 MCP Server | — |
-| `--runtime <运行时>` | Agent 运行时（`openclaw`\|`copaw`\|`hermes`） | `openclaw` |
+| `--runtime <运行时>` | Worker 运行时（`openclaw`\|`copaw`\|`hermes`\|`qwenpaw`\|`openhuman`） | `openclaw` |
 | `--yes` | 跳过交互确认（包装脚本可能在底层吞掉） | 关闭 |
 
 **YAML 模式**（`-f`）：转发给 `agentteams-apply.sh`；不支持 `--prune`/`--dry-run`。
@@ -426,5 +426,5 @@ docker start agentteams-manager
 
 1. 查看 Worker 容器日志：`docker logs agentteams-worker-<name>`
 2. 在 Element Web 中确认 Worker 出现在其专属 Room 中
-3. 确认 Manager 的 `workers-registry.json` 中有正确的条目
+3. 运行 `agt get workers <name> -o json`，确认 Controller 资源正确
 4. 尝试在 Worker 的 Room 中发送 `@<worker-name>:<matrix-domain> hello`

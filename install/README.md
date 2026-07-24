@@ -1,6 +1,7 @@
 # AgentTeams Installation
 
-One-click installation script for AgentTeams Manager and Worker Agents.
+One-click installation scripts for the AgentScope 2.0 AgentTeams Manager,
+Controller infrastructure, and Worker Agents.
 
 ## Requirements
 
@@ -9,16 +10,20 @@ One-click installation script for AgentTeams Manager and Worker Agents.
 
 ## Quick Start
 
+For an unreleased `main` commit, clone the repository and run
+`make install-interactive` so every image is built from the checked-out source.
+The remote commands below require a matching image tag to have been published.
+
 ### macOS / Linux
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/agentscope-ai/AgentTeams/main/install/agentteams-install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/jesseedcp/AgentTeams/main/install/agentteams-install.sh)
 ```
 
 ### Windows (PowerShell 7+)
 
 ```powershell
-Set-ExecutionPolicy Bypass -Scope Process -Force; $wc=New-Object Net.WebClient; $wc.Encoding=[Text.Encoding]::UTF8; iex $wc.DownloadString('https://raw.githubusercontent.com/agentscope-ai/AgentTeams/main/install/agentteams-install.ps1')
+Set-ExecutionPolicy Bypass -Scope Process -Force; $wc=New-Object Net.WebClient; $wc.Encoding=[Text.Encoding]::UTF8; iex $wc.DownloadString('https://raw.githubusercontent.com/jesseedcp/AgentTeams/main/install/agentteams-install.ps1')
 ```
 
 ## Installation Modes
@@ -60,6 +65,10 @@ Interactive prompts will ask for:
 - Admin credentials
 - Domain names (optional, defaults to `*-local.agentteams.io`)
 - GitHub PAT (optional)
+- Default Worker runtime
+
+The Manager runtime is fixed to `agentscope`. Workers independently support
+`openclaw`, `copaw`, `hermes`, `qwenpaw`, and `openhuman`.
 
 ### Install Worker
 
@@ -140,10 +149,14 @@ $env:AGENTTEAMS_LLM_API_KEY = "your-api-key"
 | `AGENTTEAMS_LLM_PROVIDER` | LLM provider (`qwen` or `openai-compat`) | `qwen` |
 | `AGENTTEAMS_DEFAULT_MODEL` | Default model ID | `qwen3.5-plus` |
 | `AGENTTEAMS_LLM_API_KEY` | LLM API key | *(required)* |
+| `AGENTTEAMS_GITHUB_TOKEN` | Optional GitHub PAT, injected into the Manager MCP path only | *(empty)* |
 | `AGENTTEAMS_ADMIN_USER` | Admin username | `admin` |
 | `AGENTTEAMS_ADMIN_PASSWORD` | Admin password | *(auto-generated)* |
 | `AGENTTEAMS_PORT_GATEWAY` | Gateway port | `18080` |
 | `AGENTTEAMS_PORT_CONSOLE` | Higress console port | `18001` |
+| `AGENTTEAMS_PORT_ELEMENT_WEB` | Element Web direct-access port | `18088` |
+| `AGENTTEAMS_MANAGER_RUNTIME` | Manager runtime (fixed; other values are rejected) | `agentscope` |
+| `AGENTTEAMS_DEFAULT_WORKER_RUNTIME` | Default Worker runtime | `copaw` |
 | `AGENTTEAMS_MATRIX_DOMAIN` | Matrix domain | `matrix-local.agentteams.io:18080` |
 | `AGENTTEAMS_DATA_DIR` | Data directory | Docker volume |
 | `AGENTTEAMS_WORKSPACE_DIR` | Manager workspace | `~/agentteams-manager` |

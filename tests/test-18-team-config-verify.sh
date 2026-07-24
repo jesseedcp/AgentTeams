@@ -6,7 +6,7 @@
 #   2. Verify Leader AGENTS.md: builtin markers, coordination context (upstream=Manager, downstream=workers)
 #   3. Verify Team Worker AGENTS.md: coordination context (coordinator=Leader, NOT Manager)
 #   4. Verify Team Room exists in teams-registry.json
-#   5. Verify groupAllowFrom: Leader has [Manager, Admin, Workers], Workers have [Leader, Admin]
+#   5. Verify Worker groupAllowFrom plus AgentScope Manager topology policy
 #   6. Verify worker count and roles in workers-registry.json
 #   7. Update team (add description change), verify config updated
 
@@ -252,7 +252,6 @@ log_section "Verify groupAllowFrom Configuration"
 wait_agent_matrix_allow_contains "${TEST_LEADER}" ".channels.matrix.groupAllowFrom" "@${TEST_W1}:" 120 || true
 wait_agent_matrix_allow_contains "${TEST_W2}" ".channels.matrix.groupAllowFrom" "@${TEST_W1}:" 120 || true
 wait_agent_matrix_allow_contains "${TEST_W1}" ".channels.matrix.groupAllowFrom" "@test-external-bot:" 120 || true
-wait_agent_matrix_allow_contains "manager" ".channels.matrix.groupAllowFrom" "@${TEST_LEADER}:" 120 || true
 
 # Leader: should have [Manager, Admin, W1, W2]
 LEADER_GAF=$(exec_in_manager mc cat "${STORAGE_PREFIX}/agents/${TEST_LEADER}/openclaw.json" 2>/dev/null | jq -r '.channels.matrix.groupAllowFrom[]' 2>/dev/null)
@@ -331,18 +330,40 @@ else
     log_fail "Worker 2 groupAllowFrom missing test-external-bot (team channelPolicy)"
 fi
 
-# Manager: should have Leader but NOT team workers
-MGR_GAF=$(exec_in_manager mc cat "${STORAGE_PREFIX}/agents/manager/openclaw.json" 2>/dev/null | jq -r '.channels.matrix.groupAllowFrom[]' 2>/dev/null)
-if echo "${MGR_GAF}" | grep -q "@${TEST_LEADER}:"; then
-    log_pass "Manager groupAllowFrom includes Leader"
+# AgentScope Manager: Controller topology binds the Team's leader room to the
+# leader Matrix identity. Team workers are deliberately omitted as standalone
+# Manager room bindings, matching the Team hierarchy without an openclaw.json
+# allow-list.
+LEADER_MATRIX_ID=$(exec_in_agent agt get workers "${TEST_LEADER}" -o json 2>/dev/null | jq -r '.matrixUserID // empty')
+if wait_manager_team_binding "${TEST_TEAM}" "${LEADER_MATRIX_ID}" 120; then
+    log_pass "AgentScope Manager topology authorizes the Team Leader"
 else
-    log_fail "Manager groupAllowFrom missing Leader"
+    log_fail "AgentScope Manager topology is missing the Team Leader binding"
 fi
 
-if echo "${MGR_GAF}" | grep -q "@${TEST_W1}:"; then
-    log_fail "Manager groupAllowFrom includes team worker (should NOT)"
+TEAM_WORKER_BINDINGS=$(exec_in_agent python -c '
+import sqlite3
+import sys
+
+connection = sqlite3.connect(
+    "file:/var/lib/agentteams-manager/state/manager.db?mode=ro",
+    uri=True,
+)
+row = connection.execute(
+    """
+    SELECT COUNT(*)
+      FROM topology
+     WHERE resource_type = ?
+       AND resource_name IN (?, ?)
+    """,
+    ("worker", sys.argv[1], sys.argv[2]),
+).fetchone()
+print(row[0])
+' "${TEST_W1}" "${TEST_W2}" 2>/dev/null || echo "query-failed")
+if [ "${TEAM_WORKER_BINDINGS}" = "0" ]; then
+    log_pass "AgentScope Manager topology does not bypass the Team Leader for workers"
 else
-    log_pass "Manager groupAllowFrom does NOT include team workers"
+    log_fail "AgentScope Manager has unexpected direct Team Worker bindings: ${TEAM_WORKER_BINDINGS}"
 fi
 
 # ============================================================

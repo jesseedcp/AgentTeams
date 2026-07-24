@@ -89,12 +89,12 @@ spec:
 |-------|------|----------|---------|-------------|
 | `metadata.name` | string | Yes | — | Worker name, globally unique |
 | `spec.model` | string | Yes | — | LLM model ID, e.g. `claude-sonnet-4-6`, `qwen3.5-plus` |
-| `spec.runtime` | string | No | `openclaw` | Agent runtime: `openclaw`, `copaw`, or `hermes` |
-| `spec.image` | string | No | — | Custom Docker image; if empty, the controller uses `AGENTTEAMS_WORKER_IMAGE` / `AGENTTEAMS_COPAW_WORKER_IMAGE` / `AGENTTEAMS_HERMES_WORKER_IMAGE` (defaults `agentteams/agentteams-worker:latest` / `agentteams/agentteams-copaw-worker:latest` / `agentteams/agentteams-hermes-worker:latest`) |
+| `spec.runtime` | string | No | `openclaw` | Worker runtime: `openclaw`, `copaw`, `hermes`, `qwenpaw`, or `openhuman` |
+| `spec.image` | string | No | — | Custom Docker image; if empty, the controller selects the runtime-specific image (`AGENTTEAMS_WORKER_IMAGE`, `AGENTTEAMS_COPAW_WORKER_IMAGE`, `AGENTTEAMS_HERMES_WORKER_IMAGE`, `AGENTTEAMS_QWENPAW_WORKER_IMAGE`, or `AGENTTEAMS_OPENHUMAN_WORKER_IMAGE`) |
 | `spec.identity` | string | No | — | Worker public identity (OpenClaw: generates IDENTITY.md; QwenPaw: merged into SOUL.md per controller) |
 | `spec.soul` | string | No | — | Worker personality and values (generates SOUL.md) |
 | `spec.agents` | string | No | — | Agent behavior rules, used to generate AGENTS.md |
-| `spec.skills` | []string | No | — | Built-in skills, distributed by Manager |
+| `spec.skills` | []string | No | — | Image-owned, on-demand skills published by the Controller |
 | `spec.mcpServers` | []object | No | — | MCP servers callable via mcporter. Each item: `name` (required, map key in mcporter-servers.json), `url` (required, full gateway endpoint), `transport` (`http` default or `sse`). The controller injects `Authorization: Bearer <gatewayKey>`; gateway-side authorization is out of scope. |
 | `spec.package` | string | No | — | Custom package URI: `file://`, `http(s)://`, `nacos://`, or controller-resolved `packages/{name}.zip` after upload |
 | `spec.expose` | []object | No | — | Ports to expose via Higress gateway (see [Service Publishing](#service-publishing)) |
@@ -115,9 +115,12 @@ When both are set, inline fields override the corresponding files in the package
 
 ### Built-in Skills vs Custom Skills
 
-`spec.skills` refers to AgentTeams platform built-in capabilities, distributed by the Manager via `push-worker-skills.sh` to the Worker's MinIO space.
+`spec.skills` refers to AgentTeams image-owned, on-demand capabilities. The Controller treats the resource as authoritative and publishes each selected skill to the Worker's MinIO space.
 
-For custom skills, use `spec.package` to provide a ZIP containing a `skills/` directory. Built-in and custom skills are merged without conflict.
+For custom skills, use `spec.package` to provide a ZIP containing a `skills/`
+directory. Custom and image-owned skill names must not collide: the Controller
+owns and exactly reconciles the complete prefix of every skill selected through
+`spec.skills`.
 
 ### Worker with Custom Package
 
@@ -145,7 +148,7 @@ When the Controller receives a Worker resource, it executes:
 3. Create a MinIO user and bucket, configure Higress gateway authorization
 4. Generate `openclaw.json` config (including `groupAllowFrom` permission matrix)
 5. Push all config files (SOUL.md, skills, crons, etc.) to MinIO
-6. Update `workers-registry.json`
+6. Update the Controller-owned compatibility projection for legacy import and diagnostics
 7. Start the Worker container
 
 ### Worker Status
@@ -268,7 +271,7 @@ spec:
 |-------|------|----------|-------------|
 | `workers[].name` | string | Yes | Worker name |
 | `workers[].model` | string | No | LLM model |
-| `workers[].runtime` | string | No | Agent runtime (`openclaw`, `copaw`, or `hermes`) |
+| `workers[].runtime` | string | No | Worker runtime (`openclaw`, `copaw`, `hermes`, `qwenpaw`, or `openhuman`) |
 | `workers[].image` | string | No | Custom Docker image |
 | `workers[].identity` | string | No | Worker public identity (generates IDENTITY.md) |
 | `workers[].soul` | string | No | Worker personality and values (generates SOUL.md) |
@@ -291,7 +294,7 @@ A Team Leader is essentially a Worker container, but with key differences:
 - Has canonical Team Leader skills: `team-coordination` for strategy, `project-management` for Project state and ready-node resolution, and `task-management` for Worker task delegation
 - Does not install the older `team-project-management`, `team-task-coordination`, or `team-task-management` compatibility aliases into new Team Leader workspaces; existing workspaces that already copied those aliases keep their local files until explicitly upgraded or recreated
 - Does NOT have Manager-exclusive skills like `worker-management` or `mcp-server-management`
-- Marked as `role: "team_leader"` in `workers-registry.json`
+- Exposed as `role: "team_leader"` by the Controller resource API
 - Follows a delegation-first principle — always assigns tasks to team Workers, never executes domain tasks itself
 
 ### Team Leader AGENTS.md Assembly
@@ -407,7 +410,10 @@ metadata:
   name: default
 spec:
   model: qwen3.5-plus
-  runtime: openclaw
+  runtime: agentscope
+  identity: |
+    Name: Atlas
+    Style: concise, proactive, and evidence-driven
   soul: |
     # Manager — coordination focus
   agents: |
@@ -437,12 +443,13 @@ spec:
 |-------|------|----------|---------|-------------|
 | `metadata.name` | string | Yes | — | Manager resource name (often `default` for the primary instance) |
 | `spec.model` | string | Yes | — | LLM model ID |
-| `spec.runtime` | string | No | `openclaw` | `openclaw` or `copaw` (Hermes is **not** a supported Manager runtime) |
+| `spec.runtime` | string | No | `agentscope` | Manager runtime; only `agentscope` is supported |
 | `spec.image` | string | No | — | Custom Manager image; empty uses deployment default |
 | `spec.soul` | string | No | — | Custom SOUL.md content |
+| `spec.identity` | string | No | — | Admin-confirmed identity/personality text managed inside the SOUL identity section |
 | `spec.agents` | string | No | — | Custom AGENTS.md content |
 | `spec.skills` | []string | No | — | On-demand Manager skills to enable |
-| `spec.mcpServers` | []object | No | — | MCP servers callable via mcporter. Each item: `name`, `url`, `transport` (`http`/`sse`). Gateway-side authorization is out of scope. |
+| `spec.mcpServers` | []object | No | — | MCP descriptors projected to the AgentScope Manager runtime. Each item: `name`, `url`, `transport` (`http`/`sse`). Gateway-side authorization is out of scope. |
 | `spec.package` | string | No | — | Package URI (`file://`, `http(s)://`, `nacos://`) |
 | `spec.state` | string | No | `Running` | Desired lifecycle: `Running`, `Sleeping`, `Stopped` |
 | `spec.resources` | object | No | install/backend defaults | CPU/memory requests and limits for the Manager Pod. Shape: `requests.cpu`, `requests.memory`, `limits.cpu`, `limits.memory` |
@@ -553,7 +560,7 @@ Human permissions are enforced through two mechanisms:
 2. Calculate which Agents need modification based on permissionLevel
 3. Update `groupAllowFrom` in each affected Agent's `openclaw.json`
 4. Invite the Human to the corresponding Rooms
-5. Update `humans-registry.json`
+5. Update the Controller-owned compatibility projection for legacy import and diagnostics
 6. Push updated configs to MinIO, notify Agents to `file-sync`
 7. Send a welcome email (if SMTP and email are configured)
 
@@ -652,7 +659,7 @@ Regardless of URI format, the extracted package follows a unified structure:
 }
 ```
 
-`worker.runtime` (`openclaw`, `copaw`, or `hermes`) is honored by `agt apply worker --zip`
+`worker.runtime` (`openclaw`, `copaw`, `hermes`, `qwenpaw`, or `openhuman`) is honored by `agt apply worker --zip`
 and overridden by an explicit `--runtime` flag.
 
 ## Operations

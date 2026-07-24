@@ -6,29 +6,27 @@
 
 ### Diagnosis Steps
 
-1. Check if Manager is waiting for a signal:
+1. Check recent AgentScope Manager events:
 ```bash
-docker exec agentteams-manager grep "Waiting for" /var/log/agentteams/manager-agent.log | tail -10
+docker logs --tail 300 agentteams-manager 2>&1
 ```
 
 2. Check if Worker messages are being processed:
 ```bash
-docker exec agentteams-manager grep -E "PHASE[0-9]_DONE|REVISION_NEEDED" /var/log/agentteams/manager-agent.log
+docker logs agentteams-manager 2>&1 | grep -E "PHASE[0-9]_DONE|REVISION_NEEDED"
 ```
 
-3. Key: Check `wasMentioned` status:
+3. Check Matrix policy decisions and mention handling:
 ```bash
-docker exec agentteams-manager grep "resolveMentions (inbound)" /var/log/agentteams/manager-agent.log | tail -20
+docker logs agentteams-manager 2>&1 | grep -Ei "mention|policy|ignored" | tail -20
 ```
 
 ### Common Causes
 
 #### 1. Worker Not @mentioning Manager (Fixed)
 
-**Symptoms**:
-```
-resolveMentions (inbound): wasMentioned=false text="PHASE2_DONE..."
-```
+**Symptoms**: the Worker reports phase completion but the Manager does not
+advance the project.
 
 **Cause**: Worker sends message in project room without @mentioning Manager, causing Manager to ignore the message.
 
@@ -136,5 +134,5 @@ cat tests/output/metrics-*.json | jq '.totals.tokens'
 docker ps --filter "name=agentteams"
 
 # Quick view recent errors
-docker exec agentteams-manager tail -50 /var/log/agentteams/manager-agent-error.log
+docker logs --tail 200 agentteams-manager 2>&1 | grep -i error
 ```

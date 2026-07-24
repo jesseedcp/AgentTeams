@@ -66,7 +66,7 @@ fi
 
 assert_not_empty "${DM_ROOM}" "DM room with Manager exists"
 
-# Wait for Manager Agent to be fully ready (OpenClaw gateway + joined DM room)
+# Wait for AgentScope Manager readiness and DM-room membership.
 wait_for_manager_agent_ready 300 "${DM_ROOM}" "${ADMIN_TOKEN}" || {
     log_fail "Manager Agent not ready in time"
     test_teardown "11-github-pr-collab"

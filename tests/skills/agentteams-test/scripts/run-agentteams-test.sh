@@ -101,7 +101,7 @@ check_prerequisites() {
 update_repo() {
     if [ ! -d "$REPO_DIR" ]; then
         log_info "Cloning AgentTeams repository to $REPO_DIR..."
-        git clone https://github.com/alibaba/agentteams.git "$REPO_DIR"
+        git clone https://github.com/jesseedcp/AgentTeams.git "$REPO_DIR"
         cd "$REPO_DIR"
     elif [ "$SKIP_PULL" = true ]; then
         log_info "Skipping git pull (--skip-pull)"
@@ -109,8 +109,7 @@ update_repo() {
     else
         log_info "Updating AgentTeams repository at $REPO_DIR..."
         cd "$REPO_DIR"
-        git fetch origin
-        git reset --hard origin/main
+        git pull --ff-only origin main
     fi
     
     log_info "Repository ready at $REPO_DIR"

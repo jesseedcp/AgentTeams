@@ -343,7 +343,7 @@ def export_matrix_messages(out_dir: Path, since_epoch: float, redact: bool,
 
 
 # ---------------------------------------------------------------------------
-# Agent sessions export (OpenClaw + CoPaw + Hermes)
+# Agent sessions export (AgentScope Manager + Worker runtimes)
 # ---------------------------------------------------------------------------
 
 def detect_runtime(container: str) -> tuple[str, str]:
@@ -355,10 +355,8 @@ def detect_runtime(container: str) -> tuple[str, str]:
     copaw/scripts/copaw-worker-entrypoint.sh, copaw/AGENTS.md and
     tests/lib/agent-metrics.sh):
 
-      Manager (any runtime, HOME=/root/manager-workspace):
-        openclaw -> /root/manager-workspace/.openclaw/agents/main/sessions
-        hermes   -> /root/manager-workspace/.hermes/sessions
-        copaw    -> /root/manager-workspace/.copaw/workspaces/default/sessions
+      AgentScope Manager:
+        sqlite -> /var/lib/agentteams-manager/state/manager.db
 
       OpenClaw / Hermes Worker (HOME=/root/agentteams-fs/agents/<name>):
         openclaw -> /root/agentteams-fs/agents/<name>/.openclaw/agents/main/sessions
@@ -369,11 +367,17 @@ def detect_runtime(container: str) -> tuple[str, str]:
         copaw    -> /root/.agentteams-worker/<name>/.copaw/workspaces/default/sessions
         copaw    -> /root/agentteams-fs/.copaw/workspaces/default/sessions  (alt)
     """
-    candidates: list[tuple[str, str]] = [
-        ("openclaw", "/root/manager-workspace/.openclaw/agents/main/sessions"),
-        ("hermes",   "/root/manager-workspace/.hermes/sessions"),
-        ("copaw",    "/root/manager-workspace/.copaw/workspaces/default/sessions"),
-    ]
+    manager_database = "/var/lib/agentteams-manager/state/manager.db"
+    if (
+        docker_exec(
+            container,
+            f"test -f '{manager_database}' && echo yes || echo no",
+        ).strip()
+        == "yes"
+    ):
+        return "agentscope", manager_database
+
+    candidates: list[tuple[str, str]] = []
 
     worker_name = docker_exec(container, "echo $AGENTTEAMS_WORKER_NAME").strip()
     if worker_name:
@@ -405,6 +409,132 @@ def detect_runtime(container: str) -> tuple[str, str]:
         return "copaw", found
 
     return "", ""
+
+
+def export_agentscope_sessions(
+    container: str,
+    database_path: str,
+    since_epoch: float,
+    out_dir: Path,
+    redact: bool,
+) -> tuple[int, int]:
+    """Export redacted AgentScope state through a read-only SQLite snapshot."""
+    extraction = f"""
+import datetime
+import json
+import sqlite3
+
+database_path = {json.dumps(database_path)}
+since_epoch = {since_epoch!r}
+connection = sqlite3.connect(
+    "file:" + database_path + "?mode=ro",
+    uri=True,
+    timeout=5,
+)
+connection.row_factory = sqlite3.Row
+rows = connection.execute(
+    "SELECT room_id, agent_state_json, policy_revision, "
+    "last_event_id, updated_at FROM sessions ORDER BY updated_at DESC"
+).fetchall()
+result = []
+for row in rows:
+    timestamp = str(row["updated_at"]).replace("Z", "+00:00")
+    try:
+        updated_epoch = datetime.datetime.fromisoformat(timestamp).timestamp()
+    except (TypeError, ValueError):
+        updated_epoch = 0
+    if updated_epoch and updated_epoch < since_epoch:
+        continue
+    try:
+        state = json.loads(row["agent_state_json"])
+    except (TypeError, json.JSONDecodeError):
+        continue
+    result.append({{
+        "room_id": row["room_id"],
+        "policy_revision": row["policy_revision"],
+        "last_event_id": row["last_event_id"],
+        "updated_at": row["updated_at"],
+        "state": state,
+    }})
+print(json.dumps(result, ensure_ascii=False))
+"""
+    raw = docker_exec(
+        container,
+        "python3 - <<'PY'\n" + extraction + "\nPY",
+    )
+    if not raw.strip():
+        return 0, 0
+    try:
+        rows = json.loads(raw)
+    except json.JSONDecodeError:
+        return 0, 0
+    if not isinstance(rows, list):
+        return 0, 0
+
+    total_sessions = 0
+    total_events = 0
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        state = row.get("state")
+        if not isinstance(state, dict):
+            continue
+        context = state.get("context", [])
+        if not isinstance(context, list):
+            context = []
+        session_id = str(state.get("session_id", "session"))
+        room_id = str(row.get("room_id", "room"))
+        metadata = {
+            key: value
+            for key, value in state.items()
+            if key != "context"
+        }
+        header = {
+            "type": "session",
+            "runtime": "agentscope",
+            "session_id": session_id,
+            "room_id": room_id,
+            "policy_revision": row.get("policy_revision"),
+            "last_event_id": row.get("last_event_id"),
+            "updated_at": row.get("updated_at"),
+            "state": metadata,
+        }
+        events = []
+        for message in context:
+            if not isinstance(message, dict):
+                continue
+            timestamp = str(message.get("created_at", ""))
+            event_epoch = parse_ts(timestamp)
+            if event_epoch and event_epoch < since_epoch:
+                continue
+            events.append({"type": "message", **message})
+        if redact:
+            header = redact_json_strings(header)
+            events = [
+                redact_json_strings(event)
+                for event in events
+            ]
+        output = [json.dumps(header, ensure_ascii=False)]
+        output.extend(
+            json.dumps(event, ensure_ascii=False)
+            for event in events
+        )
+        filename = (
+            f"{sanitize_filename(room_id) or 'room'}_"
+            f"{sanitize_filename(session_id) or 'session'}.jsonl"
+        )
+        (out_dir / filename).write_text(
+            "\n".join(output) + "\n",
+            encoding="utf-8",
+        )
+        print(
+            f"  {container}/{filename} (agentscope): "
+            f"{len(events)} events",
+        )
+        total_sessions += 1
+        total_events += len(events)
+
+    return total_sessions, total_events
 
 
 def export_openclaw_sessions(container: str, sessions_dir: str, since_epoch: float,
@@ -663,7 +793,15 @@ def export_agent_sessions(out_dir: Path, since_epoch: float, redact: bool,
         container_dir = out_dir / container
         container_dir.mkdir(parents=True, exist_ok=True)
 
-        if runtime == "openclaw":
+        if runtime == "agentscope":
+            s, e = export_agentscope_sessions(
+                container,
+                sessions_dir,
+                since_epoch,
+                container_dir,
+                redact,
+            )
+        elif runtime == "openclaw":
             s, e = export_openclaw_sessions(container, sessions_dir, since_epoch,
                                             container_dir, redact)
         elif runtime == "hermes":

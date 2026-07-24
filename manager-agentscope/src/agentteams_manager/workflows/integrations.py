@@ -77,6 +77,57 @@ class ModelSwitchReceipt(BaseModel):
     active_turns_preserved: bool = True
 
 
+class ManagerIdentityRequest(BaseModel):
+    """Administrator-confirmed identity preferences."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    name: str = Field(min_length=1, max_length=80)
+    communication_style: str = Field(min_length=1, max_length=1000)
+    behavior_guidelines: tuple[str, ...] = Field(
+        default=(),
+        max_length=20,
+    )
+    default_language: str = Field(min_length=1, max_length=80)
+
+    @field_validator(
+        "name",
+        "communication_style",
+        "default_language",
+    )
+    @classmethod
+    def normalize_text(cls, value: str) -> str:
+        normalized = " ".join(value.split())
+        if not normalized:
+            raise ValueError("identity field must not be blank")
+        return normalized
+
+    @field_validator("behavior_guidelines")
+    @classmethod
+    def normalize_guidelines(
+        cls,
+        value: tuple[str, ...],
+    ) -> tuple[str, ...]:
+        normalized = tuple(" ".join(item.split()) for item in value)
+        if any(not item for item in normalized):
+            raise ValueError("behavior guidelines must not be blank")
+        return normalized
+
+
+class ManagerIdentityReceipt(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    operation_id: str = Field(min_length=32, max_length=32)
+    manager: str
+    name: str
+    communication_style: str
+    behavior_guidelines: tuple[str, ...]
+    default_language: str
+    phase: str
+    runtime_revision: int = Field(ge=0)
+    active_turns_preserved: bool = True
+
+
 class RuntimeWatcherPort(Protocol):
     async def poll_once(self) -> object | None: ...
 
@@ -451,6 +502,72 @@ class IntegrationService:
         raise AmbiguousEffectError(
             f"worker/{worker} model did not converge",
         )
+
+    async def update_manager_identity(
+        self,
+        request: ManagerIdentityRequest,
+        *,
+        context: MutationContext,
+    ) -> ManagerIdentityReceipt:
+        identity = _render_manager_identity(request)
+        baseline_revision = self._registry.revision
+        operation = await self._supervisor.begin(
+            operation_id=context.operation_id,
+            kind=OperationKind.UPDATE_MANAGER_IDENTITY,
+            target_key=f"manager/{self._manager_name}/identity",
+            request={
+                **request.model_dump(mode="json"),
+                "identity": identity,
+                "baseline_revision": baseline_revision,
+            },
+        )
+        if operation.status is OperationStatus.SUCCEEDED:
+            return ManagerIdentityReceipt.model_validate(operation.result)
+        await self._supervisor.before_effect(
+            operation.operation_id,
+            ExternalEffect.CONTROLLER,
+            {
+                "operation": "update_manager_identity",
+                "manager": self._manager_name,
+            },
+        )
+        try:
+            manager = await self._agt.update_manager_identity(
+                self._manager_name,
+                identity,
+            )
+        except Exception as exc:
+            await self._record_external_failure(
+                operation.operation_id,
+                ExternalEffect.CONTROLLER,
+                exc,
+            )
+            raise
+        await self._supervisor.effect_acknowledged(
+            operation.operation_id,
+            ExternalEffect.CONTROLLER,
+            {
+                "manager": manager.name,
+                "phase": manager.phase,
+            },
+        )
+        runtime_revision = await self._wait_for_new_runtime_revision(
+            operation.operation_id,
+            baseline_revision=baseline_revision,
+        )
+        receipt = _identity_receipt(
+            operation_id=operation.operation_id,
+            manager=self._manager_name,
+            request=request,
+            phase=manager.phase,
+            runtime_revision=runtime_revision,
+        )
+        await self._supervisor.effect_succeeded(
+            operation.operation_id,
+            ExternalEffect.STORAGE,
+            receipt.model_dump(mode="json"),
+        )
+        return receipt
 
     async def configure_mcp(
         self,
@@ -916,6 +1033,7 @@ class IntegrationService:
         operation: OperationRecord,
     ) -> (
         ModelSwitchReceipt
+        | ManagerIdentityReceipt
         | MCPManagementReceipt
         | ServicePublishingReceipt
     ):
@@ -923,6 +1041,10 @@ class IntegrationService:
         if operation.status is OperationStatus.SUCCEEDED:
             if operation.kind is OperationKind.SWITCH_MODEL:
                 return ModelSwitchReceipt.model_validate(operation.result)
+            if operation.kind is OperationKind.UPDATE_MANAGER_IDENTITY:
+                return ManagerIdentityReceipt.model_validate(
+                    operation.result,
+                )
             if operation.kind is OperationKind.CONFIGURE_MCP:
                 return MCPManagementReceipt.model_validate(operation.result)
             if operation.kind is OperationKind.PUBLISH_SERVICE:
@@ -945,6 +1067,8 @@ class IntegrationService:
             )
         if operation.kind is OperationKind.SWITCH_MODEL:
             return await self._resume_model_switch(operation)
+        if operation.kind is OperationKind.UPDATE_MANAGER_IDENTITY:
+            return await self._resume_manager_identity(operation)
         if operation.kind is OperationKind.CONFIGURE_MCP:
             return await self._resume_mcp(operation)
         if operation.kind is OperationKind.PUBLISH_SERVICE:
@@ -952,6 +1076,69 @@ class IntegrationService:
         raise RecoveryError(
             f"IntegrationService cannot recover {operation.kind.value}",
         )
+
+    async def _resume_manager_identity(
+        self,
+        operation: OperationRecord,
+    ) -> ManagerIdentityReceipt:
+        request = _recovery_identity_request(operation.request)
+        identity = _recovery_string(operation.request, "identity")
+        if identity != _render_manager_identity(request):
+            raise RecoveryError(
+                "Manager identity recovery payload is inconsistent",
+            )
+        baseline_revision = _recovery_revision(operation.request)
+        manager = await self._agt.get_manager(self._manager_name)
+        if manager is None:
+            raise RecoveryError(
+                f"manager/{self._manager_name} is not readable",
+            )
+        if manager.identity != identity:
+            await self._supervisor.before_effect(
+                operation.operation_id,
+                ExternalEffect.CONTROLLER,
+                {
+                    "operation": "update_manager_identity",
+                    "manager": self._manager_name,
+                },
+            )
+            try:
+                manager = await self._agt.update_manager_identity(
+                    self._manager_name,
+                    identity,
+                )
+            except Exception as exc:
+                await self._record_external_failure(
+                    operation.operation_id,
+                    ExternalEffect.CONTROLLER,
+                    exc,
+                )
+                raise
+            await self._supervisor.effect_acknowledged(
+                operation.operation_id,
+                ExternalEffect.CONTROLLER,
+                {
+                    "manager": manager.name,
+                    "phase": manager.phase,
+                },
+            )
+        runtime_revision = await self._wait_for_new_runtime_revision(
+            operation.operation_id,
+            baseline_revision=baseline_revision,
+        )
+        receipt = _identity_receipt(
+            operation_id=operation.operation_id,
+            manager=self._manager_name,
+            request=request,
+            phase=manager.phase,
+            runtime_revision=runtime_revision,
+        )
+        await self._supervisor.effect_succeeded(
+            operation.operation_id,
+            ExternalEffect.STORAGE,
+            receipt.model_dump(mode="json"),
+        )
+        return receipt
 
     async def _resume_model_switch(
         self,
@@ -1892,6 +2079,29 @@ class IntegrationService:
             "document",
         )
 
+    async def _wait_for_new_runtime_revision(
+        self,
+        operation_id: str,
+        *,
+        baseline_revision: int,
+    ) -> int:
+        for _ in range(self._poll_attempts):
+            if self._registry.revision > baseline_revision:
+                return self._registry.revision
+            await self._watcher.poll_once()
+            if self._registry.revision > baseline_revision:
+                return self._registry.revision
+            await self._wait()
+        await self._supervisor.effect_ambiguous(
+            operation_id,
+            ExternalEffect.STORAGE,
+            "runtime_identity_revision_not_observed",
+        )
+        raise AmbiguousEffectError(
+            "Controller identity update is not visible in a higher runtime "
+            "document revision",
+        )
+
     async def _wait_for_worker_model(
         self,
         operation_id: str,
@@ -2084,6 +2294,43 @@ def _model_receipt(
     )
 
 
+def _render_manager_identity(request: ManagerIdentityRequest) -> str:
+    lines = [
+        f"- Name: {request.name}",
+        f"- Default language: {request.default_language}",
+        f"- Communication style: {request.communication_style}",
+        "- Behavior guidelines:",
+    ]
+    if request.behavior_guidelines:
+        lines.extend(
+            f"  - {guideline}"
+            for guideline in request.behavior_guidelines
+        )
+    else:
+        lines.append("  - Follow the Manager operating contract.")
+    return "\n".join(lines)
+
+
+def _identity_receipt(
+    *,
+    operation_id: str,
+    manager: str,
+    request: ManagerIdentityRequest,
+    phase: str,
+    runtime_revision: int,
+) -> ManagerIdentityReceipt:
+    return ManagerIdentityReceipt(
+        operation_id=operation_id,
+        manager=manager,
+        name=request.name,
+        communication_style=request.communication_style,
+        behavior_guidelines=request.behavior_guidelines,
+        default_language=request.default_language,
+        phase=phase,
+        runtime_revision=runtime_revision,
+    )
+
+
 def _safe_configuration_request(
     request: MCPConfiguration,
     *,
@@ -2179,6 +2426,37 @@ def _recovery_string(
             f"integration recovery request has no valid {key}",
         )
     return value
+
+
+def _recovery_revision(request: dict[str, object]) -> int:
+    value = request.get("baseline_revision")
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise RecoveryError(
+            "integration recovery request has no valid baseline_revision",
+        )
+    return value
+
+
+def _recovery_identity_request(
+    request: dict[str, object],
+) -> ManagerIdentityRequest:
+    try:
+        return ManagerIdentityRequest.model_validate(
+            {
+                "name": request.get("name"),
+                "communication_style": request.get(
+                    "communication_style",
+                ),
+                "behavior_guidelines": request.get(
+                    "behavior_guidelines",
+                ),
+                "default_language": request.get("default_language"),
+            },
+        )
+    except Exception as exc:
+        raise RecoveryError(
+            "Manager identity recovery request is invalid",
+        ) from exc
 
 
 def _recovery_workers(

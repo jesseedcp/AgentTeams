@@ -79,9 +79,10 @@
     {
       "name": "model-switch",
       "skillFile": "manager/agent/skills/model-switch/SKILL.md",
-      "tools": ["switch_model"],
+      "tools": ["switch_model", "update_manager_identity"],
       "evidence": [
         "manager-agentscope/tests/integration/test_model_hot_reload.py",
+        "manager-agentscope/tests/unit/workflows/test_model_switch.py",
         "manager-agentscope/tests/contract/test_integration_skill_parity.py"
       ]
     },
@@ -136,7 +137,8 @@
       "tools": ["list_workers", "get_worker", "create_worker", "update_worker", "sleep_worker", "wake_worker", "delete_worker"],
       "evidence": [
         "manager-agentscope/tests/integration/test_worker_lifecycle.py",
-        "manager-agentscope/tests/contract/test_resource_skill_parity.py"
+        "manager-agentscope/tests/contract/test_resource_skill_parity.py",
+        "tests/test-24-skills-management.sh"
       ]
     },
     {

@@ -131,9 +131,9 @@ type Config struct {
 	ControllerName string
 
 	// Embedded-mode Manager Agent container mounts (host paths, read from env)
-	ManagerWorkspaceDir string // e.g. ~/agentteams-manager — mounted as /root/manager-workspace
+	ManagerWorkspaceDir string // e.g. ~/agentteams-manager — mounted as /var/lib/agentteams-manager
 	HostShareDir        string // e.g. ~/ — mounted as /host-share
-	ManagerConsolePort  string // host port for manager console (default: 18888)
+	ManagerHealthPort   string // loopback host port for Manager health/metrics (default: 18888)
 
 	// Pre-generated Manager secrets (from install script env)
 	ManagerPassword   string // Matrix password for manager user
@@ -362,9 +362,13 @@ func LoadConfig() *Config {
 
 		ManagerWorkspaceDir: os.Getenv("AGENTTEAMS_WORKSPACE_DIR"),
 		HostShareDir:        os.Getenv("AGENTTEAMS_HOST_SHARE_DIR"),
-		ManagerConsolePort:  envOrDefault("AGENTTEAMS_PORT_MANAGER_CONSOLE", "18888"),
-		ManagerPassword:     os.Getenv("AGENTTEAMS_MANAGER_PASSWORD"),
-		ManagerGatewayKey:   os.Getenv("AGENTTEAMS_MANAGER_GATEWAY_KEY"),
+		ManagerHealthPort: firstNonEmpty(
+			os.Getenv("AGENTTEAMS_PORT_MANAGER_HEALTH"),
+			os.Getenv("AGENTTEAMS_PORT_MANAGER_CONSOLE"),
+			"18888",
+		),
+		ManagerPassword:   os.Getenv("AGENTTEAMS_MANAGER_PASSWORD"),
+		ManagerGatewayKey: os.Getenv("AGENTTEAMS_MANAGER_GATEWAY_KEY"),
 
 		MatrixServerURL:         envOrDefault("AGENTTEAMS_MATRIX_URL", "http://matrix-local.agentteams.io:8080"),
 		MatrixDomain:            envOrDefault("AGENTTEAMS_MATRIX_DOMAIN", "matrix-local.agentteams.io:8080"),
@@ -509,11 +513,6 @@ func (c *Config) AgentFSDir() string {
 // WorkerAgentDir returns the source directory for builtin worker agent files.
 func (c *Config) WorkerAgentDir() string {
 	return envOrDefault("AGENTTEAMS_WORKER_AGENT_DIR", "/opt/agentteams/agent/worker-agent")
-}
-
-// ManagerConfigPath returns the path to the Manager Agent's openclaw.json (embedded mode).
-func (c *Config) ManagerConfigPath() string {
-	return envOrDefault("AGENTTEAMS_MANAGER_CONFIG_PATH", "/root/openclaw.json")
 }
 
 // RegistryPath returns the path to the workers-registry.json (embedded mode).

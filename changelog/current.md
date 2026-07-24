@@ -20,12 +20,26 @@ Record image-affecting changes to `manager/`, `worker/`, `copaw/`, `hermes/`, `o
   skill artifacts before a secret-free, generation-stamped AgentScope runtime
   document, so model, MCP, prompt, skill, and timing changes activate
   without deleting the Manager container.
+- **Controller-owned Manager identity**: Collect administrator-confirmed name,
+  language, communication style, and behavior guidelines through a typed
+  AgentScope tool, persist them in `Manager.spec.identity`, and hot-reload only
+  the identity section of `SOUL.md`.
+- **Five-runtime release parity**: Build and inject OpenClaw, CoPaw, Hermes,
+  QwenPaw, and OpenHuman Worker images consistently across Make, local kind,
+  Helm, and both installers while keeping the Manager fixed to AgentScope.
 
 **Bug Fixes**
 
+- **Fork-safe integration CI**: Port the latest upstream PR security boundary:
+  run untrusted contributions through `pull_request`, check out the reviewed
+  merge ref, keep permissions read-only by default, and filter every
+  secret-dependent LLM/runtime shard for fork and Dependabot PRs.
+  ([0ff89f0](https://github.com/agentscope-ai/AgentTeams/commit/0ff89f07a205b82cd81d18385c7095ec352a083f))
 - **Provable resource updates**: Return complete Worker desired state and add
   typed Human updates so Manager mutations can be confirmed from Controller
   facts, including explicit skill, exposure, and permission-scope clearing.
+- **AgentScope-aware diagnostics**: Export redacted SQLite turn, operation, and
+  tool-call records instead of relying on deleted OpenClaw Manager log files.
 - **CoPaw Team coordination routing**: Route Team Leader worker assignments sent through the `message` tool from Leader DM to Team Room, matching the Matrix channel send path. ([92c8145](https://github.com/agentscope-ai/AgentTeams/commit/92c8145))
 - **Pinned OpenClaw source fetch**: Fetch the pinned OpenClaw commit directly so the base image build does not depend on a retired-brand external branch name. ([b0081c2](https://github.com/agentscope-ai/AgentTeams/commit/b0081c2))
 

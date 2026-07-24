@@ -298,12 +298,13 @@ func updateTeamCmd() *cobra.Command {
 
 func updateManagerCmd() *cobra.Command {
 	var (
-		name    string
-		model   string
-		runtime string
-		image   string
-		soul    string
-		mcpFile string
+		name     string
+		model    string
+		runtime  string
+		image    string
+		soul     string
+		identity string
+		mcpFile  string
 	)
 
 	cmd := &cobra.Command{
@@ -325,6 +326,7 @@ func updateManagerCmd() *cobra.Command {
 			setIfNotEmpty(req, "runtime", runtime)
 			setIfNotEmpty(req, "image", image)
 			setIfNotEmpty(req, "soul", soul)
+			setIfNotEmpty(req, "identity", identity)
 			if cmd.Flags().Changed("mcp-servers-file") {
 				servers, err := readMCPServers(cmd, mcpFile)
 				if err != nil {
@@ -352,6 +354,12 @@ func updateManagerCmd() *cobra.Command {
 	cmd.Flags().StringVar(&runtime, "runtime", "", "Manager runtime (agentscope)")
 	cmd.Flags().StringVar(&image, "image", "", "Container image override")
 	cmd.Flags().StringVar(&soul, "soul", "", "Manager SOUL.md content")
+	cmd.Flags().StringVar(
+		&identity,
+		"identity",
+		"",
+		"Manager Identity & Personality section content",
+	)
 	cmd.Flags().StringVar(
 		&mcpFile,
 		"mcp-servers-file",

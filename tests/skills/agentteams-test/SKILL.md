@@ -11,11 +11,12 @@ Complete AgentTeams testing workflow including installation verification, functi
 
 ```bash
 # 1. Clone/update code
-git clone https://github.com/alibaba/agentteams.git && cd agentteams
+git clone https://github.com/jesseedcp/AgentTeams.git && cd AgentTeams
 
-# 2. Create config file (first time)
-cp agentteams-manager.env.example ~/agentteams-manager.env
-# Edit ~/agentteams-manager.env and set AGENTTEAMS_LLM_API_KEY, etc.
+# 2. Create a private test config (first time)
+printf 'AGENTTEAMS_LLM_API_KEY=%s\n' 'replace-me' > ~/agentteams-manager.env
+# Add AGENTTEAMS_LLM_BASE_URL / AGENTTEAMS_DEFAULT_MODEL when your provider
+# does not use the installer defaults, then chmod 600 the file.
 
 # 3. Run full test
 set -a && . ~/agentteams-manager.env && set +a && make test
@@ -27,8 +28,8 @@ set -a && . ~/agentteams-manager.env && set +a && make test
 
 ```bash
 # Clone latest code
-git clone https://github.com/alibaba/agentteams.git
-cd agentteams
+git clone https://github.com/jesseedcp/AgentTeams.git
+cd AgentTeams
 
 # Check if config file exists
 ls ~/agentteams-manager.env
@@ -82,11 +83,8 @@ When tests fail or hang, use `agentteams-debug.sh` to export logs:
 # Manager container logs
 docker logs --tail 100 agentteams-manager 2>&1
 
-# Manager Agent logs
-docker exec agentteams-manager tail -100 /var/log/agentteams/manager-agent.log
-
-# Manager Agent error logs
-docker exec agentteams-manager tail -50 /var/log/agentteams/manager-agent-error.log
+# AgentScope Manager logs
+docker logs --tail 200 agentteams-manager 2>&1
 
 # Worker container logs
 docker ps --filter "name=agentteams-worker" --format "table {{.Names}}\t{{.Status}}"
@@ -125,15 +123,15 @@ python3 scripts/export-debug-log.py --range 1h
 # Check if Worker container is running
 docker ps --filter "name=agentteams-worker"
 
-# Check Worker Agent process
-docker exec agentteams-worker-alice ps aux | grep openclaw
+# Check the runtime process selected for this Worker
+docker exec agentteams-worker-alice ps aux
 ```
 
 ### 3. LLM Call Failures
 
 ```bash
-# Check error logs
-docker exec agentteams-manager grep -i "error\|fail" /var/log/agentteams/manager-agent-error.log
+# Check AgentScope Manager errors
+docker logs agentteams-manager 2>&1 | grep -i "error\\|fail"
 ```
 
 ### 4. Test Timeout
@@ -190,6 +188,6 @@ rm -rf ./agentteams
 
 ## References
 
-- [tests/README.md](https://github.com/alibaba/agentteams/blob/main/tests/README.md) - Test framework documentation
-- [install/README.md](https://github.com/alibaba/agentteams/blob/main/install/README.md) - Installation guide
+- [tests/README.md](https://github.com/jesseedcp/AgentTeams/blob/main/tests/README.md) - Test framework documentation
+- [install/README.md](https://github.com/jesseedcp/AgentTeams/blob/main/install/README.md) - Installation guide
 - [references/troubleshooting.md](references/troubleshooting.md) - Detailed troubleshooting

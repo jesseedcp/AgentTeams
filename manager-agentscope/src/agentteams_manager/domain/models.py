@@ -76,6 +76,7 @@ class OperationKind(StrEnum):
     FILE_SYNC = "file_sync"
     CONFIGURE_MCP = "configure_mcp"
     SWITCH_MODEL = "switch_model"
+    UPDATE_MANAGER_IDENTITY = "update_manager_identity"
     PUBLISH_SERVICE = "publish_service"
 
 

@@ -249,13 +249,13 @@ func (r *ManagerReconciler) applyEmbeddedConfig(req *backend.CreateRequest, wb b
 
 	req.RestartPolicy = "unless-stopped"
 
-	consoleHostPort := r.EmbeddedConfig.ManagerConsolePort
-	if consoleHostPort == "" {
-		consoleHostPort = "18888"
+	healthHostPort := r.EmbeddedConfig.ManagerHealthPort
+	if healthHostPort == "" {
+		healthHostPort = "18888"
 	}
 	req.Ports = append(req.Ports, backend.PortMapping{
 		HostIP:        "127.0.0.1",
-		HostPort:      consoleHostPort,
+		HostPort:      healthHostPort,
 		ContainerPort: "18799",
 	})
 

@@ -72,6 +72,7 @@ ALL_MANAGER_TOOLS = frozenset(
         "remove_mcp",
         "switch_model",
         "switch_worker_model",
+        "update_manager_identity",
         "publish_service",
     },
 )

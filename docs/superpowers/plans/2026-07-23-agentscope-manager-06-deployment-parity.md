@@ -873,7 +873,7 @@ git status --short
 git log -1 --format=full
 git rev-list --max-parents=0 HEAD
 git cat-file -p "$(git rev-list --max-parents=0 HEAD)"
-git merge-base --is-ancestor 2540c968a642845c4b9382afd75d8c80ed861137 HEAD
+git merge-base --is-ancestor 0ff89f07a205b82cd81d18385c7095ec352a083f HEAD
 ```
 
 Expected:

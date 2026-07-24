@@ -706,6 +706,7 @@ def build_application(
     for kind in (
         OperationKind.CONFIGURE_MCP,
         OperationKind.SWITCH_MODEL,
+        OperationKind.UPDATE_MANAGER_IDENTITY,
         OperationKind.PUBLISH_SERVICE,
     ):
         resumers[kind] = integration_service.resume_operation

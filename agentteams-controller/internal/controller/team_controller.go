@@ -463,9 +463,6 @@ func (r *TeamReconciler) reconcileTeamLegacy(ctx context.Context, t *v1beta1.Tea
 		logger.Error(err, "legacy team context injection failed (non-fatal)")
 	}
 	if r.Legacy != nil && r.Legacy.Enabled() {
-		if err := r.Legacy.UpdateManagerGroupAllowFrom(r.Legacy.MatrixUserID(leaderRuntimeName), true); err != nil {
-			logger.Error(err, "failed to update Manager groupAllowFrom for team leader (non-fatal)")
-		}
 		if err := r.Legacy.UpdateTeamsRegistry(service.TeamRegistryEntry{
 			Name:           teamRuntimeName,
 			Leader:         t.Spec.Leader.Name,
@@ -1201,12 +1198,8 @@ func (r *TeamReconciler) reconcileTeamDecoupled(ctx context.Context, t *v1beta1.
 		return r.failTeam(ctx, t, patchBase, err.Error())
 	}
 
-	// 6. Legacy registry updates
+	// 6. Compatibility registry updates
 	if r.Legacy != nil && r.Legacy.Enabled() {
-		leaderMatrixID := r.Legacy.MatrixUserID(leaderRuntimeName)
-		if err := r.Legacy.UpdateManagerGroupAllowFrom(leaderMatrixID, true); err != nil {
-			logger.Error(err, "failed to update Manager groupAllowFrom for team leader (non-fatal)")
-		}
 		workerNames := make([]string, 0, len(workerRefs))
 		for _, ref := range workerRefs {
 			workerNames = append(workerNames, ref.Name)
@@ -1227,8 +1220,6 @@ func (r *TeamReconciler) reconcileTeamDecoupled(ctx context.Context, t *v1beta1.
 			role := RoleTeamWorker
 			if rm.ref.Name == leaderRef.Name {
 				role = RoleTeamLeader
-			} else if err := r.Legacy.UpdateManagerGroupAllowFrom(r.Legacy.MatrixUserID(rm.runtimeName), false); err != nil {
-				logger.Error(err, "failed to revoke Manager groupAllowFrom for team worker (non-fatal)", "worker", rm.runtimeName)
 			}
 			ms := decoupledMemberStatusSnapshot(rm, role)
 			r.reconcileLegacyMember(ctx, derivedTeam, decoupledMemberContext(derivedTeam, rm, role, teamRuntimeName, leaderRuntimeName, r.DefaultBackendRuntime), &ms)
@@ -1514,16 +1505,17 @@ func (r *TeamReconciler) detachDecoupledMember(ctx context.Context, t *v1beta1.T
 	}
 
 	r.removeLegacyMember(ctx, runtimeName)
-	if r.Legacy == nil || !r.Legacy.Enabled() || runtime == backend.RuntimeQwenPaw {
+	if runtime == backend.RuntimeQwenPaw {
 		return
 	}
-	if err := r.Legacy.UpdateManagerGroupAllowFrom(r.Legacy.MatrixUserID(runtimeName), false); err != nil {
-		logger.Error(err, "failed to revoke Manager groupAllowFrom for detached member (non-fatal)", "worker", runtimeName)
+	resolveMatrixUserID := r.Provisioner.MatrixUserID
+	if r.Legacy != nil && r.Legacy.Enabled() {
+		resolveMatrixUserID = r.Legacy.MatrixUserID
 	}
-	managerMatrixID := r.Legacy.MatrixUserID("manager")
+	managerMatrixID := resolveMatrixUserID("manager")
 	var systemAdminID string
 	if r.SystemAdminUser != "" {
-		systemAdminID = r.Legacy.MatrixUserID(r.SystemAdminUser)
+		systemAdminID = resolveMatrixUserID(r.SystemAdminUser)
 	}
 	standaloneAllowFrom := uniqueTeamStrings([]string{managerMatrixID, systemAdminID, teamAdminMatrixID(t)})
 	if err := r.Deployer.InjectChannelPolicy(ctx, service.InjectChannelPolicyRequest{
@@ -1806,23 +1798,11 @@ func (r *TeamReconciler) handleDeleteDecoupled(ctx context.Context, t *v1beta1.T
 		}
 	}
 
-	// Legacy registry cleanup.
+	// Compatibility registry cleanup.
 	if r.Legacy != nil && r.Legacy.Enabled() {
-		if leaderRef != nil {
-			var leaderW v1beta1.Worker
-			key := client.ObjectKey{Name: leaderRef.Name, Namespace: t.Namespace}
-			if err := r.Get(ctx, key, &leaderW); err == nil {
-				leaderRN := leaderW.Spec.EffectiveWorkerName(leaderW.Name)
-				leaderMatrixID := r.Legacy.MatrixUserID(leaderRN)
-				if err := r.Legacy.UpdateManagerGroupAllowFrom(leaderMatrixID, false); err != nil {
-					logger.Error(err, "failed to revoke Manager groupAllowFrom (non-fatal)")
-				}
-			}
-		}
 		if err := r.Legacy.RemoveFromTeamsRegistry(ctx, teamRuntimeName); err != nil {
 			logger.Error(err, "failed to remove team from registry (non-fatal)")
 		}
-
 	}
 
 	// Delete team room aliases so a fresh Team CR with the same name gets
@@ -1930,10 +1910,9 @@ func validateWorkerMembers(refs []v1beta1.TeamWorkerRef) (leader *v1beta1.TeamWo
 // reconcileLegacyMember upserts a team member (leader or worker) into the
 // legacy workers-registry.json. This is the TeamReconciler counterpart to
 // WorkerReconciler.reconcileLegacy — both must emit entries with identical
-// field semantics (role, team_id, runtime, skills, image) so that
-// manager-side tooling (find-worker.sh, push-worker-skills.sh,
-// update-worker-config.sh, etc.) can treat standalone workers and team
-// members uniformly.
+// field semantics (role, team_id, runtime, skills, image). It is a
+// compatibility projection for imports and diagnostics; Controller resources
+// remain authoritative and AgentScope Manager tools use the resource API.
 //
 // m.Role drives the role string: RoleTeamLeader -> "team_leader",
 // RoleTeamWorker -> "worker". ms is the Team.Status member entry populated by

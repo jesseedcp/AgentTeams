@@ -93,8 +93,8 @@ After configuration, restart the container: `docker restart agentteams-manager`
 
 | Where | What to configure |
 |-------|-------------------|
-| **Embedded Docker** | Put all `AGENTTEAMS_CMS_*` variables on **`agentteams-manager`** (or `agentteams-manager-copaw` if you use QwenPaw Manager). They are loaded from your `agentteams-manager.env` at container start. **`agentteams-controller`** does not need CMS env for normal agent tracing. |
-| **Helm / Kubernetes** | Set the same keys on the **Manager** Deployment (see `helm/agentteams/values.yaml` → manager env). Optionally seed worker defaults there so every Worker Pod receives CMS settings even if Manager was configured late. |
+| **Embedded Docker** | Put the `AGENTTEAMS_CMS_*` values in `agentteams-manager.env`; the embedded **Controller** reads them and injects them into the AgentScope Manager and all Worker runtimes. |
+| **Helm / Kubernetes** | Configure the chart `cms` values. The Controller receives them and propagates the normalized environment to reconciled Manager and Worker Pods. |
 
 ## Step 3: Configure AgentTeams Workers
 
