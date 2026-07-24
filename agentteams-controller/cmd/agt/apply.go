@@ -315,7 +315,11 @@ func applyWorkerParams(name, model, runtime, image, identity, soul, soulFile,
 		req["skills"] = splitCSV(skills)
 	}
 	if expose != "" {
-		req["expose"] = parseExposePorts(expose)
+		ports, err := parseExposePorts(expose)
+		if err != nil {
+			return fmt.Errorf("--expose: %w", err)
+		}
+		req["expose"] = ports
 	}
 
 	var resp map[string]interface{}

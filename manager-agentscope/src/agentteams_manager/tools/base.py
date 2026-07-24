@@ -16,7 +16,11 @@ from agentscope.message import (
     ToolCallBlock,
     ToolResultState,
 )
-from agentscope.permission import PermissionContext, PermissionDecision
+from agentscope.permission import (
+    PermissionBehavior,
+    PermissionContext,
+    PermissionDecision,
+)
 from agentscope.state import AgentState
 from agentscope.tool import (
     ToolBase,
@@ -103,6 +107,7 @@ class ManagerTool(ToolBase):
         is_read_only: bool = False,
         is_concurrency_safe: bool = False,
         yolo: bool = False,
+        confirmation_message: str | None = None,
     ) -> None:
         super().__init__()
         if input_schema.get("type") != "object":
@@ -119,6 +124,7 @@ class ManagerTool(ToolBase):
         self._policy = policy
         self._handler = handler
         self._yolo = yolo
+        self._confirmation_message = confirmation_message
 
     async def check_permissions(
         self,
@@ -126,11 +132,22 @@ class ManagerTool(ToolBase):
         context: PermissionContext,
     ) -> PermissionDecision:
         del tool_input, context
-        return decide_tool_permission(
+        decision = decide_tool_permission(
             tool_name=self.name,
             policy=self._policy,
             yolo=self._yolo,
         )
+        if (
+            decision.behavior is PermissionBehavior.ASK
+            and self._confirmation_message is not None
+        ):
+            return PermissionDecision(
+                behavior=decision.behavior,
+                message=self._confirmation_message,
+                decision_reason=decision.decision_reason,
+                bypass_immune=decision.bypass_immune,
+            )
+        return decision
 
     async def call(self, **kwargs: Any) -> ToolChunk:
         result = self._handler(**kwargs)

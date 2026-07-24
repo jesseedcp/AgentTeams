@@ -189,6 +189,36 @@ class MCPManagementReceipt(BaseModel):
     runtime_revision: int | None = Field(default=None, ge=0)
 
 
+class PublishedRoute(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    port: int = Field(ge=1, le=65535)
+    domain: str = Field(min_length=1)
+
+
+class ServicePublishingReceipt(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    operation_id: str = Field(min_length=32, max_length=32)
+    action: Literal["publish", "unpublish"]
+    worker: str
+    ports: tuple[int, ...]
+    routes: tuple[PublishedRoute, ...] = ()
+    domains: tuple[str, ...] = ()
+    supported: bool = True
+    public: bool = True
+    phase: str
+    message: str = ""
+
+    @model_validator(mode="after")
+    def routes_match_domains(self) -> ServicePublishingReceipt:
+        if self.domains != tuple(route.domain for route in self.routes):
+            raise ValueError("service route domains must match routes")
+        if not self.supported and (self.routes or self.domains):
+            raise ValueError("unsupported publishing cannot report routes")
+        return self
+
+
 Sleep = Callable[[float], None | Awaitable[None]]
 
 
@@ -737,6 +767,262 @@ class IntegrationService:
         )
         return receipt
 
+    async def publish_service(
+        self,
+        *,
+        worker: str,
+        ports: tuple[int, ...],
+        context: MutationContext,
+    ) -> ServicePublishingReceipt:
+        requested = _validated_ports(ports)
+        operation = await self._supervisor.begin(
+            operation_id=context.operation_id,
+            kind=OperationKind.PUBLISH_SERVICE,
+            target_key=f"worker/{worker}/expose",
+            request={
+                "action": "publish",
+                "worker": worker,
+                "ports": list(requested),
+                "public": True,
+            },
+        )
+        if operation.status is OperationStatus.SUCCEEDED:
+            return ServicePublishingReceipt.model_validate(operation.result)
+        if self._runtime_mode == "aliyun":
+            return await self._unsupported_service_receipt(
+                operation.operation_id,
+                action="publish",
+                worker=worker,
+                ports=requested,
+            )
+        current = await self._require_worker(worker)
+        desired = tuple(
+            sorted({*_desired_expose(current), *requested}),
+        )
+        observed = await self._replace_expose(
+            operation.operation_id,
+            worker,
+            desired,
+            current=current,
+        )
+        converged = await self._wait_for_service_state(
+            operation.operation_id,
+            worker,
+            desired=desired,
+            removed=(),
+            first=observed,
+        )
+        route_map = _observed_routes(converged)
+        routes = tuple(
+            PublishedRoute(port=port, domain=route_map[port])
+            for port in requested
+        )
+        receipt = ServicePublishingReceipt(
+            operation_id=operation.operation_id,
+            action="publish",
+            worker=worker,
+            ports=requested,
+            routes=routes,
+            domains=tuple(route.domain for route in routes),
+            phase=converged.phase,
+        )
+        await self._supervisor.effect_succeeded(
+            operation.operation_id,
+            ExternalEffect.CONTROLLER,
+            receipt.model_dump(mode="json"),
+        )
+        return receipt
+
+    async def unpublish_service(
+        self,
+        *,
+        worker: str,
+        ports: tuple[int, ...],
+        context: MutationContext,
+    ) -> ServicePublishingReceipt:
+        requested = _validated_ports(ports)
+        operation = await self._supervisor.begin(
+            operation_id=context.operation_id,
+            kind=OperationKind.PUBLISH_SERVICE,
+            target_key=f"worker/{worker}/expose",
+            request={
+                "action": "unpublish",
+                "worker": worker,
+                "ports": list(requested),
+            },
+        )
+        if operation.status is OperationStatus.SUCCEEDED:
+            return ServicePublishingReceipt.model_validate(operation.result)
+        if self._runtime_mode == "aliyun":
+            return await self._unsupported_service_receipt(
+                operation.operation_id,
+                action="unpublish",
+                worker=worker,
+                ports=requested,
+            )
+        current = await self._require_worker(worker)
+        removed = set(requested)
+        desired = tuple(
+            port
+            for port in _desired_expose(current)
+            if port not in removed
+        )
+        observed = await self._replace_expose(
+            operation.operation_id,
+            worker,
+            desired,
+            current=current,
+        )
+        converged = await self._wait_for_service_state(
+            operation.operation_id,
+            worker,
+            desired=desired,
+            removed=requested,
+            first=observed,
+        )
+        receipt = ServicePublishingReceipt(
+            operation_id=operation.operation_id,
+            action="unpublish",
+            worker=worker,
+            ports=requested,
+            phase=converged.phase,
+        )
+        await self._supervisor.effect_succeeded(
+            operation.operation_id,
+            ExternalEffect.CONTROLLER,
+            receipt.model_dump(mode="json"),
+        )
+        return receipt
+
+    async def _unsupported_service_receipt(
+        self,
+        operation_id: str,
+        *,
+        action: Literal["publish", "unpublish"],
+        worker: str,
+        ports: tuple[int, ...],
+    ) -> ServicePublishingReceipt:
+        await self._supervisor.before_effect(
+            operation_id,
+            ExternalEffect.CONTROLLER,
+            {
+                "operation": "check_service_exposure_support",
+                "runtime": "aliyun",
+            },
+        )
+        receipt = ServicePublishingReceipt(
+            operation_id=operation_id,
+            action=action,
+            worker=worker,
+            ports=ports,
+            supported=False,
+            phase="Unsupported",
+            message=(
+                "the configured cloud gateway provider does not manage "
+                "Worker exposed ports"
+            ),
+        )
+        await self._supervisor.effect_succeeded(
+            operation_id,
+            ExternalEffect.CONTROLLER,
+            receipt.model_dump(mode="json"),
+        )
+        return receipt
+
+    async def _require_worker(self, name: str) -> WorkerResource:
+        worker = await self._agt.get_worker(name)
+        if worker is None:
+            raise ConflictError(f"worker/{name} is not readable")
+        return worker
+
+    async def _replace_expose(
+        self,
+        operation_id: str,
+        worker: str,
+        ports: tuple[int, ...],
+        *,
+        current: WorkerResource,
+    ) -> WorkerResource:
+        await self._supervisor.before_effect(
+            operation_id,
+            ExternalEffect.CONTROLLER,
+            {
+                "operation": "replace_worker_expose",
+                "worker": worker,
+                "ports": list(ports),
+                "public": True,
+            },
+        )
+        if _desired_expose(current) == ports:
+            observed = current
+        else:
+            try:
+                observed = await self._agt.update_worker_expose(
+                    worker,
+                    ports,
+                )
+            except Exception as exc:
+                await self._record_external_failure(
+                    operation_id,
+                    ExternalEffect.CONTROLLER,
+                    exc,
+                )
+                raise
+        await self._supervisor.effect_acknowledged(
+            operation_id,
+            ExternalEffect.CONTROLLER,
+            {
+                "operation": "replace_worker_expose",
+                "worker": worker,
+                "ports": list(ports),
+                "phase": observed.phase,
+            },
+        )
+        return observed
+
+    async def _wait_for_service_state(
+        self,
+        operation_id: str,
+        worker: str,
+        *,
+        desired: tuple[int, ...],
+        removed: tuple[int, ...],
+        first: WorkerResource,
+    ) -> WorkerResource:
+        observed = first
+        for attempt in range(self._poll_attempts):
+            phase = (observed.phase or "").casefold()
+            if phase in {"failed", "error"}:
+                await self._supervisor.effect_failed(
+                    operation_id,
+                    ExternalEffect.CONTROLLER,
+                    "worker entered a failed phase",
+                )
+                raise ConflictError(
+                    f"worker/{worker} entered {observed.phase}",
+                )
+            route_map = _observed_routes(observed)
+            if (
+                _desired_expose(observed) == desired
+                and all(
+                    port in route_map and route_map[port]
+                    for port in desired
+                )
+                and all(port not in route_map for port in removed)
+            ):
+                return observed
+            if attempt + 1 < self._poll_attempts:
+                await self._wait()
+                observed = await self._require_worker(worker)
+        await self._supervisor.effect_ambiguous(
+            operation_id,
+            ExternalEffect.CONTROLLER,
+            "worker_exposed_ports_not_observed",
+        )
+        raise AmbiguousEffectError(
+            f"worker/{worker} service exposure did not converge",
+        )
+
     def _require_local_mcp(self) -> None:
         if self._runtime_mode == "aliyun":
             raise CloudMCPManagementUnsupported(
@@ -1223,3 +1509,68 @@ def _worker_mcp_servers(
         raise ConflictError(
             f"worker/{worker.name} has invalid MCP descriptor state",
         ) from None
+
+
+def _validated_ports(ports: tuple[int, ...]) -> tuple[int, ...]:
+    if not ports:
+        raise ValueError("at least one service port is required")
+    if len(ports) != len(set(ports)):
+        raise ValueError("service ports must be unique")
+    if any(
+        isinstance(port, bool)
+        or not isinstance(port, int)
+        or port < 1
+        or port > 65535
+        for port in ports
+    ):
+        raise ValueError("service ports must be integers from 1 to 65535")
+    return tuple(sorted(ports))
+
+
+def _desired_expose(worker: WorkerResource) -> tuple[int, ...]:
+    raw = worker.spec.get("expose", [])
+    if not isinstance(raw, list):
+        raise ConflictError(
+            f"worker/{worker.name} has invalid expose desired state",
+        )
+    try:
+        ports = tuple(int(port) for port in raw)
+    except (TypeError, ValueError):
+        raise ConflictError(
+            f"worker/{worker.name} has invalid expose desired state",
+        ) from None
+    if any(port < 1 or port > 65535 for port in ports):
+        raise ConflictError(
+            f"worker/{worker.name} has invalid expose desired state",
+        )
+    return tuple(sorted(set(ports)))
+
+
+def _observed_routes(worker: WorkerResource) -> dict[int, str]:
+    raw = worker.status.get("exposedPorts", [])
+    if not isinstance(raw, list):
+        raise ConflictError(
+            f"worker/{worker.name} has invalid exposed port status",
+        )
+    routes: dict[int, str] = {}
+    for item in raw:
+        if not isinstance(item, dict):
+            raise ConflictError(
+                f"worker/{worker.name} has invalid exposed port status",
+            )
+        port = item.get("port")
+        domain = item.get("domain")
+        if (
+            isinstance(port, bool)
+            or not isinstance(port, int)
+            or port < 1
+            or port > 65535
+            or not isinstance(domain, str)
+            or not domain
+            or port in routes
+        ):
+            raise ConflictError(
+                f"worker/{worker.name} has invalid exposed port status",
+            )
+        routes[port] = domain
+    return routes

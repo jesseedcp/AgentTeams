@@ -43,16 +43,17 @@ func updateCmd() *cobra.Command {
 
 func updateWorkerCmd() *cobra.Command {
 	var (
-		name       string
-		model      string
-		runtime    string
-		image      string
-		identity   string
-		soul       string
-		skills     string
-		packageURI string
-		expose     string
-		mcpFile    string
+		name        string
+		model       string
+		runtime     string
+		image       string
+		identity    string
+		soul        string
+		skills      string
+		packageURI  string
+		expose      string
+		clearExpose bool
+		mcpFile     string
 	)
 
 	cmd := &cobra.Command{
@@ -101,7 +102,14 @@ func updateWorkerCmd() *cobra.Command {
 				req["skills"] = splitCSV(skills)
 			}
 			if cmd.Flags().Changed("expose") {
-				req["expose"] = parseExposePorts(expose)
+				ports, err := parseExposePorts(expose)
+				if err != nil {
+					return fmt.Errorf("--expose: %w", err)
+				}
+				req["expose"] = ports
+			}
+			if clearExpose {
+				req["expose"] = make([]map[string]interface{}, 0)
 			}
 			if cmd.Flags().Changed("mcp-servers-file") {
 				servers, err := readMCPServers(cmd, mcpFile)
@@ -134,6 +142,13 @@ func updateWorkerCmd() *cobra.Command {
 	cmd.Flags().StringVar(&skills, "skills", "", "Comma-separated built-in skills")
 	cmd.Flags().StringVar(&packageURI, "package", "", "Package URI")
 	cmd.Flags().StringVar(&expose, "expose", "", "Comma-separated ports to expose")
+	cmd.Flags().BoolVar(
+		&clearExpose,
+		"clear-expose",
+		false,
+		"Remove every exposed port",
+	)
+	cmd.MarkFlagsMutuallyExclusive("expose", "clear-expose")
 	cmd.Flags().StringVar(
 		&mcpFile,
 		"mcp-servers-file",

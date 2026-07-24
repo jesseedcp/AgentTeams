@@ -32,6 +32,12 @@ def _worker(name: str = "alice", runtime: str = "qwenpaw") -> dict:
         "skills": ["git", "review"],
         "package": "oss://workers/release.zip",
         "expose": [{"port": 8080}],
+        "exposedPorts": [
+            {
+                "port": 8080,
+                "domain": "worker-alice-8080-local.agentteams.io",
+            },
+        ],
     }
 
 
@@ -49,6 +55,12 @@ async def test_get_worker_uses_json_and_parses_runtime() -> None:
     assert worker.spec["identity"] == "Release specialist"
     assert worker.spec["package"] == "oss://workers/release.zip"
     assert worker.spec["expose"] == [8080]
+    assert worker.status["exposedPorts"] == [
+        {
+            "port": 8080,
+            "domain": "worker-alice-8080-local.agentteams.io",
+        },
+    ]
     assert process.argv == (
         "agt",
         "get",
@@ -153,9 +165,43 @@ async def test_update_worker_preserves_explicit_empty_arrays() -> None:
         "alice",
         "--skills",
         "",
-        "--expose",
-        "",
+        "--clear-expose",
     )
+
+
+@pytest.mark.asyncio
+async def test_update_worker_expose_returns_controller_observation() -> None:
+    process = FakeProcess()
+    process.queue_error("", returncode=0)
+    updated = _worker()
+    updated["expose"] = [{"port": 8080}, {"port": 3000}]
+    updated["exposedPorts"] = [
+        {
+            "port": 8080,
+            "domain": "worker-alice-8080-local.agentteams.io",
+        },
+        {
+            "port": 3000,
+            "domain": "worker-alice-3000-local.agentteams.io",
+        },
+    ]
+    process.queue_json(updated)
+
+    worker = await AgtClient(process).update_worker_expose(
+        "alice",
+        (3000, 8080),
+    )
+
+    assert process.calls[-2][0] == (
+        "agt",
+        "update",
+        "worker",
+        "--name",
+        "alice",
+        "--expose",
+        "3000,8080",
+    )
+    assert len(worker.status["exposedPorts"]) == 2
 
 
 @pytest.mark.asyncio

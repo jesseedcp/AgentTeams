@@ -34,6 +34,7 @@ WorkerRuntime = Literal[
     "qwenpaw",
     "openhuman",
 ]
+Port = Annotated[int, Field(ge=1, le=65535)]
 ResourceName = Annotated[
     str,
     StringConstraints(
@@ -79,7 +80,7 @@ class WorkerCreateRequest(_Request):
     soul: str | None = None
     skills: tuple[str, ...] = ()
     package_uri: str | None = None
-    expose: tuple[int, ...] = ()
+    expose: tuple[Port, ...] = ()
     team: ResourceName | None = None
     role: Literal["team_leader", "worker"] | None = None
 
@@ -91,6 +92,14 @@ class WorkerCreateRequest(_Request):
     ) -> str | None:
         return _safe_package_reference(value)
 
+    @field_validator("expose")
+    @classmethod
+    def require_unique_expose_ports(
+        cls,
+        value: tuple[int, ...],
+    ) -> tuple[int, ...]:
+        return _unique_ports(value)
+
 
 class WorkerUpdateRequest(_Request):
     name: ResourceName
@@ -101,7 +110,7 @@ class WorkerUpdateRequest(_Request):
     soul: str | None = None
     skills: tuple[str, ...] | None = None
     package_uri: str | None = None
-    expose: tuple[int, ...] | None = None
+    expose: tuple[Port, ...] | None = None
 
     @field_validator("package_uri")
     @classmethod
@@ -110,6 +119,14 @@ class WorkerUpdateRequest(_Request):
         value: str | None,
     ) -> str | None:
         return _safe_package_reference(value)
+
+    @field_validator("expose")
+    @classmethod
+    def require_unique_expose_ports(
+        cls,
+        value: tuple[int, ...] | None,
+    ) -> tuple[int, ...] | None:
+        return _unique_ports(value)
 
     @model_validator(mode="after")
     def require_change(self) -> WorkerUpdateRequest:
@@ -179,6 +196,10 @@ class _ExposePayload(BaseModel):
     port: int = Field(ge=1, le=65535)
 
 
+class _ExposedPortPayload(_ExposePayload):
+    domain: str = Field(min_length=1)
+
+
 class _WorkerPayload(BaseModel):
     model_config = ConfigDict(extra="allow", populate_by_name=True)
 
@@ -196,6 +217,10 @@ class _WorkerPayload(BaseModel):
     )
     package_uri: str = Field(default="", alias="package")
     expose: tuple[_ExposePayload, ...] = ()
+    exposed_ports: tuple[_ExposedPortPayload, ...] = Field(
+        default=(),
+        alias="exposedPorts",
+    )
     container_state: str = Field(default="", alias="containerState")
     matrix_user_id: str = Field(default="", alias="matrixUserID")
     room_id: str = Field(default="", alias="roomID")
@@ -231,6 +256,10 @@ class _WorkerPayload(BaseModel):
             status={
                 "containerState": self.container_state,
                 "message": self.message,
+                "exposedPorts": [
+                    item.model_dump(mode="json")
+                    for item in self.exposed_ports
+                ],
             },
         )
 
@@ -438,11 +467,14 @@ class AgtClient:
             _csv_flag(argv, "--skills", request.skills, allow_empty=True)
         _optional_flag(argv, "--package", request.package_uri)
         if request.expose is not None:
-            _optional_flag(
-                argv,
-                "--expose",
-                ",".join(map(str, request.expose)),
-            )
+            if request.expose:
+                _optional_flag(
+                    argv,
+                    "--expose",
+                    ",".join(map(str, request.expose)),
+                )
+            else:
+                argv.append("--clear-expose")
         await self._command(tuple(argv))
         worker = await self.get_worker(request.name)
         if worker is None:
@@ -450,6 +482,16 @@ class AgtClient:
                 f"updated worker {request.name!r} is not readable",
             )
         return worker
+
+    async def update_worker_expose(
+        self,
+        name: str,
+        ports: tuple[int, ...],
+    ) -> WorkerResource:
+        """Replace every desired exposed port and return observed status."""
+        return await self.update_worker(
+            WorkerUpdateRequest(name=name, expose=ports),
+        )
 
     async def apply_worker_package(
         self,
@@ -894,6 +936,14 @@ def _is_not_found(error: str) -> bool:
 def _validate_name(name: str) -> None:
     if re.fullmatch(r"[a-z0-9][a-z0-9-]*", name) is None:
         raise ValueError(f"invalid resource name {name!r}")
+
+
+def _unique_ports(
+    ports: tuple[int, ...] | None,
+) -> tuple[int, ...] | None:
+    if ports is not None and len(ports) != len(set(ports)):
+        raise ValueError("exposed ports must be unique")
+    return ports
 
 
 def _flag(argv: list[str], name: str, value: object | None) -> None:

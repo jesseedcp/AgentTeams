@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -96,7 +97,11 @@ func createWorkerCmd() *cobra.Command {
 				req["skills"] = splitCSV(skills)
 			}
 			if expose != "" {
-				req["expose"] = parseExposePorts(expose)
+				ports, err := parseExposePorts(expose)
+				if err != nil {
+					return fmt.Errorf("--expose: %w", err)
+				}
+				req["expose"] = ports
 			}
 
 			client := NewAPIClient()
@@ -487,13 +492,22 @@ func splitCSV(s string) []string {
 	return result
 }
 
-func parseExposePorts(s string) []map[string]interface{} {
+func parseExposePorts(s string) ([]map[string]interface{}, error) {
 	ports := make([]map[string]interface{}, 0)
+	seen := make(map[int]struct{})
 	for _, p := range splitCSV(s) {
-		port := map[string]interface{}{"port": p}
+		value, err := strconv.Atoi(p)
+		if err != nil || value < 1 || value > 65535 {
+			return nil, fmt.Errorf("port %q must be an integer from 1 to 65535", p)
+		}
+		if _, exists := seen[value]; exists {
+			return nil, fmt.Errorf("port %d must be unique", value)
+		}
+		seen[value] = struct{}{}
+		port := map[string]interface{}{"port": value}
 		ports = append(ports, port)
 	}
-	return ports
+	return ports, nil
 }
 
 func setIfNotEmpty(m map[string]interface{}, key, value string) {

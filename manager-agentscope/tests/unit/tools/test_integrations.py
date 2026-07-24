@@ -38,6 +38,14 @@ class Service:
         self.calls.append(("delete", name, context))
         return {"deleted": name}
 
+    async def publish_service(self, *, worker, ports, context):
+        self.calls.append(("publish", (worker, ports), context))
+        return {"published": worker, "ports": list(ports)}
+
+    async def unpublish_service(self, *, worker, ports, context):
+        self.calls.append(("unpublish", (worker, ports), context))
+        return {"unpublished": worker, "ports": list(ports)}
+
 
 def _context() -> MutationContext:
     return MutationContext(
@@ -129,3 +137,46 @@ def test_non_admin_receives_no_mcp_administration_tools() -> None:
     )
 
     assert toolkit.tools == ()
+
+
+@pytest.mark.asyncio
+async def test_service_tool_warns_route_is_public_and_unauthenticated() -> None:
+    service = Service()
+    policy = RoomPolicy(
+        room_id="!admin:example",
+        kind=RoomKind.ADMIN_DM,
+        revision=1,
+        allowed_tools=frozenset({"publish_service"}),
+        confirm_tools=frozenset({"publish_service"}),
+    )
+    toolkit = IntegrationToolkit(
+        policy=policy,
+        service=service,
+        context_provider=_context,
+    )
+
+    assert [tool.name for tool in toolkit.tools] == ["publish_service"]
+    tool = toolkit.tools[0]
+    decision = await tool.check_permissions(
+        {"action": "publish", "worker": "alice", "ports": [8080]},
+        PermissionContext(),
+    )
+    assert decision.behavior is PermissionBehavior.ASK
+    assert "public" in decision.message.casefold()
+    assert "unauthenticated" in decision.message.casefold()
+
+    chunk = await tool.call(
+        action="publish",
+        worker="alice",
+        ports=[8080],
+    )
+
+    assert json.loads(chunk.content[0].text) == {
+        "ports": [8080],
+        "published": "alice",
+    }
+    assert service.calls[-1] == (
+        "publish",
+        ("alice", (8080,)),
+        _context(),
+    )

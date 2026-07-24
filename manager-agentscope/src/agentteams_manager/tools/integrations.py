@@ -30,7 +30,12 @@ from agentteams_manager.workflows.integrations import (
 from agentteams_manager.workflows.resources import MutationContext
 
 INTEGRATION_TOOL_NAMES = frozenset(
-    {"list_mcp_servers", "configure_mcp", "remove_mcp"},
+    {
+        "list_mcp_servers",
+        "configure_mcp",
+        "remove_mcp",
+        "publish_service",
+    },
 )
 
 
@@ -109,6 +114,21 @@ class _RemoveMCPInput(_Input):
     )
 
 
+ServicePort = Annotated[int, Field(ge=1, le=65535)]
+
+
+class _PublishServiceInput(_Input):
+    action: Literal["publish", "unpublish"]
+    worker: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")
+    ports: tuple[ServicePort, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def require_unique_ports(self) -> Self:
+        if len(self.ports) != len(set(self.ports)):
+            raise ValueError("service ports must be unique")
+        return self
+
+
 ContextProvider = Callable[
     [],
     MutationContext | Awaitable[MutationContext],
@@ -162,6 +182,20 @@ class IntegrationToolkit:
                 request_model=_RemoveMCPInput,
                 handler=self._remove_mcp,
             ),
+            self._tool(
+                name="publish_service",
+                description=(
+                    "Publish or unpublish Worker ports through Controller "
+                    "reconciliation."
+                ),
+                request_model=_PublishServiceInput,
+                handler=self._publish_service,
+                confirmation_message=(
+                    "Confirm changing public, unauthenticated Worker routes. "
+                    "Anyone who can reach the generated domain can access "
+                    "the service."
+                ),
+            ),
         )
         return tuple(
             tool
@@ -177,6 +211,7 @@ class IntegrationToolkit:
         request_model: type[BaseModel],
         handler: Callable[[BaseModel], Awaitable[object]],
         is_read_only: bool = False,
+        confirmation_message: str | None = None,
     ) -> ManagerTool:
         async def invoke(**raw: Any) -> object:
             if (
@@ -196,6 +231,7 @@ class IntegrationToolkit:
             handler=invoke,
             is_read_only=is_read_only,
             yolo=self._yolo,
+            confirmation_message=confirmation_message,
         )
 
     async def _context(self) -> MutationContext:
@@ -251,6 +287,21 @@ class IntegrationToolkit:
         return await self._service.delete_mcp(
             item.name,
             context=await self._context(),
+        )
+
+    async def _publish_service(self, request: BaseModel) -> object:
+        item = _PublishServiceInput.model_validate(request)
+        context = await self._context()
+        if item.action == "publish":
+            return await self._service.publish_service(
+                worker=item.worker,
+                ports=item.ports,
+                context=context,
+            )
+        return await self._service.unpublish_service(
+            worker=item.worker,
+            ports=item.ports,
+            context=context,
         )
 
 

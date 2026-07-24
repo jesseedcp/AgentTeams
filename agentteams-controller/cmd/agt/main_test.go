@@ -46,6 +46,57 @@ func TestUpdateWorkerMCPServersCanExplicitlyClear(t *testing.T) {
 	}
 }
 
+func TestUpdateWorkerClearExposeSendsExplicitEmptyArray(t *testing.T) {
+	req := runMCPUpdateCommand(
+		t,
+		updateWorkerCmd(),
+		[]string{"--name", "alice", "--clear-expose"},
+		"",
+		"/api/v1/workers/alice",
+	)
+
+	expose, ok := req["expose"].([]interface{})
+	if !ok || len(expose) != 0 {
+		t.Fatalf("expose = %#v, want explicit empty array", req["expose"])
+	}
+}
+
+func TestUpdateWorkerExposeSendsNumericPorts(t *testing.T) {
+	req := runMCPUpdateCommand(
+		t,
+		updateWorkerCmd(),
+		[]string{"--name", "alice", "--expose", "8080,3000"},
+		"",
+		"/api/v1/workers/alice",
+	)
+
+	expose, ok := req["expose"].([]interface{})
+	if !ok || len(expose) != 2 {
+		t.Fatalf("expose = %#v, want two ports", req["expose"])
+	}
+	first := expose[0].(map[string]interface{})
+	if first["port"] != float64(8080) {
+		t.Fatalf("port = %#v, want numeric 8080", first["port"])
+	}
+}
+
+func TestUpdateWorkerRejectsExposeAndClearExposeTogether(t *testing.T) {
+	cmd := updateWorkerCmd()
+	cmd.SetArgs([]string{
+		"--name", "alice",
+		"--expose", "8080",
+		"--clear-expose",
+	})
+
+	err := cmd.Execute()
+	if err == nil ||
+		!strings.Contains(err.Error(), "none of the others") ||
+		!strings.Contains(err.Error(), "clear-expose") ||
+		!strings.Contains(err.Error(), "expose") {
+		t.Fatalf("error = %v, want mutually exclusive flags", err)
+	}
+}
+
 func TestReadMCPServersRejectsUnsafeInput(t *testing.T) {
 	tests := []struct {
 		name    string
