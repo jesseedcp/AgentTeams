@@ -45,18 +45,6 @@ _cleanup() {
         exec_in_manager rm -rf "/root/agentteams-fs/agents/${w}" 2>/dev/null || true
     done
     exec_in_agent rm -f "/tmp/agentteams-test-${TEST_HUMAN}.yaml" "/tmp/agentteams-test-${TEST_TEAM}.yaml" 2>/dev/null || true
-    # Fallback: clean registries
-    exec_in_agent bash -c "
-        jq 'del(.workers[\"${TEST_LEADER}\"], .workers[\"${TEST_W1}\"])' \
-            /root/manager-workspace/workers-registry.json > /tmp/wr-clean.json 2>/dev/null && \
-            mv /tmp/wr-clean.json /root/manager-workspace/workers-registry.json
-        jq 'del(.teams[\"${TEST_TEAM}\"])' \
-            /root/manager-workspace/teams-registry.json > /tmp/tr-clean.json 2>/dev/null && \
-            mv /tmp/tr-clean.json /root/manager-workspace/teams-registry.json
-        jq 'del(.humans[\"${TEST_HUMAN}\"])' \
-            /root/manager-workspace/humans-registry.json > /tmp/hr-clean.json 2>/dev/null && \
-            mv /tmp/hr-clean.json /root/manager-workspace/humans-registry.json
-    " 2>/dev/null || true
 }
 trap _cleanup EXIT
 

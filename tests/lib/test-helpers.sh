@@ -173,15 +173,15 @@ wait_until() {
     return 0
 }
 
-# Wait for Manager container to be healthy
+# Wait for the AgentScope Manager process to be ready.
 wait_for_manager() {
     local timeout="${1:-300}"
-    wait_until "Manager container healthy" "${timeout}" \
-        "curl -sf http://${TEST_MANAGER_HOST}:${TEST_GATEWAY_PORT}/ > /dev/null 2>&1"
+    wait_until "AgentScope Manager ready" "${timeout}" \
+        "docker exec '${TEST_AGENT_CONTAINER}' python -c 'import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:18799/readyz\", timeout=2).read()' >/dev/null 2>&1"
 }
 
-# Wait for Manager Agent (OpenClaw or CoPaw) to be fully ready
-# Phase 1: Runtime health check (OpenClaw gateway or CoPaw process)
+# Wait for the AgentScope Manager to be fully ready.
+# Phase 1: /readyz reports that recovery, runtime config, and Matrix are ready.
 # Phase 2: Manager has joined the specified DM room
 # Usage: wait_for_manager_agent_ready [timeout] [room_id] [access_token]
 wait_for_manager_agent_ready() {
@@ -195,44 +195,38 @@ wait_for_manager_agent_ready() {
 
     local elapsed=0
 
-    # Detect Manager runtime (check agent container first, then infra)
     local manager_runtime
     manager_runtime=$(docker exec "${agent_container}" printenv AGENTTEAMS_MANAGER_RUNTIME 2>/dev/null || \
                       docker exec "${infra_container}" printenv AGENTTEAMS_MANAGER_RUNTIME 2>/dev/null || \
-                      docker exec "${agent_container}" printenv AGENTTEAMS_MANAGER_RUNTIME 2>/dev/null || \
-                      docker exec "${infra_container}" printenv AGENTTEAMS_MANAGER_RUNTIME 2>/dev/null || echo "openclaw")
+                      echo "agentscope")
 
-    # Phase 1: Wait for Manager Agent to be healthy (runtime-specific, on agent container)
-    log_info "Waiting for Manager ${manager_runtime} runtime to be healthy (container: ${agent_container})..."
-    local runtime_ready=false
-
-    while [ "${elapsed}" -lt "${timeout}" ]; do
-        case "${manager_runtime}" in
-            copaw)
-                if docker exec "${agent_container}" pgrep -f "copaw(_worker\\.run_copaw_app)? app" >/dev/null 2>&1 && \
-                   docker exec "${agent_container}" curl -sf http://127.0.0.1:18799/ >/dev/null 2>&1; then
-                    runtime_ready=true
-                    break
-                fi
-                ;;
-            *)
-                if docker exec "${agent_container}" openclaw gateway health --json 2>/dev/null | grep -q '"ok"'; then
-                    runtime_ready=true
-                    break
-                fi
-                ;;
-        esac
-        sleep 5
-        elapsed=$((elapsed + 5))
-        printf "\r\033[36m[TEST INFO]\033[0m Waiting for %s runtime... (%ds/%ds)" "${manager_runtime}" "${elapsed}" "${timeout}"
-    done
-
-    if [ "${runtime_ready}" != "true" ]; then
-        log_fail "${manager_runtime} runtime did not become healthy within ${timeout}s"
+    if [ "${manager_runtime}" != "agentscope" ]; then
+        log_fail "Manager runtime must be agentscope, got: ${manager_runtime}"
         return 1
     fi
 
-    log_info "${manager_runtime} runtime is healthy (took ${elapsed}s)"
+    # Phase 1: Wait for the Manager's production readiness contract.
+    log_info "Waiting for AgentScope Manager readiness (container: ${agent_container})..."
+    local runtime_ready=false
+
+    while [ "${elapsed}" -lt "${timeout}" ]; do
+        if docker exec "${agent_container}" python -c \
+            'import urllib.request; urllib.request.urlopen("http://127.0.0.1:18799/readyz", timeout=2).read()' \
+            >/dev/null 2>&1; then
+            runtime_ready=true
+            break
+        fi
+        sleep 5
+        elapsed=$((elapsed + 5))
+        printf "\r\033[36m[TEST INFO]\033[0m Waiting for AgentScope Manager... (%ds/%ds)" "${elapsed}" "${timeout}"
+    done
+
+    if [ "${runtime_ready}" != "true" ]; then
+        log_fail "AgentScope Manager did not become ready within ${timeout}s"
+        return 1
+    fi
+
+    log_info "AgentScope Manager is ready (took ${elapsed}s)"
 
     # Phase 2: Wait for Manager to join the DM room (if room_id and token provided)
     # Matrix API calls go via infrastructure container (where Tuwunel runs)

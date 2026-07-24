@@ -123,16 +123,12 @@ REPLY=$(matrix_wait_for_reply "${ADMIN_TOKEN}" "${DM_ROOM}" "@manager" 300)
 
 if [ -z "${REPLY}" ]; then
     log_info "No DM reply yet, checking if Manager created a Project Room instead..."
-    MANAGER_TOKEN=$(docker exec "${TEST_AGENT_CONTAINER}" \
-        jq -r '.channels.matrix.accessToken // empty' /root/manager-workspace/openclaw.json 2>/dev/null || true)
-    if [ -n "${MANAGER_TOKEN}" ]; then
-        PROJECT_ROOM=$(matrix_find_room_by_name "${MANAGER_TOKEN}" "Project:" 2>/dev/null || true)
-        if [ -n "${PROJECT_ROOM}" ]; then
-            log_info "Project room found: ${PROJECT_ROOM}, checking for task assignment messages..."
-            REPLY=$(matrix_read_messages "${MANAGER_TOKEN}" "${PROJECT_ROOM}" 20 2>/dev/null | \
-                jq -r --arg u "@manager" \
-                '[.chunk[] | select(.sender | startswith($u)) | .content.body] | first // empty' 2>/dev/null || true)
-        fi
+    PROJECT_ROOM=$(matrix_find_room_by_name "${ADMIN_TOKEN}" "Project:" 2>/dev/null || true)
+    if [ -n "${PROJECT_ROOM}" ]; then
+        log_info "Project room found: ${PROJECT_ROOM}, checking for task assignment messages..."
+        REPLY=$(matrix_read_messages "${ADMIN_TOKEN}" "${PROJECT_ROOM}" 20 2>/dev/null | \
+            jq -r --arg u "@manager" \
+            '[.chunk[] | select(.sender | startswith($u)) | .content.body] | first // empty' 2>/dev/null || true)
     fi
 fi
 
@@ -140,33 +136,21 @@ assert_not_empty "${REPLY}" "Manager acknowledged collaborative task"
 
 log_section "Wait for Task Completion"
 
-# Get Manager token if not already available
-if [ -z "${MANAGER_TOKEN:-}" ]; then
-    log_info "Waiting for Manager token (timeout: 120s)..."
-    DEADLINE=$(( $(date +%s) + 120 ))
-    while [ "$(date +%s)" -lt "${DEADLINE}" ]; do
-        MANAGER_TOKEN=$(docker exec "${TEST_AGENT_CONTAINER}" \
-            jq -r '.channels.matrix.accessToken // empty' /root/manager-workspace/openclaw.json 2>/dev/null || true)
-        [ -n "${MANAGER_TOKEN}" ] && break
-        sleep 5
-    done
-fi
-
 # Find project room if not already found
-if [ -z "${PROJECT_ROOM:-}" ] && [ -n "${MANAGER_TOKEN:-}" ]; then
+if [ -z "${PROJECT_ROOM:-}" ]; then
     log_info "Waiting for project room to be created (timeout: 300s)..."
     DEADLINE=$(( $(date +%s) + 300 ))
     while [ "$(date +%s)" -lt "${DEADLINE}" ]; do
-        PROJECT_ROOM=$(matrix_find_room_by_name "${MANAGER_TOKEN}" "Project:" 2>/dev/null || true)
+        PROJECT_ROOM=$(matrix_find_room_by_name "${ADMIN_TOKEN}" "Project:" 2>/dev/null || true)
         [ -n "${PROJECT_ROOM}" ] && break
         sleep 10
     done
 fi
 
 # Wait for completion in project room (with nudge via DM), or fall back to sleep
-if [ -n "${PROJECT_ROOM:-}" ] && [ -n "${MANAGER_TOKEN:-}" ]; then
+if [ -n "${PROJECT_ROOM:-}" ]; then
     log_info "Waiting for task completion in project room (timeout: 1800s)..."
-    COMPLETION_MSG=$(matrix_wait_for_message_containing "${MANAGER_TOKEN}" "${PROJECT_ROOM}" "@manager" \
+    COMPLETION_MSG=$(matrix_wait_for_message_containing "${ADMIN_TOKEN}" "${PROJECT_ROOM}" "@manager" \
         "complete\|done\|finished\|已完成\|完成" 1800 \
         "${ADMIN_TOKEN}" "${DM_ROOM}" \
         "Please check the project room and continue coordinating the collaborative task. If any worker message was missed, please follow up." \

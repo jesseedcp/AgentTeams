@@ -173,6 +173,7 @@ type Config struct {
 	// LLM provider (for Gateway initialization)
 	LLMProvider                string
 	LLMAPIKey                  string
+	GitHubToken                string
 	OpenAIBaseURL              string // AGENTTEAMS_OPENAI_BASE_URL — custom base URL for openai-compat providers
 	AIStreamIdleTimeoutSeconds int    // AGENTTEAMS_AI_STREAM_IDLE_TIMEOUT_SECONDS
 
@@ -214,6 +215,7 @@ type WorkerEnvDefaults struct {
 	AdminUser            string
 	AdminPassword        string
 	HigressAdminURL      string
+	MCPGitHubToken       string
 	Runtime              string // "docker" for embedded, "k8s" for incluster
 	DefaultWorkerRuntime string
 	YoloMode             bool // AGENTTEAMS_YOLO=1 — propagated to managers and workers
@@ -388,6 +390,7 @@ func LoadConfig() *Config {
 
 		LLMProvider:                envOrDefault("AGENTTEAMS_LLM_PROVIDER", "qwen"),
 		LLMAPIKey:                  os.Getenv("AGENTTEAMS_LLM_API_KEY"),
+		GitHubToken:                firstNonEmpty(os.Getenv("AGENTTEAMS_MCP_GITHUB_TOKEN"), os.Getenv("AGENTTEAMS_GITHUB_TOKEN")),
 		OpenAIBaseURL:              os.Getenv("AGENTTEAMS_OPENAI_BASE_URL"),
 		AIStreamIdleTimeoutSeconds: envOrDefaultInt("AGENTTEAMS_AI_STREAM_IDLE_TIMEOUT_SECONDS", 900),
 		ElementWebURL:              os.Getenv("AGENTTEAMS_ELEMENT_WEB_URL"),
@@ -414,6 +417,7 @@ func LoadConfig() *Config {
 			AdminUser:            os.Getenv("AGENTTEAMS_ADMIN_USER"),
 			AdminPassword:        os.Getenv("AGENTTEAMS_ADMIN_PASSWORD"),
 			HigressAdminURL:      envOrDefault("AGENTTEAMS_AI_GATEWAY_ADMIN_URL", "http://127.0.0.1:8001"),
+			MCPGitHubToken:       firstNonEmpty(os.Getenv("AGENTTEAMS_MCP_GITHUB_TOKEN"), os.Getenv("AGENTTEAMS_GITHUB_TOKEN")),
 			Runtime:              kubeMode,
 			DefaultWorkerRuntime: os.Getenv("AGENTTEAMS_DEFAULT_WORKER_RUNTIME"),
 			YoloMode:             envBool("AGENTTEAMS_YOLO"),
@@ -818,6 +822,7 @@ func (c *Config) ManagerAgentEnv() map[string]string {
 	setIfNonEmpty("AGENTTEAMS_EMBEDDING_MODEL", c.EmbeddingModel)
 	setIfNonEmpty("AGENTTEAMS_LLM_PROVIDER", c.LLMProvider)
 	setIfNonEmpty("AGENTTEAMS_LLM_API_KEY", c.LLMAPIKey)
+	setIfNonEmpty("AGENTTEAMS_MCP_GITHUB_TOKEN", c.GitHubToken)
 	if c.AIStreamIdleTimeoutSeconds > 0 {
 		env["AGENTTEAMS_AI_STREAM_IDLE_TIMEOUT_SECONDS"] = strconv.Itoa(c.AIStreamIdleTimeoutSeconds)
 	}

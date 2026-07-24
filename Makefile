@@ -181,9 +181,10 @@ build-hermes-worker: ## Build Hermes Worker image
 		-t $(LOCAL_HERMES_WORKER) \
 		./hermes/
 
-build-openhuman-worker: ## Build OpenHuman Worker image (Rust + native Matrix)
+build-openhuman-worker: build-agentteams-controller ## Build OpenHuman Worker image (Rust + native Matrix)
 	@echo "==> Building OpenHuman Worker image: $(LOCAL_OPENHUMAN_WORKER)"
-	docker build $(PLATFORM_FLAG) $(DOCKER_BUILD_ARGS) \
+	docker build $(PLATFORM_FLAG) $(REGISTRY_ARG) $(DOCKER_BUILD_ARGS) \
+		--build-arg AGENTTEAMS_CONTROLLER_IMAGE=$(LOCAL_CONTROLLER_BUILD_IMAGE) \
 		-t $(LOCAL_OPENHUMAN_WORKER) \
 		-f openhuman/Dockerfile .
 
@@ -433,6 +434,33 @@ else
 		./hermes/
 endif
 
+push-openhuman-worker: push-agentteams-controller buildx-setup ## Build + push multi-arch OpenHuman Worker image
+	@echo "==> Building + pushing multi-arch OpenHuman Worker: $(OPENHUMAN_WORKER_TAG) [$(MULTIARCH_PLATFORMS)]"
+ifeq ($(IS_PODMAN),1)
+	-podman manifest rm $(OPENHUMAN_WORKER_TAG) 2>/dev/null
+	$(foreach plat,$(subst $(comma), ,$(MULTIARCH_PLATFORMS)), \
+		echo "  -> Building OpenHuman Worker for $(plat)..." && \
+		podman build --platform $(plat) \
+			$(REGISTRY_ARG) $(DOCKER_BUILD_ARGS) \
+			--build-arg AGENTTEAMS_CONTROLLER_IMAGE=$(CONTROLLER_TAG) \
+			--manifest $(OPENHUMAN_WORKER_TAG) \
+			-f openhuman/Dockerfile . && ) true
+	podman manifest push --all $(OPENHUMAN_WORKER_TAG) docker://$(OPENHUMAN_WORKER_TAG)
+	$(if $(PUSH_LATEST), \
+		podman manifest push --all $(OPENHUMAN_WORKER_TAG) docker://$(OPENHUMAN_WORKER_IMAGE):latest && \
+		echo "  -> Also pushed :latest tag")
+else
+	docker buildx build \
+		--builder $(BUILDX_BUILDER) \
+		--platform $(MULTIARCH_PLATFORMS) \
+		$(REGISTRY_ARG) $(DOCKER_BUILD_ARGS) \
+		--build-arg AGENTTEAMS_CONTROLLER_IMAGE=$(CONTROLLER_TAG) \
+		-t $(OPENHUMAN_WORKER_TAG) \
+		$(if $(PUSH_LATEST),-t $(OPENHUMAN_WORKER_IMAGE):latest) \
+		--push \
+		-f openhuman/Dockerfile .
+endif
+
 push-qwenpaw-worker: buildx-setup ## Build + push multi-arch QwenPaw Worker image
 	@echo "==> Building + pushing multi-arch QwenPaw Worker: $(QWENPAW_WORKER_TAG) [$(MULTIARCH_PLATFORMS)]"
 	OUT_DIR=dist/adapters/qwenpaw ruby plugins/teamharness/adapters/qwenpaw/scripts/build-qwenpaw-plugin.rb plugins/teamharness/plugin.yaml >/dev/null
@@ -540,7 +568,6 @@ wait-ready:
 test: ## Run integration tests (creates test container)
 ifdef SKIP_INSTALL
 	@echo "==> Running tests against existing installation"
-	@docker exec agentteams-controller touch /root/manager-workspace/yolo-mode 2>/dev/null || true
 	./tests/run-all-tests.sh --skip-build --use-existing $(if $(TEST_FILTER),--test-filter "$(TEST_FILTER)")
 else
 	@echo "==> Installing test Manager and running tests"
@@ -659,7 +686,6 @@ wait-ready-embedded: ## Wait for embedded-mode services to be ready
 test-embedded: ## Run integration tests in embedded mode
 ifdef SKIP_INSTALL
 	@echo "==> Running tests against existing embedded installation"
-	@docker exec agentteams-manager touch /root/manager-workspace/yolo-mode 2>/dev/null || true
 	./tests/run-all-tests.sh --skip-build --use-existing $(if $(TEST_FILTER),--test-filter "$(TEST_FILTER)")
 else
 	@echo "==> Installing embedded mode and running tests"
@@ -686,8 +712,7 @@ uninstall-embedded: ## Stop and remove embedded containers
 
 # ---------- Replay ----------
 
-replay: ## Send a task to Manager (TASK="..." or interactive, YOLO mode auto-enabled)
-	@docker exec agentteams-controller touch /root/manager-workspace/yolo-mode 2>/dev/null || true
+replay: ## Send a task to Manager (TASK="..." or interactive)
 ifdef TASK
 	REPLAY_USE_DOCKER_EXEC=1 ./scripts/replay-task.sh "$(TASK)"
 else

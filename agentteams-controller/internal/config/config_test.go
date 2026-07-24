@@ -154,6 +154,26 @@ func TestLoadConfigDefaultsManagerToAgentScope(t *testing.T) {
 	}
 }
 
+func TestLoadConfigMapsLegacyGitHubTokenToManagerMCPSecret(t *testing.T) {
+	t.Setenv("AGENTTEAMS_GITHUB_TOKEN", "legacy-github-secret")
+	t.Setenv("AGENTTEAMS_MCP_GITHUB_TOKEN", "")
+
+	cfg := LoadConfig()
+
+	if cfg.GitHubToken != "legacy-github-secret" {
+		t.Fatalf("GitHubToken = %q", cfg.GitHubToken)
+	}
+	if cfg.WorkerEnv.MCPGitHubToken != "legacy-github-secret" {
+		t.Fatalf(
+			"WorkerEnv.MCPGitHubToken = %q",
+			cfg.WorkerEnv.MCPGitHubToken,
+		)
+	}
+	if got := cfg.ManagerAgentEnv()["AGENTTEAMS_MCP_GITHUB_TOKEN"]; got != "legacy-github-secret" {
+		t.Fatalf("ManagerAgentEnv GitHub token = %q", got)
+	}
+}
+
 func TestLoadConfigRejectsWorkerRuntimeForManager(t *testing.T) {
 	t.Setenv("AGENTTEAMS_MANAGER_RUNTIME", backend.RuntimeCopaw)
 	t.Setenv("AGENTTEAMS_MANAGER_SPEC", "")

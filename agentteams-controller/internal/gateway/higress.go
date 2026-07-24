@@ -9,6 +9,7 @@ import (
 	"log"
 	"math/rand"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -382,6 +383,196 @@ func (c *HigressClient) UnexposePort(ctx context.Context, req PortExposeRequest)
 
 func (c *HigressClient) EnsureServiceSource(ctx context.Context, name, domain string, port int, protocol string) error {
 	return c.ensureServiceSource(ctx, name, domain, port, protocol)
+}
+
+// EnsureRESTMCPServer idempotently creates one REST-to-MCP route and retains
+// every existing consumer while adding the requested bootstrap consumers. The
+// credential-bearing raw configuration is sent directly to Higress and is not
+// retained by the Controller.
+func (c *HigressClient) EnsureRESTMCPServer(
+	ctx context.Context,
+	req RESTMCPServerRequest,
+) (MCPServerEndpoint, error) {
+	if req.Name == "" || req.ServiceName == "" || req.ServiceDomain == "" {
+		return MCPServerEndpoint{}, fmt.Errorf("ensure REST MCP server: required name is empty")
+	}
+	if req.ServicePort < 1 || req.ServicePort > 65535 {
+		return MCPServerEndpoint{}, fmt.Errorf("ensure REST MCP server %s: invalid service port", req.Name)
+	}
+	if req.RawConfiguration == "" {
+		return MCPServerEndpoint{}, fmt.Errorf("ensure REST MCP server %s: empty configuration", req.Name)
+	}
+	dataPlaneURL := strings.TrimRight(c.config.DataPlaneURL, "/")
+	parsed, err := url.Parse(dataPlaneURL)
+	if err != nil || parsed.Scheme == "" || parsed.Hostname() == "" {
+		return MCPServerEndpoint{}, fmt.Errorf("ensure REST MCP server %s: invalid data plane URL", req.Name)
+	}
+	if err := c.ensureServiceSource(
+		ctx,
+		req.ServiceName,
+		req.ServiceDomain,
+		req.ServicePort,
+		req.ServiceProtocol,
+	); err != nil {
+		return MCPServerEndpoint{}, err
+	}
+
+	apiName := "mcp-" + req.Name
+	existingConsumers, err := c.mcpConsumers(ctx, apiName)
+	if err != nil {
+		return MCPServerEndpoint{}, fmt.Errorf(
+			"ensure REST MCP server %s: read existing consumers: %w",
+			req.Name,
+			err,
+		)
+	}
+	consumers := mergeStrings(existingConsumers, req.Consumers)
+	body := map[string]interface{}{
+		"name":              apiName,
+		"description":       req.Description,
+		"type":              "OPEN_API",
+		"rawConfigurations": req.RawConfiguration,
+		"mcpServerName":     apiName,
+		"domains":           []string{parsed.Hostname()},
+		"services": []map[string]interface{}{{
+			"name":   req.ServiceName + ".dns",
+			"port":   req.ServicePort,
+			"weight": 100,
+		}},
+		"consumerAuthInfo": map[string]interface{}{
+			"type":             "key-auth",
+			"enable":           true,
+			"allowedConsumers": consumers,
+		},
+	}
+	_, status, err := c.doJSON(ctx, http.MethodPut, "/v1/mcpServer", body)
+	if err != nil {
+		return MCPServerEndpoint{}, fmt.Errorf("ensure REST MCP server %s: %w", req.Name, err)
+	}
+	if status < 200 || status >= 300 {
+		return MCPServerEndpoint{}, fmt.Errorf("ensure REST MCP server %s: HTTP %d", req.Name, status)
+	}
+	_, status, err = c.doJSON(
+		ctx,
+		http.MethodPut,
+		"/v1/mcpServer/consumers",
+		map[string]interface{}{
+			"mcpServerName": apiName,
+			"consumers":     consumers,
+		},
+	)
+	if err != nil {
+		return MCPServerEndpoint{}, fmt.Errorf("ensure REST MCP consumers %s: %w", req.Name, err)
+	}
+	if status < 200 || status >= 300 {
+		return MCPServerEndpoint{}, fmt.Errorf("ensure REST MCP consumers %s: HTTP %d", req.Name, status)
+	}
+	return MCPServerEndpoint{
+		Name:      req.Name,
+		URL:       dataPlaneURL + "/mcp-servers/" + apiName + "/mcp",
+		Transport: "http",
+	}, nil
+}
+
+func (c *HigressClient) mcpConsumers(
+	ctx context.Context,
+	apiName string,
+) ([]string, error) {
+	path := "/v1/mcpServer/consumers?mcpServerName=" +
+		url.QueryEscape(apiName)
+	body, status, err := c.doJSON(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	if status == http.StatusNotFound {
+		return nil, nil
+	}
+	if status < 200 || status >= 300 {
+		return nil, fmt.Errorf("HTTP %d", status)
+	}
+	if len(body) == 0 {
+		return nil, fmt.Errorf("empty response")
+	}
+	var payload interface{}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+	consumers, ok := extractMCPConsumers(payload)
+	if !ok {
+		return nil, fmt.Errorf("response has no consumer list")
+	}
+	return consumers, nil
+}
+
+func extractMCPConsumers(payload interface{}) ([]string, bool) {
+	switch value := payload.(type) {
+	case map[string]interface{}:
+		if data, exists := value["data"]; exists {
+			if consumers, ok := extractMCPConsumers(data); ok {
+				return consumers, true
+			}
+		}
+		for _, key := range []string{"consumers", "allowedConsumers"} {
+			if raw, exists := value[key]; exists {
+				return stringList(raw)
+			}
+		}
+		if auth, exists := value["consumerAuthInfo"]; exists {
+			return extractMCPConsumers(auth)
+		}
+	case []interface{}:
+		consumers := make([]string, 0, len(value))
+		for _, raw := range value {
+			switch item := raw.(type) {
+			case string:
+				consumers = append(consumers, item)
+			case map[string]interface{}:
+				name, _ := item["consumerName"].(string)
+				if name == "" {
+					name, _ = item["name"].(string)
+				}
+				if name == "" {
+					return nil, false
+				}
+				consumers = append(consumers, name)
+			default:
+				return nil, false
+			}
+		}
+		return consumers, true
+	}
+	return nil, false
+}
+
+func stringList(raw interface{}) ([]string, bool) {
+	items, ok := raw.([]interface{})
+	if !ok {
+		return nil, false
+	}
+	result := make([]string, 0, len(items))
+	for _, item := range items {
+		value, ok := item.(string)
+		if !ok {
+			return nil, false
+		}
+		result = append(result, value)
+	}
+	return result, true
+}
+
+func mergeStrings(existing, required []string) []string {
+	result := make([]string, 0, len(existing)+len(required))
+	seen := make(map[string]struct{}, len(existing)+len(required))
+	for _, items := range [][]string{existing, required} {
+		for _, item := range items {
+			if _, exists := seen[item]; exists {
+				continue
+			}
+			seen[item] = struct{}{}
+			result = append(result, item)
+		}
+	}
+	return result
 }
 
 func (c *HigressClient) EnsureStaticServiceSource(ctx context.Context, name, address string, port int) error {

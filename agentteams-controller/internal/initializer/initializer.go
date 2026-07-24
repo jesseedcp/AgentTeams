@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"os"
+	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -13,6 +16,7 @@ import (
 	"github.com/agentscope-ai/AgentTeams/agentteams-controller/internal/matrix"
 	"github.com/agentscope-ai/AgentTeams/agentteams-controller/internal/migration"
 	"github.com/agentscope-ai/AgentTeams/agentteams-controller/internal/oss"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -56,6 +60,8 @@ type Config struct {
 	AIStreamIdleTimeoutSeconds int
 	TuwunelURL                 string // internal Tuwunel URL, e.g. http://tuwunel:6167
 	ElementWebURL              string // internal Element Web URL (optional)
+	GitHubToken                string
+	SkillsDir                  string
 }
 
 func (c Config) managesGatewayRoutes() bool {
@@ -73,6 +79,8 @@ type Initializer struct {
 	OSS     oss.StorageClient
 	Matrix  matrix.Client
 	Gateway gateway.Client
+	MCP     gateway.MCPBootstrapper
+	Dynamic dynamic.Interface
 	RestCfg *rest.Config
 	Config  Config
 }
@@ -129,8 +137,37 @@ func (i *Initializer) Run(ctx context.Context) error {
 		}
 	}
 
+	managerMCPServers := []v1beta1.MCPServer(nil)
+	if i.Config.GitHubToken != "" && i.Config.managesGatewayRoutes() {
+		if i.MCP == nil {
+			logger.Info(
+				"skipping GitHub MCP bootstrap",
+				"reason",
+				"gateway does not expose local MCP administration",
+			)
+		} else {
+			endpoint, err := i.bootstrapGitHubMCP(ctx)
+			if err != nil {
+				logger.Error(
+					err,
+					"GitHub MCP bootstrap failed (non-fatal)",
+				)
+			} else {
+				managerMCPServers = append(
+					managerMCPServers,
+					v1beta1.MCPServer{
+						Name:      endpoint.Name,
+						URL:       endpoint.URL,
+						Transport: endpoint.Transport,
+					},
+				)
+				logger.Info("GitHub MCP bootstrap complete")
+			}
+		}
+	}
+
 	if i.Config.ManagerEnabled {
-		if err := i.ensureManagerCR(ctx); err != nil {
+		if err := i.ensureManagerCR(ctx, managerMCPServers); err != nil {
 			return fmt.Errorf("Manager CR creation failed: %w", err)
 		}
 		logger.Info("Manager CR ensured", "name", "default")
@@ -469,12 +506,66 @@ func parseHostPort(rawURL string) (string, int, error) {
 	return host, port, nil
 }
 
-func (i *Initializer) ensureManagerCR(ctx context.Context) error {
+func (i *Initializer) bootstrapGitHubMCP(
+	ctx context.Context,
+) (gateway.MCPServerEndpoint, error) {
+	skillsDir := i.Config.SkillsDir
+	if skillsDir == "" {
+		skillsDir = "/opt/agentteams/agent/skills"
+	}
+	path := filepath.Join(
+		skillsDir,
+		"mcp-server-management",
+		"references",
+		"mcp-github.yaml",
+	)
+	template, err := os.ReadFile(path)
+	if err != nil {
+		return gateway.MCPServerEndpoint{}, fmt.Errorf(
+			"read GitHub MCP template: %w",
+			err,
+		)
+	}
+	const credentialSlot = `accessToken: ""`
+	if strings.Count(string(template), credentialSlot) != 1 {
+		return gateway.MCPServerEndpoint{}, fmt.Errorf(
+			"GitHub MCP template must contain exactly one credential slot",
+		)
+	}
+	rawConfiguration := strings.Replace(
+		string(template),
+		credentialSlot,
+		"accessToken: "+strconv.Quote(i.Config.GitHubToken),
+		1,
+	)
+	return i.MCP.EnsureRESTMCPServer(
+		ctx,
+		gateway.RESTMCPServerRequest{
+			Name:             "github",
+			Description:      "GitHub MCP Server",
+			RawConfiguration: rawConfiguration,
+			ServiceName:      "github-api",
+			ServiceDomain:    "api.github.com",
+			ServicePort:      443,
+			ServiceProtocol:  "https",
+			Consumers:        []string{"manager"},
+		},
+	)
+}
+
+func (i *Initializer) ensureManagerCR(
+	ctx context.Context,
+	desiredMCPServers []v1beta1.MCPServer,
+) error {
 	logger := ctrl.Log.WithName("initializer")
 
-	dynClient, err := dynamic.NewForConfig(i.RestCfg)
-	if err != nil {
-		return fmt.Errorf("create dynamic client: %w", err)
+	dynClient := i.Dynamic
+	if dynClient == nil {
+		var err error
+		dynClient, err = dynamic.NewForConfig(i.RestCfg)
+		if err != nil {
+			return fmt.Errorf("create dynamic client: %w", err)
+		}
 	}
 
 	gvr := schema.GroupVersionResource{
@@ -486,10 +577,52 @@ func (i *Initializer) ensureManagerCR(ctx context.Context) error {
 	ns := i.Config.Namespace
 	name := "default"
 
-	_, err = dynClient.Resource(gvr).Namespace(ns).Get(ctx, name, metav1.GetOptions{})
+	current, err := dynClient.Resource(gvr).Namespace(ns).Get(
+		ctx,
+		name,
+		metav1.GetOptions{},
+	)
 	if err == nil {
-		logger.Info("Manager CR already exists, skipping creation")
+		if len(desiredMCPServers) == 0 {
+			logger.Info("Manager CR already exists, skipping creation")
+			return nil
+		}
+		existing, _, nestedErr := unstructured.NestedSlice(
+			current.Object,
+			"spec",
+			"mcpServers",
+		)
+		if nestedErr != nil {
+			return fmt.Errorf("read Manager MCP servers: %w", nestedErr)
+		}
+		merged := mergeManagerMCPServers(
+			existing,
+			desiredMCPServers,
+		)
+		if reflect.DeepEqual(existing, merged) {
+			logger.Info("Manager CR already contains bootstrap MCP state")
+			return nil
+		}
+		if err := unstructured.SetNestedSlice(
+			current.Object,
+			merged,
+			"spec",
+			"mcpServers",
+		); err != nil {
+			return fmt.Errorf("set Manager MCP servers: %w", err)
+		}
+		if _, err := dynClient.Resource(gvr).Namespace(ns).Update(
+			ctx,
+			current,
+			metav1.UpdateOptions{},
+		); err != nil {
+			return fmt.Errorf("update Manager MCP servers: %w", err)
+		}
+		logger.Info("Manager CR bootstrap MCP state updated")
 		return nil
+	}
+	if !apierrors.IsNotFound(err) {
+		return fmt.Errorf("get Manager CR: %w", err)
 	}
 
 	spec := map[string]interface{}{
@@ -501,6 +634,12 @@ func (i *Initializer) ensureManagerCR(ctx context.Context) error {
 	}
 	if i.Config.ManagerResources != nil {
 		spec["resources"] = i.Config.ManagerResources
+	}
+	if len(desiredMCPServers) > 0 {
+		spec["mcpServers"] = mergeManagerMCPServers(
+			nil,
+			desiredMCPServers,
+		)
 	}
 
 	metadata := map[string]interface{}{
@@ -526,6 +665,38 @@ func (i *Initializer) ensureManagerCR(ctx context.Context) error {
 		return fmt.Errorf("create Manager CR: %w", err)
 	}
 	return nil
+}
+
+func mergeManagerMCPServers(
+	existing []interface{},
+	desired []v1beta1.MCPServer,
+) []interface{} {
+	result := append([]interface{}(nil), existing...)
+	indexByName := make(map[string]int, len(result))
+	for index, raw := range result {
+		item, ok := raw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		name, _ := item["name"].(string)
+		if name != "" {
+			indexByName[name] = index
+		}
+	}
+	for _, server := range desired {
+		item := map[string]interface{}{
+			"name":      server.Name,
+			"url":       server.URL,
+			"transport": server.Transport,
+		}
+		if index, exists := indexByName[server.Name]; exists {
+			result[index] = item
+			continue
+		}
+		indexByName[server.Name] = len(result)
+		result = append(result, item)
+	}
+	return result
 }
 
 // retry calls fn repeatedly until it succeeds or the timeout is reached.

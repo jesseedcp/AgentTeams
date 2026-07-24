@@ -23,6 +23,28 @@ type ConsumerResult struct {
 	ConsumerID string // platform-specific consumer ID (cloud only)
 }
 
+// RESTMCPServerRequest describes one REST API exposed as a native MCP server.
+// RawConfiguration may contain credentials and must never be logged or stored
+// in Controller desired-state resources.
+type RESTMCPServerRequest struct {
+	Name             string
+	Description      string
+	RawConfiguration string
+	ServiceName      string
+	ServiceDomain    string
+	ServicePort      int
+	ServiceProtocol  string
+	Consumers        []string // required consumers; merged with existing state
+}
+
+// MCPServerEndpoint is the secret-free endpoint projected into Manager and
+// Worker desired state.
+type MCPServerEndpoint struct {
+	Name      string
+	URL       string
+	Transport string
+}
+
 // AIRoute represents an AI route in the gateway.
 type AIRoute struct {
 	Name             string   `json:"name"`

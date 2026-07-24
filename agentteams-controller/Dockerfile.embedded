@@ -75,7 +75,7 @@ COPY manager/scripts/init/start-minio.sh /opt/agentteams/scripts/init/start-mini
 COPY manager/scripts/init/start-tuwunel.sh /opt/agentteams/scripts/init/start-tuwunel.sh
 COPY manager/scripts/init/start-element-web.sh /opt/agentteams/scripts/init/start-element-web.sh
 COPY manager/scripts/init/start-mc-mirror.sh /opt/agentteams/scripts/init/start-mc-mirror.sh
-COPY manager/scripts/lib/ /opt/agentteams/scripts/lib/
+COPY manager/scripts/lib/base.sh /opt/agentteams/scripts/lib/base.sh
 COPY shared/lib/ /opt/agentteams/scripts/lib/
 RUN chmod +x /opt/agentteams/scripts/init/*.sh
 

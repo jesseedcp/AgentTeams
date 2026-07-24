@@ -92,6 +92,165 @@ func TestEnsureConsumer_Exists(t *testing.T) {
 	}
 }
 
+func TestEnsureRESTMCPServerCreatesNativeEndpoint(t *testing.T) {
+	var calls []string
+	client := newGatewayTestClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/system/init":
+			w.WriteHeader(http.StatusOK)
+		case "/session/login":
+			http.SetCookie(w, &http.Cookie{Name: "session", Value: "test"})
+			w.WriteHeader(http.StatusOK)
+		case "/v1/service-sources":
+			calls = append(calls, r.Method+" "+r.URL.Path)
+			var body map[string]interface{}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode service source: %v", err)
+			}
+			if body["name"] != "github-api" || body["domain"] != "api.github.com" {
+				t.Fatalf("service source body = %#v", body)
+			}
+			w.WriteHeader(http.StatusConflict)
+		case "/v1/mcpServer":
+			calls = append(calls, r.Method+" "+r.URL.Path)
+			var body map[string]interface{}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode MCP server: %v", err)
+			}
+			if body["name"] != "mcp-github" ||
+				body["mcpServerName"] != "mcp-github" ||
+				body["rawConfigurations"] != "accessToken: \"secret\"" {
+				t.Fatalf("MCP server body = %#v", body)
+			}
+			w.WriteHeader(http.StatusOK)
+		case "/v1/mcpServer/consumers":
+			calls = append(calls, r.Method+" "+r.URL.Path)
+			if r.Method == http.MethodGet {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			var body map[string]interface{}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode MCP consumers: %v", err)
+			}
+			if body["mcpServerName"] != "mcp-github" {
+				t.Fatalf("MCP consumers body = %#v", body)
+			}
+			consumers := toStringSlice(body["consumers"])
+			if len(consumers) != 1 || consumers[0] != "manager" {
+				t.Fatalf("MCP consumers = %#v", consumers)
+			}
+			w.WriteHeader(http.StatusOK)
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+
+	c := NewHigressClient(Config{
+		ConsoleURL:    "http://higress.test",
+		DataPlaneURL:  "http://aigw.example.com:8080",
+		AdminUser:     "admin",
+		AdminPassword: "admin",
+	}, client)
+	endpoint, err := c.EnsureRESTMCPServer(
+		context.Background(),
+		RESTMCPServerRequest{
+			Name:             "github",
+			Description:      "GitHub MCP Server",
+			RawConfiguration: "accessToken: \"secret\"",
+			ServiceName:      "github-api",
+			ServiceDomain:    "api.github.com",
+			ServicePort:      443,
+			ServiceProtocol:  "https",
+			Consumers:        []string{"manager"},
+		},
+	)
+	if err != nil {
+		t.Fatalf("EnsureRESTMCPServer: %v", err)
+	}
+	if endpoint.Name != "github" ||
+		endpoint.URL != "http://aigw.example.com:8080/mcp-servers/mcp-github/mcp" ||
+		endpoint.Transport != "http" {
+		t.Fatalf("endpoint = %#v", endpoint)
+	}
+	wantCalls := []string{
+		"POST /v1/service-sources",
+		"GET /v1/mcpServer/consumers",
+		"PUT /v1/mcpServer",
+		"PUT /v1/mcpServer/consumers",
+	}
+	if strings.Join(calls, ",") != strings.Join(wantCalls, ",") {
+		t.Fatalf("calls = %v, want %v", calls, wantCalls)
+	}
+}
+
+func TestEnsureRESTMCPServerPreservesExistingConsumers(t *testing.T) {
+	var serverConsumers []string
+	var replacedConsumers []string
+	client := newGatewayTestClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/system/init":
+			w.WriteHeader(http.StatusOK)
+		case r.URL.Path == "/session/login":
+			http.SetCookie(w, &http.Cookie{Name: "session", Value: "test"})
+			w.WriteHeader(http.StatusOK)
+		case r.URL.Path == "/v1/service-sources":
+			w.WriteHeader(http.StatusConflict)
+		case r.URL.Path == "/v1/mcpServer/consumers" && r.Method == http.MethodGet:
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"data": map[string]interface{}{
+					"consumers": []string{"manager", "worker-alice"},
+				},
+			})
+		case r.URL.Path == "/v1/mcpServer":
+			var body map[string]interface{}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode MCP server: %v", err)
+			}
+			auth, _ := body["consumerAuthInfo"].(map[string]interface{})
+			serverConsumers = toStringSlice(auth["allowedConsumers"])
+			w.WriteHeader(http.StatusOK)
+		case r.URL.Path == "/v1/mcpServer/consumers" && r.Method == http.MethodPut:
+			var body map[string]interface{}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode MCP consumers: %v", err)
+			}
+			replacedConsumers = toStringSlice(body["consumers"])
+			w.WriteHeader(http.StatusOK)
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.String())
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+
+	c := NewHigressClient(Config{
+		ConsoleURL:   "http://higress.test",
+		DataPlaneURL: "http://aigw.example.com:8080",
+	}, client)
+	_, err := c.EnsureRESTMCPServer(
+		context.Background(),
+		RESTMCPServerRequest{
+			Name:             "github",
+			RawConfiguration: "accessToken: \"secret\"",
+			ServiceName:      "github-api",
+			ServiceDomain:    "api.github.com",
+			ServicePort:      443,
+			ServiceProtocol:  "https",
+			Consumers:        []string{"manager"},
+		},
+	)
+	if err != nil {
+		t.Fatalf("EnsureRESTMCPServer: %v", err)
+	}
+	for _, consumers := range [][]string{serverConsumers, replacedConsumers} {
+		if !containsString(consumers, "manager") ||
+			!containsString(consumers, "worker-alice") {
+			t.Fatalf("existing consumers were not preserved: %v", consumers)
+		}
+	}
+}
+
 func TestAuthorizeAIRoutes(t *testing.T) {
 	client := newGatewayTestClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {

@@ -102,6 +102,9 @@ func (b *WorkerEnvBuilder) BuildManager(managerName string, prov *ManagerProvisi
 	if b.defaults.HigressAdminURL != "" {
 		env["AGENTTEAMS_AI_GATEWAY_ADMIN_URL"] = b.defaults.HigressAdminURL
 	}
+	if b.defaults.MCPGitHubToken != "" {
+		env["AGENTTEAMS_MCP_GITHUB_TOKEN"] = b.defaults.MCPGitHubToken
+	}
 	if b.defaults.DefaultWorkerRuntime != "" {
 		env["AGENTTEAMS_DEFAULT_WORKER_RUNTIME"] = b.defaults.DefaultWorkerRuntime
 	}

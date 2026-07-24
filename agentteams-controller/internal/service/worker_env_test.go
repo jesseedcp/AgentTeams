@@ -71,6 +71,7 @@ func TestWorkerEnvBuilderBuildManagerUsesAgentScopeContract(t *testing.T) {
 		AdminUser:            "admin",
 		AdminPassword:        "admin-password",
 		HigressAdminURL:      "http://higress.example.com:8001",
+		MCPGitHubToken:       "github-secret",
 		Runtime:              "docker",
 		DefaultWorkerRuntime: "copaw",
 		SkillsAPIURL:         "nacos://skills.example.com:8848/public",
@@ -113,6 +114,7 @@ func TestWorkerEnvBuilderBuildManagerUsesAgentScopeContract(t *testing.T) {
 		"AGENTTEAMS_HIGRESS_ADMIN_USER":                  "admin",
 		"AGENTTEAMS_HIGRESS_ADMIN_PASSWORD":              "admin-password",
 		"AGENTTEAMS_AI_GATEWAY_ADMIN_URL":                "http://higress.example.com:8001",
+		"AGENTTEAMS_MCP_GITHUB_TOKEN":                    "github-secret",
 		"SKILLS_API_URL":                                 "nacos://skills.example.com:8848/public",
 	} {
 		if got := env[key]; got != want {
@@ -130,5 +132,16 @@ func TestWorkerEnvBuilderBuildManagerUsesAgentScopeContract(t *testing.T) {
 		if _, ok := env[legacyKey]; ok {
 			t.Fatalf("unexpected legacy env %s in manager env", legacyKey)
 		}
+	}
+}
+
+func TestWorkerEnvNeverReceivesManagerMCPSecrets(t *testing.T) {
+	builder := NewWorkerEnvBuilder(config.WorkerEnvDefaults{
+		MCPGitHubToken: "github-secret",
+	})
+
+	env := builder.Build("alice", &WorkerProvisionResult{})
+	if _, exists := env["AGENTTEAMS_MCP_GITHUB_TOKEN"]; exists {
+		t.Fatal("Worker environment contains Manager GitHub MCP secret")
 	}
 }

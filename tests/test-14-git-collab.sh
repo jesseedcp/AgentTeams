@@ -165,23 +165,11 @@ fi
 
 log_section "Wait for Workflow Completion (up to 30 minutes)"
 
-# Get Manager's Matrix token (retry until openclaw.json is written)
-log_info "Waiting for Manager token (timeout: 120s)..."
-MANAGER_TOKEN=""
-DEADLINE=$(( $(date +%s) + 120 ))
-while [ "$(date +%s)" -lt "${DEADLINE}" ]; do
-    MANAGER_TOKEN=$(docker exec "${TEST_AGENT_CONTAINER}" \
-        jq -r '.channels.matrix.accessToken // empty' /root/manager-workspace/openclaw.json 2>/dev/null || true)
-    [ -n "${MANAGER_TOKEN}" ] && break
-    sleep 5
-done
-assert_not_empty "${MANAGER_TOKEN}" "Manager Matrix token available"
-
 log_info "Waiting for project room to be created (timeout: 900s)..."
 PROJECT_ROOM=""
 DEADLINE=$(( $(date +%s) + 900 ))
 while [ "$(date +%s)" -lt "${DEADLINE}" ]; do
-    PROJECT_ROOM=$(matrix_find_room_by_name "${MANAGER_TOKEN}" "Project:" 2>/dev/null || true)
+    PROJECT_ROOM=$(matrix_find_room_by_name "${ADMIN_TOKEN}" "Project:" 2>/dev/null || true)
     [ -n "${PROJECT_ROOM}" ] && break
     sleep 10
 done
@@ -190,12 +178,12 @@ log_info "Project room: ${PROJECT_ROOM}"
 
 log_info "Waiting for Manager to post completion message in project room (timeout: 1800s)..."
 # First check if completion message was already posted
-COMPLETION_MSG=$(matrix_read_messages "${MANAGER_TOKEN}" "${PROJECT_ROOM}" 50 2>/dev/null | \
+COMPLETION_MSG=$(matrix_read_messages "${ADMIN_TOKEN}" "${PROJECT_ROOM}" 50 2>/dev/null | \
     jq -r --arg u "@manager" '[.chunk[] | select(.sender | startswith($u)) | .content.body] | .[]' 2>/dev/null | \
     grep -iE "complete|done|finished|已完成|完成|all.*phase|phase.*4|PHASE4" | head -1 || true)
 
 if [ -z "${COMPLETION_MSG}" ]; then
-    COMPLETION_MSG=$(matrix_wait_for_message_containing "${MANAGER_TOKEN}" "${PROJECT_ROOM}" "@manager" \
+    COMPLETION_MSG=$(matrix_wait_for_message_containing "${ADMIN_TOKEN}" "${PROJECT_ROOM}" "@manager" \
         "complete\|done\|finished\|已完成\|完成\|all.*phase\|phase.*4\|PHASE4" 1800 \
         "${ADMIN_TOKEN}" "${DM_ROOM}" \
         "Please check the project room and continue coordinating the git collaboration workflow. If any phase is pending or a worker message was missed, please follow up." \

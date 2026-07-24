@@ -61,3 +61,12 @@ type Client interface {
 	// Healthy returns nil if the gateway console is reachable and authenticated.
 	Healthy(ctx context.Context) error
 }
+
+// MCPBootstrapper is implemented only by gateways whose MCP definitions are
+// managed locally. Cloud gateways keep their definitions out of band.
+type MCPBootstrapper interface {
+	EnsureRESTMCPServer(
+		ctx context.Context,
+		req RESTMCPServerRequest,
+	) (MCPServerEndpoint, error)
+}

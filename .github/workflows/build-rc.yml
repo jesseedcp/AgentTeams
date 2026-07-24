@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       targets:
-        description: 'Space-separated list of push targets (default: all). Options: openclaw-base agentteams-controller embedded manager manager-copaw worker copaw-worker hermes-worker qwenpaw-worker'
+        description: 'Space-separated list of push targets (default: all). Options: openclaw-base agentteams-controller embedded manager worker copaw-worker hermes-worker qwenpaw-worker openhuman-worker'
         required: false
         type: string
         default: 'all'
@@ -83,7 +83,24 @@ jobs:
 
       - name: Build and push multi-arch images
         run: |
-          make push-manager push-manager-copaw push-worker push-copaw-worker push-hermes-worker push-qwenpaw-worker push-agentteams-controller push-embedded \
+          TARGETS="${{ inputs.targets }}"
+          MAKE_TARGETS=""
+          wants() {
+            [ "${TARGETS}" = "all" ] || printf ' %s ' "${TARGETS}" | grep -Fq " $1 "
+          }
+          if wants manager; then MAKE_TARGETS="${MAKE_TARGETS} push-manager"; fi
+          if wants worker; then MAKE_TARGETS="${MAKE_TARGETS} push-worker"; fi
+          if wants copaw-worker; then MAKE_TARGETS="${MAKE_TARGETS} push-copaw-worker"; fi
+          if wants hermes-worker; then MAKE_TARGETS="${MAKE_TARGETS} push-hermes-worker"; fi
+          if wants qwenpaw-worker; then MAKE_TARGETS="${MAKE_TARGETS} push-qwenpaw-worker"; fi
+          if wants openhuman-worker; then MAKE_TARGETS="${MAKE_TARGETS} push-openhuman-worker"; fi
+          if wants agentteams-controller; then MAKE_TARGETS="${MAKE_TARGETS} push-agentteams-controller"; fi
+          if wants embedded; then MAKE_TARGETS="${MAKE_TARGETS} push-embedded"; fi
+          if [ -z "${MAKE_TARGETS}" ]; then
+            echo "No non-base image target selected"
+            exit 0
+          fi
+          make ${MAKE_TARGETS} \
             VERSION=${{ inputs.version }} \
             OPENCLAW_BASE_VERSION=${{ inputs.version }} \
             REGISTRY=${{ env.REGISTRY }} \
@@ -95,11 +112,11 @@ jobs:
         env:
           BASE_IMAGE: ${{ env.REGISTRY }}/${{ env.REPO }}/openclaw-base
           MANAGER_IMAGE: ${{ env.REGISTRY }}/${{ env.REPO }}/agentteams-manager
-          MANAGER_COPAW_IMAGE: ${{ env.REGISTRY }}/${{ env.REPO }}/agentteams-manager-copaw
           WORKER_IMAGE: ${{ env.REGISTRY }}/${{ env.REPO }}/agentteams-worker
           COPAW_WORKER_IMAGE: ${{ env.REGISTRY }}/${{ env.REPO }}/agentteams-copaw-worker
           HERMES_WORKER_IMAGE: ${{ env.REGISTRY }}/${{ env.REPO }}/agentteams-hermes-worker
           QWENPAW_WORKER_IMAGE: ${{ env.REGISTRY }}/${{ env.REPO }}/agentteams-qwenpaw-worker
+          OPENHUMAN_WORKER_IMAGE: ${{ env.REGISTRY }}/${{ env.REPO }}/agentteams-openhuman-worker
           CONTROLLER_IMAGE: ${{ env.REGISTRY }}/${{ env.REPO }}/agentteams-controller
           EMBEDDED_IMAGE: ${{ env.REGISTRY }}/${{ env.REPO }}/agentteams-embedded
         run: |
@@ -108,11 +125,11 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Images:**" >> $GITHUB_STEP_SUMMARY
           echo "- Manager: \`${MANAGER_IMAGE}:${{ inputs.version }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- Manager CoPaw: \`${MANAGER_COPAW_IMAGE}:${{ inputs.version }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- Worker: \`${WORKER_IMAGE}:${{ inputs.version }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- CoPaw Worker: \`${COPAW_WORKER_IMAGE}:${{ inputs.version }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- Hermes Worker: \`${HERMES_WORKER_IMAGE}:${{ inputs.version }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- QwenPaw Worker: \`${QWENPAW_WORKER_IMAGE}:${{ inputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- OpenHuman Worker: \`${OPENHUMAN_WORKER_IMAGE}:${{ inputs.version }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- Controller: \`${CONTROLLER_IMAGE}:${{ inputs.version }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- Embedded: \`${EMBEDDED_IMAGE}:${{ inputs.version }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- Base (RC): \`${BASE_IMAGE}:${{ inputs.version }}\`" >> $GITHUB_STEP_SUMMARY

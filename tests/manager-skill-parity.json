@@ -1,0 +1,152 @@
+{
+  "schemaVersion": 1,
+  "managerRuntime": "agentscope",
+  "agentScopeVersion": "2.0.4.post1",
+  "skills": [
+    {
+      "name": "agentteams-find-worker",
+      "skillFile": "manager/agent/skills/agentteams-find-worker/SKILL.md",
+      "tools": ["find_worker", "import_worker"],
+      "evidence": [
+        "manager-agentscope/tests/integration/test_find_worker_import.py",
+        "manager-agentscope/tests/contract/test_resource_skill_parity.py"
+      ]
+    },
+    {
+      "name": "channel-management",
+      "skillFile": "manager/agent/skills/channel-management/SKILL.md",
+      "tools": ["list_channels", "create_channel", "update_channel", "delete_channel", "send_notification"],
+      "evidence": [
+        "manager-agentscope/tests/integration/test_matrix_resource_admin.py",
+        "manager-agentscope/tests/contract/test_integration_skill_parity.py"
+      ]
+    },
+    {
+      "name": "file-sync-management",
+      "skillFile": "manager/agent/skills/file-sync-management/SKILL.md",
+      "tools": ["sync_files"],
+      "evidence": [
+        "manager-agentscope/tests/integration/test_file_sync.py",
+        "manager-agentscope/tests/contract/test_task_skill_parity.py"
+      ]
+    },
+    {
+      "name": "git-delegation-management",
+      "skillFile": "manager/agent/skills/git-delegation-management/SKILL.md",
+      "tools": ["inspect_git_request", "git_delegate", "git_delegate_high_risk"],
+      "evidence": [
+        "manager-agentscope/tests/integration/test_git_delegation.py",
+        "manager-agentscope/tests/contract/test_task_skill_parity.py"
+      ]
+    },
+    {
+      "name": "human-management",
+      "skillFile": "manager/agent/skills/human-management/SKILL.md",
+      "tools": ["list_humans", "get_human", "create_human", "update_human", "delete_human"],
+      "evidence": [
+        "manager-agentscope/tests/unit/workflows/test_humans.py",
+        "manager-agentscope/tests/contract/test_resource_skill_parity.py"
+      ]
+    },
+    {
+      "name": "matrix-server-management",
+      "skillFile": "manager/agent/skills/matrix-server-management/SKILL.md",
+      "tools": ["list_matrix_rooms", "list_matrix_members", "lookup_matrix_user", "get_matrix_room_state", "upload_matrix_media", "download_matrix_media", "invite_matrix_user", "kick_matrix_user", "ban_matrix_user", "unban_matrix_user"],
+      "evidence": [
+        "manager-agentscope/tests/integration/test_matrix_resource_admin.py",
+        "manager-agentscope/tests/contract/test_resource_skill_parity.py"
+      ]
+    },
+    {
+      "name": "mcp-server-management",
+      "skillFile": "manager/agent/skills/mcp-server-management/SKILL.md",
+      "tools": ["list_mcp_servers", "configure_mcp", "remove_mcp"],
+      "evidence": [
+        "manager-agentscope/tests/integration/test_mcp_management_e2e.py",
+        "manager-agentscope/tests/contract/test_integration_skill_parity.py"
+      ]
+    },
+    {
+      "name": "mcporter",
+      "skillFile": "manager/agent/skills/mcporter/SKILL.md",
+      "tools": [],
+      "dynamicTools": ["mcp__<server>__<tool>"],
+      "evidence": [
+        "manager-agentscope/tests/integration/test_agentscope_mcp.py",
+        "manager-agentscope/tests/contract/test_mcporter_parity.py"
+      ]
+    },
+    {
+      "name": "model-switch",
+      "skillFile": "manager/agent/skills/model-switch/SKILL.md",
+      "tools": ["switch_model"],
+      "evidence": [
+        "manager-agentscope/tests/integration/test_model_hot_reload.py",
+        "manager-agentscope/tests/contract/test_integration_skill_parity.py"
+      ]
+    },
+    {
+      "name": "project-management",
+      "skillFile": "manager/agent/skills/project-management/SKILL.md",
+      "tools": ["create_project", "list_projects", "get_project", "update_project", "delete_project"],
+      "evidence": [
+        "manager-agentscope/tests/integration/test_project_lifecycle.py",
+        "manager-agentscope/tests/contract/test_task_skill_parity.py"
+      ]
+    },
+    {
+      "name": "service-publishing",
+      "skillFile": "manager/agent/skills/service-publishing/SKILL.md",
+      "tools": ["publish_service"],
+      "evidence": [
+        "manager-agentscope/tests/integration/test_service_publishing.py",
+        "manager-agentscope/tests/contract/test_integration_skill_parity.py"
+      ]
+    },
+    {
+      "name": "task-coordination",
+      "skillFile": "manager/agent/skills/task-coordination/SKILL.md",
+      "tools": ["sync_files", "inspect_git_request"],
+      "evidence": [
+        "manager-agentscope/tests/unit/workflows/test_processing_lease.py",
+        "manager-agentscope/tests/contract/test_task_skill_parity.py"
+      ]
+    },
+    {
+      "name": "task-management",
+      "skillFile": "manager/agent/skills/task-management/SKILL.md",
+      "tools": ["list_tasks", "get_task", "create_task", "delegate_task", "delegate_team_task", "complete_task", "schedule_task", "update_task", "delete_task"],
+      "evidence": [
+        "manager-agentscope/tests/integration/test_finite_task_lifecycle.py",
+        "manager-agentscope/tests/contract/test_task_skill_parity.py"
+      ]
+    },
+    {
+      "name": "team-management",
+      "skillFile": "manager/agent/skills/team-management/SKILL.md",
+      "tools": ["list_teams", "get_team", "create_team", "update_team", "delete_team"],
+      "evidence": [
+        "manager-agentscope/tests/integration/test_team_topology.py",
+        "manager-agentscope/tests/contract/test_resource_skill_parity.py"
+      ]
+    },
+    {
+      "name": "worker-management",
+      "skillFile": "manager/agent/skills/worker-management/SKILL.md",
+      "tools": ["list_workers", "get_worker", "create_worker", "update_worker", "sleep_worker", "wake_worker", "delete_worker"],
+      "evidence": [
+        "manager-agentscope/tests/integration/test_worker_lifecycle.py",
+        "manager-agentscope/tests/contract/test_resource_skill_parity.py"
+      ]
+    },
+    {
+      "name": "worker-model-switch",
+      "skillFile": "manager/agent/skills/worker-model-switch/SKILL.md",
+      "tools": ["switch_worker_model"],
+      "evidence": [
+        "manager-agentscope/tests/unit/workflows/test_model_switch.py",
+        "manager-agentscope/tests/contract/test_integration_skill_parity.py"
+      ]
+    }
+  ]
+}

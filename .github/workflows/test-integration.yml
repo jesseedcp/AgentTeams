@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - 'manager/**'
+      - 'manager-agentscope/**'
       - 'worker/**'
       - 'openclaw-base/**'
       - 'agentteams-controller/**'
@@ -14,6 +15,9 @@ on:
       - 'shared/**'
       - 'copaw/**'
       - 'hermes/**'
+      - 'qwenpaw/**'
+      - 'openhuman/**'
+      - 'plugins/**'
       - 'Makefile'
       - '.github/workflows/test-integration.yml'
   push:
@@ -23,6 +27,7 @@ on:
       - 'v*'
     paths:
       - 'manager/**'
+      - 'manager-agentscope/**'
       - 'worker/**'
       - 'openclaw-base/**'
       - 'agentteams-controller/**'
@@ -31,6 +36,9 @@ on:
       - 'shared/**'
       - 'copaw/**'
       - 'hermes/**'
+      - 'qwenpaw/**'
+      - 'openhuman/**'
+      - 'plugins/**'
       - 'Makefile'
   workflow_dispatch:
     inputs:
@@ -51,6 +59,8 @@ on:
           - openclaw
           - copaw
           - hermes
+          - qwenpaw
+          - openhuman
         default: 'both'
       model:
         description: 'LLM model to use'
@@ -58,7 +68,7 @@ on:
         default: 'qwen3.6-plus'
 
 env:
-  # Tests that do not require a GitHub token, split into four shards for parallel execution
+  # Tests that do not require a GitHub token, split into five shards for parallel execution
   # Shard A: LLM interaction tests (sequential dependency: 02 creates alice → 03-06 use alice)
   # Shard B: LLM interaction tests 2 (task assignment with LLM)
   # Shard C: Controller/CR tests (independent, no cross-test dependencies)
@@ -67,7 +77,10 @@ env:
   SHARD_B_TESTS: "14"
   SHARD_C_TESTS: "15 17 18 19 20 22 23 24 25 100"
   SHARD_D_TESTS: "21"
-  NON_GITHUB_TESTS: "01 02 03 04 05 06 14 15 17 18 19 20 21 22 23 24 25 100"
+  # Shard E: native GitHub MCP (safe events only), five-Worker runtime matrix,
+  # and static AgentScope Manager parity
+  SHARD_E_TESTS: "12 26 27 28"
+  NON_GITHUB_TESTS: "01 02 03 04 05 06 14 15 17 18 19 20 21 22 23 24 25 26 27 28 100"
 
 jobs:
   # Step 0: Detect which paths changed so we can decide whether to rebuild
@@ -195,7 +208,7 @@ jobs:
           retention-days: 1
 
   # Step 2: Build downstream images in parallel (all depend on agentteams-controller;
-  # manager and worker additionally depend on openclaw-base when it was rebuilt).
+  # Only the OpenClaw Worker additionally depends on openclaw-base.
   build-images:
     needs: [detect-changes, build-base, build-openclaw-base]
     # Run even if build-openclaw-base was skipped (no openclaw-base changes).
@@ -204,11 +217,11 @@ jobs:
       needs.build-base.result == 'success' &&
       (needs.build-openclaw-base.result == 'success' || needs.build-openclaw-base.result == 'skipped')
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        target: [embedded, manager, manager-copaw, worker, copaw-worker, hermes-worker]
+        target: [embedded, manager, worker, copaw-worker, hermes-worker, qwenpaw-worker, openhuman-worker]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -231,7 +244,7 @@ jobs:
       - name: Download local openclaw-base image
         if: |
           needs.detect-changes.outputs.openclaw_base == 'true' &&
-          (matrix.target == 'manager' || matrix.target == 'worker')
+          matrix.target == 'worker'
         uses: actions/download-artifact@v4
         with:
           name: image-openclaw-base
@@ -240,22 +253,19 @@ jobs:
       - name: Load local openclaw-base image
         if: |
           needs.detect-changes.outputs.openclaw_base == 'true' &&
-          (matrix.target == 'manager' || matrix.target == 'worker')
+          matrix.target == 'worker'
         run: gunzip -c /tmp/agentteams-openclaw-base.tar.gz | docker load
 
       - name: Build image
         run: |
-          # When openclaw-base was rebuilt from this PR's source, point manager
-          # and worker builds at the local image instead of pulling :latest from
-          # the published registry. Other targets (embedded, manager-copaw,
-          # copaw-worker) do not depend on openclaw-base so the override is a
-          # no-op for them.
+          # When openclaw-base was rebuilt from this source, point the
+          # OpenClaw Worker build at the local image instead of pulling.
           EXTRA=""
           if [ "${{ needs.detect-changes.outputs.openclaw_base }}" = "true" ] && \
-             { [ "${{ matrix.target }}" = "manager" ] || [ "${{ matrix.target }}" = "worker" ]; }; then
+             [ "${{ matrix.target }}" = "worker" ]; then
             EXTRA="OPENCLAW_BASE_IMAGE=agentteams/openclaw-base OPENCLAW_BASE_VERSION=latest"
             echo "Using locally-built openclaw-base for ${{ matrix.target }}"
-          elif [ "${{ matrix.target }}" = "manager" ] || [ "${{ matrix.target }}" = "worker" ]; then
+          elif [ "${{ matrix.target }}" = "worker" ]; then
             # The pinned base predates the AgentTeams registry namespace. Keep
             # using its existing location until a release seeds the new repo.
             EXTRA="OPENCLAW_BASE_IMAGE=higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/openclaw-base OPENCLAW_BASE_VERSION=20260423-8359cbc"
@@ -301,58 +311,23 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # OpenClaw manager + OpenClaw worker (default pairing)
+          # AgentScope is the only Manager runtime. Worker-specific behavior
+          # remains covered by the selected default runtime and shard E.
           - shard: llm-interaction
             filter_env: SHARD_A_TESTS
-            manager_runtime: openclaw
             worker_runtime: openclaw
           - shard: llm-interaction-2
             filter_env: SHARD_B_TESTS
-            manager_runtime: openclaw
             worker_runtime: openclaw
           - shard: controller-cr
             filter_env: SHARD_C_TESTS
-            manager_runtime: openclaw
             worker_runtime: openclaw
-          # CoPaw manager + CoPaw worker (full copaw runtime coverage).
-          # controller-cr-2 (test-21 team project DAG) only runs under copaw:
-          # the team controller hardcodes Runtime: "copaw" for both leader and
-          # workers, so running it under the openclaw manager is redundant.
-          - shard: llm-interaction
-            filter_env: SHARD_A_TESTS
-            manager_runtime: copaw
-            worker_runtime: copaw
-          - shard: llm-interaction-2
-            filter_env: SHARD_B_TESTS
-            manager_runtime: copaw
-            worker_runtime: copaw
-          - shard: controller-cr
-            filter_env: SHARD_C_TESTS
-            manager_runtime: copaw
-            worker_runtime: copaw
           - shard: controller-cr-2
             filter_env: SHARD_D_TESTS
-            manager_runtime: copaw
             worker_runtime: copaw
-          # Hermes worker coverage: exercise bridge.py + matrix-nio adapter end-to-end.
-          # Pairs with the copaw manager because both speak matrix-nio (same
-          # adapter family), keeping the surface area small while still
-          # validating worker-side container start, config bridging, Matrix
-          # join, and task assignment for the hermes runtime. controller-cr-2
-          # (test-21 team project DAG) is intentionally excluded — the team
-          # controller hardcodes Runtime: "copaw", so it cannot exercise hermes.
-          - shard: llm-interaction
-            filter_env: SHARD_A_TESTS
-            manager_runtime: copaw
-            worker_runtime: hermes
-          - shard: llm-interaction-2
-            filter_env: SHARD_B_TESTS
-            manager_runtime: copaw
-            worker_runtime: hermes
-          - shard: controller-cr
-            filter_env: SHARD_C_TESTS
-            manager_runtime: copaw
-            worker_runtime: hermes
+          - shard: runtime-matrix
+            filter_env: SHARD_E_TESTS
+            worker_runtime: openclaw
 
     steps:
       - name: Free Up Disk Space
@@ -392,7 +367,11 @@ jobs:
           AGENTTEAMS_LLM_API_KEY: ${{ secrets.AGENTTEAMS_LLM_API_KEY }}
           AGENTTEAMS_LLM_PROVIDER: qwen
           AGENTTEAMS_DEFAULT_MODEL: ${{ inputs.model || 'qwen3.6-plus' }}
-          AGENTTEAMS_MANAGER_RUNTIME: ${{ matrix.manager_runtime }}
+          AGENTTEAMS_MANAGER_RUNTIME: agentscope
+          # Never expose a repository token to pull_request_target code.
+          # On push/tag/workflow_dispatch, test-12 uses it for read-only native
+          # AgentScope MCP verification.
+          AGENTTEAMS_GITHUB_TOKEN: ${{ github.event_name != 'pull_request_target' && secrets.GITHUB_TOKEN || '' }}
           # Propagate the worker runtime to worker-creating tests too. Without
           # this the apply-zip path (test-15) silently falls back to openclaw
           # on the copaw and hermes matrix entries because the controller's
@@ -413,7 +392,7 @@ jobs:
       # ============================================================
 
       - name: Download latest release baseline
-        if: github.event_name == 'pull_request_target' && matrix.shard == 'llm-interaction' && matrix.manager_runtime == 'openclaw' && matrix.worker_runtime == 'openclaw'
+        if: github.event_name == 'pull_request_target' && matrix.shard == 'llm-interaction' && matrix.worker_runtime == 'openclaw'
         continue-on-error: true
         run: |
           mkdir -p baseline-metrics
@@ -433,7 +412,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Generate metrics comparison and post PR comment
-        if: github.event_name == 'pull_request_target' && matrix.shard == 'llm-interaction' && matrix.manager_runtime == 'openclaw' && matrix.worker_runtime == 'openclaw'
+        if: github.event_name == 'pull_request_target' && matrix.shard == 'llm-interaction' && matrix.worker_runtime == 'openclaw'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -520,7 +499,7 @@ jobs:
             DEBUG_TAIL=$(find "$DEBUG_DIR" -name "*.log" -exec tail -20 {} + 2>/dev/null | tail -80)
           fi
 
-          BODY="## ❌ Integration Tests Failed (${{ matrix.shard }} / mgr=${{ matrix.manager_runtime }} / wk=${{ matrix.worker_runtime }})
+          BODY="## ❌ Integration Tests Failed (${{ matrix.shard }} / mgr=agentscope / wk=${{ matrix.worker_runtime }})
 
           **Commit:** ${{ github.event.pull_request.head.sha }}
           **Workflow run:** [#${{ github.run_number }}](${ARTIFACT_URL})
@@ -548,7 +527,7 @@ jobs:
 
           # Update or create comment
           EXISTING=$(gh api "repos/$REPO/issues/$PR_NUM/comments" \
-            --jq '.[] | select(.body | startswith("## ❌ Integration Tests Failed (${{ matrix.shard }} / mgr=${{ matrix.manager_runtime }} / wk=${{ matrix.worker_runtime }})")) | .id' | head -1)
+            --jq '.[] | select(.body | startswith("## ❌ Integration Tests Failed (${{ matrix.shard }} / mgr=agentscope / wk=${{ matrix.worker_runtime }})")) | .id' | head -1)
           if [ -n "$EXISTING" ]; then
             gh api --method PATCH "repos/$REPO/issues/comments/$EXISTING" -f body="$BODY"
           else
@@ -566,7 +545,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-artifacts-${{ matrix.shard }}-mgr-${{ matrix.manager_runtime }}-wk-${{ matrix.worker_runtime }}-${{ github.sha }}
+          name: test-artifacts-${{ matrix.shard }}-mgr-agentscope-wk-${{ matrix.worker_runtime }}-${{ github.sha }}
           path: test-artifacts/
           retention-days: 7
 
@@ -575,7 +554,7 @@ jobs:
       # ============================================================
 
       - name: Generate release baseline
-        if: startsWith(github.ref, 'refs/tags/v') && matrix.shard == 'llm-interaction' && matrix.manager_runtime == 'openclaw' && matrix.worker_runtime == 'openclaw'
+        if: startsWith(github.ref, 'refs/tags/v') && matrix.shard == 'llm-interaction' && matrix.worker_runtime == 'openclaw'
         run: |
           source tests/lib/agent-metrics.sh
           TEST_NAMES=$(echo "$NON_GITHUB_TESTS" | tr ' ' '\n' | while read n; do
@@ -587,7 +566,7 @@ jobs:
           cat metrics-baseline.json | jq '{totals: .totals, by_role: .by_role}'
 
       - name: Upload baseline to release
-        if: startsWith(github.ref, 'refs/tags/v') && matrix.shard == 'llm-interaction' && matrix.manager_runtime == 'openclaw' && matrix.worker_runtime == 'openclaw'
+        if: startsWith(github.ref, 'refs/tags/v') && matrix.shard == 'llm-interaction' && matrix.worker_runtime == 'openclaw'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -596,7 +575,7 @@ jobs:
           echo "✅ Baseline uploaded to release ${GITHUB_REF_NAME}"
 
       - name: Upload debug log to release
-        if: startsWith(github.ref, 'refs/tags/v') && matrix.shard == 'llm-interaction' && matrix.manager_runtime == 'openclaw' && matrix.worker_runtime == 'openclaw' && always()
+        if: startsWith(github.ref, 'refs/tags/v') && matrix.shard == 'llm-interaction' && matrix.worker_runtime == 'openclaw' && always()
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -618,7 +597,7 @@ jobs:
           echo "### Integration Test Summary" >> $GITHUB_STEP_SUMMARY
           echo "- Shard: \`${{ matrix.shard }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- Tests: \`${{ env[matrix.filter_env] }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- Manager Runtime: \`${{ matrix.manager_runtime }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Manager Runtime: \`agentscope\`" >> $GITHUB_STEP_SUMMARY
           echo "- Worker Runtime: \`${{ matrix.worker_runtime }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- Model: \`${{ inputs.model || 'qwen3.6-plus' }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- Install Mode: embedded (make test-embedded)" >> $GITHUB_STEP_SUMMARY
@@ -660,9 +639,17 @@ jobs:
           REGISTRY=higress-registry.us-west-1.cr.aliyuncs.com/agentteams
           docker pull ${REGISTRY}/agentteams-manager:${VERSION}
           docker pull ${REGISTRY}/agentteams-worker:${VERSION}
+          docker pull ${REGISTRY}/agentteams-copaw-worker:${VERSION}
+          docker pull ${REGISTRY}/agentteams-hermes-worker:${VERSION}
+          docker pull ${REGISTRY}/agentteams-qwenpaw-worker:${VERSION}
+          docker pull ${REGISTRY}/agentteams-openhuman-worker:${VERSION}
           docker pull ${REGISTRY}/agentteams-controller:${VERSION}
           docker tag ${REGISTRY}/agentteams-manager:${VERSION} agentteams/manager:${VERSION}
           docker tag ${REGISTRY}/agentteams-worker:${VERSION} agentteams/worker-agent:${VERSION}
+          docker tag ${REGISTRY}/agentteams-copaw-worker:${VERSION} agentteams/copaw-worker:${VERSION}
+          docker tag ${REGISTRY}/agentteams-hermes-worker:${VERSION} agentteams/hermes-worker:${VERSION}
+          docker tag ${REGISTRY}/agentteams-qwenpaw-worker:${VERSION} agentteams/qwenpaw-worker:${VERSION}
+          docker tag ${REGISTRY}/agentteams-openhuman-worker:${VERSION} agentteams/openhuman-worker:${VERSION}
           docker tag ${REGISTRY}/agentteams-controller:${VERSION} agentteams/agentteams-controller:${VERSION}
 
       - name: Install AgentTeams
@@ -673,34 +660,25 @@ jobs:
           AGENTTEAMS_NON_INTERACTIVE=1 \
           AGENTTEAMS_VERSION=$VERSION \
           AGENTTEAMS_MOUNT_SOCKET=1 \
+          AGENTTEAMS_YOLO=1 \
           AGENTTEAMS_MATRIX_E2EE=0 \
           AGENTTEAMS_LLM_PROVIDER=qwen \
           AGENTTEAMS_INSTALL_MANAGER_IMAGE=agentteams/manager:${VERSION} \
           AGENTTEAMS_INSTALL_WORKER_IMAGE=agentteams/worker-agent:${VERSION} \
+          AGENTTEAMS_INSTALL_COPAW_WORKER_IMAGE=agentteams/copaw-worker:${VERSION} \
+          AGENTTEAMS_INSTALL_HERMES_WORKER_IMAGE=agentteams/hermes-worker:${VERSION} \
+          AGENTTEAMS_INSTALL_QWENPAW_WORKER_IMAGE=agentteams/qwenpaw-worker:${VERSION} \
+          AGENTTEAMS_INSTALL_OPENHUMAN_WORKER_IMAGE=agentteams/openhuman-worker:${VERSION} \
           AGENTTEAMS_INSTALL_CONTROLLER_IMAGE=agentteams/agentteams-controller:${VERSION} \
           bash ./install/agentteams-install.sh manager
 
       - name: Wait for Manager to be ready
-        run: |
-          for i in {1..60}; do
-            if docker exec agentteams-manager curl -sf http://127.0.0.1:8001/ >/dev/null 2>&1; then
-              if docker exec agentteams-manager curl -sf http://127.0.0.1:6167/_matrix/client/versions >/dev/null 2>&1; then
-                echo "Manager ready, waiting 60s for agent initialization..."
-                sleep 60
-                exit 0
-              fi
-            fi
-            echo "Waiting... ($i/60)"
-            sleep 5
-          done
-          exit 1
-
-      - name: Enable YOLO mode
-        run: docker exec agentteams-manager touch /root/manager-workspace/yolo-mode
+        run: make wait-ready
 
       - name: Run integration tests
         env:
           AGENTTEAMS_LLM_API_KEY: ${{ secrets.AGENTTEAMS_LLM_API_KEY }}
+          AGENTTEAMS_MANAGER_RUNTIME: agentscope
         run: |
           TEST_GATEWAY_PORT=18080 TEST_CONSOLE_PORT=18001 TEST_MANAGER_CONTAINER=agentteams-manager \
             ./tests/run-all-tests.sh --skip-build --use-existing --test-filter "$NON_GITHUB_TESTS"

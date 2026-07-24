@@ -194,6 +194,8 @@ func (a *App) Start(ctx context.Context) error {
 				AIStreamIdleTimeoutSeconds: a.cfg.AIStreamIdleTimeoutSeconds,
 				TuwunelURL:                 a.cfg.MatrixServerURL,
 				ElementWebURL:              a.cfg.ElementWebURL,
+				GitHubToken:                a.cfg.GitHubToken,
+				SkillsDir:                  a.cfg.SkillsDir,
 				ControllerName:             a.cfg.ControllerName,
 				AppServiceEnabled:          a.cfg.MatrixAppServiceEnabled,
 				AppServiceID:               a.cfg.MatrixAppServiceID,
@@ -203,6 +205,9 @@ func (a *App) Start(ctx context.Context) error {
 				AppServicePushURL:          a.cfg.MatrixAppServicePushURL,
 				MatrixDomain:               a.cfg.MatrixDomain,
 			},
+		}
+		if mcp, ok := a.gateway.(gateway.MCPBootstrapper); ok {
+			init.MCP = mcp
 		}
 		if err := init.Run(ctx); err != nil {
 			logger.Error(err, "cluster initialization failed (non-fatal, continuing)")

@@ -38,10 +38,18 @@ export TEST_OUTPUT_DIR="${TEST_OUTPUT_DIR:-${PROJECT_ROOT:-.}/tests/output}"
 
 # Detect agent runtime for a given container from its on-disk workspace layout.
 # Usage: _detect_runtime <container> <base_workspace_dir>
-# Output: openclaw | copaw | hermes | unknown
+# Output: agentscope | openclaw | copaw | hermes | unknown
 _detect_runtime() {
     local container="$1"
     local base_dir="$2"
+
+    local declared_manager_runtime
+    declared_manager_runtime=$(docker exec "$container" printenv \
+        AGENTTEAMS_MANAGER_RUNTIME 2>/dev/null | tr -d '\r')
+    if [ "$declared_manager_runtime" = "agentscope" ]; then
+        echo agentscope
+        return 0
+    fi
 
     docker exec "$container" sh -c "
         if [ -d '${base_dir}/.hermes/sessions' ]; then
@@ -54,6 +62,69 @@ _detect_runtime() {
             echo unknown
         fi
     " 2>/dev/null | tr -d '\r'
+}
+
+# Read the Manager's process-level Prometheus registry as a flat JSON object.
+# AgentScope does not persist OpenClaw-style session JSONL; this endpoint is
+# its authoritative operational metrics contract.
+_read_agentscope_manager_counters() {
+    local container="$1"
+    docker exec "$container" python -c '
+import json
+import urllib.request
+
+text = urllib.request.urlopen(
+    "http://127.0.0.1:18799/metrics",
+    timeout=2,
+).read().decode()
+metrics = {}
+for line in text.splitlines():
+    if not line.startswith("agentteams_manager_"):
+        continue
+    name, value = line.split(None, 1)
+    metrics[name] = float(value)
+print(json.dumps(metrics, separators=(",", ":"), sort_keys=True))
+' 2>/dev/null
+}
+
+_emit_agentscope_manager_blob() {
+    local current="${1:-}"
+    local baseline="${2:-}"
+    [ -n "$current" ] || current='{}'
+    [ -n "$baseline" ] || baseline='{}'
+
+    jq -n --argjson current "$current" --argjson baseline "$baseline" '
+      def delta($name):
+        (($current[$name] // 0) - ($baseline[$name] // 0));
+      {
+        llm_calls: delta("agentteams_manager_model_turns_total"),
+        tokens: {
+          input: 0,
+          output: 0,
+          cache_read: 0,
+          cache_write: 0,
+          total: 0
+        },
+        timing: {start: "", end: "", duration_seconds: 0},
+        metrics_supported: true,
+        token_metrics_supported: false,
+        runtime: "agentscope",
+        counters: {
+          matrix_events: delta("agentteams_manager_matrix_events_total"),
+          matrix_turns: delta("agentteams_manager_matrix_turns_total"),
+          model_turns: delta("agentteams_manager_model_turns_total"),
+          tool_calls: delta("agentteams_manager_tool_calls_total"),
+          tool_errors: delta("agentteams_manager_tool_errors_total"),
+          recovery_reconciled: delta("agentteams_manager_recovery_reconciled_total"),
+          recovery_errors: delta("agentteams_manager_recovery_errors_total"),
+          errors: delta("agentteams_manager_errors_total"),
+          runtime_reloads: delta("agentteams_manager_runtime_reloads_total"),
+          runtime_revision: ($current.agentteams_manager_runtime_revision // 0),
+          up: ($current.agentteams_manager_up // 0)
+        },
+        note: "AgentScope exposes operational counters; token counts are not exported"
+      }
+    '
 }
 
 # Detect session directory for a given container based on its runtime.
@@ -625,57 +696,53 @@ wait_for_worker_session_stable() {
 }
 
 # Usage: wait_for_session_stable [stable_seconds] [max_wait_seconds]
-# Polls the manager's latest session file until its size is unchanged for stable_seconds.
+# Polls AgentScope's turn counters until they are unchanged for stable_seconds.
 wait_for_session_stable() {
     local stable_seconds="${1:-5}"
     local max_wait="${2:-60}"
     local manager_container="${TEST_AGENT_CONTAINER:-${TEST_CONTROLLER_CONTAINER:-agentteams-manager}}"
-    local manager_session_dir
-    manager_session_dir=$(_detect_session_dir "$manager_container" "/root/manager-workspace")
     local manager_runtime
-    manager_runtime=$(_detect_runtime "$manager_container" "/root/manager-workspace")
-
-    if [ "$manager_runtime" = "hermes" ]; then
-        log_info "Manager uses Hermes; SessionDB metrics are transaction-based, skipping jsonl stabilization wait" >&2
+    manager_runtime=$(_detect_runtime "$manager_container" "")
+    if [ "$manager_runtime" != "agentscope" ]; then
+        log_info "Manager runtime '${manager_runtime}' is not AgentScope; skipping turn-counter wait" >&2
         return 0
     fi
 
-    if ! _is_metrics_supported "$manager_container" "/root/manager-workspace"; then
-        log_info "Manager runtime does not record session metrics, skipping session wait" >&2
-        return 0
-    fi
-
-    log_info "Waiting for Manager session to stabilize (up to ${max_wait}s)..." >&2
+    log_info "Waiting for AgentScope Manager turns to stabilize (up to ${max_wait}s)..." >&2
 
     local elapsed=0
-    local last_size=-1
+    local last_value=""
     local stable_for=0
 
     while [ "$elapsed" -lt "$max_wait" ]; do
-        local session
-        session=$(get_latest_session "$manager_container" "$manager_session_dir")
-        local size=0
-        if [ -n "$session" ]; then
-            size=$(docker exec "$manager_container" sh -c "wc -c < '${session}' 2>/dev/null || echo 0" | tr -dc '0-9')
-            size=${size:-0}
-        fi
+        local counters value
+        counters=$(_read_agentscope_manager_counters "$manager_container")
+        [ -n "$counters" ] || counters='{}'
+        value=$(echo "$counters" | jq -r '
+          [
+            .agentteams_manager_matrix_events_total // 0,
+            .agentteams_manager_matrix_turns_total // 0,
+            .agentteams_manager_model_turns_total // 0,
+            .agentteams_manager_tool_calls_total // 0
+          ] | @csv
+        ' 2>/dev/null)
 
-        if [ "$size" -eq "$last_size" ]; then
+        if [ -n "$value" ] && [ "$value" = "$last_value" ]; then
             stable_for=$((stable_for + 2))
             if [ "$stable_for" -ge "$stable_seconds" ]; then
-                log_info "Session stable after ${elapsed}s (size=${size})" >&2
+                log_info "AgentScope Manager counters stable after ${elapsed}s" >&2
                 return 0
             fi
         else
             stable_for=0
-            last_size="$size"
+            last_value="$value"
         fi
 
         sleep 2
         elapsed=$((elapsed + 2))
     done
 
-    log_info "Session did not stabilize within ${max_wait}s, proceeding anyway" >&2
+    log_info "Manager counters did not stabilize within ${max_wait}s, proceeding anyway" >&2
     return 0
 }
 
@@ -683,46 +750,25 @@ wait_for_session_stable() {
 # Baseline & Delta Metrics (for per-test metrics)
 # ============================================================
 
-# Snapshot all session file byte offsets as baseline for accurate delta calculation.
+# Snapshot Manager counters and Worker session offsets for delta calculation.
 # Usage: METRICS_BASELINE=$(snapshot_baseline "worker1" "worker2" ...)
-# Returns: JSON with per-agent map of {file -> byte_offset} for all existing session files.
+# Returns: JSON with a Manager counter map and per-Worker session offsets.
 snapshot_baseline() {
     local workers=("$@")
 
     local manager_container="${TEST_AGENT_CONTAINER:-${TEST_CONTROLLER_CONTAINER:-agentteams-manager}}"
-    local manager_session_dir
-    manager_session_dir=$(_detect_session_dir "$manager_container" "/root/manager-workspace")
     local manager_runtime
-    manager_runtime=$(_detect_runtime "$manager_container" "/root/manager-workspace")
+    manager_runtime=$(_detect_runtime "$manager_container" "")
 
     local snapshot_result='{"offsets": {}}'
 
-    # Snapshot all Manager session artifacts (only for runtimes whose sessions
-    # are parseable; otherwise leave the offsets map empty so collect_*
-    # can short-circuit with an unsupported placeholder).
-    if [ "$manager_runtime" = "hermes" ]; then
-        local manager_db
-        manager_db=$(_detect_hermes_state_db "/root/manager-workspace")
-        local manager_snapshot
-        manager_snapshot=$(_snapshot_hermes_sessions "$manager_container" "$manager_db")
-        snapshot_result=$(echo "$snapshot_result" | jq --argjson o "$manager_snapshot" '.offsets.manager = $o')
-    elif [ "$manager_runtime" = "copaw" ]; then
-        local manager_copaw_totals
-        manager_copaw_totals=$(_read_copaw_token_totals "$manager_container" "/root/manager-workspace")
-        snapshot_result=$(echo "$snapshot_result" | jq --argjson o "$manager_copaw_totals" '.offsets.manager = $o')
-    elif _is_metrics_supported "$manager_container" "/root/manager-workspace"; then
-        local manager_files
-        manager_files=$(docker exec "$manager_container" \
-            sh -c "ls '${manager_session_dir}'/*.jsonl 2>/dev/null" 2>/dev/null)
-        if [ -n "$manager_files" ]; then
-            local manager_offsets='{}'
-            while IFS= read -r f; do
-                local sz
-                sz=$(docker exec "$manager_container" sh -c "wc -c < '$f' 2>/dev/null || echo 0")
-                manager_offsets=$(echo "$manager_offsets" | jq --arg f "$f" --argjson s "$sz" '.[$f] = $s')
-            done <<< "$manager_files"
-            snapshot_result=$(echo "$snapshot_result" | jq --argjson o "$manager_offsets" '.offsets.manager = $o')
-        fi
+    if [ "$manager_runtime" = "agentscope" ]; then
+        local manager_counters
+        manager_counters=$(_read_agentscope_manager_counters "$manager_container")
+        [ -n "$manager_counters" ] || manager_counters='{}'
+        snapshot_result=$(echo "$snapshot_result" | \
+            jq --argjson counters "$manager_counters" \
+            '.offsets.manager = $counters')
     fi
 
     # Snapshot all Worker session files
@@ -860,51 +906,29 @@ collect_delta_metrics() {
     local workers=("$@")
 
     local manager_container="${TEST_AGENT_CONTAINER:-${TEST_CONTROLLER_CONTAINER:-agentteams-manager}}"
-    local manager_session_dir
-    manager_session_dir=$(_detect_session_dir "$manager_container" "/root/manager-workspace")
     local manager_runtime
-    manager_runtime=$(_detect_runtime "$manager_container" "/root/manager-workspace")
+    manager_runtime=$(_detect_runtime "$manager_container" "")
 
     # Initialize result structure
     local delta_result='{"test_name": "'"${test_name}"'", "timestamp": "'"$(date -Iseconds)"'", "agents": {}, "totals": {"llm_calls": 0, "tokens": {"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "total": 0}, "timing": {"duration_seconds": 0}}}'
 
-    # Collect Manager delta using runtime-specific source
+    # Collect Manager delta from the AgentScope Prometheus registry.
     log_info "Collecting Manager delta metrics..." >&2
-    if [ "$manager_runtime" = "hermes" ]; then
-        local manager_offsets
-        manager_offsets=$(echo "$baseline" | jq -r '.offsets.manager // empty')
-        local manager_db
-        manager_db=$(_detect_hermes_state_db "/root/manager-workspace")
-        local manager_delta
-        manager_delta=$(_collect_hermes_delta "$manager_container" "$manager_db" "$manager_offsets")
-        if [ -n "$manager_delta" ]; then
-            delta_result=$(echo "$delta_result" | jq --argjson m "$manager_delta" '.agents.manager = $m')
-            log_info "Manager delta: $(echo "$manager_delta" | jq -r '.llm_calls') LLM calls, $(echo "$manager_delta" | jq -r '.tokens.total') tokens" >&2
-        fi
-    elif [ "$manager_runtime" = "copaw" ]; then
-        local manager_offsets
-        manager_offsets=$(echo "$baseline" | jq -c '.offsets.manager // {}')
-        local manager_delta
-        manager_delta=$(_collect_copaw_delta "$manager_container" "/root/manager-workspace" "$manager_offsets")
-        if [ -n "$manager_delta" ]; then
-            delta_result=$(echo "$delta_result" | jq --argjson m "$manager_delta" '.agents.manager = $m')
-            log_info "Manager delta: $(echo "$manager_delta" | jq -r '.llm_calls') LLM calls, $(echo "$manager_delta" | jq -r '.tokens.total') tokens" >&2
-        fi
-    elif _is_metrics_supported "$manager_container" "/root/manager-workspace"; then
-        local manager_offsets
-        manager_offsets=$(echo "$baseline" | jq -r '.offsets.manager // empty')
-        local manager_delta
-        manager_delta=$(_collect_agent_delta "$manager_container" "$manager_session_dir" "$manager_offsets")
-        if [ -n "$manager_delta" ]; then
-            delta_result=$(echo "$delta_result" | jq --argjson m "$manager_delta" '.agents.manager = $m')
-            log_info "Manager delta: $(echo "$manager_delta" | jq -r '.llm_calls') LLM calls, $(echo "$manager_delta" | jq -r '.tokens.total') tokens" >&2
-        fi
+    if [ "$manager_runtime" = "agentscope" ]; then
+        local manager_baseline manager_current manager_delta
+        manager_baseline=$(echo "$baseline" | jq -c '.offsets.manager // {}')
+        manager_current=$(_read_agentscope_manager_counters "$manager_container")
+        [ -n "$manager_current" ] || manager_current='{}'
+        manager_delta=$(_emit_agentscope_manager_blob \
+            "$manager_current" "$manager_baseline")
+        delta_result=$(echo "$delta_result" | \
+            jq --argjson metrics "$manager_delta" \
+            '.agents.manager = $metrics')
+        log_info "Manager delta: $(echo "$manager_delta" | jq -r '.llm_calls') AgentScope model turns" >&2
     else
-        local manager_runtime_id
-        manager_runtime_id=$(_detect_runtime "$manager_container" "/root/manager-workspace")
-        log_info "Manager runtime '${manager_runtime_id}' does not record session metrics; emitting unsupported placeholder" >&2
+        log_info "Unexpected Manager runtime '${manager_runtime}'; emitting unsupported placeholder" >&2
         local manager_blob
-        manager_blob=$(_emit_unsupported_metrics_blob "$manager_runtime_id")
+        manager_blob=$(_emit_unsupported_metrics_blob "$manager_runtime")
         delta_result=$(echo "$delta_result" | jq --argjson m "$manager_blob" '.agents.manager = $m')
     fi
 
@@ -983,10 +1007,8 @@ collect_test_metrics() {
     local workers=("$@")
     
     local manager_container="${TEST_AGENT_CONTAINER:-${TEST_CONTROLLER_CONTAINER:-agentteams-manager}}"
-    local manager_session_dir
-    manager_session_dir=$(_detect_session_dir "$manager_container" "/root/manager-workspace")
     local manager_runtime
-    manager_runtime=$(_detect_runtime "$manager_container" "/root/manager-workspace")
+    manager_runtime=$(_detect_runtime "$manager_container" "")
 
     # Initialize result structure
     local cumulative_result='{"test_name": "'"${test_name}"'", "timestamp": "'"$(date -Iseconds)"'", "agents": {}, "totals": {"llm_calls": 0, "tokens": {"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "total": 0}, "timing": {"duration_seconds": 0}}}'
@@ -994,42 +1016,20 @@ collect_test_metrics() {
     # Collect Manager metrics
     log_info "Collecting Manager metrics..." >&2
     local manager_metrics
-    if [ "$manager_runtime" = "hermes" ]; then
-        local manager_db
-        manager_db=$(_detect_hermes_state_db "/root/manager-workspace")
-        manager_metrics=$(_collect_hermes_latest_metrics "$manager_container" "$manager_db")
-    elif [ "$manager_runtime" = "copaw" ]; then
-        local manager_copaw_totals
-        manager_copaw_totals=$(_read_copaw_token_totals "$manager_container" "/root/manager-workspace")
-        local total_input total_output total_calls
-        total_calls=$(echo "$manager_copaw_totals" | jq -r '.call_count // 0')
-        total_input=$(echo "$manager_copaw_totals" | jq -r '.prompt_tokens // 0')
-        total_output=$(echo "$manager_copaw_totals" | jq -r '.completion_tokens // 0')
-        manager_metrics=$(cat <<EOF
-{
-  "llm_calls": ${total_calls},
-  "tokens": {"input": ${total_input}, "output": ${total_output}, "cache_read": 0, "cache_write": 0, "total": $((total_input + total_output))},
-  "timing": {"start": "", "end": "", "duration_seconds": 0},
-  "runtime": "copaw"
-}
-EOF
-)
-    elif _is_metrics_supported "$manager_container" "/root/manager-workspace"; then
-        local manager_session
-        manager_session=$(get_latest_session "$manager_container" "$manager_session_dir")
-        if [ -n "$manager_session" ]; then
-            manager_metrics=$(docker exec "$manager_container" cat "$manager_session" 2>/dev/null | parse_session_metrics_inline)
-        fi
+    if [ "$manager_runtime" = "agentscope" ]; then
+        local manager_current
+        manager_current=$(_read_agentscope_manager_counters "$manager_container")
+        [ -n "$manager_current" ] || manager_current='{}'
+        manager_metrics=$(_emit_agentscope_manager_blob \
+            "$manager_current" '{}')
     else
-        local manager_runtime_id
-        manager_runtime_id=$(_detect_runtime "$manager_container" "/root/manager-workspace")
-        log_info "Manager runtime '${manager_runtime_id}' does not record session metrics; emitting unsupported placeholder" >&2
-        manager_metrics=$(_emit_unsupported_metrics_blob "$manager_runtime_id")
+        log_info "Unexpected Manager runtime '${manager_runtime}'; emitting unsupported placeholder" >&2
+        manager_metrics=$(_emit_unsupported_metrics_blob "$manager_runtime")
     fi
 
     if [ -n "$manager_metrics" ] && [ "$manager_metrics" != "null" ]; then
         cumulative_result=$(echo "$cumulative_result" | jq --argjson m "$manager_metrics" '.agents.manager = $m')
-        log_info "Manager: $(echo "$manager_metrics" | jq -r '.llm_calls') LLM calls, $(echo "$manager_metrics" | jq -r '.tokens.total') tokens" >&2
+        log_info "Manager: $(echo "$manager_metrics" | jq -r '.llm_calls') AgentScope model turns" >&2
     else
         log_info "No Manager session found" >&2
     fi

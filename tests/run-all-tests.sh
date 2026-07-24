@@ -62,22 +62,11 @@ load_env_file() {
                 AGENTTEAMS_LLM_API_KEY)         [ -z "${AGENTTEAMS_LLM_API_KEY}" ] && export AGENTTEAMS_LLM_API_KEY="${value}" ;;
                 AGENTTEAMS_PORT_GATEWAY)        export TEST_GATEWAY_PORT="${value}" ;;
                 AGENTTEAMS_PORT_CONSOLE)        export TEST_CONSOLE_PORT="${value}" ;;
-                AGENTTEAMS_ADMIN_USER)          export TEST_ADMIN_USER="${value}" ;;
-                AGENTTEAMS_ADMIN_PASSWORD)      export TEST_ADMIN_PASSWORD="${value}" ;;
-                AGENTTEAMS_MINIO_USER)          export TEST_MINIO_USER="${value}" ;;
-                AGENTTEAMS_MINIO_PASSWORD)      export TEST_MINIO_PASSWORD="${value}" ;;
-                AGENTTEAMS_REGISTRATION_TOKEN)  export TEST_REGISTRATION_TOKEN="${value}" ;;
-                AGENTTEAMS_MATRIX_DOMAIN)       export TEST_MATRIX_DOMAIN="${value}" ;;
-                AGENTTEAMS_LLM_API_KEY)         [ -z "${AGENTTEAMS_LLM_API_KEY}" ] && export AGENTTEAMS_LLM_API_KEY="${value}" ;;
-                AGENTTEAMS_PORT_GATEWAY)        export TEST_GATEWAY_PORT="${value}" ;;
-                AGENTTEAMS_PORT_CONSOLE)        export TEST_CONSOLE_PORT="${value}" ;;
             esac
         done < "${env_file}"
     fi
     export TEST_CONTROLLER_CONTAINER="${TEST_CONTROLLER_CONTAINER:-$(docker ps --format '{{.Names}}' 2>/dev/null | grep -E '^agentteams-controller$' | head -1 || true)}"
-    export TEST_CONTROLLER_CONTAINER="${TEST_CONTROLLER_CONTAINER:-$(docker ps --format '{{.Names}}' 2>/dev/null | grep -E '^agentteams-manager$' | head -1 || true)}"
     export TEST_CONTROLLER_CONTAINER="${TEST_CONTROLLER_CONTAINER:-agentteams-controller}"
-    export TEST_AGENT_CONTAINER="${TEST_AGENT_CONTAINER:-$(docker ps --format '{{.Names}}' 2>/dev/null | grep -E '^agentteams-manager(-|$)' | head -1 || true)}"
     export TEST_AGENT_CONTAINER="${TEST_AGENT_CONTAINER:-$(docker ps --format '{{.Names}}' 2>/dev/null | grep -E '^agentteams-manager(-|$)' | head -1 || true)}"
     export TEST_AGENT_CONTAINER="${TEST_AGENT_CONTAINER:-${TEST_CONTROLLER_CONTAINER}}"
 }
@@ -145,7 +134,7 @@ cleanup() {
     if [ "${USE_EXISTING}" = true ]; then
         log "Using existing installation — skipping container cleanup"
         # Still clean up test worker containers
-        for c in $(docker ps -a --filter "name=agentteams-test-worker-" --format '{{.Names}}' 2>/dev/null; docker ps -a --filter "name=agentteams-test-worker-" --format '{{.Names}}' 2>/dev/null); do
+        for c in $(docker ps -a --filter "name=agentteams-test-worker-" --format '{{.Names}}' 2>/dev/null); do
             docker rm -f "$c" 2>/dev/null || true
         done
         return
@@ -156,12 +145,8 @@ cleanup() {
     docker rm agentteams-controller 2>/dev/null || true
     docker stop agentteams-manager 2>/dev/null || true
     docker rm agentteams-manager 2>/dev/null || true
-    # Legacy container name
-    docker stop agentteams-manager 2>/dev/null || true
-    docker rm agentteams-manager 2>/dev/null || true
-
     # Cleanup worker containers
-    for c in $(docker ps -a --filter "name=agentteams-test-worker-" --format '{{.Names}}' 2>/dev/null; docker ps -a --filter "name=agentteams-test-worker-" --format '{{.Names}}' 2>/dev/null); do
+    for c in $(docker ps -a --filter "name=agentteams-test-worker-" --format '{{.Names}}' 2>/dev/null); do
         docker rm -f "$c" 2>/dev/null || true
     done
 
@@ -197,15 +182,6 @@ if [ "${USE_EXISTING}" = true ]; then
         error "Manager does not appear to be running (container: ${TEST_CONTROLLER_CONTAINER}). Start it with 'make install' first."
     fi
     log "Manager is reachable"
-
-    # Enable YOLO mode for test run (auto-decision, no interactive prompts)
-    # Try agent container first (embedded mode), fall back to manager container (legacy mode)
-    agent_container="$(docker ps --format '{{.Names}}' 2>/dev/null | grep -E '^agentteams-manager(-|$)' | head -1 || true)"
-    agent_container="${agent_container:-$(docker ps --format '{{.Names}}' 2>/dev/null | grep -E '^agentteams-manager(-|$)' | head -1 || true)}"
-    agent_container="${agent_container:-${TEST_CONTROLLER_CONTAINER}}"
-    docker exec "${agent_container}" touch /root/manager-workspace/yolo-mode 2>/dev/null && \
-        log "YOLO mode enabled (${agent_container})" || \
-        log "WARNING: Could not enable YOLO mode (container may differ)"
 else
     log "Installing Manager via install script..."
 
@@ -230,152 +206,21 @@ else
     log "  Matrix domain:  ${TEST_MATRIX_DOMAIN}"
     log "  Gateway port:   ${TEST_GATEWAY_PORT}"
     log "  Console port:   ${TEST_CONSOLE_PORT}"
-
-    # Enable YOLO mode for test run
-    agent_container="$(docker ps --format '{{.Names}}' 2>/dev/null | grep -E '^agentteams-manager(-|$)' | head -1 || true)"
-    agent_container="${agent_container:-$(docker ps --format '{{.Names}}' 2>/dev/null | grep -E '^agentteams-manager(-|$)' | head -1 || true)}"
-    agent_container="${agent_container:-${TEST_CONTROLLER_CONTAINER}}"
-    docker exec "${agent_container}" touch /root/manager-workspace/yolo-mode 2>/dev/null && \
-        log "YOLO mode enabled (${agent_container})" || true
 fi
 
 # ============================================================
-# Step 3.5: Configure Manager identity (English, for test consistency)
+# Step 3.5: Verify the declared AgentScope Manager runtime
 # ============================================================
-# The welcome message triggers onboarding Q&A. Send identity setup
-# so Manager uses English regardless of host timezone/locale.
-
 source "${SCRIPT_DIR}/lib/matrix-client.sh"
 source "${SCRIPT_DIR}/lib/agent-metrics.sh"
 
-_setup_manager_identity() {
-    log "Configuring Manager identity (English)..."
-
-    local admin_login admin_token dm_room manager_user
-    admin_login=$(matrix_login "${TEST_ADMIN_USER}" "${TEST_ADMIN_PASSWORD}" 2>/dev/null) || {
-        log "WARNING: Could not login as admin for identity setup"
-        return 0
-    }
-    admin_token=$(echo "${admin_login}" | jq -r '.access_token')
-    manager_user="@manager:${TEST_MATRIX_DOMAIN}"
-
-    dm_room=$(matrix_find_dm_room "${admin_token}" "${manager_user}" 2>/dev/null || true)
-    if [ -z "${dm_room}" ]; then
-        log "WARNING: No DM room found for identity setup"
-        return 0
-    fi
-
-    # Check if identity is already configured
-    # Check in agent container (embedded mode) or manager container (legacy mode)
-    local _agent
-    _agent="$(docker ps --format '{{.Names}}' 2>/dev/null | grep -E '^agentteams-manager(-|$)' | head -1 || true)"
-    _agent="${_agent:-$(docker ps --format '{{.Names}}' 2>/dev/null | grep -E '^agentteams-manager(-|$)' | head -1 || true)}"
-    _agent="${_agent:-${TEST_CONTROLLER_CONTAINER}}"
-
-    if docker exec "${_agent}" test -f /root/manager-workspace/soul-configured 2>/dev/null; then
-        log "Manager identity already configured, skipping"
-        return 0
-    fi
-
-    # Wait for Manager Agent to be ready
-    wait_for_manager_agent_ready 300 "${dm_room}" "${admin_token}" || {
-        log "WARNING: Manager not ready for identity setup"
-        return 0
-    }
-
-    # Verify Gateway consumer and AI route authorization before sending messages
-    log "Verifying Gateway authorization for Manager..."
-    local _gw_ready=false _gw_elapsed=0
-    local _console_url="http://${TEST_MANAGER_HOST}:${TEST_CONSOLE_PORT:-18001}"
-    local _gw_url="http://${TEST_MANAGER_HOST}:${TEST_GATEWAY_PORT:-18080}"
-    local _cookie_file="/tmp/higress-test-cookie-$$"
-    local _mgr_key
-    local _env_file="${AGENTTEAMS_ENV_FILE:-${HOME}/agentteams-manager.env}"
-    [ -f "${_env_file}" ] || _env_file="${HOME}/agentteams-manager.env"
-    _mgr_key=$(grep '^AGENTTEAMS_MANAGER_GATEWAY_KEY=' "${_env_file}" 2>/dev/null | tail -1 | cut -d= -f2-)
-    while [ "${_gw_elapsed}" -lt 60 ]; do
-        # Login to Higress console and check manager consumer
-        curl -sf -X POST "${_console_url}/session/login" \
-            -H 'Content-Type: application/json' \
-            -c "${_cookie_file}" \
-            -d '{"username":"'"${TEST_ADMIN_USER}"'","password":"'"${TEST_ADMIN_PASSWORD}"'"}' >/dev/null 2>&1 || true
-        if curl -sf "${_console_url}/v1/consumers" -b "${_cookie_file}" 2>/dev/null | grep -q '"manager"'; then
-            if [ -n "${_mgr_key}" ]; then
-                # Test actual LLM call through gateway with a minimal chat completion request
-                local _gw_resp _gw_code
-                _gw_resp=$(curl -s -w "\n%{http_code}" \
-                    -X POST "${_gw_url}/v1/chat/completions" \
-                    -H "Authorization: Bearer ${_mgr_key}" \
-                    -H "Content-Type: application/json" \
-                    -d '{"model":"'"${AGENTTEAMS_DEFAULT_MODEL:-qwen3.6-plus}"'","messages":[{"role":"user","content":"hi"}],"max_tokens":1}' 2>/dev/null || echo -e "\n000")
-                _gw_code=$(echo "${_gw_resp}" | tail -1)
-                if [ "${_gw_code}" = "200" ]; then
-                    _gw_ready=true
-                    break
-                elif [ "${_gw_code}" != "401" ] && [ "${_gw_code}" != "403" ]; then
-                    # Non-auth error (e.g. 400, 500) — gateway auth is working, model may just be wrong
-                    log "Gateway returned HTTP ${_gw_code} (non-auth error, authorization is working)"
-                    _gw_ready=true
-                    break
-                fi
-                log "Gateway returned HTTP ${_gw_code}, retrying... (${_gw_elapsed}s/60s)"
-            fi
-        fi
-        sleep 2
-        _gw_elapsed=$((_gw_elapsed + 2))
-    done
-    rm -f "${_cookie_file}"
-    if [ "${_gw_ready}" != "true" ]; then
-        local _last_body
-        _last_body=$(echo "${_gw_resp}" | sed '$d')
-        error "Gateway authorization not ready after 60s (HTTP ${_gw_code})"
-        error "Response: ${_last_body}"
-        exit 1
-    fi
-    log "Gateway authorization verified"
-
-    # Send identity setup message
-    matrix_send_message "${admin_token}" "${dm_room}" \
-        "Here is my identity configuration for you:
-- Name: Manager
-- Language: English (always respond in English)
-- Style: concise and professional
-- No special constraints
-
-Please update your SOUL.md with these preferences, then run: touch ~/soul-configured"
-
-    log "Waiting for Manager to configure identity..."
-
-    # Wait for Manager to process and touch soul-configured (up to 120s)
-    local elapsed=0
-    while [ "${elapsed}" -lt 120 ]; do
-        if docker exec "${_agent}" test -f /root/manager-workspace/soul-configured 2>/dev/null; then
-            # soul-configured exists, but Manager's Matrix reply may still be in flight.
-            # Wait for the reply to arrive in the DM room so subsequent tests don't
-            # pick it up as their own reply (race condition with test-02).
-            local _wait=0
-            while [ "${_wait}" -lt 30 ]; do
-                local _reply
-                _reply=$(matrix_read_messages "${admin_token}" "${dm_room}" 5 2>/dev/null | \
-                    jq -r '[.chunk[] | select(.sender | startswith("@manager")) | .content.body] | first // ""' 2>/dev/null)
-                if echo "${_reply}" | grep -qi "soul\|identity\|configured\|language\|english\|ready\|activated"; then
-                    break
-                fi
-                sleep 3
-                _wait=$((_wait + 3))
-            done
-            log "Manager identity configured successfully"
-            return 0
-        fi
-        sleep 5
-        elapsed=$((elapsed + 5))
-    done
-
-    log "WARNING: Manager did not complete identity setup within 120s (tests will continue)"
-    return 0
-}
-
-_setup_manager_identity
+if ! docker exec "${TEST_AGENT_CONTAINER}" python -c \
+    'import urllib.request; urllib.request.urlopen("http://127.0.0.1:18799/readyz", timeout=2).read()' \
+    >/dev/null 2>&1; then
+    error "AgentScope Manager readiness endpoint is unavailable in ${TEST_AGENT_CONTAINER}"
+    exit 1
+fi
+log "AgentScope Manager declared configuration is active"
 
 # ============================================================
 # Step 4: Run test cases

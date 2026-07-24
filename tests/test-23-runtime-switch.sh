@@ -1,5 +1,5 @@
 #!/bin/bash
-# test-23-runtime-switch.sh - Case 23: Switch worker runtime in-place
+# test-23-runtime-switch.sh - Worker runtime switch and Manager hot reload
 #
 # Verifies the controller recreates a worker's container with the new
 # runtime image when spec.runtime changes, while preserving identity
@@ -11,6 +11,8 @@
 #   3. apply worker runtime=copaw → SpecChanged triggers recreate
 #   4. new container image is copaw; sentinel preserved; consumer unchanged
 #
+# The final section also proves that a Manager model update is applied at a
+# turn boundary without replacing the AgentScope Manager container.
 # This is a controller-cr style test — no LLM required.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -22,6 +24,8 @@ test_setup "23-runtime-switch"
 
 TEST_WORKER="test-rt-$$"
 STORAGE_PREFIX="${STORAGE_PREFIX:-${TEST_STORAGE_PREFIX:-agentteams/agentteams-storage}}"
+ORIGINAL_MANAGER_MODEL=""
+HOT_RELOAD_MODEL=""
 
 _cleanup() {
     log_info "Cleaning up: ${TEST_WORKER}"
@@ -30,6 +34,10 @@ _cleanup() {
     remove_worker_container "${TEST_WORKER}"
     exec_in_manager mc rm -r --force "${STORAGE_PREFIX}/agents/${TEST_WORKER}/" 2>/dev/null || true
     exec_in_manager mc rm "${STORAGE_PREFIX}/agentteams-config/workers/${TEST_WORKER}.yaml" 2>/dev/null || true
+    if [ -n "${ORIGINAL_MANAGER_MODEL}" ] && [ "${HOT_RELOAD_MODEL}" != "${ORIGINAL_MANAGER_MODEL}" ]; then
+        exec_in_agent agt update manager --name default \
+            --model "${ORIGINAL_MANAGER_MODEL}" >/dev/null 2>&1 || true
+    fi
 }
 trap _cleanup EXIT
 
@@ -205,6 +213,74 @@ if minio_file_exists "agents/${TEST_WORKER}/openclaw.json"; then
 else
     log_fail "openclaw.json missing post-switch"
 fi
+
+# ============================================================
+# Section 5: Hot-reload Manager model without container restart
+# ============================================================
+log_section "AgentScope Manager Model Hot Reload"
+
+_MANAGER_CONTAINER="${TEST_AGENT_CONTAINER:-agentteams-manager}"
+MANAGER_CONTAINER_ID_BEFORE=$(docker inspect --format '{{.Id}}' \
+    "${_MANAGER_CONTAINER}" 2>/dev/null || true)
+MANAGER_RESOURCE_BEFORE=$(exec_in_agent agt get managers default -o json 2>/dev/null || true)
+ORIGINAL_MANAGER_MODEL=$(echo "${MANAGER_RESOURCE_BEFORE}" | jq -r '.model // empty')
+assert_not_empty "${ORIGINAL_MANAGER_MODEL}" "Current Manager model is observable"
+assert_eq "agentscope" "$(echo "${MANAGER_RESOURCE_BEFORE}" | jq -r '.runtime // empty')" \
+    "Manager resource remains agentscope"
+
+_manager_metric() {
+    local metric_name="$1"
+    docker exec "${_MANAGER_CONTAINER}" python -c \
+        'import sys,urllib.request; n=sys.argv[1]; t=urllib.request.urlopen("http://127.0.0.1:18799/metrics",timeout=2).read().decode(); print(next((line.split()[1] for line in t.splitlines() if line.startswith(n+" ")),""))' \
+        "${metric_name}" 2>/dev/null
+}
+
+RUNTIME_REVISION_BEFORE=$(_manager_metric agentteams_manager_runtime_revision)
+assert_not_empty "${RUNTIME_REVISION_BEFORE}" "Manager runtime revision metric is exposed"
+
+if [ -n "${AGENTTEAMS_HOT_RELOAD_MODEL:-}" ]; then
+    HOT_RELOAD_MODEL="${AGENTTEAMS_HOT_RELOAD_MODEL}"
+elif [ "${ORIGINAL_MANAGER_MODEL}" = "qwen3.6-plus" ]; then
+    HOT_RELOAD_MODEL="qwen3.5-plus"
+else
+    HOT_RELOAD_MODEL="qwen3.6-plus"
+fi
+
+HOT_RELOAD_OUTPUT=$(exec_in_agent agt update manager --name default \
+    --model "${HOT_RELOAD_MODEL}" 2>&1)
+HOT_RELOAD_EXIT=$?
+if [ "${HOT_RELOAD_EXIT}" -eq 0 ]; then
+    log_pass "Manager model update accepted"
+else
+    log_fail "Manager model update failed: ${HOT_RELOAD_OUTPUT}"
+fi
+
+HOT_RELOAD_DEADLINE=$(( $(date +%s) + 180 ))
+RUNTIME_REVISION_AFTER="${RUNTIME_REVISION_BEFORE}"
+OBSERVED_MANAGER_MODEL=""
+while [ "$(date +%s)" -lt "${HOT_RELOAD_DEADLINE}" ]; do
+    OBSERVED_MANAGER_MODEL=$(exec_in_agent agt get managers default -o json 2>/dev/null | \
+        jq -r '.model // empty')
+    RUNTIME_REVISION_AFTER=$(_manager_metric agentteams_manager_runtime_revision)
+    if [ "${OBSERVED_MANAGER_MODEL}" = "${HOT_RELOAD_MODEL}" ] && \
+        awk "BEGIN {exit !(${RUNTIME_REVISION_AFTER:-0} > ${RUNTIME_REVISION_BEFORE:-0})}"; then
+        break
+    fi
+    sleep 3
+done
+
+assert_eq "${HOT_RELOAD_MODEL}" "${OBSERVED_MANAGER_MODEL}" \
+    "Controller and Manager converge on the updated model"
+if awk "BEGIN {exit !(${RUNTIME_REVISION_AFTER:-0} > ${RUNTIME_REVISION_BEFORE:-0})}"; then
+    log_pass "AgentScope runtime revision increased (${RUNTIME_REVISION_BEFORE} → ${RUNTIME_REVISION_AFTER})"
+else
+    log_fail "AgentScope runtime revision did not increase (${RUNTIME_REVISION_BEFORE} → ${RUNTIME_REVISION_AFTER})"
+fi
+
+MANAGER_CONTAINER_ID_AFTER=$(docker inspect --format '{{.Id}}' \
+    "${_MANAGER_CONTAINER}" 2>/dev/null || true)
+assert_eq "${MANAGER_CONTAINER_ID_BEFORE}" "${MANAGER_CONTAINER_ID_AFTER}" \
+    "Manager model hot reload does not replace the container"
 
 # ============================================================
 # Summary

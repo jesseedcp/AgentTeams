@@ -1,92 +1,91 @@
 #!/bin/bash
-# test-05-heartbeat.sh - Case 5: Heartbeat triggers Manager inquiry
-# Verifies: Manager sends status inquiry to Worker during heartbeat,
-#           Worker responds with progress
+# test-05-heartbeat.sh - AgentScope deterministic heartbeat and snapshot gate
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/test-helpers.sh"
-source "${SCRIPT_DIR}/lib/matrix-client.sh"
-source "${SCRIPT_DIR}/lib/agent-metrics.sh"
+source "${SCRIPT_DIR}/lib/minio-client.sh"
 
 test_setup "05-heartbeat"
 
-if ! require_llm_key; then
-    test_teardown "05-heartbeat"
-    test_summary
-    exit 0
+_AGENT_CTR="${TEST_AGENT_CONTAINER:-agentteams-manager}"
+
+log_section "Heartbeat Runtime"
+
+if docker exec "${_AGENT_CTR}" python -c \
+    'import urllib.request; urllib.request.urlopen("http://127.0.0.1:18799/readyz",timeout=2).read()' \
+    >/dev/null 2>&1; then
+    log_pass "AgentScope Manager is ready after startup heartbeat"
+else
+    log_fail "AgentScope Manager is ready after startup heartbeat"
 fi
 
-ADMIN_LOGIN=$(matrix_login "${TEST_ADMIN_USER}" "${TEST_ADMIN_PASSWORD}")
-ADMIN_TOKEN=$(echo "${ADMIN_LOGIN}" | jq -r '.access_token')
+METRICS=$(docker exec "${_AGENT_CTR}" python -c \
+    'import urllib.request; print(urllib.request.urlopen("http://127.0.0.1:18799/metrics",timeout=2).read().decode())' \
+    2>/dev/null || true)
 
-MANAGER_USER="@manager:${TEST_MATRIX_DOMAIN}"
-
-log_section "Assign Long Task"
-
-DM_ROOM=$(matrix_find_dm_room "${ADMIN_TOKEN}" "${MANAGER_USER}" 2>/dev/null || true)
-assert_not_empty "${DM_ROOM}" "DM room with Manager found"
-
-# Wait for Manager Agent to be fully ready (OpenClaw gateway + joined DM room)
-wait_for_manager_agent_ready 300 "${DM_ROOM}" "${ADMIN_TOKEN}" || {
-    log_fail "Manager Agent not ready in time"
-    test_teardown "05-heartbeat"
-    test_summary
-    exit 1
+_metric_value() {
+    local name="$1"
+    echo "${METRICS}" | awk -v metric="${name}" \
+        '$1 == metric {print $2; exit}'
 }
 
-# Alice container should be running from test-02/03/04; wait to ensure it's up before snapshot
-wait_for_worker_container "alice" 60
-METRICS_BASELINE=$(snapshot_baseline "alice")
-matrix_send_message "${ADMIN_TOKEN}" "${DM_ROOM}" \
-    "Ask Alice to research and write a comprehensive technical document about WebAssembly. This should be detailed and thorough."
+HEARTBEATS=$(_metric_value agentteams_manager_heartbeats_total)
+RECOVERED=$(_metric_value agentteams_manager_recovery_reconciled_total)
+RECOVERY_ERRORS=$(_metric_value agentteams_manager_recovery_errors_total)
+MANAGER_UP=$(_metric_value agentteams_manager_up)
 
-log_info "Waiting for Manager to assign task..."
-sleep 30
-
-log_section "Trigger Heartbeat"
-
-MANAGER_CONTAINER="${TEST_CONTROLLER_CONTAINER:-agentteams-controller}"
-MANAGER_RUNTIME=$(docker exec "${MANAGER_CONTAINER}" printenv AGENTTEAMS_MANAGER_RUNTIME 2>/dev/null || \
-                  docker exec "${MANAGER_CONTAINER}" printenv AGENTTEAMS_MANAGER_RUNTIME 2>/dev/null || echo "openclaw")
-log_info "Triggering heartbeat (runtime=${MANAGER_RUNTIME})..."
-
-case "${MANAGER_RUNTIME}" in
-    copaw)
-        # CoPaw: the internal _heartbeat APScheduler job has no manual trigger API.
-        # Send a heartbeat instruction via Matrix DM to make the Agent execute HEARTBEAT.md.
-        matrix_send_message "${ADMIN_TOKEN}" "${DM_ROOM}" \
-            "Please execute your heartbeat check now. Read ~/HEARTBEAT.md and follow the full checklist. Report findings here."
-        ;;
-    *)
-        # OpenClaw: trigger via system event
-        docker exec "${MANAGER_CONTAINER}" bash -c \
-            "cd ~/agentteams-fs/agents/manager && openclaw system event --mode now" 2>/dev/null || \
-            log_info "Could not trigger OpenClaw heartbeat via system event"
-        ;;
-esac
-
-log_info "Waiting for heartbeat inquiry..."
-sleep 60
-
-log_section "Verify Heartbeat Inquiry"
-
-# Check for Manager inquiry message in Alice's room
-MESSAGES=$(matrix_read_messages "${ADMIN_TOKEN}" "${DM_ROOM}" 30)
-INQUIRY=$(echo "${MESSAGES}" | jq -r '[.chunk[] | select(.sender | startswith("@manager")) | .content.body] | map(select(test("status|progress|heartbeat|how"; "i"))) | first // empty')
-
-if [ -n "${INQUIRY}" ]; then
-    log_pass "Manager sent heartbeat inquiry"
+if awk "BEGIN {exit !(${HEARTBEATS:-0} >= 1)}"; then
+    log_pass "Startup executes at least one deterministic heartbeat"
 else
-    log_info "Heartbeat inquiry not detected (may need longer wait or different room)"
+    log_fail "Startup executes at least one deterministic heartbeat (got ${HEARTBEATS:-empty})"
+fi
+assert_not_empty "${RECOVERED}" "Heartbeat exports recovery reconciliation count"
+assert_not_empty "${RECOVERY_ERRORS}" "Heartbeat exports recovery error count"
+assert_eq "1" "${MANAGER_UP}" "Manager up metric remains healthy"
+
+log_section "Verified SQLite Snapshot"
+
+minio_setup
+if minio_wait_for_file "manager/snapshots/latest.json" 60; then
+    log_pass "Heartbeat publishes the latest SQLite snapshot pointer"
+else
+    log_fail "Heartbeat publishes the latest SQLite snapshot pointer"
 fi
 
-log_section "Collect Metrics"
-wait_for_worker_session_stable "alice" 5 120
-wait_for_session_stable 5 60
-PREV_METRICS=$(cat "${TEST_OUTPUT_DIR}/metrics-05-heartbeat.json" 2>/dev/null || true)
-METRICS=$(collect_delta_metrics "05-heartbeat" "$METRICS_BASELINE" "alice")
-print_metrics_report "$METRICS" "$PREV_METRICS"
-save_metrics_file "$METRICS" "05-heartbeat"
+SNAPSHOT_META=$(minio_read_file "manager/snapshots/latest.json" 2>/dev/null || true)
+if echo "${SNAPSHOT_META}" | jq -e '
+    (.sequence | type == "number") and
+    (.sequence >= 0) and
+    (.key | test("^manager/snapshots/[0-9]{20}\\.db$")) and
+    (.sha256 | test("^[0-9a-f]{64}$")) and
+    (.size > 0)
+' >/dev/null 2>&1; then
+    log_pass "Snapshot pointer has a sequence, checksum, size, and immutable key"
+else
+    log_fail "Snapshot pointer has a sequence, checksum, size, and immutable key"
+fi
+
+SNAPSHOT_KEY=$(echo "${SNAPSHOT_META}" | jq -r '.key // empty')
+if [ -n "${SNAPSHOT_KEY}" ] && \
+    minio_file_exists "${SNAPSHOT_KEY}"; then
+    log_pass "Snapshot database object exists"
+else
+    log_fail "Snapshot database object exists"
+fi
+
+log_section "Heartbeat Policy"
+
+HEARTBEAT_DOC=$(docker exec "${_AGENT_CTR}" \
+    cat /opt/agentteams/manager/HEARTBEAT.md 2>/dev/null || true)
+assert_contains "${HEARTBEAT_DOC}" \
+    "Recover task, project, artifact, and Git operations" \
+    "Heartbeat starts with deterministic operation recovery"
+assert_contains "${HEARTBEAT_DOC}" \
+    "Create a verified SQLite snapshot" \
+    "Heartbeat ends with verified SQLite snapshot creation"
+assert_contains "${HEARTBEAT_DOC}" \
+    "without a model call" \
+    "Heartbeat does not depend on an LLM turn"
 
 test_teardown "05-heartbeat"
 test_summary
