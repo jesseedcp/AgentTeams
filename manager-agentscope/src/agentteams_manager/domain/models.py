@@ -179,6 +179,7 @@ class RoomPolicy(FrozenStrictModel):
     resource_scope_all: bool = False
     allowed_team_names: frozenset[str] = frozenset()
     allowed_worker_names: frozenset[str] = frozenset()
+    allowed_mcp_names: frozenset[str] = frozenset()
     silent: bool = False
 
 

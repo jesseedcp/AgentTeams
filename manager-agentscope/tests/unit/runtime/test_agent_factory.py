@@ -20,6 +20,28 @@ class EmptyToolkitFactory:
         return Toolkit()
 
 
+class MCP:
+    name = "github"
+    is_stateful = False
+
+
+class RecordingMCPRegistry:
+    def __init__(self) -> None:
+        self.clients = {1: MCP(), 2: MCP()}
+        self.retained: list[int] = []
+        self.released: list[tuple[int, int]] = []
+
+    def clients_for(self, policy, *, revision):
+        del policy
+        return (self.clients[revision],)
+
+    def retain(self, revision):
+        self.retained.append(revision)
+
+    async def release(self, revision, *, active_revision):
+        self.released.append((revision, active_revision))
+
+
 def manager_config(tmp_path: Path) -> ManagerConfig:
     return ManagerConfig(
         manager_name="manager",
@@ -83,3 +105,38 @@ async def test_factory_creates_direct_agentscope_agent(
     assert agent.state.session_id == "matrix:!room:example"
     assert agent.model.model == "qwen3.6-plus"
     assert agent.model.context_size == 150_000
+
+
+@pytest.mark.asyncio
+async def test_factory_leases_mcp_until_old_agent_is_retired(
+    tmp_path: Path,
+) -> None:
+    registry = RecordingMCPRegistry()
+    factory = AgentFactory(
+        config=manager_config(tmp_path),
+        runtime=runtime_document(),
+        prompt_builder=PromptBuilder(Path("manager/agent")),
+        toolkit_factory=EmptyToolkitFactory(),
+        mcp_registry=registry,
+    )
+    policy = RoomPolicy(
+        room_id="!room:example",
+        kind=RoomKind.ADMIN_DM,
+        revision=1,
+    )
+
+    old_agent = await factory.create("!room:example", policy)
+    factory.replace_runtime(
+        runtime_document().model_copy(update={"revision": 2}),
+    )
+    new_agent = await factory.create("!room:example", policy)
+    await factory.retire(old_agent)
+
+    assert old_agent.toolkit.tool_groups[0].mcps == [
+        registry.clients[1],
+    ]
+    assert new_agent.toolkit.tool_groups[0].mcps == [
+        registry.clients[2],
+    ]
+    assert registry.retained == [1, 2]
+    assert registry.released == [(1, 2)]

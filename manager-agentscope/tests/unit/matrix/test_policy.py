@@ -93,7 +93,16 @@ async def test_worker_identity_gets_only_worker_room_tools() -> None:
         room_id="!worker:local",
         resource_name="alice",
         matrix_user_id="@alice:local",
-        payload={},
+        payload={
+            "spec": {
+                "mcpServers": [
+                    {
+                        "name": "jira",
+                        "url": "https://gateway/mcp/jira",
+                    },
+                ],
+            },
+        },
     )
     resolver = RoomPolicyResolver(
         topology=FakeTopology({"!worker:local": binding}),
@@ -120,6 +129,7 @@ async def test_worker_identity_gets_only_worker_room_tools() -> None:
         },
     )
     assert policy.resource_name == "alice"
+    assert policy.allowed_mcp_names == frozenset({"jira"})
 
 
 @pytest.mark.asyncio

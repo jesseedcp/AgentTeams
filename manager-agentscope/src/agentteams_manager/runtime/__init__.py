@@ -4,6 +4,7 @@ from typing import Any
 
 __all__ = [
     "AgentFactory",
+    "MCPRegistry",
     "PromptBuilder",
     "RoomSessionManager",
     "SkillRegistry",
@@ -16,6 +17,10 @@ def __getattr__(name: str) -> Any:
         from .agent_factory import AgentFactory
 
         return AgentFactory
+    if name == "MCPRegistry":
+        from .mcp import MCPRegistry
+
+        return MCPRegistry
     if name == "PromptBuilder":
         from .prompts import PromptBuilder
 

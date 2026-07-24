@@ -286,6 +286,7 @@ class RoomPolicyResolver:
                 in {RoomKind.LEADER_ROOM, RoomKind.TEAM_ROOM}
                 else None
             ),
+            allowed_mcp_names=_mcp_names(binding.payload),
             project_id=(
                 binding.resource_name
                 if binding.room_kind is RoomKind.PROJECT_ROOM
@@ -375,4 +376,24 @@ def _scope_names(value: object) -> frozenset[str]:
         item
         for item in value
         if isinstance(item, str) and item
+    )
+
+
+def _mcp_names(payload: dict[str, object]) -> frozenset[str]:
+    spec = payload.get("spec")
+    sources = (
+        spec.get("mcpServers")
+        if isinstance(spec, dict)
+        else None
+    )
+    if sources is None:
+        sources = payload.get("mcpServers")
+    if not isinstance(sources, (list, tuple)):
+        return frozenset()
+    return frozenset(
+        name
+        for item in sources
+        if isinstance(item, dict)
+        and isinstance((name := item.get("name")), str)
+        and name
     )

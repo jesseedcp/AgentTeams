@@ -7,7 +7,13 @@ import os
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SecretStr,
+    model_validator,
+)
 
 
 class MCPServerDocument(BaseModel):
@@ -15,7 +21,9 @@ class MCPServerDocument(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    name: str = Field(min_length=1)
+    name: str = Field(
+        pattern=r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$",
+    )
     url: str = Field(pattern=r"^https?://")
     transport: Literal["http", "sse"] = "http"
 
@@ -49,6 +57,13 @@ class RuntimeDocument(BaseModel):
     prompt_sources: PromptSources
     heartbeat_interval_seconds: int = Field(default=1_800, gt=0)
     worker_idle_timeout_seconds: int = Field(default=43_200, gt=0)
+
+    @model_validator(mode="after")
+    def require_unique_mcp_names(self) -> RuntimeDocument:
+        names = [server.name for server in self.mcp_servers]
+        if len(names) != len(set(names)):
+            raise ValueError("MCP server names must be unique")
+        return self
 
     @classmethod
     def load(cls, path: Path) -> RuntimeDocument:
