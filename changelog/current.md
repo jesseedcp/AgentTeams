@@ -10,6 +10,9 @@ Record image-affecting changes to `manager/`, `worker/`, `copaw/`, `hermes/`, `o
   with AgentScope 2.0, Matrix E2EE, `agt`, the retained 16-skill catalog, and
   standard-library health/readiness/metrics on port 18799. OpenClaw, CoPaw,
   Hermes, QwenPaw, and OpenHuman remain Worker runtimes.
+- **Role-specific runtimes**: Make `agentscope` the Manager-only runtime while
+  preserving OpenClaw, CoPaw, Hermes, QwenPaw, and OpenHuman as independent
+  Worker choices with their existing images.
 - **AgentScope resource administration**: Expose policy-scoped typed tools for
   Worker, Team, Human, Matrix, channel, and Nacos operations, with durable
   recovery and deterministic heartbeat reconciliation.

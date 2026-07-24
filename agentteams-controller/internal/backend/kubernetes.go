@@ -27,6 +27,7 @@ const defaultK8sNamespaceFile = "/var/run/secrets/kubernetes.io/serviceaccount/n
 // K8sConfig holds Kubernetes backend configuration.
 type K8sConfig struct {
 	Namespace            string
+	ManagerImage         string
 	WorkerImage          string
 	CopawWorkerImage     string
 	HermesWorkerImage    string
@@ -256,6 +257,8 @@ func (k *K8sBackend) Create(ctx context.Context, req CreateRequest) (*WorkerResu
 	image := req.Image
 	if image == "" {
 		switch {
+		case req.Runtime == RuntimeAgentScope && k.config.ManagerImage != "":
+			image = k.config.ManagerImage
 		case req.Runtime == RuntimeCopaw && k.config.CopawWorkerImage != "":
 			image = k.config.CopawWorkerImage
 		case req.Runtime == RuntimeHermes && k.config.HermesWorkerImage != "":
@@ -269,7 +272,10 @@ func (k *K8sBackend) Create(ctx context.Context, req CreateRequest) (*WorkerResu
 		}
 	}
 	if image == "" {
-		return nil, fmt.Errorf("no worker image configured for kubernetes backend")
+		return nil, fmt.Errorf(
+			"no image configured for %s runtime on kubernetes backend",
+			req.Runtime,
+		)
 	}
 
 	if req.WorkingDir == "" {
@@ -740,12 +746,13 @@ func rawK8sPhase(phase corev1.PodPhase) string {
 
 func defaultRuntime(runtime string) string {
 	switch runtime {
-	case RuntimeCopaw:
-		return RuntimeCopaw
-	case RuntimeHermes:
-		return RuntimeHermes
-	case RuntimeQwenPaw:
-		return RuntimeQwenPaw
+	case RuntimeAgentScope,
+		RuntimeOpenClaw,
+		RuntimeCopaw,
+		RuntimeHermes,
+		RuntimeQwenPaw,
+		RuntimeOpenHuman:
+		return runtime
 	default:
 		return RuntimeOpenClaw
 	}

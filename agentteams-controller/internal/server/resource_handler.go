@@ -83,6 +83,14 @@ func (h *ResourceHandler) CreateWorker(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, http.StatusBadRequest, "name is required")
 		return
 	}
+	if !backend.ValidRuntime(req.Runtime) {
+		httputil.WriteError(
+			w,
+			http.StatusBadRequest,
+			"unsupported Worker runtime: "+req.Runtime,
+		)
+		return
+	}
 
 	if team, ok, err := h.findTeamForMember(r.Context(), req.Name); err != nil {
 		writeK8sError(w, "create worker", err)
@@ -281,6 +289,14 @@ func (h *ResourceHandler) UpdateWorker(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
 	}
+	if req.Runtime != nil && !backend.ValidRuntime(*req.Runtime) {
+		httputil.WriteError(
+			w,
+			http.StatusBadRequest,
+			"unsupported Worker runtime: "+*req.Runtime,
+		)
+		return
+	}
 
 	if team, ok, err := h.findTeamForMember(r.Context(), name); err != nil {
 		writeK8sError(w, "update worker", err)
@@ -414,6 +430,14 @@ func (h *ResourceHandler) CreateTeam(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, http.StatusBadRequest, "leader.name is required")
 		return
 	}
+	if !validTeamWorkerRuntimes(req.Leader.Runtime, req.Workers) {
+		httputil.WriteError(
+			w,
+			http.StatusBadRequest,
+			"Team members must use a supported Worker runtime",
+		)
+		return
+	}
 
 	team := &v1beta1.Team{
 		ObjectMeta: metav1.ObjectMeta{
@@ -520,6 +544,18 @@ func (h *ResourceHandler) UpdateTeam(w http.ResponseWriter, r *http.Request) {
 	var req UpdateTeamRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httputil.WriteError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	leaderRuntime := ""
+	if req.Leader != nil {
+		leaderRuntime = req.Leader.Runtime
+	}
+	if !validTeamWorkerRuntimes(leaderRuntime, req.Workers) {
+		httputil.WriteError(
+			w,
+			http.StatusBadRequest,
+			"Team members must use a supported Worker runtime",
+		)
 		return
 	}
 
@@ -816,6 +852,14 @@ func (h *ResourceHandler) CreateManager(w http.ResponseWriter, r *http.Request) 
 		httputil.WriteError(w, http.StatusBadRequest, "model is required")
 		return
 	}
+	if !backend.ValidManagerRuntime(req.Runtime) {
+		httputil.WriteError(
+			w,
+			http.StatusBadRequest,
+			"unsupported Manager runtime: "+req.Runtime,
+		)
+		return
+	}
 
 	mgr := &v1beta1.Manager{
 		ObjectMeta: metav1.ObjectMeta{
@@ -825,7 +869,7 @@ func (h *ResourceHandler) CreateManager(w http.ResponseWriter, r *http.Request) 
 		Spec: v1beta1.ManagerSpec{
 			Model:         req.Model,
 			ModelProvider: req.ModelProvider,
-			Runtime:       req.Runtime,
+			Runtime:       backend.ResolveManagerRuntime(req.Runtime),
 			Image:         req.Image,
 			Soul:          req.Soul,
 			Agents:        req.Agents,
@@ -891,6 +935,14 @@ func (h *ResourceHandler) UpdateManager(w http.ResponseWriter, r *http.Request) 
 	var req UpdateManagerRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httputil.WriteError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	if !backend.ValidManagerRuntime(req.Runtime) {
+		httputil.WriteError(
+			w,
+			http.StatusBadRequest,
+			"unsupported Manager runtime: "+req.Runtime,
+		)
 		return
 	}
 
@@ -1275,6 +1327,21 @@ func (h *ResourceHandler) teamMemberToResponse(ctx context.Context, t *v1beta1.T
 		resp.Phase = "Running"
 	}
 	return resp
+}
+
+func validTeamWorkerRuntimes(
+	leaderRuntime string,
+	workers []TeamWorkerRequest,
+) bool {
+	if !backend.ValidRuntime(leaderRuntime) {
+		return false
+	}
+	for _, worker := range workers {
+		if !backend.ValidRuntime(worker.Runtime) {
+			return false
+		}
+	}
+	return true
 }
 
 // writeK8sError maps K8s API errors to HTTP status codes.

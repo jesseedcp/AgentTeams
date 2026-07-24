@@ -10,6 +10,7 @@ import (
 
 	v1beta1 "github.com/agentscope-ai/AgentTeams/agentteams-controller/api/v1beta1"
 	authpkg "github.com/agentscope-ai/AgentTeams/agentteams-controller/internal/auth"
+	"github.com/agentscope-ai/AgentTeams/agentteams-controller/internal/backend"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -787,6 +788,107 @@ func TestCreateWorkerDefaultsRuntime(t *testing.T) {
 	}
 }
 
+func TestCreateWorkerRejectsManagerRuntime(t *testing.T) {
+	scheme := newServerTestScheme(t)
+	k8sClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+	handler := NewResourceHandler(k8sClient, "default", nil, "")
+
+	body := []byte(`{"name":"worker-cr","runtime":"agentscope"}`)
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/workers",
+		bytes.NewReader(body),
+	)
+	rec := httptest.NewRecorder()
+	handler.CreateWorker(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf(
+			"expected status %d, got %d: %s",
+			http.StatusBadRequest,
+			rec.Code,
+			rec.Body.String(),
+		)
+	}
+}
+
+func TestUpdateWorkerRejectsManagerRuntime(t *testing.T) {
+	scheme := newServerTestScheme(t)
+	worker := &v1beta1.Worker{}
+	worker.Name = "worker-cr"
+	worker.Namespace = "default"
+	worker.Spec.Runtime = backend.RuntimeOpenClaw
+	k8sClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(worker).
+		Build()
+	handler := NewResourceHandler(k8sClient, "default", nil, "")
+	body := []byte(`{"runtime":"agentscope"}`)
+	req := httptest.NewRequest(
+		http.MethodPut,
+		"/api/v1/workers/worker-cr",
+		bytes.NewReader(body),
+	)
+	req.SetPathValue("name", "worker-cr")
+	rec := httptest.NewRecorder()
+
+	handler.UpdateWorker(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf(
+			"expected status %d, got %d: %s",
+			http.StatusBadRequest,
+			rec.Code,
+			rec.Body.String(),
+		)
+	}
+}
+
+func TestCreateWorkerAcceptsEveryWorkerRuntime(t *testing.T) {
+	for _, workerRuntime := range []string{
+		backend.RuntimeOpenClaw,
+		backend.RuntimeCopaw,
+		backend.RuntimeHermes,
+		backend.RuntimeQwenPaw,
+		backend.RuntimeOpenHuman,
+	} {
+		t.Run(workerRuntime, func(t *testing.T) {
+			scheme := newServerTestScheme(t)
+			k8sClient := fake.NewClientBuilder().
+				WithScheme(scheme).
+				Build()
+			handler := NewResourceHandler(
+				k8sClient,
+				"default",
+				nil,
+				"",
+			)
+			body := []byte(
+				`{"name":"worker-cr","runtime":"` +
+					workerRuntime +
+					`"}`,
+			)
+			req := httptest.NewRequest(
+				http.MethodPost,
+				"/api/v1/workers",
+				bytes.NewReader(body),
+			)
+			rec := httptest.NewRecorder()
+
+			handler.CreateWorker(rec, req)
+
+			if rec.Code != http.StatusCreated {
+				t.Fatalf(
+					"expected status %d, got %d: %s",
+					http.StatusCreated,
+					rec.Code,
+					rec.Body.String(),
+				)
+			}
+		})
+	}
+}
+
 func TestCreateTeam_StampsControllerLabel(t *testing.T) {
 	scheme := newServerTestScheme(t)
 	k8sClient := fake.NewClientBuilder().WithScheme(scheme).Build()
@@ -942,6 +1044,72 @@ func TestCreateManager_StampsControllerLabel(t *testing.T) {
 	}
 	if got := mgr.Labels[v1beta1.LabelController]; got != "ctrl-a" {
 		t.Fatalf("expected controller label ctrl-a, got %q", got)
+	}
+	if got := mgr.Spec.Runtime; got != backend.RuntimeAgentScope {
+		t.Fatalf(
+			"manager runtime = %q, want %q",
+			got,
+			backend.RuntimeAgentScope,
+		)
+	}
+}
+
+func TestCreateManagerRejectsWorkerRuntime(t *testing.T) {
+	scheme := newServerTestScheme(t)
+	k8sClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+	handler := NewResourceHandler(k8sClient, "default", nil, "")
+	body := []byte(
+		`{"name":"m1","model":"qwen3.5-plus","runtime":"openclaw"}`,
+	)
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/managers",
+		bytes.NewReader(body),
+	)
+	rec := httptest.NewRecorder()
+
+	handler.CreateManager(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf(
+			"expected status %d, got %d: %s",
+			http.StatusBadRequest,
+			rec.Code,
+			rec.Body.String(),
+		)
+	}
+}
+
+func TestUpdateManagerRejectsWorkerRuntime(t *testing.T) {
+	scheme := newServerTestScheme(t)
+	manager := &v1beta1.Manager{}
+	manager.Name = "m1"
+	manager.Namespace = "default"
+	manager.Spec.Model = "qwen3.5-plus"
+	manager.Spec.Runtime = backend.RuntimeAgentScope
+	k8sClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(manager).
+		Build()
+	handler := NewResourceHandler(k8sClient, "default", nil, "")
+	body := []byte(`{"runtime":"copaw"}`)
+	req := httptest.NewRequest(
+		http.MethodPut,
+		"/api/v1/managers/m1",
+		bytes.NewReader(body),
+	)
+	req.SetPathValue("name", "m1")
+	rec := httptest.NewRecorder()
+
+	handler.UpdateManager(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf(
+			"expected status %d, got %d: %s",
+			http.StatusBadRequest,
+			rec.Code,
+			rec.Body.String(),
+		)
 	}
 }
 

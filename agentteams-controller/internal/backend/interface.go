@@ -29,13 +29,15 @@ const (
 	StatusUnknown  WorkerStatus = "unknown"
 )
 
-// Supported worker runtimes.
+// Supported Manager and Worker runtimes. AgentScope is Manager-only; the
+// other runtimes are Worker-only.
 const (
-	RuntimeOpenClaw  = "openclaw"
-	RuntimeCopaw     = "copaw"
-	RuntimeHermes    = "hermes"
-	RuntimeOpenHuman = "openhuman"
-	RuntimeQwenPaw   = "qwenpaw"
+	RuntimeAgentScope = "agentscope"
+	RuntimeOpenClaw   = "openclaw"
+	RuntimeCopaw      = "copaw"
+	RuntimeHermes     = "hermes"
+	RuntimeOpenHuman  = "openhuman"
+	RuntimeQwenPaw    = "qwenpaw"
 )
 
 const (
@@ -60,6 +62,20 @@ func NormalizeAuthTokenExpirationSeconds(seconds int64) int64 {
 // An empty string is valid — backends resolve it via ResolveRuntime.
 func ValidRuntime(r string) bool {
 	return r == "" || r == RuntimeOpenClaw || r == RuntimeCopaw || r == RuntimeHermes || r == RuntimeOpenHuman || r == RuntimeQwenPaw
+}
+
+// ValidManagerRuntime reports whether r is a supported Manager runtime.
+// Empty is accepted because the Controller resolves it to AgentScope.
+func ValidManagerRuntime(r string) bool {
+	return r == "" || r == RuntimeAgentScope
+}
+
+// ResolveManagerRuntime applies the only supported Manager default.
+func ResolveManagerRuntime(runtime string) string {
+	if runtime == "" {
+		return RuntimeAgentScope
+	}
+	return runtime
 }
 
 // ResolveRuntime returns the effective runtime for a backend request.
@@ -147,7 +163,7 @@ type CreateRequest struct {
 	Name    string            `json:"name"`
 	Image   string            `json:"image,omitempty"`
 	Env     map[string]string `json:"env,omitempty"`
-	Runtime string            `json:"runtime,omitempty"` // "openclaw" | "copaw" | "hermes" | "qwenpaw"
+	Runtime string            `json:"runtime,omitempty"` // Manager: "agentscope"; Worker: one of the five Worker runtimes
 	// RuntimeFallback is the value used by Backend.Create when Runtime is
 	// empty, before falling back to RuntimeOpenClaw. Manager / Worker
 	// reconcilers populate this from AGENTTEAMS_MANAGER_RUNTIME /

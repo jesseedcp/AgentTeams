@@ -345,8 +345,8 @@ func LoadConfig() *Config {
 
 		ManagerEnabled:          envOrDefault("AGENTTEAMS_MANAGER_ENABLED", "true") == "true",
 		ManagerModel:            firstNonEmpty(os.Getenv("AGENTTEAMS_MANAGER_MODEL"), envOrDefault("AGENTTEAMS_DEFAULT_MODEL", "qwen3.6-plus")),
-		ManagerRuntime:          envOrDefault("AGENTTEAMS_MANAGER_RUNTIME", "openclaw"),
-		ManagerImage:            os.Getenv("AGENTTEAMS_MANAGER_IMAGE"),
+		ManagerRuntime:          envOrDefault("AGENTTEAMS_MANAGER_RUNTIME", backend.RuntimeAgentScope),
+		ManagerImage:            envOrDefault("AGENTTEAMS_MANAGER_IMAGE", "agentteams/agentteams-manager:latest"),
 		DefaultWorkerRuntime:    os.Getenv("AGENTTEAMS_DEFAULT_WORKER_RUNTIME"),
 		K8sManagerCPURequest:    envOrDefault("AGENTTEAMS_K8S_MANAGER_CPU_REQUEST", "500m"),
 		K8sManagerMemoryRequest: envOrDefault("AGENTTEAMS_K8S_MANAGER_MEMORY_REQUEST", "1Gi"),
@@ -445,6 +445,16 @@ func LoadConfig() *Config {
 			panic(fmt.Sprintf("invalid AGENTTEAMS_MANAGER_SPEC: %v", err))
 		}
 	}
+	if !backend.ValidManagerRuntime(cfg.ManagerRuntime) {
+		panic(
+			fmt.Sprintf(
+				"invalid AGENTTEAMS_MANAGER_RUNTIME %q: only %q is supported",
+				cfg.ManagerRuntime,
+				backend.RuntimeAgentScope,
+			),
+		)
+	}
+	cfg.ManagerRuntime = backend.ResolveManagerRuntime(cfg.ManagerRuntime)
 
 	// Validate AppService tokens when AS mode is enabled.
 	// Tokens must be provided via env vars (set by install script or manually).
@@ -514,10 +524,12 @@ func (c *Config) ManagerResources() *backend.ResourceRequirements {
 func (c *Config) DockerConfig() backend.DockerConfig {
 	return backend.DockerConfig{
 		SocketPath:           c.SocketPath,
+		ManagerImage:         c.ManagerImage,
 		WorkerImage:          envOrDefault("AGENTTEAMS_WORKER_IMAGE", "agentteams/agentteams-worker:latest"),
 		CopawWorkerImage:     envOrDefault("AGENTTEAMS_COPAW_WORKER_IMAGE", "agentteams/agentteams-copaw-worker:latest"),
 		HermesWorkerImage:    envOrDefault("AGENTTEAMS_HERMES_WORKER_IMAGE", "agentteams/agentteams-hermes-worker:latest"),
 		OpenHumanWorkerImage: envOrDefault("AGENTTEAMS_OPENHUMAN_WORKER_IMAGE", "agentteams/agentteams-openhuman-worker:latest"),
+		QwenPawWorkerImage:   envOrDefault("AGENTTEAMS_QWENPAW_WORKER_IMAGE", "agentteams/agentteams-qwenpaw-worker:latest"),
 		DefaultNetwork:       envOrDefault("AGENTTEAMS_DOCKER_NETWORK", "agentteams-net"),
 	}
 }
@@ -556,10 +568,12 @@ func (c *Config) UsesExternalOSS() bool {
 func (c *Config) K8sConfig() backend.K8sConfig {
 	return backend.K8sConfig{
 		Namespace:            c.K8sNamespace,
+		ManagerImage:         c.ManagerImage,
 		WorkerImage:          envOrDefault("AGENTTEAMS_WORKER_IMAGE", "agentteams/agentteams-worker:latest"),
 		CopawWorkerImage:     envOrDefault("AGENTTEAMS_COPAW_WORKER_IMAGE", "agentteams/agentteams-copaw-worker:latest"),
 		HermesWorkerImage:    envOrDefault("AGENTTEAMS_HERMES_WORKER_IMAGE", "agentteams/agentteams-hermes-worker:latest"),
 		OpenHumanWorkerImage: envOrDefault("AGENTTEAMS_OPENHUMAN_WORKER_IMAGE", "agentteams/agentteams-openhuman-worker:latest"),
+		QwenPawWorkerImage:   envOrDefault("AGENTTEAMS_QWENPAW_WORKER_IMAGE", "agentteams/agentteams-qwenpaw-worker:latest"),
 		WorkerCPU:            c.K8sWorkerCPU,
 		WorkerMemory:         c.K8sWorkerMemory,
 		ControllerName:       c.ControllerName,
@@ -572,10 +586,12 @@ func (c *Config) SandboxConfig() backend.SandboxConfig {
 		Namespace:                    c.K8sNamespace,
 		ProviderType:                 c.SandboxProviderType,
 		AgentRuntimeImage:            os.Getenv("AGENTTEAMS_SANDBOX_AGENT_RUNTIME_IMAGE"),
+		ManagerImage:                 c.ManagerImage,
 		WorkerImage:                  envOrDefault("AGENTTEAMS_WORKER_IMAGE", "agentteams/agentteams-worker:latest"),
 		CopawWorkerImage:             envOrDefault("AGENTTEAMS_COPAW_WORKER_IMAGE", "agentteams/agentteams-copaw-worker:latest"),
 		HermesWorkerImage:            envOrDefault("AGENTTEAMS_HERMES_WORKER_IMAGE", "agentteams/agentteams-hermes-worker:latest"),
 		OpenHumanWorkerImage:         envOrDefault("AGENTTEAMS_OPENHUMAN_WORKER_IMAGE", "agentteams/agentteams-openhuman-worker:latest"),
+		QwenPawWorkerImage:           envOrDefault("AGENTTEAMS_QWENPAW_WORKER_IMAGE", "agentteams/agentteams-qwenpaw-worker:latest"),
 		WorkerCPU:                    c.K8sWorkerCPU,
 		WorkerMemory:                 c.K8sWorkerMemory,
 		SandboxPrewarmSize:           c.SandboxPrewarmSize,

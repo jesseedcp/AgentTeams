@@ -383,7 +383,7 @@ func createManagerCmd() *cobra.Command {
 		Long: `Create a new Manager resource.
 
   agt create manager --name default --model qwen3.6-plus
-  agt create manager --name default --model claude-sonnet-4-6 --runtime copaw
+  agt create manager --name default --model claude-sonnet-4-6 --runtime agentscope
   To configure CPU/memory resources, use a YAML manifest and pass it with 'agt apply -f manager.yaml'.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if name == "" {
@@ -413,7 +413,7 @@ func createManagerCmd() *cobra.Command {
 
 	cmd.Flags().StringVar(&name, "name", "", "Manager name (required)")
 	cmd.Flags().StringVar(&model, "model", "", "LLM model ID (required)")
-	cmd.Flags().StringVar(&runtime, "runtime", "", "Agent runtime (openclaw|copaw|hermes|qwenpaw|openhuman)")
+	cmd.Flags().StringVar(&runtime, "runtime", "", "Manager runtime (agentscope)")
 	cmd.Flags().StringVar(&image, "image", "", "Container image override")
 	cmd.Flags().StringVar(&soul, "soul", "", "Manager SOUL.md content")
 	return cmd

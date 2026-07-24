@@ -18,6 +18,7 @@ func TestResolveRuntime(t *testing.T) {
 		{"explicit_openclaw_preserved", RuntimeOpenClaw, RuntimeHermes, RuntimeOpenClaw},
 		{"explicit_hermes_preserved", RuntimeHermes, RuntimeCopaw, RuntimeHermes},
 		{"explicit_qwenpaw_preserved", RuntimeQwenPaw, RuntimeCopaw, RuntimeQwenPaw},
+		{"explicit_openhuman_preserved", RuntimeOpenHuman, RuntimeCopaw, RuntimeOpenHuman},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -39,11 +40,51 @@ func TestValidRuntime(t *testing.T) {
 		{RuntimeCopaw, true},
 		{RuntimeHermes, true},
 		{RuntimeQwenPaw, true},
+		{RuntimeOpenHuman, true},
 		{"unknown", false},
 	}
 	for _, tc := range cases {
 		if got := ValidRuntime(tc.in); got != tc.want {
 			t.Fatalf("ValidRuntime(%q) = %v, want %v", tc.in, got, tc.want)
 		}
+	}
+}
+
+func TestRuntimeSetsAreSeparated(t *testing.T) {
+	if !ValidManagerRuntime(RuntimeAgentScope) {
+		t.Fatal("agentscope must be valid for Manager")
+	}
+	if ValidManagerRuntime(RuntimeOpenClaw) ||
+		ValidManagerRuntime(RuntimeCopaw) {
+		t.Fatal("legacy runtimes must be invalid for Manager")
+	}
+
+	for _, runtime := range []string{
+		RuntimeOpenClaw,
+		RuntimeCopaw,
+		RuntimeHermes,
+		RuntimeQwenPaw,
+		RuntimeOpenHuman,
+	} {
+		if !ValidRuntime(runtime) {
+			t.Fatalf("%s must remain valid for Worker", runtime)
+		}
+	}
+	if ValidRuntime(RuntimeAgentScope) {
+		t.Fatal("agentscope is not a Worker runtime")
+	}
+}
+
+func TestResolveManagerRuntime(t *testing.T) {
+	if got := ResolveManagerRuntime(""); got != RuntimeAgentScope {
+		t.Fatalf("ResolveManagerRuntime(\"\") = %q, want %q", got, RuntimeAgentScope)
+	}
+	if got := ResolveManagerRuntime(RuntimeAgentScope); got != RuntimeAgentScope {
+		t.Fatalf(
+			"ResolveManagerRuntime(%q) = %q, want %q",
+			RuntimeAgentScope,
+			got,
+			RuntimeAgentScope,
+		)
 	}
 }

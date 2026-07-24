@@ -3,6 +3,8 @@ package config
 import (
 	"os"
 	"testing"
+
+	"github.com/agentscope-ai/AgentTeams/agentteams-controller/internal/backend"
 )
 
 func TestMain(m *testing.M) {
@@ -62,7 +64,7 @@ func TestLoadConfigMetricsBindAddrPrefersAgentTeamsEnv(t *testing.T) {
 func TestLoadConfigAppliesManagerSpec(t *testing.T) {
 	t.Setenv("AGENTTEAMS_MANAGER_SPEC", `{
 		"model":"qwen-max",
-		"runtime":"copaw",
+		"runtime":"agentscope",
 		"image":"agentteams/manager:test",
 		"resources":{
 			"requests":{"cpu":"750m","memory":"1536Mi"},
@@ -78,8 +80,8 @@ func TestLoadConfigAppliesManagerSpec(t *testing.T) {
 	if cfg.ManagerModel != "qwen-max" {
 		t.Fatalf("ManagerModel = %q, want %q", cfg.ManagerModel, "qwen-max")
 	}
-	if cfg.ManagerRuntime != "copaw" {
-		t.Fatalf("ManagerRuntime = %q, want %q", cfg.ManagerRuntime, "copaw")
+	if cfg.ManagerRuntime != "agentscope" {
+		t.Fatalf("ManagerRuntime = %q, want %q", cfg.ManagerRuntime, "agentscope")
 	}
 	if cfg.ManagerImage != "agentteams/manager:test" {
 		t.Fatalf("ManagerImage = %q, want %q", cfg.ManagerImage, "agentteams/manager:test")
@@ -106,7 +108,7 @@ func TestLoadConfigAppliesManagerSpec(t *testing.T) {
 
 func TestLoadConfigUsesManagerEnvFallback(t *testing.T) {
 	t.Setenv("AGENTTEAMS_MANAGER_MODEL", "env-model")
-	t.Setenv("AGENTTEAMS_MANAGER_RUNTIME", "openclaw")
+	t.Setenv("AGENTTEAMS_MANAGER_RUNTIME", "agentscope")
 	t.Setenv("AGENTTEAMS_MANAGER_IMAGE", "agentteams/manager:env")
 	t.Setenv("AGENTTEAMS_K8S_MANAGER_CPU", "4")
 	t.Setenv("AGENTTEAMS_K8S_MANAGER_MEMORY", "6Gi")
@@ -116,8 +118,8 @@ func TestLoadConfigUsesManagerEnvFallback(t *testing.T) {
 	if cfg.ManagerModel != "env-model" {
 		t.Fatalf("ManagerModel = %q, want %q", cfg.ManagerModel, "env-model")
 	}
-	if cfg.ManagerRuntime != "openclaw" {
-		t.Fatalf("ManagerRuntime = %q, want %q", cfg.ManagerRuntime, "openclaw")
+	if cfg.ManagerRuntime != "agentscope" {
+		t.Fatalf("ManagerRuntime = %q, want %q", cfg.ManagerRuntime, "agentscope")
 	}
 	if cfg.ManagerImage != "agentteams/manager:env" {
 		t.Fatalf("ManagerImage = %q, want %q", cfg.ManagerImage, "agentteams/manager:env")
@@ -127,6 +129,89 @@ func TestLoadConfigUsesManagerEnvFallback(t *testing.T) {
 	}
 	if cfg.K8sManagerMemory != "6Gi" {
 		t.Fatalf("K8sManagerMemory = %q, want %q", cfg.K8sManagerMemory, "6Gi")
+	}
+}
+
+func TestLoadConfigDefaultsManagerToAgentScope(t *testing.T) {
+	t.Setenv("AGENTTEAMS_MANAGER_RUNTIME", "")
+	t.Setenv("AGENTTEAMS_MANAGER_IMAGE", "")
+	t.Setenv("AGENTTEAMS_MANAGER_SPEC", "")
+
+	cfg := LoadConfig()
+
+	if cfg.ManagerRuntime != backend.RuntimeAgentScope {
+		t.Fatalf(
+			"ManagerRuntime = %q, want %q",
+			cfg.ManagerRuntime,
+			backend.RuntimeAgentScope,
+		)
+	}
+	if cfg.ManagerImage != "agentteams/agentteams-manager:latest" {
+		t.Fatalf(
+			"ManagerImage = %q, want AgentScope Manager image",
+			cfg.ManagerImage,
+		)
+	}
+}
+
+func TestLoadConfigRejectsWorkerRuntimeForManager(t *testing.T) {
+	t.Setenv("AGENTTEAMS_MANAGER_RUNTIME", backend.RuntimeCopaw)
+	t.Setenv("AGENTTEAMS_MANAGER_SPEC", "")
+
+	defer func() {
+		if recover() == nil {
+			t.Fatal("LoadConfig() accepted a Worker runtime for Manager")
+		}
+	}()
+
+	_ = LoadConfig()
+}
+
+func TestBackendConfigsKeepManagerAndWorkerImagesSeparate(t *testing.T) {
+	t.Setenv("AGENTTEAMS_MANAGER_IMAGE", "manager:v1")
+	t.Setenv("AGENTTEAMS_WORKER_IMAGE", "openclaw:v1")
+	t.Setenv("AGENTTEAMS_COPAW_WORKER_IMAGE", "copaw:v1")
+	t.Setenv("AGENTTEAMS_HERMES_WORKER_IMAGE", "hermes:v1")
+	t.Setenv("AGENTTEAMS_QWENPAW_WORKER_IMAGE", "qwenpaw:v1")
+	t.Setenv("AGENTTEAMS_OPENHUMAN_WORKER_IMAGE", "openhuman:v1")
+	cfg := LoadConfig()
+
+	for name, images := range map[string]struct {
+		manager, openclaw, copaw, hermes, qwenpaw, openhuman string
+	}{
+		"docker": {
+			cfg.DockerConfig().ManagerImage,
+			cfg.DockerConfig().WorkerImage,
+			cfg.DockerConfig().CopawWorkerImage,
+			cfg.DockerConfig().HermesWorkerImage,
+			cfg.DockerConfig().QwenPawWorkerImage,
+			cfg.DockerConfig().OpenHumanWorkerImage,
+		},
+		"kubernetes": {
+			cfg.K8sConfig().ManagerImage,
+			cfg.K8sConfig().WorkerImage,
+			cfg.K8sConfig().CopawWorkerImage,
+			cfg.K8sConfig().HermesWorkerImage,
+			cfg.K8sConfig().QwenPawWorkerImage,
+			cfg.K8sConfig().OpenHumanWorkerImage,
+		},
+		"sandbox": {
+			cfg.SandboxConfig().ManagerImage,
+			cfg.SandboxConfig().WorkerImage,
+			cfg.SandboxConfig().CopawWorkerImage,
+			cfg.SandboxConfig().HermesWorkerImage,
+			cfg.SandboxConfig().QwenPawWorkerImage,
+			cfg.SandboxConfig().OpenHumanWorkerImage,
+		},
+	} {
+		if images.manager != "manager:v1" ||
+			images.openclaw != "openclaw:v1" ||
+			images.copaw != "copaw:v1" ||
+			images.hermes != "hermes:v1" ||
+			images.qwenpaw != "qwenpaw:v1" ||
+			images.openhuman != "openhuman:v1" {
+			t.Fatalf("%s backend images = %+v", name, images)
+		}
 	}
 }
 

@@ -20,6 +20,7 @@ import (
 // DockerConfig holds Docker backend configuration.
 type DockerConfig struct {
 	SocketPath           string
+	ManagerImage         string // AgentScope Manager image (AGENTTEAMS_MANAGER_IMAGE)
 	WorkerImage          string // default worker image (AGENTTEAMS_WORKER_IMAGE)
 	CopawWorkerImage     string // default copaw worker image (AGENTTEAMS_COPAW_WORKER_IMAGE)
 	HermesWorkerImage    string // default hermes worker image (AGENTTEAMS_HERMES_WORKER_IMAGE)
@@ -108,6 +109,8 @@ func (d *DockerBackend) Create(ctx context.Context, req CreateRequest) (*WorkerR
 	image := req.Image
 	if image == "" {
 		switch {
+		case req.Runtime == RuntimeAgentScope && d.config.ManagerImage != "":
+			image = d.config.ManagerImage
 		case req.Runtime == RuntimeCopaw && d.config.CopawWorkerImage != "":
 			image = d.config.CopawWorkerImage
 		case req.Runtime == RuntimeHermes && d.config.HermesWorkerImage != "":

@@ -533,6 +533,12 @@ func TestSandboxBackend_Create_ImageResolution(t *testing.T) {
 			wantImage: "custom/image:v1",
 		},
 		{
+			name:      "agentscope manager runtime",
+			runtime:   RuntimeAgentScope,
+			config:    SandboxConfig{ManagerImage: "manager:v1", WorkerImage: "default:latest"},
+			wantImage: "manager:v1",
+		},
+		{
 			name:      "copaw runtime",
 			runtime:   RuntimeCopaw,
 			config:    SandboxConfig{WorkerImage: "default:latest", CopawWorkerImage: "copaw:v2"},
@@ -549,6 +555,12 @@ func TestSandboxBackend_Create_ImageResolution(t *testing.T) {
 			runtime:   RuntimeQwenPaw,
 			config:    SandboxConfig{WorkerImage: "default:latest", QwenPawWorkerImage: "qwenpaw:v4"},
 			wantImage: "qwenpaw:v4",
+		},
+		{
+			name:      "openhuman runtime",
+			runtime:   RuntimeOpenHuman,
+			config:    SandboxConfig{WorkerImage: "default:latest", OpenHumanWorkerImage: "openhuman:v5"},
+			wantImage: "openhuman:v5",
 		},
 		{
 			name:      "default worker image",

@@ -35,6 +35,7 @@ type SandboxConfig struct {
 	Namespace                    string
 	ProviderType                 string
 	AgentRuntimeImage            string
+	ManagerImage                 string
 	WorkerImage                  string
 	CopawWorkerImage             string
 	HermesWorkerImage            string
@@ -146,6 +147,8 @@ func (s *SandboxBackend) Create(ctx context.Context, req CreateRequest) (*Worker
 	workerImage := req.Image
 	if workerImage == "" {
 		switch {
+		case req.Runtime == RuntimeAgentScope && s.config.ManagerImage != "":
+			workerImage = s.config.ManagerImage
 		case req.Runtime == RuntimeCopaw && s.config.CopawWorkerImage != "":
 			workerImage = s.config.CopawWorkerImage
 		case req.Runtime == RuntimeHermes && s.config.HermesWorkerImage != "":
@@ -159,7 +162,10 @@ func (s *SandboxBackend) Create(ctx context.Context, req CreateRequest) (*Worker
 		}
 	}
 	if workerImage == "" {
-		return nil, fmt.Errorf("no worker image configured for sandbox backend")
+		return nil, fmt.Errorf(
+			"no image configured for %s runtime on sandbox backend",
+			req.Runtime,
+		)
 	}
 	if req.WorkersDeps != nil && req.WorkersDeps.InplaceUpdateImage == "" {
 		req.WorkersDeps.InplaceUpdateImage = workerImage
