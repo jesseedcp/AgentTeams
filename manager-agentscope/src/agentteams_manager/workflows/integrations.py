@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import inspect
 from collections.abc import Awaitable, Callable
 from typing import Literal, Protocol
@@ -13,6 +14,8 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    JsonValue,
+    TypeAdapter,
     field_validator,
     model_validator,
 )
@@ -37,10 +40,12 @@ from agentteams_manager.config import MCPServerDocument
 from agentteams_manager.domain.errors import (
     AmbiguousEffectError,
     ConflictError,
+    RecoveryError,
 )
 from agentteams_manager.domain.models import (
     ExternalEffect,
     OperationKind,
+    OperationRecord,
     OperationStatus,
     WorkerResource,
 )
@@ -153,7 +158,7 @@ class MCPConfiguration(BaseModel):
         min_length=1,
         pattern=r"^mcp__[a-z0-9][a-z0-9-]*__[A-Za-z0-9_.:-]+$",
     )
-    verification_arguments: dict[str, object] = Field(
+    verification_arguments: dict[str, JsonValue] = Field(
         default_factory=dict,
         repr=False,
     )
@@ -163,6 +168,15 @@ class MCPConfiguration(BaseModel):
     def validate_workers(cls, value: tuple[str, ...]) -> tuple[str, ...]:
         if len(value) != len(set(value)):
             raise ValueError("MCP Worker names must be unique")
+        return value
+
+    @field_validator("verification_arguments")
+    @classmethod
+    def reject_sensitive_verification_arguments(
+        cls,
+        value: dict[str, JsonValue],
+    ) -> dict[str, JsonValue]:
+        _validate_safe_verification_arguments(value)
         return value
 
     @model_validator(mode="after")
@@ -449,7 +463,10 @@ class IntegrationService:
             require_verifier=True,
         )
         baseline_revision = self._registry.revision
-        safe_request = _safe_configuration_request(request)
+        safe_request = _safe_configuration_request(
+            request,
+            baseline_revision=baseline_revision,
+        )
         operation = await self._supervisor.begin(
             operation_id=context.operation_id,
             kind=OperationKind.CONFIGURE_MCP,
@@ -894,6 +911,548 @@ class IntegrationService:
         )
         return receipt
 
+    async def resume_operation(
+        self,
+        operation: OperationRecord,
+    ) -> (
+        ModelSwitchReceipt
+        | MCPManagementReceipt
+        | ServicePublishingReceipt
+    ):
+        """Converge one durable integration intent from external facts."""
+        if operation.status is OperationStatus.SUCCEEDED:
+            if operation.kind is OperationKind.SWITCH_MODEL:
+                return ModelSwitchReceipt.model_validate(operation.result)
+            if operation.kind is OperationKind.CONFIGURE_MCP:
+                return MCPManagementReceipt.model_validate(operation.result)
+            if operation.kind is OperationKind.PUBLISH_SERVICE:
+                return ServicePublishingReceipt.model_validate(
+                    operation.result,
+                )
+        if operation.status in {
+            OperationStatus.FAILED,
+            OperationStatus.NEEDS_ATTENTION,
+        }:
+            raise RecoveryError(
+                f"cannot resume terminal integration operation "
+                f"{operation.operation_id}",
+            )
+        if operation.status is OperationStatus.RETRY_WAIT:
+            await self._supervisor.effect_ambiguous(
+                operation.operation_id,
+                ExternalEffect.STORAGE,
+                "integration_retry_resumed",
+            )
+        if operation.kind is OperationKind.SWITCH_MODEL:
+            return await self._resume_model_switch(operation)
+        if operation.kind is OperationKind.CONFIGURE_MCP:
+            return await self._resume_mcp(operation)
+        if operation.kind is OperationKind.PUBLISH_SERVICE:
+            return await self._resume_service_publishing(operation)
+        raise RecoveryError(
+            f"IntegrationService cannot recover {operation.kind.value}",
+        )
+
+    async def _resume_model_switch(
+        self,
+        operation: OperationRecord,
+    ) -> ModelSwitchReceipt:
+        target = _recovery_string(operation.request, "target")
+        name = _recovery_string(operation.request, "name")
+        model = _recovery_string(operation.request, "model")
+        raw_capabilities = operation.request.get("capabilities")
+        if not isinstance(raw_capabilities, dict):
+            raise RecoveryError(
+                "model recovery request has no typed capabilities",
+            )
+        try:
+            capabilities = ModelCapabilities.model_validate(
+                raw_capabilities,
+            )
+        except Exception as exc:
+            raise RecoveryError(
+                "model recovery capabilities are invalid",
+            ) from exc
+        if capabilities.model != model:
+            raise RecoveryError(
+                "model recovery capabilities do not match the target",
+            )
+        if target == "manager":
+            return await self._resume_manager_model(
+                operation,
+                name=name,
+                capabilities=capabilities,
+            )
+        if target == "worker":
+            return await self._resume_worker_model(
+                operation,
+                name=name,
+                capabilities=capabilities,
+            )
+        raise RecoveryError("model recovery target is invalid")
+
+    async def _resume_manager_model(
+        self,
+        operation: OperationRecord,
+        *,
+        name: str,
+        capabilities: ModelCapabilities,
+    ) -> ModelSwitchReceipt:
+        if name != self._manager_name:
+            raise RecoveryError(
+                "model recovery targets a different Manager",
+            )
+        manager = await self._agt.get_manager(name)
+        if manager is None:
+            raise RecoveryError(f"manager/{name} is not readable")
+        if manager.model != capabilities.model:
+            await self._supervisor.before_effect(
+                operation.operation_id,
+                ExternalEffect.CONTROLLER,
+                {
+                    "operation": "update_manager_model",
+                    "manager": name,
+                    "model": capabilities.model,
+                },
+            )
+            try:
+                manager = await self._agt.update_manager_model(
+                    name,
+                    capabilities.model,
+                )
+            except Exception as exc:
+                await self._record_external_failure(
+                    operation.operation_id,
+                    ExternalEffect.CONTROLLER,
+                    exc,
+                )
+                raise
+            await self._supervisor.effect_acknowledged(
+                operation.operation_id,
+                ExternalEffect.CONTROLLER,
+                {
+                    "manager": manager.name,
+                    "phase": manager.phase,
+                    "model": manager.model,
+                },
+            )
+        runtime_revision = await self._wait_for_runtime_model(
+            operation.operation_id,
+            capabilities.model,
+        )
+        receipt = _model_receipt(
+            operation_id=operation.operation_id,
+            target=f"manager/{name}",
+            capabilities=capabilities,
+            phase=manager.phase,
+            runtime_revision=runtime_revision,
+        )
+        await self._supervisor.effect_succeeded(
+            operation.operation_id,
+            ExternalEffect.STORAGE,
+            receipt.model_dump(mode="json"),
+        )
+        return receipt
+
+    async def _resume_worker_model(
+        self,
+        operation: OperationRecord,
+        *,
+        name: str,
+        capabilities: ModelCapabilities,
+    ) -> ModelSwitchReceipt:
+        worker = await self._require_worker(name)
+        if worker.model != capabilities.model:
+            await self._supervisor.before_effect(
+                operation.operation_id,
+                ExternalEffect.CONTROLLER,
+                {
+                    "operation": "update_worker_model",
+                    "worker": name,
+                    "model": capabilities.model,
+                },
+            )
+            try:
+                worker = await self._agt.update_worker(
+                    WorkerUpdateRequest(
+                        name=name,
+                        model=capabilities.model,
+                    ),
+                )
+            except Exception as exc:
+                await self._record_external_failure(
+                    operation.operation_id,
+                    ExternalEffect.CONTROLLER,
+                    exc,
+                )
+                raise
+            await self._supervisor.effect_acknowledged(
+                operation.operation_id,
+                ExternalEffect.CONTROLLER,
+                {
+                    "worker": name,
+                    "model": capabilities.model,
+                },
+            )
+        worker = await self._wait_for_worker_model(
+            operation.operation_id,
+            name,
+            capabilities.model,
+            first=worker,
+        )
+        receipt = _model_receipt(
+            operation_id=operation.operation_id,
+            target=f"worker/{name}",
+            capabilities=capabilities,
+            phase=worker.phase or "Unknown",
+        )
+        await self._supervisor.effect_succeeded(
+            operation.operation_id,
+            ExternalEffect.CONTROLLER,
+            receipt.model_dump(mode="json"),
+        )
+        return receipt
+
+    async def _resume_mcp(
+        self,
+        operation: OperationRecord,
+    ) -> MCPManagementReceipt:
+        self._require_local_mcp()
+        action = _recovery_string(operation.request, "action")
+        if action == "configure":
+            return await self._resume_mcp_configuration(operation)
+        if action == "grant":
+            return await self._resume_mcp_grant(operation)
+        if action == "revoke":
+            return await self._resume_mcp_revoke(operation)
+        if action == "delete":
+            return await self._resume_mcp_delete(operation)
+        raise RecoveryError("MCP recovery action is invalid")
+
+    async def _resume_mcp_configuration(
+        self,
+        operation: OperationRecord,
+    ) -> MCPManagementReceipt:
+        higress, verifier = self._require_mcp_dependencies(
+            require_verifier=True,
+        )
+        assert verifier is not None
+        name = _recovery_string(operation.request, "name")
+        workers = _recovery_workers(operation.request)
+        verification_tool = _recovery_string(
+            operation.request,
+            "verification_tool",
+        )
+        arguments = _recovery_verification_arguments(operation.request)
+        available = {
+            server.name
+            for server in await higress.list_mcp_servers()
+        }
+        if name not in available:
+            raise RecoveryError(
+                f"MCP server {name!r} is absent from Higress; its "
+                "credential was deliberately not persisted, so the "
+                "configuration must be submitted again",
+            )
+        descriptor = higress.descriptor(name)
+        existing = await higress.get_consumers(name)
+        consumers = await self._converge_consumers(
+            operation.operation_id,
+            name,
+            observed=existing,
+            intended={
+                *existing,
+                "manager",
+                *(_worker_consumer(worker) for worker in workers),
+            },
+            higress=higress,
+        )
+        await self._install_descriptor(
+            operation.operation_id,
+            descriptor,
+            workers=workers,
+        )
+        runtime_revision = await self._runtime_revision_for_descriptor(
+            operation.operation_id,
+            descriptor,
+        )
+        await self._wait_for_verification_tool(
+            operation.operation_id,
+            name,
+            verification_tool,
+            revision=runtime_revision,
+            verifier=verifier,
+        )
+        await self._supervisor.before_effect(
+            operation.operation_id,
+            ExternalEffect.PROCESS,
+            {
+                "operation": "verify_mcp_tool",
+                "name": name,
+                "tool": verification_tool,
+                "argument_names": sorted(arguments),
+            },
+        )
+        try:
+            await verifier.call_server_tool(
+                name,
+                verification_tool,
+                arguments,
+                revision=runtime_revision,
+            )
+        except Exception as exc:
+            await self._record_external_failure(
+                operation.operation_id,
+                ExternalEffect.PROCESS,
+                exc,
+            )
+            raise MCPVerificationError(
+                "native AgentScope MCP recovery verification failed "
+                f"({type(exc).__name__})",
+            ) from None
+        await self._supervisor.effect_acknowledged(
+            operation.operation_id,
+            ExternalEffect.PROCESS,
+            {
+                "operation": "verify_mcp_tool",
+                "name": name,
+                "tool": verification_tool,
+            },
+        )
+        await self._notify_mcp_workers(
+            operation.operation_id,
+            name,
+            workers,
+        )
+        receipt = MCPManagementReceipt(
+            operation_id=operation.operation_id,
+            action="configure",
+            name=name,
+            descriptor=descriptor,
+            consumers=consumers,
+            workers=workers,
+            verified=True,
+            verification_tool=verification_tool,
+            runtime_revision=runtime_revision,
+        )
+        await self._supervisor.effect_succeeded(
+            operation.operation_id,
+            ExternalEffect.MATRIX if workers else ExternalEffect.PROCESS,
+            receipt.model_dump(mode="json"),
+        )
+        return receipt
+
+    async def _resume_mcp_grant(
+        self,
+        operation: OperationRecord,
+    ) -> MCPManagementReceipt:
+        higress, _ = self._require_mcp_dependencies()
+        name = _recovery_string(operation.request, "name")
+        workers = _recovery_workers(operation.request)
+        await self._require_mcp_server(higress, name)
+        existing = await higress.get_consumers(name)
+        consumers = await self._converge_consumers(
+            operation.operation_id,
+            name,
+            observed=existing,
+            intended={
+                *existing,
+                "manager",
+                *(_worker_consumer(worker) for worker in workers),
+            },
+            higress=higress,
+        )
+        descriptor = higress.descriptor(name)
+        await self._install_descriptor(
+            operation.operation_id,
+            descriptor,
+            workers=workers,
+        )
+        receipt = MCPManagementReceipt(
+            operation_id=operation.operation_id,
+            action="grant",
+            name=name,
+            descriptor=descriptor,
+            consumers=consumers,
+            workers=workers,
+        )
+        await self._supervisor.effect_succeeded(
+            operation.operation_id,
+            ExternalEffect.CONTROLLER,
+            receipt.model_dump(mode="json"),
+        )
+        return receipt
+
+    async def _resume_mcp_revoke(
+        self,
+        operation: OperationRecord,
+    ) -> MCPManagementReceipt:
+        higress, _ = self._require_mcp_dependencies()
+        name = _recovery_string(operation.request, "name")
+        workers = _recovery_workers(operation.request)
+        await self._require_mcp_server(higress, name)
+        existing = await higress.get_consumers(name)
+        revoked = {_worker_consumer(worker) for worker in workers}
+        consumers = await self._converge_consumers(
+            operation.operation_id,
+            name,
+            observed=existing,
+            intended={"manager", *(existing - revoked)},
+            higress=higress,
+        )
+        await self._remove_worker_descriptor(
+            operation.operation_id,
+            name,
+            workers,
+        )
+        receipt = MCPManagementReceipt(
+            operation_id=operation.operation_id,
+            action="revoke",
+            name=name,
+            descriptor=higress.descriptor(name),
+            consumers=consumers,
+            workers=workers,
+        )
+        await self._supervisor.effect_succeeded(
+            operation.operation_id,
+            ExternalEffect.CONTROLLER,
+            receipt.model_dump(mode="json"),
+        )
+        return receipt
+
+    async def _resume_mcp_delete(
+        self,
+        operation: OperationRecord,
+    ) -> MCPManagementReceipt:
+        higress, _ = self._require_mcp_dependencies()
+        name = _recovery_string(operation.request, "name")
+        manager = await self._agt.get_manager(self._manager_name)
+        if manager is None:
+            raise RecoveryError(
+                f"manager/{self._manager_name} is not readable",
+            )
+        desired_manager = tuple(
+            server
+            for server in manager.mcp_servers
+            if server.name != name
+        )
+        if desired_manager != manager.mcp_servers:
+            await self._replace_manager_descriptors(
+                operation.operation_id,
+                desired_manager,
+            )
+        workers = await self._agt.list_workers()
+        affected = tuple(
+            worker.name
+            for worker in workers
+            if any(
+                server.name == name
+                for server in _worker_mcp_servers(worker)
+            )
+        )
+        await self._remove_worker_descriptor(
+            operation.operation_id,
+            name,
+            affected,
+        )
+        available = {
+            server.name
+            for server in await higress.list_mcp_servers()
+        }
+        if name in available:
+            await self._supervisor.before_effect(
+                operation.operation_id,
+                ExternalEffect.HIGRESS,
+                {"operation": "delete_mcp", "name": name},
+            )
+            try:
+                await higress.delete_server(name)
+            except Exception as exc:
+                await self._record_external_failure(
+                    operation.operation_id,
+                    ExternalEffect.HIGRESS,
+                    exc,
+                )
+                raise
+        receipt = MCPManagementReceipt(
+            operation_id=operation.operation_id,
+            action="delete",
+            name=name,
+            workers=affected,
+        )
+        await self._supervisor.effect_succeeded(
+            operation.operation_id,
+            ExternalEffect.HIGRESS,
+            receipt.model_dump(mode="json"),
+        )
+        return receipt
+
+    async def _resume_service_publishing(
+        self,
+        operation: OperationRecord,
+    ) -> ServicePublishingReceipt:
+        action = _recovery_string(operation.request, "action")
+        if action not in {"publish", "unpublish"}:
+            raise RecoveryError("service recovery action is invalid")
+        worker_name = _recovery_string(operation.request, "worker")
+        ports = _recovery_ports(operation.request)
+        if self._runtime_mode == "aliyun":
+            return await self._unsupported_service_receipt(
+                operation.operation_id,
+                action=action,
+                worker=worker_name,
+                ports=ports,
+            )
+        current = await self._require_worker(worker_name)
+        if action == "publish":
+            desired = tuple(
+                sorted({*_desired_expose(current), *ports}),
+            )
+            removed: tuple[int, ...] = ()
+        else:
+            removed = ports
+            desired = tuple(
+                port
+                for port in _desired_expose(current)
+                if port not in set(removed)
+            )
+        observed = await self._replace_expose(
+            operation.operation_id,
+            worker_name,
+            desired,
+            current=current,
+        )
+        converged = await self._wait_for_service_state(
+            operation.operation_id,
+            worker_name,
+            desired=desired,
+            removed=removed,
+            first=observed,
+        )
+        if action == "publish":
+            route_map = _observed_routes(converged)
+            routes = tuple(
+                PublishedRoute(port=port, domain=route_map[port])
+                for port in ports
+            )
+        else:
+            routes = ()
+        receipt = ServicePublishingReceipt(
+            operation_id=operation.operation_id,
+            action=action,
+            worker=worker_name,
+            ports=ports,
+            routes=routes,
+            domains=tuple(route.domain for route in routes),
+            phase=converged.phase or "Unknown",
+        )
+        await self._supervisor.effect_succeeded(
+            operation.operation_id,
+            ExternalEffect.CONTROLLER,
+            receipt.model_dump(mode="json"),
+        )
+        return receipt
+
     async def _unsupported_service_receipt(
         self,
         operation_id: str,
@@ -1045,6 +1604,19 @@ class IntegrationService:
             )
         return self._higress, self._mcp_verifier
 
+    @staticmethod
+    async def _require_mcp_server(
+        higress: HigressMCPPort,
+        name: str,
+    ) -> None:
+        if not any(
+            server.name == name
+            for server in await higress.list_mcp_servers()
+        ):
+            raise RecoveryError(
+                f"MCP server {name!r} is absent from Higress",
+            )
+
     async def _replace_consumers(
         self,
         operation_id: str,
@@ -1114,24 +1686,32 @@ class IntegrationService:
             raise ConflictError(
                 f"manager/{self._manager_name} is not readable",
             )
-        await self._replace_manager_descriptors(
-            operation_id,
-            _upsert_descriptor(manager.mcp_servers, descriptor),
+        manager_servers = _upsert_descriptor(
+            manager.mcp_servers,
+            descriptor,
         )
+        if manager_servers != manager.mcp_servers:
+            await self._replace_manager_descriptors(
+                operation_id,
+                manager_servers,
+            )
         for worker_name in workers:
             worker = await self._agt.get_worker(worker_name)
             if worker is None:
                 raise ConflictError(
                     f"worker/{worker_name} is not readable",
                 )
-            await self._replace_worker_descriptors(
-                operation_id,
-                worker_name,
-                _upsert_descriptor(
-                    _worker_mcp_servers(worker),
-                    descriptor,
-                ),
+            existing = _worker_mcp_servers(worker)
+            desired = _upsert_descriptor(
+                existing,
+                descriptor,
             )
+            if desired != existing:
+                await self._replace_worker_descriptors(
+                    operation_id,
+                    worker_name,
+                    desired,
+                )
 
     async def _replace_manager_descriptors(
         self,
@@ -1227,15 +1807,36 @@ class IntegrationService:
                 raise ConflictError(
                     f"worker/{worker_name} is not readable",
                 )
-            await self._replace_worker_descriptors(
-                operation_id,
-                worker_name,
-                tuple(
-                    server
-                    for server in _worker_mcp_servers(worker)
-                    if server.name != name
-                ),
+            existing = _worker_mcp_servers(worker)
+            desired = tuple(
+                server
+                for server in existing
+                if server.name != name
             )
+            if desired != existing:
+                await self._replace_worker_descriptors(
+                    operation_id,
+                    worker_name,
+                    desired,
+                )
+
+    async def _runtime_revision_for_descriptor(
+        self,
+        operation_id: str,
+        descriptor: MCPServerDocument,
+    ) -> int:
+        generation = getattr(self._registry, "current", None)
+        document = getattr(generation, "document", None)
+        if (
+            document is not None
+            and descriptor in document.mcp_servers
+        ):
+            return self._registry.revision
+        return await self._wait_for_runtime_descriptor(
+            operation_id,
+            descriptor,
+            baseline_revision=max(-1, self._registry.revision - 1),
+        )
 
     async def _wait_for_runtime_descriptor(
         self,
@@ -1263,6 +1864,66 @@ class IntegrationService:
         raise AmbiguousEffectError(
             "Controller MCP descriptor is not visible in a higher runtime "
             "document revision",
+        )
+
+    async def _wait_for_runtime_model(
+        self,
+        operation_id: str,
+        model: str,
+    ) -> int:
+        for _ in range(self._poll_attempts):
+            generation = getattr(self._registry, "current", None)
+            document = getattr(generation, "document", None)
+            if document is not None and document.model == model:
+                return self._registry.revision
+            await self._watcher.poll_once()
+            generation = getattr(self._registry, "current", None)
+            document = getattr(generation, "document", None)
+            if document is not None and document.model == model:
+                return self._registry.revision
+            await self._wait()
+        await self._supervisor.effect_ambiguous(
+            operation_id,
+            ExternalEffect.STORAGE,
+            "runtime_model_not_observed",
+        )
+        raise AmbiguousEffectError(
+            "Controller model update is not visible in the runtime "
+            "document",
+        )
+
+    async def _wait_for_worker_model(
+        self,
+        operation_id: str,
+        worker: str,
+        model: str,
+        *,
+        first: WorkerResource,
+    ) -> WorkerResource:
+        observed = first
+        for attempt in range(self._poll_attempts):
+            phase = (observed.phase or "").casefold()
+            if phase in {"failed", "error"}:
+                await self._supervisor.effect_failed(
+                    operation_id,
+                    ExternalEffect.CONTROLLER,
+                    "worker entered a failed phase",
+                )
+                raise ConflictError(
+                    f"worker/{worker} entered {observed.phase}",
+                )
+            if observed.model == model and phase:
+                return observed
+            if attempt + 1 < self._poll_attempts:
+                await self._wait()
+                observed = await self._require_worker(worker)
+        await self._supervisor.effect_ambiguous(
+            operation_id,
+            ExternalEffect.CONTROLLER,
+            "worker_model_not_observed",
+        )
+        raise AmbiguousEffectError(
+            f"worker/{worker} model did not converge",
         )
 
     async def _wait_for_verification_tool(
@@ -1346,7 +2007,10 @@ class IntegrationService:
                 await self._worker_notifications.notify_worker(
                     worker,
                     f"MCP server {name} is verified and ready.",
-                    source_operation_id=operation_id,
+                    source_operation_id=_notification_source_id(
+                        operation_id,
+                        worker,
+                    ),
                 )
             except Exception as exc:
                 await self._record_external_failure(
@@ -1422,6 +2086,8 @@ def _model_receipt(
 
 def _safe_configuration_request(
     request: MCPConfiguration,
+    *,
+    baseline_revision: int,
 ) -> dict[str, object]:
     server = request.server
     common: dict[str, object] = {
@@ -1430,9 +2096,16 @@ def _safe_configuration_request(
         "kind": "rest" if isinstance(server, RestMCPRequest) else "proxy",
         "workers": list(request.workers),
         "verification_tool": request.verification_tool,
+        "verification_arguments": TypeAdapter(
+            dict[str, JsonValue],
+        ).dump_python(
+            request.verification_arguments,
+            mode="json",
+        ),
         "verification_argument_names": sorted(
             request.verification_arguments,
         ),
+        "baseline_revision": baseline_revision,
     }
     if isinstance(server, RestMCPRequest):
         common["service"] = server.service.model_dump(mode="json")
@@ -1453,6 +2126,112 @@ def _safe_configuration_request(
             },
         )
     return common
+
+
+def _validate_safe_verification_arguments(
+    value: dict[str, JsonValue],
+) -> None:
+    forbidden = (
+        "apikey",
+        "authorization",
+        "credential",
+        "password",
+        "secret",
+        "token",
+    )
+
+    def inspect_value(item: JsonValue) -> None:
+        if isinstance(item, dict):
+            for key, child in item.items():
+                normalized = "".join(
+                    character
+                    for character in key.casefold()
+                    if character.isalnum()
+                )
+                if any(term in normalized for term in forbidden):
+                    raise ValueError(
+                        "verification arguments must not contain "
+                        "credential-like fields",
+                    )
+                inspect_value(child)
+        elif isinstance(item, list):
+            for child in item:
+                inspect_value(child)
+
+    inspect_value(value)
+
+
+def _notification_source_id(
+    operation_id: str,
+    worker: str,
+) -> str:
+    material = f"{operation_id}\0mcp-ready\0{worker}".encode()
+    return hashlib.sha256(material).hexdigest()[:32]
+
+
+def _recovery_string(
+    request: dict[str, object],
+    key: str,
+) -> str:
+    value = request.get(key)
+    if not isinstance(value, str) or not value:
+        raise RecoveryError(
+            f"integration recovery request has no valid {key}",
+        )
+    return value
+
+
+def _recovery_workers(
+    request: dict[str, object],
+) -> tuple[str, ...]:
+    raw = request.get("workers", [])
+    if (
+        not isinstance(raw, list)
+        or any(not isinstance(worker, str) for worker in raw)
+    ):
+        raise RecoveryError(
+            "MCP recovery request has invalid Worker names",
+        )
+    workers = tuple(raw)
+    try:
+        _validate_worker_names(workers)
+    except ValueError as exc:
+        raise RecoveryError(
+            "MCP recovery request has invalid Worker names",
+        ) from exc
+    return workers
+
+
+def _recovery_verification_arguments(
+    request: dict[str, object],
+) -> dict[str, JsonValue]:
+    raw = request.get("verification_arguments")
+    try:
+        arguments = TypeAdapter(
+            dict[str, JsonValue],
+        ).validate_python(raw)
+        _validate_safe_verification_arguments(arguments)
+    except (TypeError, ValueError) as exc:
+        raise RecoveryError(
+            "MCP recovery request has invalid verification arguments",
+        ) from exc
+    return arguments
+
+
+def _recovery_ports(
+    request: dict[str, object],
+) -> tuple[int, ...]:
+    raw = request.get("ports")
+    if not isinstance(raw, list):
+        raise RecoveryError(
+            "service recovery request has invalid ports",
+        )
+    try:
+        return _validated_ports(tuple(raw))
+    except (TypeError, ValueError) as exc:
+        raise RecoveryError(
+            "service recovery request has invalid ports",
+        ) from exc
 
 
 def _worker_consumer(worker: str) -> str:

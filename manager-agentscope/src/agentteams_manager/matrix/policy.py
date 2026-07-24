@@ -87,7 +87,12 @@ WORKER_TOOLS = frozenset(
     },
 )
 LEADER_TOOLS = frozenset(
-    {"delegate_team_task", "complete_task", "sync_files"},
+    {
+        "delegate_team_task",
+        "complete_task",
+        "sync_files",
+        "switch_worker_model",
+    },
 )
 PROJECT_TOOLS = frozenset(
     {
@@ -287,6 +292,11 @@ class RoomPolicyResolver:
                 else None
             ),
             allowed_mcp_names=_mcp_names(binding.payload),
+            allowed_worker_names=(
+                team_member_names(binding.payload)
+                if binding.room_kind is RoomKind.LEADER_ROOM
+                else frozenset()
+            ),
             project_id=(
                 binding.resource_name
                 if binding.room_kind is RoomKind.PROJECT_ROOM
@@ -397,3 +407,20 @@ def _mcp_names(payload: dict[str, object]) -> frozenset[str]:
         and isinstance((name := item.get("name")), str)
         and name
     )
+
+
+def team_member_names(
+    payload: dict[str, object],
+) -> frozenset[str]:
+    """Return only Controller-materialized Team member names."""
+    leader = payload.get("leader")
+    workers = payload.get("workers")
+    names = {
+        item
+        for item in (
+            leader,
+            *(workers if isinstance(workers, (list, tuple)) else ()),
+        )
+        if isinstance(item, str) and item
+    }
+    return frozenset(names)

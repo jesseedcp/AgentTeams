@@ -432,6 +432,10 @@ async def test_worker_notification_occurs_after_real_tool_call() -> None:
     assert agt.workers["alice"].spec["mcpServers"] == [
         receipt.descriptor.model_dump(mode="json"),
     ]
+    operation = next(iter(supervisor.operations.values()))
+    assert operation.request["verification_arguments"] == {
+        "query": "repo:agentscope-ai/AgentTeams",
+    }
     serialized = repr(
         [
             operation.request
@@ -441,6 +445,21 @@ async def test_worker_notification_occurs_after_real_tool_call() -> None:
     )
     assert "github-secret" not in serialized
     assert "accessToken" not in serialized
+
+
+def test_verification_arguments_reject_credential_like_fields() -> None:
+    configured = _configuration()
+
+    with pytest.raises(ValueError, match="credential-like"):
+        MCPConfiguration(
+            server=configured.server,
+            verification_tool=configured.verification_tool,
+            verification_arguments={
+                "filters": {
+                    "Authorization": "Bearer do-not-persist",
+                },
+            },
+        )
 
 
 class HangingVerifier:

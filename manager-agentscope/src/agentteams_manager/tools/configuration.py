@@ -9,7 +9,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from agentteams_manager.domain.errors import PermissionDeniedError
-from agentteams_manager.domain.models import RoomPolicy
+from agentteams_manager.domain.models import RoomKind, RoomPolicy
 from agentteams_manager.tools.base import (
     ManagerTool,
     current_tool_invocation,
@@ -78,7 +78,23 @@ class ConfigurationToolkit:
         return tuple(
             tool
             for tool in tools
-            if tool.name in self._policy.allowed_tools
+            if (
+                tool.name in self._policy.allowed_tools
+                and (
+                    (
+                        tool.name == "switch_model"
+                        and self._policy.kind is RoomKind.ADMIN_DM
+                    )
+                    or (
+                        tool.name == "switch_worker_model"
+                        and self._policy.kind
+                        in {
+                            RoomKind.ADMIN_DM,
+                            RoomKind.LEADER_ROOM,
+                        }
+                    )
+                )
+            )
         )
 
     def _tool(

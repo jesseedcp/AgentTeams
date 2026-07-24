@@ -1,53 +1,37 @@
-# MCP Server API Commands
+# Typed MCP Administration
 
-Direct Higress Console API calls for listing, inspecting, deleting servers, and managing consumer access.
+Higress Console remains authoritative for MCP definitions and consumers, but
+only the Manager's typed workflow may call it. Do not emit direct HTTP
+administration instructions.
 
-## List servers
+## List
 
-```bash
-curl -s http://127.0.0.1:8001/v1/mcpServers -b "${HIGRESS_COOKIE_FILE}" | jq
-```
+Use `list_mcp_servers`. Results contain logical server names and complete
+consumer sets, never raw configuration or credentials.
 
-## Get server details
+## Grant
 
-```bash
-curl -s "http://127.0.0.1:8001/v1/mcpServer?name=<mcp-server-name>" -b "${HIGRESS_COOKIE_FILE}" | jq
-```
+Use `configure_mcp` with action `grant`, the logical server name, and selected
+Worker names. The workflow reads the current consumers and sends one complete
+replacement containing `manager`, existing unaffected Workers, and the newly
+selected Workers. It then replaces those Workers' Controller descriptors.
 
-## Delete server
+## Revoke
 
-```bash
-curl -X DELETE "http://127.0.0.1:8001/v1/mcpServer?name=<mcp-server-name>" -b "${HIGRESS_COOKIE_FILE}"
-```
+Use `configure_mcp` with action `revoke`. The workflow removes only the
+selected `worker-<name>` consumers, retains `manager` and unaffected
+consumers, and removes the matching Worker descriptors.
 
-## Consumer authorization
+## Delete
 
-The setup script handles this automatically. For manual adjustments:
+Use `remove_mcp`. It removes Manager and affected Worker descriptors through
+`AgtClient`, then deletes the Higress definition. A retry reconciles observed
+facts instead of assuming the prior response described the final state.
 
-```bash
-# Authorize consumers (REPLACE operation — include ALL consumers)
-curl -X PUT http://127.0.0.1:8001/v1/mcpServer/consumers \
-  -b "${HIGRESS_COOKIE_FILE}" \
-  -H 'Content-Type: application/json' \
-  -d '{"mcpServerName":"<name>","consumers":["manager","worker-alice"]}'
+The Console adapter owns these routes internally:
 
-# Revoke a consumer from ALL MCP servers
-curl -X DELETE "http://127.0.0.1:8001/v1/mcpServer/consumers?consumer=worker-alice" \
-  -b "${HIGRESS_COOKIE_FILE}"
-```
+- service-source registration;
+- MCP definition list/upsert/delete;
+- consumer list and complete replacement.
 
-## Tool-level access control
-
-Add `allowTools` to the YAML's `server` section:
-
-```yaml
-server:
-  name: github-mcp-server
-  config:
-    accessToken: "..."
-  allowTools:
-    - search_repositories
-    - get_file_contents
-```
-
-When set, only listed tools are exposed. Re-run setup script to apply.
+They are implementation boundaries, not model-callable tools.

@@ -53,3 +53,37 @@ async def test_worker_model_tool_is_closed_and_scope_bound() -> None:
     assert service.calls == [("alice", "new", _context())]
     with pytest.raises(Exception):
         await tool.call(worker="bob", model="new")
+
+
+def test_model_tools_are_room_kind_bound_even_if_policy_is_too_broad() -> None:
+    service = Service()
+    human_policy = RoomPolicy(
+        room_id="!human:example",
+        kind=RoomKind.HUMAN_OR_CHANNEL_ROOM,
+        revision=1,
+        allowed_tools=frozenset(
+            {"switch_model", "switch_worker_model"},
+        ),
+        resource_scope_all=True,
+    )
+    leader_policy = RoomPolicy(
+        room_id="!leader:example",
+        kind=RoomKind.LEADER_ROOM,
+        revision=1,
+        allowed_tools=frozenset(
+            {"switch_model", "switch_worker_model"},
+        ),
+        allowed_worker_names=frozenset({"alice"}),
+    )
+
+    assert not ConfigurationToolkit(
+        policy=human_policy,
+        service=service,
+    ).tools
+    assert [
+        tool.name
+        for tool in ConfigurationToolkit(
+            policy=leader_policy,
+            service=service,
+        ).tools
+    ] == ["switch_worker_model"]

@@ -4,6 +4,7 @@ import json
 
 import pytest
 from agentscope.permission import PermissionBehavior, PermissionContext
+from pydantic import SecretStr
 
 from agentteams_manager.domain.models import RoomKind, RoomPolicy
 from agentteams_manager.tools.integrations import IntegrationToolkit
@@ -79,6 +80,11 @@ async def test_admin_mcp_tool_is_closed_confirmed_and_secret_typed() -> None:
         policy=_policy(),
         service=service,
         context_provider=_context,
+        secret_resolver=lambda reference: SecretStr(
+            {
+                "AGENTTEAMS_MCP_GITHUB_TOKEN": "github-secret",
+            }[reference],
+        ),
     )
     tools = {tool.name: tool for tool in toolkit.tools}
 
@@ -109,7 +115,7 @@ async def test_admin_mcp_tool_is_closed_confirmed_and_secret_typed() -> None:
                 "  config:\n"
                 '    accessToken: ""\n'
             ),
-            "credential": "github-secret",
+            "credential_ref": "AGENTTEAMS_MCP_GITHUB_TOKEN",
             "service": {
                 "name": "github-api",
                 "domain": "api.github.com",
@@ -127,6 +133,12 @@ async def test_admin_mcp_tool_is_closed_confirmed_and_secret_typed() -> None:
     }
     assert service.calls[0][0] == "configure"
     assert service.calls[0][2] == _context()
+    schema_text = json.dumps(
+        tools["configure_mcp"].input_schema,
+        sort_keys=True,
+    )
+    assert '"credential"' not in schema_text
+    assert "github-secret" not in schema_text
 
 
 def test_non_admin_receives_no_mcp_administration_tools() -> None:

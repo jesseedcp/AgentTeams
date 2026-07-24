@@ -57,6 +57,7 @@ from agentteams_manager.matrix.policy import (
     TRUSTED_TOOLS,
     WORKER_TOOLS,
     policy_for_human,
+    team_member_names,
 )
 from agentteams_manager.state.topology import TopologyRepository
 
@@ -2298,12 +2299,18 @@ class TopologyResolver:
             kind=binding.room_kind,
             revision=revision,
             allowed_tools=tools,
+            confirm_tools=tools & CONFIRM_TOOLS,
             allowed_senders=frozenset({sender_id}),
             resource_name=binding.resource_name,
             team_name=(
                 binding.resource_name
                 if binding.room_kind is RoomKind.LEADER_ROOM
                 else None
+            ),
+            allowed_worker_names=(
+                team_member_names(binding.payload)
+                if binding.room_kind is RoomKind.LEADER_ROOM
+                else frozenset()
             ),
         )
 

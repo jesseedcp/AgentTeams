@@ -133,6 +133,39 @@ async def test_worker_identity_gets_only_worker_room_tools() -> None:
 
 
 @pytest.mark.asyncio
+async def test_leader_model_switch_is_limited_to_team_members() -> None:
+    binding = SimpleNamespace(
+        room_kind=RoomKind.LEADER_ROOM,
+        room_id="!leader:local",
+        resource_name="alpha",
+        matrix_user_id="@alpha-lead:local",
+        payload={
+            "leader": "alpha-lead",
+            "workers": ["alpha-dev", "alpha-test"],
+        },
+    )
+    resolver = RoomPolicyResolver(
+        topology=FakeTopology({"!leader:local": binding}),
+        admin_user_id="@admin:local",
+    )
+
+    policy = await resolver.resolve(
+        _event(
+            room_id="!leader:local",
+            sender_id="@alpha-lead:local",
+            is_direct=False,
+        ),
+    )
+
+    assert "switch_worker_model" in policy.allowed_tools
+    assert "switch_worker_model" in policy.confirm_tools
+    assert policy.allowed_worker_names == frozenset(
+        {"alpha-lead", "alpha-dev", "alpha-test"},
+    )
+    assert "switch_model" not in policy.allowed_tools
+
+
+@pytest.mark.asyncio
 async def test_scoped_human_cannot_gain_resource_admin_tools() -> None:
     human = HumanResource(
         name="reviewer",

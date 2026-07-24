@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from types import SimpleNamespace
 
 import pytest
 
@@ -139,3 +140,74 @@ async def test_worker_switch_waits_for_observed_model() -> None:
     assert receipt.target == "worker/alice"
     assert agt.worker_updates == 1
     assert agt.worker_reads == 2
+
+
+@pytest.mark.asyncio
+async def test_manager_model_recovery_uses_persisted_preflight() -> None:
+    class RecoveringAgt:
+        def __init__(self) -> None:
+            self.manager = ManagerResource(
+                name="manager",
+                phase="Running",
+                model="old",
+                runtime="agentscope",
+            )
+            self.updates = 0
+
+        async def get_manager(self, name: str):
+            assert name == "manager"
+            return self.manager
+
+        async def update_manager_model(self, name: str, model: str):
+            self.updates += 1
+            self.manager = self.manager.model_copy(
+                update={"model": model},
+            )
+            raise TimeoutError("lost Controller acknowledgement")
+
+    class RecoveringRegistry:
+        def __init__(self) -> None:
+            self.revision = 1
+            self.current = SimpleNamespace(
+                document=SimpleNamespace(model="old"),
+            )
+
+    class RecoveringWatcher:
+        def __init__(self, registry, agt) -> None:
+            self.registry = registry
+            self.agt = agt
+
+        async def poll_once(self):
+            self.registry.revision = 2
+            self.registry.current = SimpleNamespace(
+                document=SimpleNamespace(model=self.agt.manager.model),
+            )
+
+    agt = RecoveringAgt()
+    gateway = Gateway()
+    registry = RecoveringRegistry()
+    supervisor = TaskSupervisor(Clock())
+    service = IntegrationService(
+        agt=agt,
+        gateway=gateway,
+        supervisor=supervisor,
+        clock=Clock(),
+        manager_name="manager",
+        registry=registry,
+        watcher=RecoveringWatcher(registry, agt),
+        sleep=lambda _: None,
+    )
+
+    with pytest.raises(TimeoutError):
+        await service.switch_manager_model(
+            ModelSwitchRequest(model="new"),
+            context=_context(),
+        )
+    operation = next(iter(supervisor.operations.values()))
+
+    receipt = await service.resume_operation(operation)
+
+    assert receipt.model == "new"
+    assert receipt.runtime_revision == 2
+    assert gateway.calls == 1
+    assert agt.updates == 1

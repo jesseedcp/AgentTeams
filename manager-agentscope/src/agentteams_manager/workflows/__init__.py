@@ -4,6 +4,12 @@ from .git_delegation import (
     GitDelegationService,
     ProcessingLeaseService,
 )
+from .heartbeat import (
+    Heartbeat,
+    HeartbeatReport,
+    IntegrationRecovery,
+    IntegrationRecoveryReport,
+)
 from .integrations import (
     IntegrationService,
     ModelSwitchReceipt,
@@ -32,7 +38,11 @@ from .tasks import (
 
 __all__ = [
     "GitDelegationService",
+    "Heartbeat",
+    "HeartbeatReport",
     "IntegrationService",
+    "IntegrationRecovery",
+    "IntegrationRecoveryReport",
     "DailyMemory",
     "OperationSupervisor",
     "NotificationService",

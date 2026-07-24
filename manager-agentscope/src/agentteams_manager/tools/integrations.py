@@ -10,12 +10,15 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    SecretStr,
     model_validator,
 )
 
 from agentteams_manager.clients.higress import (
+    ProxyHeader,
     ProxyMCPRequest,
     RestMCPRequest,
+    ServiceSource,
 )
 from agentteams_manager.domain.errors import PermissionDeniedError
 from agentteams_manager.domain.models import RoomKind, RoomPolicy
@@ -47,22 +50,49 @@ class _ListMCPInput(_Input):
     pass
 
 
-class _RestServerInput(RestMCPRequest):
+SecretReference = Annotated[
+    str,
+    Field(pattern=r"^[A-Z][A-Z0-9_]{2,127}$"),
+]
+
+
+class _RestServerInput(_Input):
     kind: Literal["rest"]
+    name: str = Field(
+        pattern=r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$",
+    )
+    description: str = Field(default="", max_length=2_000)
+    yaml_template: str = Field(min_length=1)
+    credential_ref: SecretReference
+    service: ServiceSource
 
-    def request(self) -> RestMCPRequest:
-        return RestMCPRequest.model_validate(
-            self.model_dump(exclude={"kind"}),
-        )
+
+class _ProxyHeaderInput(_Input):
+    name: str = Field(min_length=1, max_length=256)
+    credential_ref: SecretReference
+    scheme: Literal["raw", "bearer", "basic"] = "raw"
+
+    @model_validator(mode="after")
+    def authorization_scheme_matches_header(self) -> Self:
+        if (
+            self.scheme != "raw"
+            and self.name.casefold() != "authorization"
+        ):
+            raise ValueError(
+                "bearer/basic schemes require Authorization header",
+            )
+        return self
 
 
-class _ProxyServerInput(ProxyMCPRequest):
+class _ProxyServerInput(_Input):
     kind: Literal["proxy"]
-
-    def request(self) -> ProxyMCPRequest:
-        return ProxyMCPRequest.model_validate(
-            self.model_dump(exclude={"kind"}),
-        )
+    name: str = Field(
+        pattern=r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$",
+    )
+    description: str = Field(default="", max_length=2_000)
+    backend_url: str = Field(min_length=1, max_length=2_048)
+    transport: Literal["http", "sse"]
+    headers: tuple[_ProxyHeaderInput, ...] = ()
 
 
 ServerInput = Annotated[
@@ -133,6 +163,10 @@ ContextProvider = Callable[
     [],
     MutationContext | Awaitable[MutationContext],
 ]
+SecretResolver = Callable[
+    [str],
+    SecretStr | Awaitable[SecretStr],
+]
 
 
 class IntegrationToolkit:
@@ -144,6 +178,7 @@ class IntegrationToolkit:
         policy: RoomPolicy,
         service: IntegrationService,
         context_provider: ContextProvider | None = None,
+        secret_resolver: SecretResolver | None = None,
         yolo: bool = False,
     ) -> None:
         self._policy = policy
@@ -151,6 +186,7 @@ class IntegrationToolkit:
         self._context_provider = (
             context_provider or _current_mutation_context
         )
+        self._secret_resolver = secret_resolver
         self._yolo = yolo
         self.tools = self._build_tools()
 
@@ -258,7 +294,7 @@ class IntegrationToolkit:
         if item.action == "upsert":
             if item.server is None or item.verification_tool is None:
                 raise ValueError("invalid upsert request")
-            server = item.server.request()
+            server = await self._server_request(item.server)
             return await self._service.configure_mcp(
                 MCPConfiguration(
                     server=server,
@@ -281,6 +317,55 @@ class IntegrationToolkit:
             workers=item.workers,
             context=context,
         )
+
+    async def _server_request(
+        self,
+        server: _RestServerInput | _ProxyServerInput,
+    ) -> RestMCPRequest | ProxyMCPRequest:
+        if isinstance(server, _RestServerInput):
+            credential = await self._resolve_secret(
+                server.credential_ref,
+            )
+            return RestMCPRequest(
+                name=server.name,
+                description=server.description,
+                yaml_template=server.yaml_template,
+                credential=credential,
+                service=server.service,
+            )
+        headers: list[ProxyHeader] = []
+        for header in server.headers:
+            secret = await self._resolve_secret(header.credential_ref)
+            value = secret.get_secret_value()
+            if header.scheme != "raw":
+                value = f"{header.scheme.title()} {value}"
+            headers.append(
+                ProxyHeader(
+                    name=header.name,
+                    value=SecretStr(value),
+                ),
+            )
+        return ProxyMCPRequest(
+            name=server.name,
+            description=server.description,
+            backend_url=server.backend_url,
+            transport=server.transport,
+            headers=tuple(headers),
+        )
+
+    async def _resolve_secret(self, reference: str) -> SecretStr:
+        if self._secret_resolver is None:
+            raise RuntimeError(
+                "MCP secret references are not configured",
+            )
+        value = self._secret_resolver(reference)
+        if inspect.isawaitable(value):
+            value = await value
+        if not isinstance(value, SecretStr):
+            raise TypeError("secret_resolver returned invalid secret")
+        if not value.get_secret_value():
+            raise ValueError(f"secret reference {reference!r} is empty")
+        return value
 
     async def _remove_mcp(self, request: BaseModel) -> object:
         item = _RemoveMCPInput.model_validate(request)
@@ -310,9 +395,11 @@ class IntegrationToolkitFactory:
         self,
         *,
         service: IntegrationService,
+        secret_resolver: SecretResolver | None = None,
         yolo: bool = False,
     ) -> None:
         self._service = service
+        self._secret_resolver = secret_resolver
         self._yolo = yolo
 
     def tools_for_policy(
@@ -322,6 +409,7 @@ class IntegrationToolkitFactory:
         return IntegrationToolkit(
             policy=policy,
             service=self._service,
+            secret_resolver=self._secret_resolver,
             yolo=self._yolo,
         ).tools
 

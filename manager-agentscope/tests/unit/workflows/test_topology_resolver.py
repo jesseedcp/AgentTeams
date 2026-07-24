@@ -239,6 +239,42 @@ async def test_sender_must_match_controller_matrix_identity(
 
 
 @pytest.mark.asyncio
+async def test_leader_policy_scopes_model_switch_to_team(
+    tmp_path: Path,
+) -> None:
+    workers, teams, humans = facts()
+    repository = await make_repository(tmp_path)
+    resolver = TopologyResolver(
+        controller=FakeController(
+            workers=workers,
+            teams=teams,
+            humans=humans,
+        ),
+        matrix=FakeMatrix(
+            joined=("!solo:example", "!leader:example"),
+            members=valid_members(),
+        ),
+        topology=repository,
+        manager_user_id="@manager:example",
+        admin_user_id="@admin:example",
+        admin_room_id="!admin:example",
+    )
+    await resolver.refresh()
+
+    policy = await resolver.policy_for(
+        "!leader:example",
+        "@worker-alpha-lead:example",
+    )
+
+    assert "switch_worker_model" in policy.allowed_tools
+    assert "switch_worker_model" in policy.confirm_tools
+    assert policy.allowed_worker_names == frozenset(
+        {"alpha-lead", "alpha-dev"},
+    )
+    assert "switch_model" not in policy.allowed_tools
+
+
+@pytest.mark.asyncio
 async def test_unknown_admin_room_sender_is_read_only(
     tmp_path: Path,
 ) -> None:

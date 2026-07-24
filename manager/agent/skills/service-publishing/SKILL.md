@@ -1,91 +1,31 @@
 ---
 name: service-publishing
-description: Expose worker HTTP services via Higress gateway. Use when admin asks to publish a worker's web app or API to make it externally accessible.
+description: Publish or unpublish Worker HTTP ports through Controller reconciliation and observed gateway status.
 ---
 
 # Service Publishing
 
-## Overview
+Use `publish_service` with action `publish` or `unpublish`. Only the Admin Room
+receives this tool, and every call requires confirmation that the resulting
+route is public and unauthenticated.
 
-Expose HTTP services running inside worker containers to the outside world via the Higress gateway. Each exposed port gets an auto-generated domain name.
+The workflow reads the Worker's current desired ports, computes one complete
+replacement set, and updates it through `AgtClient`. Clearing the last port is
+an explicit empty replacement. It then polls the Worker and returns only
+domains present in Controller `status.exposedPorts`.
 
-## How It Works
+Never predict a domain from a naming convention. A successful desired-state
+update is not proof that the gateway route exists.
 
-Add `expose` to a Worker's spec to publish container ports. The controller automatically creates the Higress domain, service source, and route.
+Important:
 
-**Auto-generated domain pattern:**
-```
-worker-{name}-{port}-local.agentteams.io
-```
+- ports are unique integers from 1 through 65535;
+- publishing unions requested ports with existing desired ports;
+- unpublishing removes only requested ports;
+- Controller and its gateway provider own route creation/removal;
+- custom domains and route authentication are outside the current contract;
+- an unsupported cloud provider returns a typed unsupported result with no
+  claimed domain.
 
-Example: worker `alice` exposing port `8080` → `worker-alice-8080-local.agentteams.io`
-
-## Usage
-
-### Via CLI
-
-```bash
-# Expose port 8080 for worker alice
-agt apply worker --name alice --model qwen3.5-plus --expose 8080
-
-# Expose multiple ports
-agt apply worker --name alice --model qwen3.5-plus --expose 8080,3000
-
-# Check exposed ports
-agt get worker alice
-# Look for status.exposedPorts in the output
-
-# Remove exposed ports (update without --expose)
-agt apply worker --name alice --model qwen3.5-plus
-```
-
-### Via YAML
-
-```yaml
-apiVersion: agentteams.io/v1beta1
-kind: Worker
-metadata:
-  name: alice
-spec:
-  model: qwen3.5-plus
-  expose:
-    - port: 8080
-    - port: 3000
-```
-
-Apply with:
-```bash
-agt apply -f worker.yaml
-```
-
-### Team Workers
-
-Team workers also support `expose`:
-
-```yaml
-apiVersion: agentteams.io/v1beta1
-kind: Team
-metadata:
-  name: dev-team
-spec:
-  leader:
-    name: lead
-    model: qwen3.5-plus
-  workers:
-    - name: backend
-      model: qwen3.5-plus
-      expose:
-        - port: 8080
-    - name: frontend
-      model: qwen3.5-plus
-      expose:
-        - port: 3000
-```
-
-## Important Notes
-
-- The worker container must be running and the service must be listening on the specified port before it can be accessed
-- Domains are auto-generated; custom domains are not yet supported
-- No authentication is configured on exposed routes (public access)
-- Docker DNS resolves the worker container name (`agentteams-worker-{name}`) automatically within `agentteams-net`
-- To stop exposing a port, remove it from the `expose` list and re-apply
+The service inside the Worker must already listen on the requested container
+port.

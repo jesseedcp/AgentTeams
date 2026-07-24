@@ -144,6 +144,87 @@ class TaskRecoveryRunner(Protocol):
     async def reconcile_pending_tasks(self) -> TaskRecoveryReport: ...
 
 
+class RuntimeWatcher(Protocol):
+    async def poll_once(self) -> object | None: ...
+
+
+class IntegrationRecoveryReport(BaseModel):
+    """Typed result of model, MCP, and service recovery."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    inspected: int = Field(ge=0)
+    reconciled: tuple[str, ...] = ()
+    pending: tuple[str, ...] = ()
+    failed: tuple[str, ...] = ()
+    needs_attention: tuple[str, ...] = ()
+
+
+class IntegrationOperationResumer(Protocol):
+    async def resume_operation(
+        self,
+        operation: OperationRecord,
+    ) -> object: ...
+
+
+class IntegrationRecovery:
+    """Recover only operations owned by the integration boundary."""
+
+    _KINDS = frozenset(
+        {
+            OperationKind.SWITCH_MODEL,
+            OperationKind.CONFIGURE_MCP,
+            OperationKind.PUBLISH_SERVICE,
+        },
+    )
+
+    def __init__(
+        self,
+        *,
+        operations: TaskOperationReader,
+        integrations: IntegrationOperationResumer,
+    ) -> None:
+        self._operations = operations
+        self._integrations = integrations
+
+    async def reconcile_pending_integrations(
+        self,
+    ) -> IntegrationRecoveryReport:
+        operations = tuple(
+            operation
+            for operation in await self._operations.list_recoverable()
+            if operation.kind in self._KINDS
+        )
+        reconciled: list[str] = []
+        pending: list[str] = []
+        failed: list[str] = []
+        needs_attention: list[str] = []
+        for operation in operations:
+            try:
+                await self._integrations.resume_operation(operation)
+            except AmbiguousEffectError:
+                pending.append(operation.operation_id)
+            except RecoveryError:
+                needs_attention.append(operation.operation_id)
+            except Exception:
+                failed.append(operation.operation_id)
+            else:
+                reconciled.append(operation.operation_id)
+        return IntegrationRecoveryReport(
+            inspected=len(operations),
+            reconciled=tuple(reconciled),
+            pending=tuple(pending),
+            failed=tuple(failed),
+            needs_attention=tuple(needs_attention),
+        )
+
+
+class IntegrationRecoveryRunner(Protocol):
+    async def reconcile_pending_integrations(
+        self,
+    ) -> IntegrationRecoveryReport: ...
+
+
 class LeaseReclaimer(Protocol):
     async def reclaim_expired(self, now: datetime) -> object: ...
 
@@ -239,6 +320,12 @@ class HeartbeatReport(BaseModel):
     completions_reconciled: int = Field(default=0, ge=0)
     completions_pending: int = Field(default=0, ge=0)
     completions_failed: int = Field(default=0, ge=0)
+    runtime_changed: bool = False
+    integration_inspected: int = Field(default=0, ge=0)
+    integration_reconciled: int = Field(default=0, ge=0)
+    integration_pending: int = Field(default=0, ge=0)
+    integration_failed: int = Field(default=0, ge=0)
+    integration_needs_attention: int = Field(default=0, ge=0)
     snapshot_created: bool = False
 
 
@@ -256,6 +343,8 @@ class Heartbeat:
         task_scheduler: DueTaskDispatcher | None = None,
         completions: CompletionRecovery | None = None,
         snapshotter: SnapshotScheduler | None = None,
+        runtime_watcher: RuntimeWatcher | None = None,
+        integration_recovery: IntegrationRecoveryRunner | None = None,
     ) -> None:
         self._recovery = recovery
         self._topology = topology
@@ -265,10 +354,22 @@ class Heartbeat:
         self._task_scheduler = task_scheduler
         self._completions = completions
         self._snapshotter = snapshotter
+        self._runtime_watcher = runtime_watcher
+        self._integration_recovery = integration_recovery
 
     async def run_once(self) -> HeartbeatReport:
+        runtime_change = (
+            await self._runtime_watcher.poll_once()
+            if self._runtime_watcher is not None
+            else None
+        )
         recovery = await self._recovery.reconcile_pending_resources()
         snapshot = await self._topology.refresh()
+        integration_recovery = (
+            await self._integration_recovery.reconcile_pending_integrations()
+            if self._integration_recovery is not None
+            else IntegrationRecoveryReport(inspected=0)
+        )
         task_recovery = (
             await self._task_recovery.reconcile_pending_tasks()
             if self._task_recovery is not None
@@ -295,6 +396,7 @@ class Heartbeat:
         for operation_id in dict.fromkeys(
             (
                 *recovery.failed,
+                *integration_recovery.failed,
                 *task_recovery.failed,
                 *completion_report.failed,
             ),
@@ -336,6 +438,14 @@ class Heartbeat:
             completions_reconciled=len(completion_report.reconciled),
             completions_pending=len(completion_report.pending),
             completions_failed=len(completion_report.failed),
+            runtime_changed=runtime_change is not None,
+            integration_inspected=integration_recovery.inspected,
+            integration_reconciled=len(integration_recovery.reconciled),
+            integration_pending=len(integration_recovery.pending),
+            integration_failed=len(integration_recovery.failed),
+            integration_needs_attention=len(
+                integration_recovery.needs_attention,
+            ),
             snapshot_created=snapshot_created,
         )
 
