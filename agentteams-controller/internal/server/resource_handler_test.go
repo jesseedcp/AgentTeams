@@ -281,6 +281,34 @@ func TestGetWorkerSynthesizesTeamMember(t *testing.T) {
 	}
 }
 
+func TestResourceResponsesIncludeMCPServers(t *testing.T) {
+	servers := []v1beta1.MCPServer{
+		{
+			Name:      "github",
+			URL:       "https://gateway/mcp/github",
+			Transport: "http",
+		},
+	}
+	worker := &v1beta1.Worker{}
+	worker.Name = "alice"
+	worker.Spec.McpServers = servers
+	manager := &v1beta1.Manager{}
+	manager.Name = "default"
+	manager.Spec.McpServers = servers
+
+	workerResponse := workerToResponse(worker)
+	managerResponse := managerToResponse(manager)
+
+	if len(workerResponse.McpServers) != 1 ||
+		workerResponse.McpServers[0].Name != "github" {
+		t.Fatalf("worker mcpServers = %#v", workerResponse.McpServers)
+	}
+	if len(managerResponse.McpServers) != 1 ||
+		managerResponse.McpServers[0].Name != "github" {
+		t.Fatalf("manager mcpServers = %#v", managerResponse.McpServers)
+	}
+}
+
 func TestGetWorkerEnrichesDecoupledMemberCR(t *testing.T) {
 	scheme := newServerTestScheme(t)
 	worker := &v1beta1.Worker{}

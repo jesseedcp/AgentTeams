@@ -984,6 +984,7 @@ func workerToResponse(w *v1beta1.Worker) WorkerResponse {
 		Identity:       w.Spec.Identity,
 		Soul:           w.Spec.Soul,
 		Skills:         append([]string(nil), w.Spec.Skills...),
+		McpServers:     append([]v1beta1.MCPServer(nil), w.Spec.McpServers...),
 		Package:        w.Spec.Package,
 		Expose:         append([]v1beta1.ExposePort(nil), w.Spec.Expose...),
 		ContainerState: w.Status.ContainerState,
@@ -1074,6 +1075,7 @@ func managerToResponse(m *v1beta1.Manager) ManagerResponse {
 		RoomID:       m.Status.RoomID,
 		Version:      m.Status.Version,
 		Message:      m.Status.Message,
+		McpServers:   append([]v1beta1.MCPServer(nil), m.Spec.McpServers...),
 		WelcomeSent:  m.Status.WelcomeSent,
 	}
 	if resp.Phase == "" {
@@ -1217,6 +1219,10 @@ func (h *ResourceHandler) teamMemberToResponse(ctx context.Context, t *v1beta1.T
 		resp.Identity = t.Spec.Leader.Identity
 		resp.Soul = t.Spec.Leader.Soul
 		resp.Package = t.Spec.Leader.Package
+		resp.McpServers = append(
+			[]v1beta1.MCPServer(nil),
+			t.Spec.Leader.McpServers...,
+		)
 		if t.Spec.Leader.State != nil {
 			resp.State = *t.Spec.Leader.State
 		}
@@ -1232,6 +1238,10 @@ func (h *ResourceHandler) teamMemberToResponse(ctx context.Context, t *v1beta1.T
 			resp.Identity = wk.Identity
 			resp.Soul = wk.Soul
 			resp.Skills = append([]string(nil), wk.Skills...)
+			resp.McpServers = append(
+				[]v1beta1.MCPServer(nil),
+				wk.McpServers...,
+			)
 			resp.Package = wk.Package
 			resp.Expose = append([]v1beta1.ExposePort(nil), wk.Expose...)
 			if wk.State != nil {

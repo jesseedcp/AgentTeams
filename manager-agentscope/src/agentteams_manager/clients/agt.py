@@ -18,13 +18,14 @@ from pydantic import (
     model_validator,
 )
 
+from agentteams_manager.config import MCPServerDocument
 from agentteams_manager.domain.models import (
     HumanResource,
     TeamResource,
     WorkerResource,
 )
 
-from .process import ProcessResult
+from .process import ProcessResult, ProcessTimeout
 
 WorkerRuntime = Literal[
     "openclaw",
@@ -189,6 +190,10 @@ class _WorkerPayload(BaseModel):
     identity: str = ""
     soul: str = ""
     skills: tuple[str, ...] = ()
+    mcp_servers: tuple[MCPServerDocument, ...] = Field(
+        default=(),
+        alias="mcpServers",
+    )
     package_uri: str = Field(default="", alias="package")
     expose: tuple[_ExposePayload, ...] = ()
     container_state: str = Field(default="", alias="containerState")
@@ -217,6 +222,10 @@ class _WorkerPayload(BaseModel):
                 "expose": [
                     item.port
                     for item in self.expose
+                ],
+                "mcpServers": [
+                    server.model_dump(mode="json")
+                    for server in self.mcp_servers
                 ],
             },
             status={
@@ -315,6 +324,7 @@ class ManagerResource(BaseModel):
     matrix_user_id: str | None = None
     version: str | None = None
     message: str | None = None
+    mcp_servers: tuple[MCPServerDocument, ...] = ()
 
 
 class _ManagerPayload(BaseModel):
@@ -328,6 +338,10 @@ class _ManagerPayload(BaseModel):
     matrix_user_id: str = Field(default="", alias="matrixUserID")
     version: str = ""
     message: str = ""
+    mcp_servers: tuple[MCPServerDocument, ...] = Field(
+        default=(),
+        alias="mcpServers",
+    )
 
     def domain(self) -> ManagerResource:
         return ManagerResource(
@@ -339,6 +353,7 @@ class _ManagerPayload(BaseModel):
             matrix_user_id=self.matrix_user_id or None,
             version=self.version or None,
             message=self.message or None,
+            mcp_servers=self.mcp_servers,
         )
 
 
@@ -684,6 +699,68 @@ class AgtClient:
             )
         return manager
 
+    async def replace_manager_mcp_servers(
+        self,
+        name: str,
+        servers: tuple[MCPServerDocument, ...],
+    ) -> ManagerResource:
+        _validate_name(name)
+        timeout_error: ProcessTimeout | None = None
+        try:
+            await self._command(
+                (
+                    "agt",
+                    "update",
+                    "manager",
+                    "--name",
+                    name,
+                    "--mcp-servers-file",
+                    "-",
+                ),
+                stdin=_mcp_servers_json(servers),
+            )
+        except ProcessTimeout as exc:
+            timeout_error = exc
+        manager = await self.get_manager(name)
+        if manager is not None and manager.mcp_servers == servers:
+            return manager
+        if timeout_error is not None:
+            raise timeout_error
+        raise AgtProtocolError(
+            f"Manager {name!r} MCP descriptors did not converge",
+        )
+
+    async def replace_worker_mcp_servers(
+        self,
+        name: str,
+        servers: tuple[MCPServerDocument, ...],
+    ) -> WorkerResource:
+        _validate_name(name)
+        timeout_error: ProcessTimeout | None = None
+        try:
+            await self._command(
+                (
+                    "agt",
+                    "update",
+                    "worker",
+                    "--name",
+                    name,
+                    "--mcp-servers-file",
+                    "-",
+                ),
+                stdin=_mcp_servers_json(servers),
+            )
+        except ProcessTimeout as exc:
+            timeout_error = exc
+        worker = await self.get_worker(name)
+        if worker is not None and _worker_mcp_servers(worker) == servers:
+            return worker
+        if timeout_error is not None:
+            raise timeout_error
+        raise AgtProtocolError(
+            f"Worker {name!r} MCP descriptors did not converge",
+        )
+
     async def _delete(self, kind: str, name: str) -> None:
         _validate_name(name)
         await self._command(("agt", "delete", kind, name))
@@ -757,6 +834,40 @@ def _decode_json(stdout: bytes) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise AgtProtocolError("agt JSON root must be an object")
     return value
+
+
+def _mcp_servers_json(
+    servers: tuple[MCPServerDocument, ...],
+) -> bytes:
+    return json.dumps(
+        [
+            server.model_dump(mode="json")
+            for server in servers
+        ],
+        ensure_ascii=False,
+        allow_nan=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+
+
+def _worker_mcp_servers(
+    worker: WorkerResource,
+) -> tuple[MCPServerDocument, ...]:
+    value = worker.spec.get("mcpServers", [])
+    if not isinstance(value, list):
+        raise AgtProtocolError(
+            "Worker mcpServers is not an array",
+        )
+    try:
+        return tuple(
+            MCPServerDocument.model_validate(item)
+            for item in value
+        )
+    except ValidationError as exc:
+        raise AgtProtocolError(
+            "Worker mcpServers is invalid",
+        ) from exc
 
 
 _SENSITIVE_VALUE = re.compile(

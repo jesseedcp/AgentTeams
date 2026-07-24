@@ -287,17 +287,18 @@ func getManagersCmd() *cobra.Command {
 // ---------------------------------------------------------------------------
 
 type workerResp struct {
-	Name           string `json:"name"`
-	Phase          string `json:"phase"`
-	Model          string `json:"model,omitempty"`
-	Runtime        string `json:"runtime,omitempty"`
-	Image          string `json:"image,omitempty"`
-	ContainerState string `json:"containerState,omitempty"`
-	MatrixUserID   string `json:"matrixUserID,omitempty"`
-	RoomID         string `json:"roomID,omitempty"`
-	Message        string `json:"message,omitempty"`
-	Team           string `json:"team,omitempty"`
-	Role           string `json:"role,omitempty"`
+	Name           string          `json:"name"`
+	Phase          string          `json:"phase"`
+	Model          string          `json:"model,omitempty"`
+	Runtime        string          `json:"runtime,omitempty"`
+	Image          string          `json:"image,omitempty"`
+	ContainerState string          `json:"containerState,omitempty"`
+	MatrixUserID   string          `json:"matrixUserID,omitempty"`
+	RoomID         string          `json:"roomID,omitempty"`
+	Message        string          `json:"message,omitempty"`
+	Team           string          `json:"team,omitempty"`
+	Role           string          `json:"role,omitempty"`
+	McpServers     []mcpServerSpec `json:"mcpServers,omitempty"`
 }
 
 type workerListResp struct {
@@ -353,16 +354,17 @@ type humanListResp struct {
 }
 
 type managerResp struct {
-	Name         string `json:"name"`
-	Phase        string `json:"phase"`
-	Model        string `json:"model,omitempty"`
-	Runtime      string `json:"runtime,omitempty"`
-	Image        string `json:"image,omitempty"`
-	MatrixUserID string `json:"matrixUserID,omitempty"`
-	RoomID       string `json:"roomID,omitempty"`
-	Version      string `json:"version,omitempty"`
-	Message      string `json:"message,omitempty"`
-	WelcomeSent  bool   `json:"welcomeSent"`
+	Name         string          `json:"name"`
+	Phase        string          `json:"phase"`
+	Model        string          `json:"model,omitempty"`
+	Runtime      string          `json:"runtime,omitempty"`
+	Image        string          `json:"image,omitempty"`
+	MatrixUserID string          `json:"matrixUserID,omitempty"`
+	RoomID       string          `json:"roomID,omitempty"`
+	Version      string          `json:"version,omitempty"`
+	Message      string          `json:"message,omitempty"`
+	WelcomeSent  bool            `json:"welcomeSent"`
+	McpServers   []mcpServerSpec `json:"mcpServers,omitempty"`
 }
 
 type managerListResp struct {

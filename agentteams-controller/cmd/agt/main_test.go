@@ -1,12 +1,155 @@
 package main
 
 import (
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
 
 	sigyaml "sigs.k8s.io/yaml"
 )
+
+func TestUpdateManagerMCPServersFromStdin(t *testing.T) {
+	req := runMCPUpdateCommand(
+		t,
+		updateManagerCmd(),
+		[]string{"--name", "default", "--mcp-servers-file", "-"},
+		`[{"name":"github","url":"http://gateway/mcp","transport":"http"}]`,
+		"/api/v1/managers/default",
+	)
+
+	servers, ok := req["mcpServers"].([]interface{})
+	if !ok || len(servers) != 1 {
+		t.Fatalf("mcpServers = %#v, want one item", req["mcpServers"])
+	}
+	server := servers[0].(map[string]interface{})
+	if server["name"] != "github" || server["transport"] != "http" {
+		t.Fatalf("unexpected MCP server: %#v", server)
+	}
+}
+
+func TestUpdateWorkerMCPServersCanExplicitlyClear(t *testing.T) {
+	req := runMCPUpdateCommand(
+		t,
+		updateWorkerCmd(),
+		[]string{"--name", "alice", "--mcp-servers-file", "-"},
+		`[]`,
+		"/api/v1/workers/alice",
+	)
+
+	servers, ok := req["mcpServers"].([]interface{})
+	if !ok || len(servers) != 0 {
+		t.Fatalf("mcpServers = %#v, want explicit empty array", req["mcpServers"])
+	}
+}
+
+func TestReadMCPServersRejectsUnsafeInput(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		wantErr string
+	}{
+		{
+			name:    "unknown field",
+			input:   `[{"name":"github","url":"https://gateway/mcp","credential":"secret"}]`,
+			wantErr: "unknown field",
+		},
+		{
+			name:    "duplicate name",
+			input:   `[{"name":"github","url":"https://gateway/a"},{"name":"github","url":"https://gateway/b"}]`,
+			wantErr: "unique",
+		},
+		{
+			name:    "unsupported transport",
+			input:   `[{"name":"github","url":"https://gateway/mcp","transport":"stdio"}]`,
+			wantErr: "transport",
+		},
+		{
+			name:    "non-http URL",
+			input:   `[{"name":"github","url":"file:///tmp/mcp"}]`,
+			wantErr: "http",
+		},
+		{
+			name:    "not an array",
+			input:   `null`,
+			wantErr: "array",
+		},
+		{
+			name:    "over one MiB",
+			input:   `[` + strings.Repeat(" ", 1<<20) + `]`,
+			wantErr: "1 MiB",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := updateManagerCmd()
+			cmd.SetIn(strings.NewReader(tt.input))
+			_, err := readMCPServers(cmd, "-")
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("error = %v, want substring %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestGetResponseTypesPreserveMCPServers(t *testing.T) {
+	data := []byte(`{"name":"alice","phase":"Running","mcpServers":[{"name":"jira","url":"https://gateway/mcp/jira","transport":"http"}]}`)
+	var worker workerResp
+	if err := json.Unmarshal(data, &worker); err != nil {
+		t.Fatalf("decode worker: %v", err)
+	}
+	if len(worker.McpServers) != 1 || worker.McpServers[0].Name != "jira" {
+		t.Fatalf("worker mcpServers = %#v", worker.McpServers)
+	}
+
+	var manager managerResp
+	if err := json.Unmarshal(data, &manager); err != nil {
+		t.Fatalf("decode manager: %v", err)
+	}
+	if len(manager.McpServers) != 1 || manager.McpServers[0].Name != "jira" {
+		t.Fatalf("manager mcpServers = %#v", manager.McpServers)
+	}
+}
+
+func runMCPUpdateCommand(
+	t *testing.T,
+	cmd interface {
+		SetArgs([]string)
+		SetIn(io.Reader)
+		Execute() error
+	},
+	args []string,
+	stdin string,
+	wantPath string,
+) map[string]interface{} {
+	t.Helper()
+	var captured map[string]interface{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut || r.URL.Path != wantPath {
+			t.Errorf("request = %s %s, want PUT %s", r.Method, r.URL.Path, wantPath)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+	t.Setenv("AGENTTEAMS_CONTROLLER_URL", server.URL)
+	t.Setenv("AGENTTEAMS_AUTH_TOKEN", "")
+	t.Setenv("AGENTTEAMS_AUTH_TOKEN_FILE", "")
+
+	cmd.SetArgs(args)
+	cmd.SetIn(strings.NewReader(stdin))
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute update: %v", err)
+	}
+	return captured
+}
 
 func TestRootCommandUsesInvokedBinaryName(t *testing.T) {
 	if got := newRootCommand("agt").Use; got != "agt" {
