@@ -29,6 +29,8 @@
 #   AGENTTEAMS_INSTALL_WORKER_IMAGE        Override worker image  (e.g., local build)
 #   AGENTTEAMS_INSTALL_COPAW_WORKER_IMAGE  Override copaw worker image (e.g., local build)
 #   AGENTTEAMS_INSTALL_HERMES_WORKER_IMAGE Override hermes worker image (e.g., local build)
+#   AGENTTEAMS_INSTALL_QWENPAW_WORKER_IMAGE Override qwenpaw worker image (e.g., local build)
+#   AGENTTEAMS_INSTALL_OPENHUMAN_WORKER_IMAGE Override openhuman worker image (e.g., local build)
 #   AGENTTEAMS_NACOS_REGISTRY_URI          Default Nacos registry URI for Worker market search/import
 #                                      (default: nacos://market.agentteams.io:80/public)
 #   AGENTTEAMS_NACOS_USERNAME              Default Nacos username for nacos:// package imports (optional)
@@ -44,7 +46,6 @@
 #   AGENTTEAMS_PORT_GATEWAY       Host port for Higress gateway (default: 18080)
 #   AGENTTEAMS_PORT_CONSOLE       Host port for Higress console (default: 18001)
 #   AGENTTEAMS_PORT_ELEMENT_WEB   Host port for Element Web direct access (default: 18088)
-#   AGENTTEAMS_PORT_MANAGER_CONSOLE  Host port for Manager console (default: 18888)
 #   AGENTTEAMS_WORKER_IDLE_TIMEOUT  Worker idle timeout in minutes (default: 720, i.e. 12 hours)
 
 set -e
@@ -52,16 +53,8 @@ set -e
 AGENTTEAMS_VERSION="${AGENTTEAMS_VERSION:-}"
 AGENTTEAMS_KNOWN_STABLE_VERSION="v1.1.2"   # fallback if GitHub API is unreachable
 
-# Returns 0 (true) if $1 < $2 using semver order; "latest" is treated as greatest
-_ver_lt() {
-    [ "$1" = "latest" ] && return 1
-    [ "$2" = "latest" ] && return 0
-    [ "$1" = "$2" ] && return 1
-    [ "$(printf '%s\n%s' "$1" "$2" | sort -V | head -1)" = "$1" ]
-}
 AGENTTEAMS_NON_INTERACTIVE="${AGENTTEAMS_NON_INTERACTIVE:-0}"
 AGENTTEAMS_MOUNT_SOCKET="${AGENTTEAMS_MOUNT_SOCKET:-1}"
-AGENTTEAMS_DOCKER_PROXY="${AGENTTEAMS_DOCKER_PROXY:-1}"
 STEP_RESULT=""  # Used by state machine to signal "back" navigation
 
 # ============================================================
@@ -488,10 +481,6 @@ msg() {
         "port.console_prompt.en") text="Host port for Higress console (8001 inside container)" ;;
         "port.element_prompt.zh") text="Element Web 直接访问主机端口（容器内 8088）" ;;
         "port.element_prompt.en") text="Host port for Element Web direct access (8088 inside container)" ;;
-        "port.manager_console_prompt.zh") text="Manager 控制台主机端口（容器内 18888）" ;;
-        "port.manager_console_prompt.en") text="Host port for Manager console (18888 inside container)" ;;
-        "port.copaw_app_prompt.zh") text="QwenPaw App API 主机端口（容器内 18799）" ;;
-        "port.copaw_app_prompt.en") text="Host port for QwenPaw App API (18799 inside container)" ;;
         # --- Local-only binding ---
         "port.local_only.title.zh") text="--- 网络访问模式 ---" ;;
         "port.local_only.title.en") text="--- Network Access Mode ---" ;;
@@ -524,8 +513,6 @@ msg() {
         "domain.gateway_prompt.en") text="AI Gateway Domain" ;;
         "domain.fs_prompt.zh") text="文件系统域名" ;;
         "domain.fs_prompt.en") text="File System Domain" ;;
-        "domain.console_prompt.zh") text="Manager 控制台域名" ;;
-        "domain.console_prompt.en") text="Manager Console Domain" ;;
         # --- GitHub Integration ---
         "github.title.zh") text="--- GitHub 集成（可选，按回车跳过）---" ;;
         "github.title.en") text="--- GitHub Integration (optional, press Enter to skip) ---" ;;
@@ -562,28 +549,20 @@ msg() {
         "worker_runtime.title.en") text="--- Default Worker Runtime ---" ;;
         "worker_runtime.openclaw.zh") text="OpenClaw" ;;
         "worker_runtime.openclaw.en") text="OpenClaw" ;;
-        "worker_runtime.copaw.zh") text="QwenPaw" ;;
-        "worker_runtime.copaw.en") text="QwenPaw" ;;
+        "worker_runtime.copaw.zh") text="CoPaw" ;;
+        "worker_runtime.copaw.en") text="CoPaw" ;;
         "worker_runtime.hermes.zh") text="Hermes" ;;
         "worker_runtime.hermes.en") text="Hermes" ;;
-        "worker_runtime.choice.zh") text="请选择 [1/2/3]" ;;
-        "worker_runtime.choice.en") text="Enter choice [1/2/3]" ;;
+        "worker_runtime.qwenpaw.zh") text="QwenPaw" ;;
+        "worker_runtime.qwenpaw.en") text="QwenPaw" ;;
+        "worker_runtime.openhuman.zh") text="OpenHuman" ;;
+        "worker_runtime.openhuman.en") text="OpenHuman" ;;
+        "worker_runtime.choice.zh") text="请选择 [1/2/3/4/5]" ;;
+        "worker_runtime.choice.en") text="Enter choice [1/2/3/4/5]" ;;
         "worker_runtime.selected.zh") text="默认 Worker 运行时: %s" ;;
         "worker_runtime.selected.en") text="Default Worker runtime: %s" ;;
         "worker_runtime.title_short.zh") text="默认 Worker 运行时" ;;
         "worker_runtime.title_short.en") text="Default Worker Runtime" ;;
-        "manager_runtime.title.zh") text="--- Manager 运行时 ---" ;;
-        "manager_runtime.title.en") text="--- Manager Runtime ---" ;;
-        "manager_runtime.openclaw.zh") text="OpenClaw" ;;
-        "manager_runtime.openclaw.en") text="OpenClaw" ;;
-        "manager_runtime.copaw.zh") text="QwenPaw" ;;
-        "manager_runtime.copaw.en") text="QwenPaw" ;;
-        "manager_runtime.choice.zh") text="请选择 [1/2]" ;;
-        "manager_runtime.choice.en") text="Enter choice [1/2]" ;;
-        "manager_runtime.selected.zh") text="Manager 运行时: %s" ;;
-        "manager_runtime.selected.en") text="Manager runtime: %s" ;;
-        "manager_runtime.title_short.zh") text="Manager 运行时" ;;
-        "manager_runtime.title_short.en") text="Manager Runtime" ;;
         # --- Secrets and config ---
         "install.generating_secrets.zh") text="正在生成密钥..." ;;
         "install.generating_secrets.en") text="Generating secrets..." ;;
@@ -592,16 +571,8 @@ msg() {
         # --- Container runtime socket ---
         "install.socket_detected.zh") text="容器运行时 socket: %s（已启用直接创建 Worker）" ;;
         "install.socket_detected.en") text="Container runtime socket: %s (direct Worker creation enabled)" ;;
-        "install.socket_not_found.zh") text="未找到容器运行时 socket（Manager 无法直接创建 Worker 容器，需要你手动执行 docker 命令创建）" ;;
-        "install.socket_not_found.en") text="No container runtime socket found (Manager cannot create Worker containers directly, you will need to create them manually using docker commands)" ;;
-        "install.socket_confirm.title.zh") text="⚠️ 未检测到容器运行时 Socket" ;;
-        "install.socket_confirm.title.en") text="⚠️ Container Runtime Socket Not Detected" ;;
-        "install.socket_confirm.message.zh") text="未找到 Docker/Podman socket，Manager 将无法自动创建 Worker 容器。\n你需要手动执行 docker run 命令来创建 Worker。\n\n是否继续安装？" ;;
-        "install.socket_confirm.message.en") text="Docker/Podman socket not found. Manager will not be able to create Worker containers automatically.\nYou will need to manually run docker commands to create Workers.\n\nContinue installation?" ;;
-        "install.socket_confirm.prompt.zh") text="继续安装? [y/N]: " ;;
-        "install.socket_confirm.prompt.en") text="Continue? [y/N]: " ;;
-        "install.socket_confirm.cancelled.zh") text="安装已取消。如需启用 Worker 自动创建，请确保 Docker/Podman 正在运行，然后重新运行安装脚本。" ;;
-        "install.socket_confirm.cancelled.en") text="Installation cancelled. To enable automatic Worker creation, ensure Docker/Podman is running and re-run the installer." ;;
+        "install.socket_not_found.zh") text="未找到容器运行时 socket；Controller 无法创建 AgentScope Manager 和 Worker 容器" ;;
+        "install.socket_not_found.en") text="No container runtime socket found; the Controller cannot create the AgentScope Manager or Worker containers" ;;
         # --- Container management ---
         "install.removing_existing.zh") text="正在移除现有 agentteams-manager 容器..." ;;
         "install.removing_existing.en") text="Removing existing agentteams-manager container..." ;;
@@ -627,32 +598,6 @@ msg() {
         "matrix_e2ee.val_disabled.zh") text="已禁用" ;;
         "matrix_e2ee.val_disabled.en") text="disabled" ;;
         # --- Docker API proxy ---
-        "docker_proxy.title.zh") text="--- Docker API 安全代理 ---" ;;
-        "docker_proxy.title.en") text="--- Docker API Security Proxy ---" ;;
-        "docker_proxy.desc.zh") text="Docker API 代理可防止 AI Agent 通过 Docker API 越狱访问宿主机。\n  启用后，Manager 不再直接持有 Docker socket，所有容器操作经过安全校验。" ;;
-        "docker_proxy.desc.en") text="Docker API proxy prevents AI Agents from escaping via Docker API to access the host.\n  When enabled, Manager no longer has direct Docker socket access; all container operations go through security validation." ;;
-        "docker_proxy.enable.zh") text="启用（推荐）" ;;
-        "docker_proxy.enable.en") text="Enable (recommended)" ;;
-        "docker_proxy.disable.zh") text="禁用（直接挂载 Docker socket）" ;;
-        "docker_proxy.disable.en") text="Disable (mount Docker socket directly)" ;;
-        "docker_proxy.choice.zh") text="请选择 [1/2]" ;;
-        "docker_proxy.choice.en") text="Enter choice [1/2]" ;;
-        "docker_proxy.selected_enabled.zh") text="Docker API 代理: 已启用" ;;
-        "docker_proxy.selected_enabled.en") text="Docker API proxy: enabled" ;;
-        "docker_proxy.selected_disabled.zh") text="Docker API 代理: 已禁用" ;;
-        "docker_proxy.selected_disabled.en") text="Docker API proxy: disabled" ;;
-        "docker_proxy.title_short.zh") text="Docker API 代理" ;;
-        "docker_proxy.title_short.en") text="Docker API Proxy" ;;
-        "docker_proxy.val_enabled.zh") text="已启用" ;;
-        "docker_proxy.val_enabled.en") text="enabled" ;;
-        "docker_proxy.val_disabled.zh") text="已禁用" ;;
-        "docker_proxy.val_disabled.en") text="disabled" ;;
-        "docker_proxy.registries_desc.zh") text="默认放行的镜像来源：本地镜像、localhost、Higress 仓库（所有 region）。\n  如需放行其他镜像仓库，请输入逗号分隔的地址前缀。\n  示例: ghcr.io/myorg,registry.example.com/team" ;;
-        "docker_proxy.registries_desc.en") text="Default allowed image sources: local images, localhost, Higress registries (all regions).\n  To allow additional image sources, enter comma-separated address prefixes.\n  Example: ghcr.io/myorg,registry.example.com/team" ;;
-        "docker_proxy.registries_prompt.zh") text="额外放行的镜像来源（按回车跳过）" ;;
-        "docker_proxy.registries_prompt.en") text="Additional allowed image sources (press Enter to skip)" ;;
-        "docker_proxy.registries_label.zh") text="额外放行的镜像来源" ;;
-        "docker_proxy.registries_label.en") text="Additional allowed image sources" ;;
         # --- Podman Autostart ---
         "podman.autostart.title.zh") text="--- Podman 驻留与开机自启 ---" ;;
         "podman.autostart.title.en") text="--- Podman Linger & Autostart ---" ;;
@@ -869,12 +814,8 @@ msg() {
         "success.other_consoles.en") text="--- Other Consoles ---" ;;
         "success.higress_console.zh") text="  Higress 控制台: http://localhost:%s（用户名: %s / 密码: %s）" ;;
         "success.higress_console.en") text="  Higress Console: http://localhost:%s (Username: %s / Password: %s)" ;;
-        "success.manager_console.zh") text="  Manager 控制台（本地）: http://localhost:%s（无需登录）" ;;
-        "success.manager_console.en") text="  Manager Console (local): http://localhost:%s (no login required)" ;;
-        "success.manager_console_gateway.zh") text="  Manager 控制台（网关）: http://console-local.agentteams.io（用户名: %s / 密码: %s）" ;;
-        "success.manager_console_gateway.en") text="  Manager Console (gateway): http://console-local.agentteams.io (Username: %s / Password: %s)" ;;
-        "success.copaw_console.zh") text="  QwenPaw App API: http://localhost:%s（无需登录）" ;;
-        "success.copaw_console.en") text="  QwenPaw App API: http://localhost:%s (no login required)" ;;
+        "success.manager_health.zh") text="  Manager 健康与指标: 容器内 http://127.0.0.1:18799（运维接口，不是聊天界面）" ;;
+        "success.manager_health.en") text="  Manager health and metrics: container-local http://127.0.0.1:18799 (operations only, not a chat UI)" ;;
         "success.switch_llm.title.zh") text="--- 切换 LLM 提供商 ---" ;;
         "success.switch_llm.title.en") text="--- Switch LLM Providers ---" ;;
         "success.switch_llm.hint.zh") text="  您可以通过 Higress 控制台切换到其他 LLM 提供商（OpenAI、Anthropic 等）。" ;;
@@ -945,8 +886,6 @@ msg() {
         "uninstall.removing_volume.en") text="Removing Docker volume: %s" ;;
         "uninstall.removing_env.zh") text="正在移除 env 文件: %s" ;;
         "uninstall.removing_env.en") text="Removing env file: %s" ;;
-        "uninstall.removing_proxy.zh") text="正在停止并移除 Docker API 代理容器: agentteams-docker-proxy" ;;
-        "uninstall.removing_proxy.en") text="Stopping and removing Docker API proxy container: agentteams-docker-proxy" ;;
         "uninstall.stopping_controller.zh") text="正在停止并移除 agentteams-controller (内嵌 Tuwunel/MinIO/Higress)..." ;;
         "uninstall.stopping_controller.en") text="Stopping and removing agentteams-controller (embedded Tuwunel/MinIO/Higress)..." ;;
         "uninstall.removing_network.zh") text="正在移除 Docker 网络: agentteams-net" ;;
@@ -1017,38 +956,25 @@ AGENTTEAMS_REGISTRY="${AGENTTEAMS_REGISTRY:-$(detect_registry)}"
 # Image variables are resolved after version selection in step_version().
 # These placeholders allow early code paths to reference them without errors.
 MANAGER_IMAGE="${AGENTTEAMS_INSTALL_MANAGER_IMAGE:-}"
-MANAGER_COPAW_IMAGE="${AGENTTEAMS_INSTALL_MANAGER_COPAW_IMAGE:-}"
 WORKER_IMAGE="${AGENTTEAMS_INSTALL_WORKER_IMAGE:-}"
 COPAW_WORKER_IMAGE="${AGENTTEAMS_INSTALL_COPAW_WORKER_IMAGE:-}"
 HERMES_WORKER_IMAGE="${AGENTTEAMS_INSTALL_HERMES_WORKER_IMAGE:-}"
-CONTROLLER_IMAGE="${AGENTTEAMS_INSTALL_CONTROLLER_IMAGE:-}"
+QWENPAW_WORKER_IMAGE="${AGENTTEAMS_INSTALL_QWENPAW_WORKER_IMAGE:-}"
+OPENHUMAN_WORKER_IMAGE="${AGENTTEAMS_INSTALL_OPENHUMAN_WORKER_IMAGE:-}"
 
 resolve_image_tags() {
     MANAGER_IMAGE="${AGENTTEAMS_INSTALL_MANAGER_IMAGE:-${AGENTTEAMS_REGISTRY}/agentteams/agentteams-manager:${AGENTTEAMS_VERSION}}"
-    MANAGER_COPAW_IMAGE="${AGENTTEAMS_INSTALL_MANAGER_COPAW_IMAGE:-${AGENTTEAMS_REGISTRY}/agentteams/agentteams-manager-copaw:${AGENTTEAMS_VERSION}}"
     WORKER_IMAGE="${AGENTTEAMS_INSTALL_WORKER_IMAGE:-${AGENTTEAMS_REGISTRY}/agentteams/agentteams-worker:${AGENTTEAMS_VERSION}}"
     COPAW_WORKER_IMAGE="${AGENTTEAMS_INSTALL_COPAW_WORKER_IMAGE:-${AGENTTEAMS_REGISTRY}/agentteams/agentteams-copaw-worker:${AGENTTEAMS_VERSION}}"
     HERMES_WORKER_IMAGE="${AGENTTEAMS_INSTALL_HERMES_WORKER_IMAGE:-${AGENTTEAMS_REGISTRY}/agentteams/agentteams-hermes-worker:${AGENTTEAMS_VERSION}}"
+    QWENPAW_WORKER_IMAGE="${AGENTTEAMS_INSTALL_QWENPAW_WORKER_IMAGE:-${AGENTTEAMS_REGISTRY}/agentteams/agentteams-qwenpaw-worker:${AGENTTEAMS_VERSION}}"
+    OPENHUMAN_WORKER_IMAGE="${AGENTTEAMS_INSTALL_OPENHUMAN_WORKER_IMAGE:-${AGENTTEAMS_REGISTRY}/agentteams/agentteams-openhuman-worker:${AGENTTEAMS_VERSION}}"
     EMBEDDED_IMAGE="${AGENTTEAMS_INSTALL_EMBEDDED_IMAGE:-${AGENTTEAMS_REGISTRY}/agentteams/agentteams-embedded:${AGENTTEAMS_VERSION}}"
-    # CoPaw Worker introduced in v1.0.4; Hermes Worker introduced in v1.1.0
-    if [ -z "${AGENTTEAMS_INSTALL_COPAW_WORKER_IMAGE:-}" ] && _ver_lt "${AGENTTEAMS_VERSION}" "v1.0.4"; then
-        COPAW_WORKER_IMAGE=""
-    fi
-    if [ -z "${AGENTTEAMS_INSTALL_HERMES_WORKER_IMAGE:-}" ] && _ver_lt "${AGENTTEAMS_VERSION}" "v1.1.0"; then
-        HERMES_WORKER_IMAGE=""
-    fi
 }
 
-# Resolve the embedded controller image. Embedded mode is the only supported
-# architecture since PR #616 (manager image no longer bundles Higress/Tuwunel/MinIO).
-# If the embedded image is unavailable for the requested version, fail fast with an
-# actionable error rather than silently falling back to the legacy single-container
-# path — that path is permanently broken with the slim manager image and would just
-# leave the user with a manager container looping on "Waiting for Higress Gateway".
-# Sets EMBEDDED_IMAGE and AGENTTEAMS_USE_EMBEDDED.
+# Resolve the infrastructure Controller image. The Manager is always a separate
+# AgentScope process and installation fails if its Controller image is unavailable.
 resolve_embedded_image() {
-    AGENTTEAMS_USE_EMBEDDED=1
-
     # If the user explicitly overrode the image (e.g. `make install-embedded` passes
     # a locally-built tag), respect it as-is without any registry probe.
     if [ -n "${AGENTTEAMS_INSTALL_EMBEDDED_IMAGE:-}" ]; then
@@ -1070,30 +996,9 @@ resolve_embedded_image() {
         return 0
     fi
 
-    # Versions before v1.1.0 predate agentteams-embedded entirely — their manager image
-    # bundled all infrastructure.  Falling back to agentteams-embedded:latest would
-    # silently swap in the v1.1.0 architecture (embedded kube-apiserver) which
-    # crashes under QEMU on Apple Silicon.  Auto-activate legacy mode instead.
-    if _ver_lt "${AGENTTEAMS_VERSION}" "v1.1.0"; then
-        log "INFO: ${AGENTTEAMS_VERSION} predates agentteams-embedded; switching to legacy all-in-one manager architecture."
-        log "WARNING: Legacy all-in-one mode requires AGENTTEAMS_VERSION <= v1.0.9 (older bundled manager image)."
-        log "WARNING: Newer slim manager images will hang on 'Waiting for Higress Gateway'."
-        AGENTTEAMS_USE_EMBEDDED=0
-        return 0
-    fi
-
     if ${DOCKER_CMD} pull "${_latest}" >/dev/null 2>&1; then
         log "embedded ${AGENTTEAMS_VERSION} not found, using latest"
         EMBEDDED_IMAGE="${_latest}"
-        return 0
-    fi
-
-    # Explicit escape hatch — still honoured for edge cases.
-    if [ "${AGENTTEAMS_FORCE_LEGACY:-0}" = "1" ]; then
-        log "WARNING: AGENTTEAMS_FORCE_LEGACY=1 — using legacy all-in-one manager architecture."
-        log "WARNING: This requires AGENTTEAMS_VERSION <= v1.0.9 (older bundled manager image)."
-        log "WARNING: Newer slim manager images will hang on 'Waiting for Higress Gateway'."
-        AGENTTEAMS_USE_EMBEDDED=0
         return 0
     fi
 
@@ -1101,7 +1006,7 @@ resolve_embedded_image() {
     error "  - tried: ${_versioned}"
     error "  - tried: ${_latest}"
     error ""
-    error "Embedded mode is the only supported architecture since PR #616."
+    error "The Controller plus direct AgentScope Manager architecture is required."
     error "How to resolve:"
     error "  1) Pin to a AGENTTEAMS_VERSION whose embedded image has been published, or"
     error "     wait for the release pipeline to publish it."
@@ -1162,7 +1067,7 @@ prompt_custom_model_params() {
 
 # ============================================================
 # Wait for Manager agent to be ready
-# Uses `openclaw gateway health` inside the container to confirm the gateway is running
+# Uses Python's standard library because the slim Manager image does not ship curl.
 # ============================================================
 
 wait_manager_ready() {
@@ -1172,23 +1077,13 @@ wait_manager_ready() {
 
     log "$(msg install.wait_ready "${timeout}")"
 
-    # Wait for Manager agent to be healthy inside the container
-    local runtime="${AGENTTEAMS_MANAGER_RUNTIME:-copaw}"
     while [ "${elapsed}" -lt "${timeout}" ]; do
-        case "${runtime}" in
-            copaw)
-                if ${DOCKER_CMD} exec "${container}" curl -sf http://127.0.0.1:18799/api/agents 2>/dev/null | grep -q '"agents"'; then
-                    log "$(msg install.wait_ready.ok)"
-                    return 0
-                fi
-                ;;
-            *)
-                if ${DOCKER_CMD} exec "${container}" openclaw gateway health --json 2>/dev/null | grep -q '"ok"' 2>/dev/null; then
-                    log "$(msg install.wait_ready.ok)"
-                    return 0
-                fi
-                ;;
-        esac
+        if ${DOCKER_CMD} exec "${container}" python -c \
+            'import urllib.request; urllib.request.urlopen("http://127.0.0.1:18799/readyz", timeout=2).read()' \
+            >/dev/null 2>&1; then
+            log "$(msg install.wait_ready.ok)"
+            return 0
+        fi
         sleep 5
         elapsed=$((elapsed + 5))
         printf "\r\033[36m[AgentTeams]\033[0m $(msg install.wait_ready.waiting "${elapsed}" "${timeout}")"
@@ -1217,42 +1112,6 @@ wait_matrix_ready() {
 
     echo ""
     die "$(msg install.wait_matrix.timeout "${timeout}" "${container}")"
-}
-
-# Read KEY=value from /data/agentteams-secrets.env on a Docker volume (manager container not required).
-# Requires EMBEDDED_IMAGE (resolved earlier in install_manager). Uses ${DOCKER_CMD}.
-agentteams_read_secret_from_data_volume() {
-    local _vol="$1" _key="$2"
-    if [ -z "${_vol}" ] || [ -z "${_key}" ] || [ -z "${EMBEDDED_IMAGE:-}" ]; then
-        echo ""
-        return 0
-    fi
-    ${DOCKER_CMD} run --rm --entrypoint sh \
-        -v "${_vol}:/data:ro" \
-        "${EMBEDDED_IMAGE}" -c "grep \"^${_key}=\" /data/agentteams-secrets.env 2>/dev/null | cut -d= -f2- | head -1 | tr -d '\r'" 2>/dev/null
-}
-
-# Read KEY=value from /data/worker-creds/<worker>.env on a Docker volume.
-agentteams_read_worker_creds_value_from_volume() {
-    local _vol="$1" _worker="$2" _key="$3"
-    if [ -z "${_vol}" ] || [ -z "${_worker}" ] || [ -z "${_key}" ] || [ -z "${EMBEDDED_IMAGE:-}" ]; then
-        echo ""
-        return 0
-    fi
-    ${DOCKER_CMD} run --rm --entrypoint sh \
-        -v "${_vol}:/data:ro" \
-        "${EMBEDDED_IMAGE}" -c "grep \"^${_key}=\" \"/data/worker-creds/${_worker}.env\" 2>/dev/null | cut -d= -f2- | head -1 | tr -d \"\\r\"" 2>/dev/null
-}
-
-# Read admin_dm_room_id from host workspace state.json (fallback when Matrix API is unavailable).
-agentteams_read_admin_dm_room_from_workspace() {
-    local _ws="$1"
-    local _f="${_ws}/state.json"
-    if [ ! -f "${_f}" ] || ! command -v jq >/dev/null 2>&1; then
-        echo ""
-        return 0
-    fi
-    jq -r '.admin_dm_room_id // empty | select(. != "null")' "${_f}" 2>/dev/null
 }
 
 # Read secret input with masked echo (shows * per keystroke, supports backspace)
@@ -1602,7 +1461,7 @@ should_skip_step() {
             [ ! -f "${_env}" ] && return 0
             ;;
         # Keep-All upgrade mode: skip all config steps (step_volume/step_workspace handled separately)
-        step_llm|step_admin|step_network|step_ports|step_domains|step_github|step_skills|step_runtime|step_manager_runtime|step_e2ee|step_docker_proxy|step_idle|step_hostshare)
+        step_llm|step_admin|step_network|step_ports|step_domains|step_github|step_skills|step_runtime|step_e2ee|step_idle|step_hostshare)
             [ "${AGENTTEAMS_UPGRADE}" = "1" ] && [ "${AGENTTEAMS_UPGRADE_KEEP_ALL}" = "1" ] && return 0
             ;;
         step_volume|step_workspace)
@@ -1613,15 +1472,6 @@ should_skip_step() {
         step_e2ee|step_idle)
             [ "${AGENTTEAMS_NON_INTERACTIVE}" = "1" ] && return 0
             [ "${AGENTTEAMS_QUICKSTART}" = "1" ] && [ "${AGENTTEAMS_UPGRADE}" != "1" ] && return 0
-            ;;
-        step_docker_proxy)
-            [ "${AGENTTEAMS_NON_INTERACTIVE}" = "1" ] && return 0
-            [ "${AGENTTEAMS_QUICKSTART}" = "1" ] && [ "${AGENTTEAMS_UPGRADE}" != "1" ] && return 0
-            # Embedded mode handles docker access natively — skip this step
-            [ "${AGENTTEAMS_USE_EMBEDDED:-}" = "1" ] && return 0
-            ;;
-        step_manager_runtime)
-            [ "${AGENTTEAMS_NON_INTERACTIVE}" = "1" ] && return 0
             ;;
         step_hostshare)
             [ "${AGENTTEAMS_NON_INTERACTIVE}" = "1" ] && return 0
@@ -1656,20 +1506,18 @@ clear_step_vars() {
         step_network) unset AGENTTEAMS_LOCAL_ONLY ;;
         step_ports)
             unset AGENTTEAMS_PORT_GATEWAY AGENTTEAMS_PORT_CONSOLE
-            unset AGENTTEAMS_PORT_ELEMENT_WEB AGENTTEAMS_PORT_MANAGER_CONSOLE
+            unset AGENTTEAMS_PORT_ELEMENT_WEB
             ;;
         step_domains)
             unset AGENTTEAMS_MATRIX_DOMAIN AGENTTEAMS_MATRIX_CLIENT_DOMAIN
-            unset AGENTTEAMS_AI_GATEWAY_DOMAIN AGENTTEAMS_FS_DOMAIN AGENTTEAMS_CONSOLE_DOMAIN
+            unset AGENTTEAMS_AI_GATEWAY_DOMAIN AGENTTEAMS_FS_DOMAIN
             ;;
         step_github)    unset AGENTTEAMS_GITHUB_TOKEN ;;
         step_skills)    unset AGENTTEAMS_SKILLS_API_URL ;;
         step_volume)    unset AGENTTEAMS_DATA_DIR ;;
         step_workspace) unset AGENTTEAMS_WORKSPACE_DIR ;;
         step_runtime)   unset AGENTTEAMS_DEFAULT_WORKER_RUNTIME ;;
-        step_manager_runtime) unset AGENTTEAMS_MANAGER_RUNTIME ;;
         step_e2ee)      unset AGENTTEAMS_MATRIX_E2EE ;;
-        step_docker_proxy) unset AGENTTEAMS_DOCKER_PROXY; unset AGENTTEAMS_PROXY_ALLOWED_REGISTRIES ;;
         step_idle)      unset AGENTTEAMS_WORKER_IDLE_TIMEOUT ;;
         step_hostshare) unset AGENTTEAMS_HOST_SHARE_DIR ;;
         step_podman_autostart) unset AGENTTEAMS_PODMAN_AUTOSTART ;;
@@ -2352,7 +2200,6 @@ step_ports() {
     prompt AGENTTEAMS_PORT_GATEWAY "$(msg port.gateway_prompt)" "18080" || return 0
     prompt AGENTTEAMS_PORT_CONSOLE "$(msg port.console_prompt)" "18001" || return 0
     prompt AGENTTEAMS_PORT_ELEMENT_WEB "$(msg port.element_prompt)" "18088" || return 0
-    prompt AGENTTEAMS_PORT_MANAGER_CONSOLE "$(msg port.manager_console_prompt)" "18888" || return 0
     log ""
 }
 
@@ -2363,9 +2210,6 @@ step_domains() {
     prompt AGENTTEAMS_MATRIX_CLIENT_DOMAIN "$(msg domain.element_prompt)" "matrix-client-local.agentteams.io" || return 0
     prompt AGENTTEAMS_AI_GATEWAY_DOMAIN "$(msg domain.gateway_prompt)" "aigw-local.agentteams.io" || return 0
     prompt AGENTTEAMS_FS_DOMAIN "$(msg domain.fs_prompt)" "fs-local.agentteams.io" || return 0
-    if [ "${AGENTTEAMS_MANAGER_RUNTIME}" != "copaw" ]; then
-        prompt AGENTTEAMS_CONSOLE_DOMAIN "$(msg domain.console_prompt)" "console-local.agentteams.io" || return 0
-    fi
     log ""
 }
 
@@ -2440,9 +2284,9 @@ step_runtime() {
     echo ""
     echo "  1) $(msg worker_runtime.copaw)"
     echo "  2) $(msg worker_runtime.openclaw)"
-    if ! _ver_lt "${AGENTTEAMS_VERSION}" "v1.1.0"; then
-        echo "  3) $(msg worker_runtime.hermes)"
-    fi
+    echo "  3) $(msg worker_runtime.hermes)"
+    echo "  4) $(msg worker_runtime.qwenpaw)"
+    echo "  5) $(msg worker_runtime.openhuman)"
     echo ""
     if [ "${AGENTTEAMS_NON_INTERACTIVE}" = "1" ]; then
         AGENTTEAMS_DEFAULT_WORKER_RUNTIME="${AGENTTEAMS_DEFAULT_WORKER_RUNTIME:-copaw}"
@@ -2454,11 +2298,9 @@ step_runtime() {
         if [ -n "${_runtime_choice}" ]; then
             case "${_runtime_choice}" in
                 2) AGENTTEAMS_DEFAULT_WORKER_RUNTIME="openclaw" ;;
-                3) if ! _ver_lt "${AGENTTEAMS_VERSION}" "v1.1.0"; then
-                       AGENTTEAMS_DEFAULT_WORKER_RUNTIME="hermes"
-                   else
-                       AGENTTEAMS_DEFAULT_WORKER_RUNTIME="copaw"
-                   fi ;;
+                3) AGENTTEAMS_DEFAULT_WORKER_RUNTIME="hermes" ;;
+                4) AGENTTEAMS_DEFAULT_WORKER_RUNTIME="qwenpaw" ;;
+                5) AGENTTEAMS_DEFAULT_WORKER_RUNTIME="openhuman" ;;
                 *) AGENTTEAMS_DEFAULT_WORKER_RUNTIME="copaw" ;;
             esac
         fi
@@ -2469,49 +2311,14 @@ step_runtime() {
         _runtime_choice="${_runtime_choice:-1}"
         case "${_runtime_choice}" in
             2) AGENTTEAMS_DEFAULT_WORKER_RUNTIME="openclaw" ;;
-            3) if ! _ver_lt "${AGENTTEAMS_VERSION}" "v1.1.0"; then
-                   AGENTTEAMS_DEFAULT_WORKER_RUNTIME="hermes"
-               else
-                   AGENTTEAMS_DEFAULT_WORKER_RUNTIME="copaw"
-               fi ;;
+            3) AGENTTEAMS_DEFAULT_WORKER_RUNTIME="hermes" ;;
+            4) AGENTTEAMS_DEFAULT_WORKER_RUNTIME="qwenpaw" ;;
+            5) AGENTTEAMS_DEFAULT_WORKER_RUNTIME="openhuman" ;;
             *) AGENTTEAMS_DEFAULT_WORKER_RUNTIME="copaw" ;;
         esac
     fi
     export AGENTTEAMS_DEFAULT_WORKER_RUNTIME
     log "$(msg worker_runtime.selected "${AGENTTEAMS_DEFAULT_WORKER_RUNTIME}")"
-}
-
-step_manager_runtime() {
-    log "$(msg manager_runtime.title)"
-    echo ""
-    echo "  1) $(msg manager_runtime.copaw)"
-    echo "  2) $(msg manager_runtime.openclaw)"
-    echo ""
-    if [ "${AGENTTEAMS_NON_INTERACTIVE}" = "1" ]; then
-        AGENTTEAMS_MANAGER_RUNTIME="${AGENTTEAMS_MANAGER_RUNTIME:-copaw}"
-    elif [ "${AGENTTEAMS_UPGRADE}" = "1" ] && [ -n "${AGENTTEAMS_MANAGER_RUNTIME}" ]; then
-        log "$(msg prompt.upgrade_keep "$(msg manager_runtime.title_short)" "${AGENTTEAMS_MANAGER_RUNTIME}")"
-        local _runtime_choice
-        read -e -p "$(msg manager_runtime.choice): " _runtime_choice
-        if [ "${_runtime_choice}" = "b" ]; then STEP_RESULT="back"; return 0; fi
-        if [ -n "${_runtime_choice}" ]; then
-            case "${_runtime_choice}" in
-                2) AGENTTEAMS_MANAGER_RUNTIME="openclaw" ;;
-                *) AGENTTEAMS_MANAGER_RUNTIME="copaw" ;;
-            esac
-        fi
-    elif [ -z "${AGENTTEAMS_MANAGER_RUNTIME+x}" ]; then
-        local _runtime_choice
-        read -e -p "$(msg manager_runtime.choice): " _runtime_choice
-        if [ "${_runtime_choice}" = "b" ]; then STEP_RESULT="back"; return 0; fi
-        _runtime_choice="${_runtime_choice:-1}"
-        case "${_runtime_choice}" in
-            2) AGENTTEAMS_MANAGER_RUNTIME="openclaw" ;;
-            *) AGENTTEAMS_MANAGER_RUNTIME="copaw" ;;
-        esac
-    fi
-    export AGENTTEAMS_MANAGER_RUNTIME
-    log "$(msg manager_runtime.selected "${AGENTTEAMS_MANAGER_RUNTIME}")"
 }
 
 step_e2ee() {
@@ -2559,80 +2366,6 @@ step_e2ee() {
         log "$(msg matrix_e2ee.selected_enabled)"
     else
         log "$(msg matrix_e2ee.selected_disabled)"
-    fi
-}
-
-step_docker_proxy() {
-    # Only relevant when socket mounting is enabled
-    if [ "${AGENTTEAMS_MOUNT_SOCKET}" != "1" ]; then
-        AGENTTEAMS_DOCKER_PROXY="0"
-        return 0
-    fi
-
-    # ── Non-interactive guard (deep defense) ──────────────────────────
-    if [ "${AGENTTEAMS_NON_INTERACTIVE}" = "1" ]; then
-        AGENTTEAMS_DOCKER_PROXY="${AGENTTEAMS_DOCKER_PROXY:-0}"
-        log "  $(msg docker_proxy.title_short) = ${AGENTTEAMS_DOCKER_PROXY} (non-interactive, skipped)"
-        export AGENTTEAMS_DOCKER_PROXY
-        return 0
-    fi
-    # ─────────────────────────────────────────────────────────────────
-
-    echo ""
-    echo -e "  \033[1m$(msg docker_proxy.title)\033[0m"
-    echo ""
-    echo -e "  $(msg docker_proxy.desc)"
-    echo ""
-    echo "  1) $(msg docker_proxy.enable)"
-    echo "  2) $(msg docker_proxy.disable)"
-    echo ""
-
-    if [ "${AGENTTEAMS_UPGRADE}" = "1" ] && [ -n "${AGENTTEAMS_DOCKER_PROXY}" ]; then
-        local _proxy_display; if [ "${AGENTTEAMS_DOCKER_PROXY}" = "1" ]; then _proxy_display="$(msg docker_proxy.val_enabled)"; else _proxy_display="$(msg docker_proxy.val_disabled)"; fi
-        log "$(msg prompt.upgrade_keep "$(msg docker_proxy.title_short)" "${_proxy_display}")"
-        local _choice
-        read -e -p "$(msg docker_proxy.choice): " _choice
-        if [ "${_choice}" = "b" ]; then STEP_RESULT="back"; return 0; fi
-        if [ -n "${_choice}" ]; then
-            case "${_choice}" in
-                2) AGENTTEAMS_DOCKER_PROXY="0" ;;
-                *) AGENTTEAMS_DOCKER_PROXY="1" ;;
-            esac
-        fi
-    elif [ -z "${AGENTTEAMS_DOCKER_PROXY+x}" ]; then
-        local _choice
-        read -e -p "$(msg docker_proxy.choice): " _choice
-        if [ "${_choice}" = "b" ]; then STEP_RESULT="back"; return 0; fi
-        _choice="${_choice:-1}"
-        case "${_choice}" in
-            2) AGENTTEAMS_DOCKER_PROXY="0" ;;
-            *) AGENTTEAMS_DOCKER_PROXY="1" ;;
-        esac
-    fi
-    AGENTTEAMS_DOCKER_PROXY="${AGENTTEAMS_DOCKER_PROXY:-1}"
-    export AGENTTEAMS_DOCKER_PROXY
-    if [ "${AGENTTEAMS_DOCKER_PROXY}" = "1" ]; then
-        log "$(msg docker_proxy.selected_enabled)"
-
-        # Prompt for additional allowed image sources
-        echo ""
-        echo -e "  $(msg docker_proxy.registries_desc)"
-        echo ""
-        if [ "${AGENTTEAMS_UPGRADE}" = "1" ] && [ -n "${AGENTTEAMS_PROXY_ALLOWED_REGISTRIES}" ]; then
-            log "$(msg prompt.upgrade_keep "$(msg docker_proxy.registries_label)" "${AGENTTEAMS_PROXY_ALLOWED_REGISTRIES}")"
-            local _reg_input
-            read -e -p "$(msg docker_proxy.registries_prompt): " _reg_input
-            if [ "${_reg_input}" = "b" ]; then STEP_RESULT="back"; return 0; fi
-            [ -n "${_reg_input}" ] && AGENTTEAMS_PROXY_ALLOWED_REGISTRIES="${_reg_input}"
-        elif [ -z "${AGENTTEAMS_PROXY_ALLOWED_REGISTRIES+x}" ]; then
-            local _reg_input
-            read -e -p "$(msg docker_proxy.registries_prompt): " _reg_input
-            if [ "${_reg_input}" = "b" ]; then STEP_RESULT="back"; return 0; fi
-            AGENTTEAMS_PROXY_ALLOWED_REGISTRIES="${_reg_input:-}"
-        fi
-        export AGENTTEAMS_PROXY_ALLOWED_REGISTRIES
-    else
-        log "$(msg docker_proxy.selected_disabled)"
     fi
 }
 
@@ -2907,9 +2640,9 @@ install_manager() {
     fi
 
     # ── State machine ─────────────────────────────────────────────────────────
-    local _STEPS=( step_lang step_mode step_version step_existing step_llm step_manager_runtime step_runtime step_admin step_network
+    local _STEPS=( step_lang step_mode step_version step_existing step_llm step_runtime step_admin step_network
                    step_ports step_domains step_github step_skills step_volume
-                   step_workspace step_e2ee step_docker_proxy step_idle step_hostshare step_podman_autostart )
+                   step_workspace step_e2ee step_idle step_hostshare step_podman_autostart )
     local _STEP_HISTORY=()
     local _step_idx=0
     while [ "${_step_idx}" -lt "${#_STEPS[@]}" ]; do
@@ -2946,7 +2679,7 @@ install_manager() {
     fi
     AGENTTEAMS_WORKSPACE_DIR="$(cd "${AGENTTEAMS_WORKSPACE_DIR}" 2>/dev/null && pwd || echo "${AGENTTEAMS_WORKSPACE_DIR}")"
     mkdir -p "${AGENTTEAMS_WORKSPACE_DIR}"
-    AGENTTEAMS_MANAGER_RUNTIME="${AGENTTEAMS_MANAGER_RUNTIME:-copaw}"
+    AGENTTEAMS_MANAGER_RUNTIME=agentscope
     export AGENTTEAMS_MANAGER_RUNTIME
     AGENTTEAMS_DEFAULT_WORKER_RUNTIME="${AGENTTEAMS_DEFAULT_WORKER_RUNTIME:-copaw}"
     AGENTTEAMS_MATRIX_E2EE="${AGENTTEAMS_MATRIX_E2EE:-0}"
@@ -3021,10 +2754,9 @@ AGENTTEAMS_LOCAL_ONLY=${AGENTTEAMS_LOCAL_ONLY}
 AGENTTEAMS_PORT_GATEWAY=${AGENTTEAMS_PORT_GATEWAY}
 AGENTTEAMS_PORT_CONSOLE=${AGENTTEAMS_PORT_CONSOLE}
 AGENTTEAMS_PORT_ELEMENT_WEB=${AGENTTEAMS_PORT_ELEMENT_WEB}
-AGENTTEAMS_PORT_MANAGER_CONSOLE=${AGENTTEAMS_PORT_MANAGER_CONSOLE:-18888}
 
-# Manager runtime (openclaw | copaw)
-AGENTTEAMS_MANAGER_RUNTIME=${AGENTTEAMS_MANAGER_RUNTIME:-copaw}
+# Manager runtime is fixed; Worker runtime remains independently configurable.
+AGENTTEAMS_MANAGER_RUNTIME=agentscope
 
 # Matrix
 AGENTTEAMS_MATRIX_DOMAIN=${AGENTTEAMS_MATRIX_DOMAIN}
@@ -3036,7 +2768,6 @@ AGENTTEAMS_MANAGER_GATEWAY_KEY=${AGENTTEAMS_MANAGER_GATEWAY_KEY}
 
 # File System
 AGENTTEAMS_FS_DOMAIN=${AGENTTEAMS_FS_DOMAIN}
-AGENTTEAMS_CONSOLE_DOMAIN=${AGENTTEAMS_CONSOLE_DOMAIN}
 AGENTTEAMS_MINIO_USER=${AGENTTEAMS_MINIO_USER}
 AGENTTEAMS_MINIO_PASSWORD=${AGENTTEAMS_MINIO_PASSWORD}
 
@@ -3069,8 +2800,10 @@ AGENTTEAMS_CMS_METRICS_ENABLED=${AGENTTEAMS_CMS_METRICS_ENABLED:-false}
 AGENTTEAMS_WORKER_IMAGE=${WORKER_IMAGE}
 AGENTTEAMS_COPAW_WORKER_IMAGE=${COPAW_WORKER_IMAGE}
 AGENTTEAMS_HERMES_WORKER_IMAGE=${HERMES_WORKER_IMAGE}
+AGENTTEAMS_QWENPAW_WORKER_IMAGE=${QWENPAW_WORKER_IMAGE}
+AGENTTEAMS_OPENHUMAN_WORKER_IMAGE=${OPENHUMAN_WORKER_IMAGE}
 
-# Default Worker runtime (openclaw | copaw | hermes)
+# Default Worker runtime (openclaw | copaw | hermes | qwenpaw | openhuman)
 AGENTTEAMS_DEFAULT_WORKER_RUNTIME=${AGENTTEAMS_DEFAULT_WORKER_RUNTIME:-copaw}
 
 # Matrix E2EE (0=disabled, 1=enabled; default: 0)
@@ -3080,12 +2813,6 @@ AGENTTEAMS_MATRIX_E2EE=${AGENTTEAMS_MATRIX_E2EE:-0}
 AGENTTEAMS_MATRIX_APPSERVICE_ENABLED=${AGENTTEAMS_MATRIX_APPSERVICE_ENABLED:-true}
 AGENTTEAMS_MATRIX_APPSERVICE_AS_TOKEN=${AGENTTEAMS_MATRIX_APPSERVICE_AS_TOKEN:-}
 AGENTTEAMS_MATRIX_APPSERVICE_HS_TOKEN=${AGENTTEAMS_MATRIX_APPSERVICE_HS_TOKEN:-}
-
-# Docker API proxy (0=disabled, 1=enabled; default: 1)
-AGENTTEAMS_DOCKER_PROXY=${AGENTTEAMS_DOCKER_PROXY:-1}
-
-# Docker API proxy: additional allowed image sources (comma-separated)
-AGENTTEAMS_PROXY_ALLOWED_REGISTRIES=${AGENTTEAMS_PROXY_ALLOWED_REGISTRIES:-}
 
 # Worker idle timeout in minutes (default: 720 = 12 hours)
 AGENTTEAMS_WORKER_IDLE_TIMEOUT=${AGENTTEAMS_WORKER_IDLE_TIMEOUT:-720}
@@ -3111,7 +2838,6 @@ EOF
     log "$(msg install.config_saved "${ENV_FILE}")"
 
     # Detect container runtime socket
-    SOCKET_MOUNT_ARGS=""
     if [ "${AGENTTEAMS_MOUNT_SOCKET}" = "1" ]; then
         # Actively ensure the API socket is enabled and active before detection.
         if [ "${DOCKER_CMD:-}" = "podman" ]; then
@@ -3122,23 +2848,11 @@ EOF
         fi
         if [ -n "${CONTAINER_SOCK}" ]; then
             log "$(msg install.socket_detected "${CONTAINER_SOCK}")"
-            SOCKET_MOUNT_ARGS="-v ${CONTAINER_SOCK}:/var/run/docker.sock --security-opt label=disable"
         else
-            log "$(msg install.socket_not_found)"
-            # Interactive confirmation when socket not found
-            if [ "${AGENTTEAMS_NON_INTERACTIVE}" != "1" ]; then
-                echo ""
-                echo -e "\033[33m$(msg install.socket_confirm.title)\033[0m"
-                echo ""
-                echo -e "$(msg install.socket_confirm.message)"
-                echo ""
-                read -p "$(msg install.socket_confirm.prompt)" SOCKET_CONFIRM
-                if [ "${SOCKET_CONFIRM}" != "y" ] && [ "${SOCKET_CONFIRM}" != "Y" ]; then
-                    log "$(msg install.socket_confirm.cancelled)"
-                    exit 0
-                fi
-            fi
+            die "$(msg install.socket_not_found)"
         fi
+    else
+        die "$(msg install.socket_not_found)"
     fi
 
     # Create the data volume if it doesn't already exist (reuse on reinstall)
@@ -3146,45 +2860,18 @@ EOF
         ${DOCKER_CMD} volume create "${AGENTTEAMS_DATA_DIR}" > /dev/null
     fi
 
-    # Data mount: Docker volume
-    DATA_MOUNT_ARGS="-v ${AGENTTEAMS_DATA_DIR}:/data"
-
-    # Manager workspace mount (always a host directory, defaulting to ~/agentteams-manager)
-    WORKSPACE_MOUNT_ARGS="-v ${AGENTTEAMS_WORKSPACE_DIR}:/root/manager-workspace"
-
-    # Pass host timezone to container so date/time commands reflect local time
-    TZ_ARGS="-e TZ=${AGENTTEAMS_TIMEZONE}"
-
-    # Host directory mount
+    # The Controller mounts this host directory into the Manager and Workers.
     if [ -d "${AGENTTEAMS_HOST_SHARE_DIR}" ]; then
-        HOST_SHARE_MOUNT_ARGS="-v ${AGENTTEAMS_HOST_SHARE_DIR}:/host-share"
         log "$(msg host_share.sharing "${AGENTTEAMS_HOST_SHARE_DIR}")"
     else
         log "$(msg host_share.not_exist "${AGENTTEAMS_HOST_SHARE_DIR}")"
-        HOST_SHARE_MOUNT_ARGS="-v ${AGENTTEAMS_HOST_SHARE_DIR}:/host-share"
     fi
 
-    # YOLO mode: pass through if set in environment (enables autonomous decisions)
-    YOLO_ARGS=""
     if [ "${AGENTTEAMS_YOLO:-}" = "1" ]; then
-        YOLO_ARGS="-e AGENTTEAMS_YOLO=1"
         log "$(msg install.yolo)"
     fi
 
-    # Matrix-plugin debug tracing: pass through if AGENTTEAMS_MATRIX_DEBUG=1.
-    # The container entrypoints translate this to OPENCLAW_MATRIX_DEBUG=1
-    # so the openclaw matrix plugin emits structured INFO-level lifecycle
-    # traces (sync state transitions, room.invite/join, message handler
-    # arrival + filter outcomes). Used to diagnose worker/manager hangs.
-    MATRIX_DEBUG_ARGS=""
-    if [ "${AGENTTEAMS_MATRIX_DEBUG:-}" = "1" ]; then
-        MATRIX_DEBUG_ARGS="-e AGENTTEAMS_MATRIX_DEBUG=1"
-    fi
-
-    # E2EE is already in the env file; but also pass explicitly in case env file is not the source
-    # (AGENTTEAMS_MATRIX_E2EE is already written to ENV_FILE above via --env-file)
-
-    # Pull images (manager based on runtime config; all worker runtimes always pulled)
+    # Pull the single Manager image and all five Worker runtime images.
     _is_local_image() {
         case "$1" in
             agentteams/*) return 0 ;;
@@ -3226,138 +2913,15 @@ EOF
 
     # Embedded controller image (resolve versioned tag, fallback to latest)
     resolve_embedded_image
-    if [ "${AGENTTEAMS_USE_EMBEDDED}" = "1" ]; then
-        _local_image_exists "${EMBEDDED_IMAGE}" || true
-    fi
-
-    # Manager image is always required (select based on runtime)
-    if [ "${AGENTTEAMS_MANAGER_RUNTIME}" = "copaw" ]; then
-        _pull_image "${MANAGER_COPAW_IMAGE}" "install.image.exists" "install.image.pulling_manager"
-    else
-        _pull_image "${MANAGER_IMAGE}" "install.image.exists" "install.image.pulling_manager"
-    fi
+    _local_image_exists "${EMBEDDED_IMAGE}" || true
+    _pull_image "${MANAGER_IMAGE}" "install.image.exists" "install.image.pulling_manager"
 
     # Pull all worker runtime images (workers may use any runtime regardless of the default)
     _pull_image "${WORKER_IMAGE}" "install.image.worker_exists" "install.image.pulling_worker"
     _pull_image "${COPAW_WORKER_IMAGE}" "install.image.worker_exists" "install.image.pulling_worker"
     _pull_image "${HERMES_WORKER_IMAGE}" "install.image.worker_exists" "install.image.pulling_worker"
-
-    # --- Pre-upgrade: extract Matrix passwords from running old containers ---
-    # Only needed when upgrading FROM old architecture (v1.0.9) TO embedded.
-    # For new-arch-to-new-arch upgrades, credential files already exist with
-    # correct room IDs — we must NOT overwrite them.
-    _creds_tmp=""
-    if [ "${AGENTTEAMS_UPGRADE:-0}" = "1" ] && [ "${AGENTTEAMS_USE_EMBEDDED}" = "1" ]; then
-        # Detect if upgrading from old arch: old arch has no agentteams-controller container
-        # (or has it as a docker-proxy only, not embedded). Check if the existing
-        # agentteams-controller is an embedded image (has supervisord) or just a proxy.
-        _is_old_arch=0
-        if ! ${DOCKER_CMD} ps -a --format '{{.Names}}' 2>/dev/null | grep -q "^agentteams-controller$"; then
-            _is_old_arch=1
-        elif ${DOCKER_CMD} ps -a --format '{{.Names}} {{.Image}}' 2>/dev/null | grep "^agentteams-controller " | grep -qv "embedded"; then
-            _is_old_arch=1
-        fi
-
-        if [ "${_is_old_arch}" = "1" ]; then
-        _creds_tmp=$(mktemp -d)
-
-        # docker exec for Matrix/minio paths only works while agentteams-manager is running.
-        _mgr_creds_tempstart=0
-        if ${DOCKER_CMD} ps -a --format '{{.Names}}' 2>/dev/null | grep -q '^agentteams-manager$'; then
-            if ! ${DOCKER_CMD} ps --format '{{.Names}}' 2>/dev/null | grep -q '^agentteams-manager$'; then
-                log "agentteams-manager is stopped; starting it temporarily to extract Matrix credentials for upgrade..."
-                ${DOCKER_CMD} start agentteams-manager 2>/dev/null || true
-                wait_matrix_ready "agentteams-manager"
-                _mgr_creds_tempstart=1
-            fi
-        fi
-
-        # Manager password (container Config.Env, then secrets file inside running manager, then data volume)
-        _mgr_pw=$(${DOCKER_CMD} inspect agentteams-manager --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null | grep '^AGENTTEAMS_MANAGER_PASSWORD=' | cut -d= -f2-)
-        if [ -z "${_mgr_pw}" ] && ${DOCKER_CMD} ps --format '{{.Names}}' 2>/dev/null | grep -q '^agentteams-manager$'; then
-            _mgr_pw=$(${DOCKER_CMD} exec agentteams-manager bash -c 'source /data/agentteams-secrets.env 2>/dev/null && echo "${AGENTTEAMS_MANAGER_PASSWORD}"' 2>/dev/null)
-        fi
-        if [ -z "${_mgr_pw}" ] && ${DOCKER_CMD} volume ls -q 2>/dev/null | grep -q "^${AGENTTEAMS_DATA_DIR}$"; then
-            _mgr_pw=$(agentteams_read_secret_from_data_volume "${AGENTTEAMS_DATA_DIR}" AGENTTEAMS_MANAGER_PASSWORD)
-        fi
-
-        # Manager admin DM room ID: login as admin, find DM room with @manager
-        _mgr_room=""
-        if [ -n "${_mgr_pw}" ]; then
-            _admin_pw=$(grep AGENTTEAMS_ADMIN_PASSWORD "${AGENTTEAMS_ENV_FILE:-${HOME}/agentteams-manager.env}" 2>/dev/null | cut -d= -f2-)
-            _admin_user=$(grep AGENTTEAMS_ADMIN_USER "${AGENTTEAMS_ENV_FILE:-${HOME}/agentteams-manager.env}" 2>/dev/null | cut -d= -f2-)
-            _admin_user="${_admin_user:-admin}"
-            _matrix_domain=$(grep AGENTTEAMS_MATRIX_DOMAIN "${AGENTTEAMS_ENV_FILE:-${HOME}/agentteams-manager.env}" 2>/dev/null | cut -d= -f2-)
-            if [ -n "${_admin_pw}" ] && ${DOCKER_CMD} ps --format '{{.Names}}' 2>/dev/null | grep -q '^agentteams-manager$'; then
-                _admin_token=$(${DOCKER_CMD} exec agentteams-manager curl -sf -X POST http://127.0.0.1:6167/_matrix/client/v3/login \
-                    -H "Content-Type: application/json" \
-                    -d '{"type":"m.login.password","identifier":{"type":"m.id.user","user":"'"${_admin_user}"'"},"password":"'"${_admin_pw}"'"}' 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('access_token',''))" 2>/dev/null || true)
-                if [ -n "${_admin_token}" ]; then
-                    _mgr_room=$(${DOCKER_CMD} exec agentteams-manager curl -sf -X GET \
-                        -H "Authorization: Bearer ${_admin_token}" \
-                        "http://127.0.0.1:6167/_matrix/client/v3/joined_rooms" 2>/dev/null | python3 -c "
-import sys,json,subprocess
-rooms = json.load(sys.stdin).get('joined_rooms',[])
-for room_id in rooms:
-    enc = room_id.replace('!','%21')
-    members = json.loads(subprocess.check_output([
-        'docker','exec','agentteams-manager','curl','-sf','-X','GET',
-        '-H','Authorization: Bearer ${_admin_token}',
-        'http://127.0.0.1:6167/_matrix/client/v3/rooms/'+enc+'/members'
-    ]).decode()).get('chunk',[])
-    member_ids = [m['state_key'] for m in members]
-    if any('manager' in m and 'admin' not in m.split(':')[0] for m in member_ids):
-        if len(member_ids) <= 3:
-            print(room_id)
-            break
-" 2>/dev/null || true)
-                fi
-            fi
-            if [ -z "${_mgr_room}" ]; then
-                _mgr_room=$(agentteams_read_admin_dm_room_from_workspace "${AGENTTEAMS_WORKSPACE_DIR}")
-            fi
-            cat > "${_creds_tmp}/default.env" <<CREDEOF
-WORKER_PASSWORD="${_mgr_pw}"
-WORKER_MINIO_PASSWORD="$(openssl rand -hex 24)"
-WORKER_GATEWAY_KEY="${AGENTTEAMS_MANAGER_GATEWAY_KEY}"
-WORKER_ROOM_ID="${_mgr_room}"
-CREDEOF
-            log "Extracted Manager Matrix password${_mgr_room:+ and room ID}"
-        fi
-
-        # Worker passwords and room IDs from workers-registry.json
-        if [ -f "${AGENTTEAMS_WORKSPACE_DIR}/workers-registry.json" ]; then
-            _worker_names=$(python3 -c "import json; d=json.load(open('${AGENTTEAMS_WORKSPACE_DIR}/workers-registry.json')); print(' '.join(d.get('workers',{}).keys()))" 2>/dev/null || true)
-            for _wname in ${_worker_names}; do
-                _wpw=""
-                if ${DOCKER_CMD} ps --format '{{.Names}}' 2>/dev/null | grep -q '^agentteams-manager$'; then
-                    _wpw=$(${DOCKER_CMD} exec agentteams-manager cat "/root/agentteams-fs/agents/${_wname}/credentials/matrix/password" 2>/dev/null || true)
-                fi
-                if [ -z "${_wpw}" ] && ${DOCKER_CMD} volume ls -q 2>/dev/null | grep -q "^${AGENTTEAMS_DATA_DIR}$"; then
-                    _wpw=$(agentteams_read_worker_creds_value_from_volume "${AGENTTEAMS_DATA_DIR}" "${_wname}" WORKER_PASSWORD)
-                fi
-                _wroom=$(python3 -c "import json; d=json.load(open('${AGENTTEAMS_WORKSPACE_DIR}/workers-registry.json')); print(d.get('workers',{}).get('${_wname}',{}).get('room_id',''))" 2>/dev/null || true)
-                if [ -z "${_wroom}" ] && ${DOCKER_CMD} volume ls -q 2>/dev/null | grep -q "^${AGENTTEAMS_DATA_DIR}$"; then
-                    _wroom=$(agentteams_read_worker_creds_value_from_volume "${AGENTTEAMS_DATA_DIR}" "${_wname}" WORKER_ROOM_ID)
-                fi
-                if [ -n "${_wpw}" ]; then
-                    cat > "${_creds_tmp}/${_wname}.env" <<CREDEOF
-WORKER_PASSWORD="${_wpw}"
-WORKER_MINIO_PASSWORD="$(openssl rand -hex 24)"
-WORKER_GATEWAY_KEY="$(openssl rand -hex 32)"
-WORKER_ROOM_ID="${_wroom}"
-CREDEOF
-                    log "Extracted ${_wname} Matrix password${_wroom:+ and room ID}"
-                fi
-            done
-        fi
-
-        if [ "${_mgr_creds_tempstart}" = "1" ]; then
-            log "Stopping agentteams-manager after credential extraction (upgrade will recreate containers)..."
-            ${DOCKER_CMD} stop agentteams-manager 2>/dev/null || true
-        fi
-        fi  # _is_old_arch
-    fi
+    _pull_image "${QWENPAW_WORKER_IMAGE}" "install.image.worker_exists" "install.image.pulling_worker"
+    _pull_image "${OPENHUMAN_WORKER_IMAGE}" "install.image.worker_exists" "install.image.pulling_worker"
 
     # --- Stop and remove existing containers ---
     if ${DOCKER_CMD} ps -a --format '{{.Names}}' | grep -q "^agentteams-controller$"; then
@@ -3380,24 +2944,6 @@ CREDEOF
         done
     fi
 
-    # --- Upgrade: inject extracted credentials into data volume ---
-    # Only needed for old-arch upgrades (credential files were extracted above).
-    if [ -n "${_creds_tmp}" ] && [ -d "${_creds_tmp}" ] && [ -n "$(ls -A "${_creds_tmp}" 2>/dev/null)" ]; then
-        local _cleanup_ctr="agentteams-upgrade-cleanup"
-        ${DOCKER_CMD} rm -f "${_cleanup_ctr}" 2>/dev/null || true
-        ${DOCKER_CMD} run --rm --name "${_cleanup_ctr}" \
-            --entrypoint sh \
-            -v "${AGENTTEAMS_DATA_DIR}:/data" \
-            -v "${_creds_tmp}:/creds:ro" \
-            "${EMBEDDED_IMAGE}" -c '
-                rm -rf /data/worker-creds
-                mkdir -p /data/worker-creds
-                cp /creds/*.env /data/worker-creds/ 2>/dev/null || true
-                chmod 600 /data/worker-creds/*.env 2>/dev/null || true
-            ' 2>/dev/null && log "Injected credentials for upgrade" || log "Warning: credential injection failed, continuing"
-        rm -rf "${_creds_tmp}"
-    fi
-
     # --- Start containers ---
     log "$(msg install.starting_manager)"
 
@@ -3411,18 +2957,8 @@ CREDEOF
     # Ensure agentteams-net Docker network exists
     ${DOCKER_CMD} network inspect agentteams-net >/dev/null 2>&1 || ${DOCKER_CMD} network create agentteams-net
 
-    if [ "${AGENTTEAMS_USE_EMBEDDED}" != "1" ] && [ "${AGENTTEAMS_UPGRADE:-0}" = "1" ]; then
-        # Check if current installation is embedded — downgrade to legacy is not supported
-        if ${DOCKER_CMD} ps -a --format '{{.Names}} {{.Image}}' 2>/dev/null | grep "^agentteams-controller " | grep -q "embedded"; then
-            error "Downgrade from embedded architecture to legacy version (${AGENTTEAMS_VERSION}) is not supported."
-            error "Please use 'make uninstall-embedded' first, then do a clean install of the target version."
-            exit 1
-        fi
-    fi
-
-    if [ "${AGENTTEAMS_USE_EMBEDDED}" = "1" ]; then
         # ============================================================
-        # New architecture: embedded controller + auto-created manager
+        # Infrastructure Controller + direct AgentScope Manager
         # ============================================================
 
         # Internal port: 8080 (Higress gateway inside the container).
@@ -3446,12 +2982,14 @@ CREDEOF
             -e "AGENTTEAMS_LLM_API_KEY=${AGENTTEAMS_LLM_API_KEY}"
             -e "AGENTTEAMS_DEFAULT_MODEL=${AGENTTEAMS_DEFAULT_MODEL}"
             -e "AGENTTEAMS_MANAGER_GATEWAY_KEY=${AGENTTEAMS_MANAGER_GATEWAY_KEY}"
-            -e "AGENTTEAMS_MANAGER_RUNTIME=${AGENTTEAMS_MANAGER_RUNTIME:-copaw}"
-            -e "AGENTTEAMS_MANAGER_IMAGE=$([ "${AGENTTEAMS_MANAGER_RUNTIME}" = "copaw" ] && echo "${MANAGER_COPAW_IMAGE}" || echo "${MANAGER_IMAGE}")"
+            -e "AGENTTEAMS_MANAGER_RUNTIME=agentscope"
+            -e "AGENTTEAMS_MANAGER_IMAGE=${MANAGER_IMAGE}"
             -e "AGENTTEAMS_DEFAULT_WORKER_RUNTIME=${AGENTTEAMS_DEFAULT_WORKER_RUNTIME:-copaw}"
             -e "AGENTTEAMS_WORKER_IMAGE=${WORKER_IMAGE}"
             -e "AGENTTEAMS_COPAW_WORKER_IMAGE=${COPAW_WORKER_IMAGE}"
             -e "AGENTTEAMS_HERMES_WORKER_IMAGE=${HERMES_WORKER_IMAGE}"
+            -e "AGENTTEAMS_QWENPAW_WORKER_IMAGE=${QWENPAW_WORKER_IMAGE}"
+            -e "AGENTTEAMS_OPENHUMAN_WORKER_IMAGE=${OPENHUMAN_WORKER_IMAGE}"
             -e "AGENTTEAMS_MATRIX_DOMAIN=${_matrix_domain}"
             -e "AGENTTEAMS_ELEMENT_HOMESERVER_URL=http://127.0.0.1:${AGENTTEAMS_PORT_GATEWAY}"
             -e "AGENTTEAMS_MATRIX_URL=http://127.0.0.1:6167"
@@ -3469,7 +3007,6 @@ CREDEOF
             -e "AGENTTEAMS_WORKSPACE_DIR=${AGENTTEAMS_WORKSPACE_DIR}"
             -e "AGENTTEAMS_HOST_SHARE_DIR=${AGENTTEAMS_HOST_SHARE_DIR}"
             -e "AGENTTEAMS_MANAGER_ENABLED=true"
-            -e "AGENTTEAMS_PORT_MANAGER_CONSOLE=${AGENTTEAMS_PORT_MANAGER_CONSOLE:-18888}"
         )
 
         # Timezone
@@ -3482,10 +3019,8 @@ CREDEOF
             _ctrl_env_args+=(-e "AGENTTEAMS_YOLO=1")
         fi
 
-        # Matrix-plugin debug tracing — propagated to every manager + worker
-        # the controller spawns, then translated to OPENCLAW_MATRIX_DEBUG=1
-        # by the container entrypoints. Use this to diagnose
-        # "worker did not join" / "manager replied empty" hangs.
+        # Matrix debug tracing is propagated to the AgentScope Manager and all
+        # Worker runtimes by the Controller.
         if [ "${AGENTTEAMS_MATRIX_DEBUG:-}" = "1" ]; then
             _ctrl_env_args+=(-e "AGENTTEAMS_MATRIX_DEBUG=1")
         fi
@@ -3601,10 +3136,7 @@ CREDEOF
             _agent_wait=$((_agent_wait + 2))
         done
 
-        # Enable yolo mode in agent if requested
-        if [ "${AGENTTEAMS_YOLO:-}" = "1" ]; then
-            ${DOCKER_CMD} exec agentteams-manager touch /root/manager-workspace/yolo-mode 2>/dev/null || true
-        fi
+        wait_manager_ready "agentteams-manager"
 
         # Wait for the controller to send the first-boot welcome message.
         # The controller gates this on (a) Manager joining the DM room and
@@ -3656,96 +3188,6 @@ CREDEOF
             log "$(msg install.welcome_msg.poll_unavailable)"
         fi
 
-    else
-        # ============================================================
-        # Legacy architecture: all-in-one manager container
-        # ============================================================
-
-        NETWORK_ARGS="--network agentteams-net"
-        NETWORK_ALIAS_ARGS="--network-alias matrix-local.agentteams.io --network-alias aigw-local.agentteams.io --network-alias fs-local.agentteams.io"
-        for _domain in "${AGENTTEAMS_MATRIX_CLIENT_DOMAIN:-}" "${AGENTTEAMS_CONSOLE_DOMAIN:-}"; do
-            if [ -n "${_domain}" ] && [[ "${_domain}" == *-local.agentteams.io ]]; then
-                NETWORK_ALIAS_ARGS="${NETWORK_ALIAS_ARGS} --network-alias ${_domain}"
-            fi
-        done
-
-        # Start Docker API proxy if enabled (security layer between Manager and Docker daemon)
-        PROXY_ARGS=""
-        if [ "${AGENTTEAMS_DOCKER_PROXY:-1}" = "1" ] && [ -n "${CONTAINER_SOCK:-}" ]; then
-            local _proxy_image="${AGENTTEAMS_REGISTRY}/higress/agentteams-docker-proxy:${AGENTTEAMS_VERSION}"
-            # Try versioned tag, fallback to latest
-            if ! ${DOCKER_CMD} image inspect "${_proxy_image}" >/dev/null 2>&1; then
-                ${DOCKER_CMD} pull "${_proxy_image}" 2>/dev/null || {
-                    _proxy_image="${AGENTTEAMS_REGISTRY}/higress/agentteams-docker-proxy:latest"
-                    ${DOCKER_CMD} pull "${_proxy_image}" 2>/dev/null || true
-                }
-            fi
-            if ${DOCKER_CMD} image inspect "${_proxy_image}" >/dev/null 2>&1; then
-                log "Starting Docker API proxy..."
-                ${DOCKER_CMD} run -d \
-                    --name agentteams-docker-proxy \
-                    --network agentteams-net \
-                    -v "${CONTAINER_SOCK}:/var/run/docker.sock" \
-                    --security-opt label=disable \
-                    -e AGENTTEAMS_WORKER_IMAGE="${WORKER_IMAGE}" \
-                    -e AGENTTEAMS_COPAW_WORKER_IMAGE="${COPAW_WORKER_IMAGE}" \
-                    -e AGENTTEAMS_HERMES_WORKER_IMAGE="${HERMES_WORKER_IMAGE}" \
-                    ${AGENTTEAMS_PROXY_ALLOWED_REGISTRIES:+-e AGENTTEAMS_PROXY_ALLOWED_REGISTRIES="${AGENTTEAMS_PROXY_ALLOWED_REGISTRIES}"} \
-                    --restart unless-stopped \
-                    "${_proxy_image}"
-                PROXY_ARGS="-e AGENTTEAMS_CONTROLLER_URL=http://agentteams-docker-proxy:2375 -e AGENTTEAMS_CONTAINER_API=http://agentteams-docker-proxy:2375"
-                SOCKET_MOUNT_ARGS=""
-            fi
-        fi
-
-        # Pass host timezone to container
-        TZ_ARGS=""
-        if [ -n "${AGENTTEAMS_TIMEZONE:-}" ]; then
-            TZ_ARGS="-e TZ=${AGENTTEAMS_TIMEZONE}"
-        fi
-
-        YOLO_ARGS=""
-        if [ "${AGENTTEAMS_YOLO:-}" = "1" ]; then
-            YOLO_ARGS="-e AGENTTEAMS_YOLO=1"
-        fi
-
-        MATRIX_DEBUG_ARGS=""
-        if [ "${AGENTTEAMS_MATRIX_DEBUG:-}" = "1" ]; then
-            MATRIX_DEBUG_ARGS="-e AGENTTEAMS_MATRIX_DEBUG=1"
-        fi
-
-        # shellcheck disable=SC2086
-        ${DOCKER_CMD} run -d \
-            --name agentteams-manager \
-            --env-file "${ENV_FILE}" \
-            -e HOME=/root/manager-workspace \
-            -w /root/manager-workspace \
-            -e HOST_ORIGINAL_HOME="${AGENTTEAMS_HOST_SHARE_DIR}" \
-            -e AGENTTEAMS_MANAGER_RUNTIME="${AGENTTEAMS_MANAGER_RUNTIME:-copaw}" \
-            ${JVM_ARGS:+-e JVM_ARGS="${JVM_ARGS}"} \
-            ${YOLO_ARGS} \
-            ${MATRIX_DEBUG_ARGS} \
-            ${TZ_ARGS} \
-            ${SOCKET_MOUNT_ARGS} \
-            ${NETWORK_ARGS} \
-            ${NETWORK_ALIAS_ARGS} \
-            ${PROXY_ARGS} \
-            -p "${_port_prefix}${AGENTTEAMS_PORT_GATEWAY}:8080" \
-            -p "${_port_prefix}${AGENTTEAMS_PORT_CONSOLE}:8001" \
-            -p "${_port_prefix}${AGENTTEAMS_PORT_ELEMENT_WEB:-18088}:8088" \
-            -p "127.0.0.1:${AGENTTEAMS_PORT_MANAGER_CONSOLE:-18888}:18888" \
-            ${DATA_MOUNT_ARGS} \
-            ${WORKSPACE_MOUNT_ARGS} \
-            ${HOST_SHARE_MOUNT_ARGS} \
-            --restart unless-stopped \
-            "$([ "${AGENTTEAMS_MANAGER_RUNTIME}" = "copaw" ] && echo "${MANAGER_COPAW_IMAGE}" || echo "${MANAGER_IMAGE}")"
-
-        # Wait for Manager agent to be ready
-        wait_manager_ready "agentteams-manager"
-
-        # Wait for Matrix server to be ready
-        wait_matrix_ready "agentteams-manager"
-
         # Post-install verification (non-fatal: warnings only)
         local _verify_script
         _verify_script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/agentteams-verify.sh"
@@ -3754,7 +3196,6 @@ CREDEOF
                 log "WARNING: Some post-install checks failed. Re-run: bash install/agentteams-verify.sh"
             }
         fi
-    fi
     unset _port_prefix
 
     # Apply Podman autostart if selected and environment matches
@@ -3766,7 +3207,7 @@ CREDEOF
     log "$(msg success.title)"
     log ""
     log "$(msg success.domains_configured)"
-    log "  ${AGENTTEAMS_MATRIX_DOMAIN%%:*} ${AGENTTEAMS_MATRIX_CLIENT_DOMAIN} ${AGENTTEAMS_AI_GATEWAY_DOMAIN} ${AGENTTEAMS_FS_DOMAIN} ${AGENTTEAMS_CONSOLE_DOMAIN}"
+    log "  ${AGENTTEAMS_MATRIX_DOMAIN%%:*} ${AGENTTEAMS_MATRIX_CLIENT_DOMAIN} ${AGENTTEAMS_AI_GATEWAY_DOMAIN} ${AGENTTEAMS_FS_DOMAIN}"
     log ""
     local lan_ip
     lan_ip=$(detect_lan_ip)
@@ -3805,10 +3246,7 @@ CREDEOF
     log ""
     log "$(msg success.other_consoles)"
     log "$(msg success.higress_console "${AGENTTEAMS_PORT_CONSOLE}" "${AGENTTEAMS_ADMIN_USER}" "${AGENTTEAMS_ADMIN_PASSWORD}")"
-    if [ "${AGENTTEAMS_USE_EMBEDDED}" != "1" ]; then
-        log "$(msg success.manager_console "${AGENTTEAMS_PORT_MANAGER_CONSOLE:-18888}")"
-        log "$(msg success.manager_console_gateway "${AGENTTEAMS_ADMIN_USER}" "${AGENTTEAMS_ADMIN_PASSWORD}")"
-    fi
+    log "$(msg success.manager_health)"
     log ""
     log "$(msg success.switch_llm.title)"
     log "$(msg success.switch_llm.hint)"
@@ -4048,14 +3486,6 @@ uninstall_agentteams() {
             ${DOCKER_CMD} rm -f "${w}" >/dev/null 2>&1 || true
             log "$(msg uninstall.removed "${w}")"
         done
-    fi
-
-    # Stop and remove docker-proxy (legacy ≤ v1.0.x; current arch uses
-    # agentteams-controller for the same role)
-    if ${DOCKER_CMD} ps -a --format '{{.Names}}' 2>/dev/null | grep -q "^agentteams-docker-proxy$"; then
-        log "$(msg uninstall.removing_proxy)"
-        ${DOCKER_CMD} stop agentteams-docker-proxy >/dev/null 2>&1 || true
-        ${DOCKER_CMD} rm agentteams-docker-proxy >/dev/null 2>&1 || true
     fi
 
     # Stop and remove the embedded controller container. MUST happen

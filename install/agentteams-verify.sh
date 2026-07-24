@@ -4,13 +4,14 @@
 # Usage:
 #   bash install/agentteams-verify.sh [container_name]   # default: agentteams-manager
 #
-# Runs 6 read-only reachability checks and prints PASS/FAIL per check.
+# Runs read-only reachability checks against the Controller infrastructure and
+# the direct AgentScope Manager. Prints PASS/FAIL per check.
 # Exit code: 0 if all pass, 1 if any fail.
 #
 # ── Extension notes ────────────────────────────────────────────────────────────
 #
 # Kubernetes migration (TODO when K8s support is planned):
-#   This script currently assumes a single-container Docker/Podman deployment.
+#   This script currently assumes the local dual-container Docker/Podman deployment.
 #   Three areas need rework for K8s:
 #
 #   1. Runtime detection
@@ -21,9 +22,8 @@
 #      Pod name is dynamic; discover it with:
 #        kubectl get pod -l app=agentteams-manager -o jsonpath='{.items[0].metadata.name}'
 #
-#   2. Internal service checks (checks #2, #3, #6)
-#      These use `docker exec ... curl 127.0.0.1:PORT` which works because all
-#      services share a single container network namespace.
+#   2. Internal service checks (checks #2 and #3)
+#      These use `docker exec agentteams-controller ...` for embedded services.
 #      In K8s each service is a separate Pod/Service; replace with:
 #        `kubectl exec <manager-pod> -- curl http://<service-name>.<ns>.svc:PORT`
 #      or use `kubectl port-forward svc/<name> LOCAL:REMOTE` for a one-shot probe.
@@ -40,6 +40,7 @@
 # No set -e: each check is independent; failures do not abort subsequent checks.
 
 CONTAINER="${1:-agentteams-manager}"
+CONTROLLER_CONTAINER="${AGENTTEAMS_CONTROLLER_CONTAINER:-agentteams-controller}"
 
 # ---------- Docker/Podman detection ----------
 # TODO(k8s): extend to three-way detection (docker / podman / kubectl)
@@ -52,15 +53,12 @@ if ! docker version >/dev/null 2>&1; then
     fi
 fi
 
-# ---------- Port/config detection from container env ----------
+# ---------- Host port configuration ----------
 # TODO(k8s): replace printenv-based detection with kubectl-based service
 #   discovery, or accept GATEWAY_URL / CONSOLE_URL env vars directly.
 
-container_env=$("${DOCKER_CMD}" exec "${CONTAINER}" printenv 2>/dev/null) || container_env=""
-PORT_GATEWAY=$(echo "$container_env" | grep ^AGENTTEAMS_PORT_GATEWAY= | cut -d= -f2-)
-PORT_CONSOLE=$(echo "$container_env" | grep ^AGENTTEAMS_PORT_CONSOLE= | cut -d= -f2-)
-PORT_GATEWAY="${PORT_GATEWAY:-18080}"
-PORT_CONSOLE="${PORT_CONSOLE:-18001}"
+PORT_GATEWAY="${AGENTTEAMS_PORT_GATEWAY:-18080}"
+PORT_CONSOLE="${AGENTTEAMS_PORT_CONSOLE:-18001}"
 
 # ---------- Result tracking ----------
 
@@ -91,10 +89,10 @@ else
     check_fail "Manager container running (container '${CONTAINER}' not found in docker ps)"
 fi
 
-# 2. MinIO health check (internal via docker exec)
+# 2. MinIO health check (inside the infrastructure Controller)
 # TODO(k8s): replace with `kubectl exec <manager-pod> -- curl http://minio.<ns>.svc:9000/minio/health/live`
 #   or probe the MinIO Service ClusterIP directly if network policy allows.
-minio_status=$("${DOCKER_CMD}" exec "${CONTAINER}" \
+minio_status=$("${DOCKER_CMD}" exec "${CONTROLLER_CONTAINER}" \
     curl -s -o /dev/null -w "%{http_code}" --max-time 10 \
     "http://127.0.0.1:9000/minio/health/live" 2>/dev/null) || minio_status="000"
 if [ "${minio_status}" = "200" ]; then
@@ -103,9 +101,9 @@ else
     check_fail "MinIO health check (HTTP ${minio_status})"
 fi
 
-# 3. Matrix API reachable (internal via docker exec)
+# 3. Matrix API reachable (inside the infrastructure Controller)
 # TODO(k8s): replace with `kubectl exec <manager-pod> -- curl http://matrix.<ns>.svc:6167/_matrix/client/versions`
-matrix_status=$("${DOCKER_CMD}" exec "${CONTAINER}" \
+matrix_status=$("${DOCKER_CMD}" exec "${CONTROLLER_CONTAINER}" \
     curl -s -o /dev/null -w "%{http_code}" --max-time 10 \
     "http://127.0.0.1:6167/_matrix/client/versions" 2>/dev/null) || matrix_status="000"
 if [ "${matrix_status}" = "200" ]; then
@@ -136,31 +134,14 @@ else
     check_fail "Higress Console reachable (HTTP ${console_status} on port ${PORT_CONSOLE})"
 fi
 
-# 6. Manager Agent healthy (runtime-aware check)
-# TODO(k8s): replace with `kubectl exec <manager-pod> -- <health-check-command>`
-#   Pod name must be resolved dynamically before this call.
-MANAGER_RUNTIME=$(echo "$container_env" | grep ^AGENTTEAMS_MANAGER_RUNTIME= | cut -d= -f2-)
-MANAGER_RUNTIME="${MANAGER_RUNTIME:-openclaw}"
-
-if [ "${MANAGER_RUNTIME}" = "copaw" ]; then
-    # CoPaw: check app API health endpoint
-    agent_status=$("${DOCKER_CMD}" exec "${CONTAINER}" \
-        curl -s -o /dev/null -w "%{http_code}" --max-time 10 \
-        "http://127.0.0.1:18799/health" 2>/dev/null) || agent_status="000"
-    if [ "${agent_status}" = "200" ]; then
-        check_pass "CoPaw Agent healthy"
-    else
-        check_fail "CoPaw Agent healthy (HTTP ${agent_status})"
-    fi
+# 6. Direct AgentScope Manager ready
+# Python is part of the Manager runtime and avoids adding curl to the image.
+if "${DOCKER_CMD}" exec "${CONTAINER}" python -c \
+    'import urllib.request; urllib.request.urlopen("http://127.0.0.1:18799/readyz", timeout=5).read()' \
+    >/dev/null 2>&1; then
+    check_pass "AgentScope Manager ready"
 else
-    # OpenClaw: check gateway health
-    agent_output=$("${DOCKER_CMD}" exec "${CONTAINER}" \
-        openclaw gateway health --json 2>/dev/null) || agent_output=""
-    if echo "${agent_output}" | grep -q '"ok"'; then
-        check_pass "OpenClaw Agent healthy"
-    else
-        check_fail "OpenClaw Agent healthy (output: ${agent_output:-<empty>})"
-    fi
+    check_fail "AgentScope Manager ready (/readyz unavailable)"
 fi
 
 # ---------- Summary ----------
