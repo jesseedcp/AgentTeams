@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -10,6 +11,7 @@ from typing import Protocol
 from urllib.parse import urlsplit
 
 from agentscope.mcp import HttpMCPConfig, MCPClient
+from agentscope.message import ToolResultState
 from agentscope.tool import ToolBase
 from pydantic import SecretStr
 
@@ -155,6 +157,58 @@ class MCPRegistry:
             if client.name in allowed
         )
 
+    async def list_server_tools(
+        self,
+        server_name: str,
+        *,
+        revision: int | None = None,
+    ) -> tuple[ToolBase, ...]:
+        """Rediscover one configured server through its AgentScope client."""
+        client = self._client_for(server_name, revision=revision)
+        try:
+            return tuple(await client.list_tools())
+        except Exception as exc:
+            raise MCPPreparationError(
+                f"MCP {server_name!r} discovery failed "
+                f"({type(exc).__name__})",
+            ) from None
+
+    async def call_server_tool(
+        self,
+        server_name: str,
+        tool_name: str,
+        arguments: dict[str, object],
+        *,
+        revision: int | None = None,
+    ) -> object:
+        """Invoke a discovered tool without a sidecar or model round trip."""
+        tools = await self.list_server_tools(
+            server_name,
+            revision=revision,
+        )
+        tool = next(
+            (candidate for candidate in tools if candidate.name == tool_name),
+            None,
+        )
+        if tool is None:
+            raise MCPPreparationError(
+                f"MCP tool {tool_name!r} is not exposed by {server_name!r}",
+            )
+        try:
+            result = tool.call(**arguments)
+            if inspect.isawaitable(result):
+                result = await result
+        except Exception as exc:
+            raise MCPPreparationError(
+                f"MCP tool {tool_name!r} failed "
+                f"({type(exc).__name__})",
+            ) from None
+        if getattr(result, "state", None) is ToolResultState.ERROR:
+            raise MCPPreparationError(
+                f"MCP tool {tool_name!r} returned an error result",
+            )
+        return result
+
     def retain(self, revision: int) -> None:
         if revision not in self._generations:
             raise KeyError(f"MCP generation {revision} is not prepared")
@@ -190,6 +244,36 @@ class MCPRegistry:
         await _close_clients(generation.clients, ignore_errors=False)
         del self._generations[revision]
         del self._references[revision]
+
+    def _client_for(
+        self,
+        server_name: str,
+        *,
+        revision: int | None,
+    ) -> MCPClientPort:
+        if revision is None:
+            if not self._generations:
+                raise MCPPreparationError("no MCP generation is prepared")
+            revision = max(self._generations)
+        generation = self._generations.get(revision)
+        if generation is None:
+            raise MCPPreparationError(
+                f"MCP generation {revision} is not prepared",
+            )
+        client = next(
+            (
+                candidate
+                for candidate in generation.clients
+                if candidate.name == server_name
+            ),
+            None,
+        )
+        if client is None:
+            raise MCPPreparationError(
+                f"MCP server {server_name!r} is not in generation "
+                f"{revision}",
+            )
+        return client
 
 
 def _validate_transport(transport: str, url: str) -> None:
@@ -236,4 +320,3 @@ async def _close_clients(
             "MCP generation cleanup failed "
             f"({type(first_error).__name__})",
         ) from None
-

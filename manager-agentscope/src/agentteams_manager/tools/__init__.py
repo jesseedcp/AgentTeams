@@ -6,6 +6,11 @@ from .configuration import (
     ConfigurationToolkit,
     ConfigurationToolkitFactory,
 )
+from .integrations import (
+    INTEGRATION_TOOL_NAMES,
+    IntegrationToolkit,
+    IntegrationToolkitFactory,
+)
 from .resources import (
     RESOURCE_TOOL_NAMES,
     ChannelResolver,
@@ -50,6 +55,9 @@ __all__ = [
     "CreateRecurringTaskInput",
     "ConfigurationToolkit",
     "ConfigurationToolkitFactory",
+    "INTEGRATION_TOOL_NAMES",
+    "IntegrationToolkit",
+    "IntegrationToolkitFactory",
     "FileSyncReceipt",
     "FileSyncService",
     "GitDelegationInput",
