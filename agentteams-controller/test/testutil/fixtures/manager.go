@@ -14,7 +14,7 @@ func NewTestManager(name string) *v1beta1.Manager {
 		},
 		Spec: v1beta1.ManagerSpec{
 			Model:   "gpt-4o",
-			Runtime: "openclaw",
+			Runtime: "agentscope",
 			Image:   "agentteams/manager:test",
 		},
 	}

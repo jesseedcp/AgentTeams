@@ -41,7 +41,7 @@ func captureManagerCreateRequest(t *testing.T, mgr *v1beta1.Manager, defaults *b
 		EnvBuilder:       mocks.NewMockManagerEnvBuilder(),
 		ResourcePrefix:   auth.DefaultResourcePrefix,
 		ControllerName:   "real-ctl",
-		DefaultRuntime:   "copaw",
+		DefaultRuntime:   backend.RuntimeAgentScope,
 		ManagerResources: defaults,
 	}
 
@@ -81,17 +81,17 @@ func TestCreateManagerContainer_MergesMetadataAndSpecLabels(t *testing.T) {
 		"env":  "prod",
 		"tier": "spec-tier", // overrides metadata
 	}
-	m.Spec.Runtime = "copaw"
+	m.Spec.Runtime = backend.RuntimeAgentScope
 
 	labels := captureManagerCreateLabels(t, m)
 
 	cases := map[string]string{
-		"owner":                 "alice",     // metadata.labels propagated
-		"env":                   "prod",      // spec.labels propagated
-		"tier":                  "spec-tier", // spec beats metadata
-		"agentteams.io/manager": "default",   // system label
-		"agentteams.io/role":    "manager",   // system label
-		"agentteams.io/runtime": "copaw",     // system label
+		"owner":                 "alice",      // metadata.labels propagated
+		"env":                   "prod",       // spec.labels propagated
+		"tier":                  "spec-tier",  // spec beats metadata
+		"agentteams.io/manager": "default",    // system label
+		"agentteams.io/role":    "manager",    // system label
+		"agentteams.io/runtime": "agentscope", // system label
 		"app":                   "agentteams-manager",
 		v1beta1.LabelController: "real-ctl",
 	}
@@ -120,7 +120,7 @@ func TestCreateManagerContainer_SystemLabelsOverrideUserLabels(t *testing.T) {
 		"agentteams.io/role":    "evil-role",
 		"agentteams.io/manager": "spoofed",
 	}
-	m.Spec.Runtime = "copaw"
+	m.Spec.Runtime = backend.RuntimeAgentScope
 
 	labels := captureManagerCreateLabels(t, m)
 
@@ -145,7 +145,7 @@ func TestCreateManagerContainer_NilLabelsSafe(t *testing.T) {
 	m := &v1beta1.Manager{}
 	m.Name = "default"
 	m.Namespace = "agentteams"
-	m.Spec.Runtime = "copaw"
+	m.Spec.Runtime = backend.RuntimeAgentScope
 
 	labels := captureManagerCreateLabels(t, m)
 
@@ -226,6 +226,118 @@ func TestCreateManagerContainerUsesDefaultResourcesWhenSpecResourcesUnset(t *tes
 
 	if req.Resources != defaults {
 		t.Fatalf("CreateRequest.Resources = %+v, want default pointer %+v", req.Resources, defaults)
+	}
+}
+
+func TestModelAndMCPChangeDoNotChangeManagerPodHash(t *testing.T) {
+	before := v1beta1.ManagerSpec{
+		Model:   "qwen3.6-plus",
+		Runtime: backend.RuntimeAgentScope,
+		Image:   "agentteams/agentteams-manager:v1",
+		McpServers: []v1beta1.MCPServer{{
+			Name: "github",
+			URL:  "http://higress/mcp/github",
+		}},
+	}
+	after := before
+	after.Model = "new-model"
+	after.McpServers = []v1beta1.MCPServer{{
+		Name: "jira",
+		URL:  "http://higress/mcp/jira",
+	}}
+	after.Soul = "new soul"
+	after.Agents = "new agents"
+	after.Skills = []string{"worker-management"}
+	after.Config.HeartbeatInterval = "15m"
+
+	if got, want := hashAppliedManagerSpec(after), hashAppliedManagerSpec(before); got != want {
+		t.Fatalf("config-only hash=%q, want unchanged %q", got, want)
+	}
+}
+
+func TestPodAffectingManagerFieldsChangePodHash(t *testing.T) {
+	base := v1beta1.ManagerSpec{
+		Runtime: backend.RuntimeAgentScope,
+		Image:   "agentteams/agentteams-manager:v1",
+		Resources: &v1beta1.AgentResourceRequirements{
+			Limits: v1beta1.AgentResourceValues{CPU: "2"},
+		},
+		AccessEntries: []v1beta1.AccessEntry{{Service: "storage"}},
+		Env:           map[string]string{"EXTRA": "one"},
+		Labels:        map[string]string{"tier": "manager"},
+	}
+	baseHash := hashAppliedManagerSpec(base)
+	cases := map[string]v1beta1.ManagerSpec{}
+
+	changed := base
+	changed.Image = "agentteams/agentteams-manager:v2"
+	cases["image"] = changed
+	changed = base
+	changed.Runtime = "future-manager"
+	cases["runtime"] = changed
+	changed = base
+	changed.Resources = &v1beta1.AgentResourceRequirements{
+		Limits: v1beta1.AgentResourceValues{CPU: "3"},
+	}
+	cases["resources"] = changed
+	changed = base
+	changed.AccessEntries = []v1beta1.AccessEntry{{Service: "other"}}
+	cases["accessEntries"] = changed
+	changed = base
+	changed.Env = map[string]string{"EXTRA": "two"}
+	cases["env"] = changed
+	changed = base
+	changed.Labels = map[string]string{"tier": "other"}
+	cases["labels"] = changed
+
+	for name, spec := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got := hashAppliedManagerSpec(spec); got == baseHash {
+				t.Fatalf("%s did not change pod hash %q", name, got)
+			}
+		})
+	}
+}
+
+func TestReconcileManagerConfigPublishesGenerationStampedDocument(t *testing.T) {
+	deployer := mocks.NewMockManagerDeployer()
+	reconciler := &ManagerReconciler{Deployer: deployer}
+	manager := &v1beta1.Manager{}
+	manager.Name = "default"
+	manager.Generation = 9
+	manager.Spec = v1beta1.ManagerSpec{
+		Model:      "qwen3.6-plus",
+		Runtime:    backend.RuntimeAgentScope,
+		Skills:     []string{"worker-management"},
+		McpServers: []v1beta1.MCPServer{{Name: "github", URL: "http://mcp"}},
+	}
+	provisioned := &service.ManagerProvisionResult{
+		MatrixUserID:   "@manager:matrix.example.com",
+		MatrixToken:    "matrix-token",
+		GatewayKey:     "gateway-key",
+		MinIOPassword:  "minio-password",
+		MatrixPassword: "matrix-password",
+	}
+
+	_, err := reconciler.reconcileManagerConfig(
+		context.Background(),
+		&managerScope{manager: manager, provResult: provisioned},
+	)
+	if err != nil {
+		t.Fatalf("reconcileManagerConfig: %v", err)
+	}
+	if got := len(deployer.Calls.DeployManagerConfig); got != 1 {
+		t.Fatalf("DeployManagerConfig calls=%d, want 1", got)
+	}
+	request := deployer.Calls.DeployManagerConfig[0]
+	if got, want := request.RuntimeRevision, manager.Generation; got != want {
+		t.Fatalf("RuntimeRevision=%d, want generation %d", got, want)
+	}
+	if got, want := request.MatrixUserID, provisioned.MatrixUserID; got != want {
+		t.Fatalf("MatrixUserID=%q, want %q", got, want)
+	}
+	if got := len(deployer.Calls.PushOnDemandSkills); got != 0 {
+		t.Fatalf("legacy PushOnDemandSkills calls=%d, want 0", got)
 	}
 }
 

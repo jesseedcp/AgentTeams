@@ -3,7 +3,9 @@ package oss
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"os/exec"
@@ -93,8 +95,32 @@ func (c *MinIOClient) PutFile(ctx context.Context, localPath, key string) error 
 	if err := c.ensureAlias(ctx); err != nil {
 		return err
 	}
-	_, err := c.runMC(ctx, "cp", localPath, c.fullPath(key))
+	args, err := c.copyArgs(localPath, key)
+	if err != nil {
+		return err
+	}
+	_, err = c.runMC(ctx, args...)
 	return err
+}
+
+func (c *MinIOClient) copyArgs(localPath, key string) ([]string, error) {
+	file, err := os.Open(localPath)
+	if err != nil {
+		return nil, fmt.Errorf("open upload source: %w", err)
+	}
+	defer file.Close()
+
+	digest := sha256.New()
+	if _, err := io.Copy(digest, file); err != nil {
+		return nil, fmt.Errorf("hash upload source: %w", err)
+	}
+	return []string{
+		"cp",
+		"--attr",
+		fmt.Sprintf("sha256=%x", digest.Sum(nil)),
+		localPath,
+		c.fullPath(key),
+	}, nil
 }
 
 func (c *MinIOClient) GetObject(ctx context.Context, key string) ([]byte, error) {

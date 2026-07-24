@@ -1,7 +1,12 @@
 package service
 
 import (
+	"strconv"
+	"strings"
+	"time"
+
 	v1beta1 "github.com/agentscope-ai/AgentTeams/agentteams-controller/api/v1beta1"
+	"github.com/agentscope-ai/AgentTeams/agentteams-controller/internal/backend"
 	"github.com/agentscope-ai/AgentTeams/agentteams-controller/internal/config"
 )
 
@@ -38,35 +43,53 @@ func (b *WorkerEnvBuilder) Build(workerName string, prov *WorkerProvisionResult)
 
 // BuildManager returns the env map for a Manager container.
 func (b *WorkerEnvBuilder) BuildManager(managerName string, prov *ManagerProvisionResult, spec v1beta1.ManagerSpec) map[string]string {
-	runtime := b.defaults.Runtime
-	if runtime == "" {
-		runtime = "k8s"
+	deploymentRuntime := b.defaults.Runtime
+	if deploymentRuntime == "" {
+		deploymentRuntime = "k8s"
+	}
+	heartbeatSeconds, err := managerDurationSeconds(
+		spec.Config.HeartbeatInterval,
+		30*time.Minute,
+		"heartbeatInterval",
+	)
+	if err != nil {
+		heartbeatSeconds = int64((30 * time.Minute) / time.Second)
+	}
+	idleSeconds, err := managerDurationSeconds(
+		spec.Config.WorkerIdleTimeout,
+		12*time.Hour,
+		"workerIdleTimeout",
+	)
+	if err != nil {
+		idleSeconds = int64((12 * time.Hour) / time.Second)
+	}
+	modelName := strings.TrimPrefix(
+		strings.TrimSpace(spec.Model),
+		"agentteams-gateway/",
+	)
+	if modelName == "" {
+		modelName = "qwen3.6-plus"
 	}
 
 	env := map[string]string{
-		"AGENTTEAMS_MANAGER_NAME":        managerName,
-		"AGENTTEAMS_MANAGER_GATEWAY_KEY": prov.GatewayKey,
-		// In AS mode MatrixPassword is empty; set a placeholder so the
-		// entrypoint's :? validation passes. The password is never used
-		// for login in AS mode (token obtained via AS login instead).
-		"AGENTTEAMS_MANAGER_PASSWORD": valueOrPlaceholder(prov.MatrixPassword),
-		// Pre-inject the Matrix access token so the Manager entrypoint can
-		// skip password-based login. Required in AppService mode (no password)
-		// and beneficial in legacy mode (avoids a redundant login round-trip).
-		"AGENTTEAMS_MANAGER_MATRIX_TOKEN": prov.MatrixToken,
-		"AGENTTEAMS_FS_ACCESS_KEY":        managerName,
-		"AGENTTEAMS_FS_SECRET_KEY":        prov.MinIOPassword,
-		"OPENCLAW_DISABLE_BONJOUR":        "1",
-		"OPENCLAW_MDNS_HOSTNAME":          "agentteams-manager",
-		"HOME":                            "/root/manager-workspace",
-		"AGENTTEAMS_RUNTIME":              runtime,
+		"AGENTTEAMS_MANAGER_NAME":                        managerName,
+		"AGENTTEAMS_MANAGER_MATRIX_USER_ID":              prov.MatrixUserID,
+		"AGENTTEAMS_MANAGER_MATRIX_TOKEN":                prov.MatrixToken,
+		"AGENTTEAMS_MANAGER_GATEWAY_KEY":                 prov.GatewayKey,
+		"AGENTTEAMS_MANAGER_RUNTIME":                     backend.RuntimeAgentScope,
+		"AGENTTEAMS_MANAGER_RUNTIME_DOCUMENT_KEY":        "manager/agentscope-manager.json",
+		"AGENTTEAMS_MANAGER_WORKSPACE":                   "/var/lib/agentteams-manager",
+		"AGENTTEAMS_MANAGER_HEARTBEAT_INTERVAL_SECONDS":  strconv.FormatInt(heartbeatSeconds, 10),
+		"AGENTTEAMS_MANAGER_WORKER_IDLE_TIMEOUT_SECONDS": strconv.FormatInt(idleSeconds, 10),
+		"AGENTTEAMS_DEFAULT_MODEL":                       modelName,
+		"AGENTTEAMS_FS_ACCESS_KEY":                       managerName,
+		"AGENTTEAMS_FS_SECRET_KEY":                       prov.MinIOPassword,
+		"AGENTTEAMS_RUNTIME":                             deploymentRuntime,
+		"HOME":                                           "/var/lib/agentteams-manager",
 	}
 
-	if spec.Model != "" {
-		env["AGENTTEAMS_DEFAULT_MODEL"] = spec.Model
-	}
-	if spec.Runtime != "" {
-		env["AGENTTEAMS_MANAGER_RUNTIME"] = spec.Runtime
+	if prov.MatrixPassword != "" {
+		env["AGENTTEAMS_MANAGER_MATRIX_PASSWORD"] = prov.MatrixPassword
 	}
 	if b.defaults.AdminUser != "" {
 		env["AGENTTEAMS_ADMIN_USER"] = b.defaults.AdminUser
@@ -75,15 +98,8 @@ func (b *WorkerEnvBuilder) BuildManager(managerName string, prov *ManagerProvisi
 		env["AGENTTEAMS_DEFAULT_WORKER_RUNTIME"] = b.defaults.DefaultWorkerRuntime
 	}
 
-	cfg := spec.Config
-	if cfg.HeartbeatInterval != "" {
-		env["AGENTTEAMS_MANAGER_HEARTBEAT_INTERVAL"] = cfg.HeartbeatInterval
-	}
-	if cfg.WorkerIdleTimeout != "" {
-		env["AGENTTEAMS_MANAGER_WORKER_IDLE_TIMEOUT"] = cfg.WorkerIdleTimeout
-	}
-	if cfg.NotifyChannel != "" {
-		env["AGENTTEAMS_MANAGER_NOTIFY_CHANNEL"] = cfg.NotifyChannel
+	if spec.Config.NotifyChannel != "" {
+		env["AGENTTEAMS_MANAGER_NOTIFY_CHANNEL"] = spec.Config.NotifyChannel
 	}
 
 	b.applyClusterDefaults(env)
@@ -113,13 +129,9 @@ func (b *WorkerEnvBuilder) applyClusterDefaults(env map[string]string) {
 		env["AGENTTEAMS_YOLO"] = "1"
 	}
 
-	// Matrix-plugin trace logging: when the controller was started with
-	// AGENTTEAMS_MATRIX_DEBUG=1, propagate it to every manager + worker container.
-	// The container entrypoints translate it to OPENCLAW_MATRIX_DEBUG=1, which
-	// makes openclaw's matrix plugin emit structured INFO-level traces (sync
-	// state transitions, room.invite/join, message handler arrival + filter
-	// outcomes). Used to debug "worker never joined" / "manager never replied"
-	// hangs without rebuilding images.
+	// Matrix trace logging: Worker entrypoints translate this to their native
+	// runtime flags, while the AgentScope Manager reads the AgentTeams name
+	// directly.
 	if b.defaults.MatrixDebug {
 		env["AGENTTEAMS_MATRIX_DEBUG"] = "1"
 	}
@@ -149,13 +161,4 @@ func (b *WorkerEnvBuilder) applyClusterDefaults(env map[string]string) {
 	if b.defaults.NacosAuthType != "" {
 		env["NACOS_AUTH_TYPE"] = b.defaults.NacosAuthType
 	}
-}
-
-// valueOrPlaceholder returns v if non-empty, otherwise a harmless placeholder.
-// Used for env vars that must be present but are unused in certain modes.
-func valueOrPlaceholder(v string) string {
-	if v != "" {
-		return v
-	}
-	return "as-mode-not-used"
 }

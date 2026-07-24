@@ -410,6 +410,7 @@ func LoadConfig() *Config {
 			AIGatewayURL:         envOrDefault("AGENTTEAMS_AI_GATEWAY_URL", "http://aigw-local.agentteams.io:8080"),
 			MatrixURL:            envOrDefault("AGENTTEAMS_MATRIX_URL", "http://matrix-local.agentteams.io:8080"),
 			AdminUser:            os.Getenv("AGENTTEAMS_ADMIN_USER"),
+			Runtime:              kubeMode,
 			DefaultWorkerRuntime: os.Getenv("AGENTTEAMS_DEFAULT_WORKER_RUNTIME"),
 			YoloMode:             envBool("AGENTTEAMS_YOLO"),
 			MatrixDebug:          envBool("AGENTTEAMS_MATRIX_DEBUG"),

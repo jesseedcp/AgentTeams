@@ -144,6 +144,13 @@ func (r *ManagerReconciler) ensureManagerContainerAbsent(ctx context.Context, s 
 func (r *ManagerReconciler) createManagerContainer(ctx context.Context, s *managerScope, wb backend.WorkerBackend) (reconcile.Result, error) {
 	m := s.manager
 	logger := log.FromContext(ctx)
+	if !backend.ValidManagerRuntime(m.Spec.Runtime) {
+		return reconcile.Result{}, fmt.Errorf(
+			"unsupported Manager runtime %q",
+			m.Spec.Runtime,
+		)
+	}
+	managerRuntime := backend.ResolveManagerRuntime(m.Spec.Runtime)
 
 	prov := s.provResult
 	if prov.MatrixToken == "" {
@@ -177,8 +184,8 @@ func (r *ManagerReconciler) createManagerContainer(ctx context.Context, s *manag
 		Name:               m.Name,
 		ContainerName:      containerName,
 		Image:              m.Spec.Image,
-		Runtime:            m.Spec.Runtime,
-		RuntimeFallback:    r.DefaultRuntime,
+		Runtime:            managerRuntime,
+		RuntimeFallback:    backend.RuntimeAgentScope,
 		Env:                managerEnv,
 		ServiceAccountName: saName,
 		AuthExpirationSeconds: backend.NormalizeAuthTokenExpirationSeconds(
@@ -192,7 +199,7 @@ func (r *ManagerReconciler) createManagerContainer(ctx context.Context, s *manag
 				"app":                   r.ResourcePrefix.ManagerAppLabel(),
 				v1beta1.LabelManager:    m.Name,
 				v1beta1.LabelRole:       "manager",
-				v1beta1.LabelRuntime:    backend.ResolveRuntime(m.Spec.Runtime, r.DefaultRuntime),
+				v1beta1.LabelRuntime:    managerRuntime,
 				v1beta1.LabelController: r.ControllerName,
 			},
 		),
@@ -230,7 +237,7 @@ func (r *ManagerReconciler) applyEmbeddedConfig(req *backend.CreateRequest, wb b
 	if r.EmbeddedConfig.WorkspaceDir != "" {
 		req.Volumes = append(req.Volumes, backend.VolumeMount{
 			HostPath:      r.EmbeddedConfig.WorkspaceDir,
-			ContainerPath: "/root/manager-workspace",
+			ContainerPath: "/var/lib/agentteams-manager",
 		})
 	}
 	if r.EmbeddedConfig.HostShareDir != "" {
@@ -276,26 +283,34 @@ func managerRuntimeStale(result *backend.WorkerResult, desiredHash, currentHash 
 	return specChanged || missingHashMeansStale
 }
 
-// hashAppliedManagerSpec computes a fnv64a hash of the ManagerSpec with State
-// zeroed out. This captures all spec fields that should trigger sandbox
-// recreation when changed.
-//
-// Current coverage (fnv64a over json.Marshal with State=nil):
-//
-//	Model, Runtime, Image, Soul, Agents, Skills, McpServers, Package, Config,
-//	AccessEntries, Labels, Env.
+// managerPodSpec is the subset of Manager desired state that changes the
+// container itself. All other Manager fields are hot-reloaded through the
+// generation-stamped AgentScope runtime document.
+type managerPodSpec struct {
+	Runtime       string                             `json:"runtime,omitempty"`
+	Image         string                             `json:"image,omitempty"`
+	Resources     *v1beta1.AgentResourceRequirements `json:"resources,omitempty"`
+	AccessEntries []v1beta1.AccessEntry              `json:"accessEntries,omitempty"`
+	Env           map[string]string                  `json:"env,omitempty"`
+	Labels        map[string]string                  `json:"labels,omitempty"`
+}
+
+// hashAppliedManagerSpec computes a fnv64a hash over pod-affecting fields only.
 //
 // Consumed by ensureManagerContainerPresent / createManagerContainer to update
 // Manager.status.specHash. Sandbox backend annotations are no longer written;
 // old annotation values are only read as a migration fallback while
 // status.specHash is empty.
-//
-// TODO: When Agent-side hot-reload lands, narrow to pod-affecting fields
-// only (Image, Runtime, Model, Env, Labels, AccessEntries) and handle
-// config-only changes via the reload channel.
 func hashAppliedManagerSpec(spec v1beta1.ManagerSpec) string {
-	spec.State = nil // exclude lifecycle state from hash
-	buf, err := json.Marshal(spec)
+	podSpec := managerPodSpec{
+		Runtime:       spec.Runtime,
+		Image:         spec.Image,
+		Resources:     spec.Resources,
+		AccessEntries: spec.AccessEntries,
+		Env:           spec.Env,
+		Labels:        spec.Labels,
+	}
+	buf, err := json.Marshal(podSpec)
 	if err != nil {
 		return ""
 	}

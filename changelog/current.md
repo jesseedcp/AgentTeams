@@ -16,6 +16,10 @@ Record image-affecting changes to `manager/`, `worker/`, `copaw/`, `hermes/`, `o
 - **AgentScope resource administration**: Expose policy-scoped typed tools for
   Worker, Team, Human, Matrix, channel, and Nacos operations, with durable
   recovery and deterministic heartbeat reconciliation.
+- **Restart-free Manager desired state**: Publish integrity-tagged prompt and
+  skill artifacts before a secret-free, generation-stamped AgentScope runtime
+  document, so model, MCP, prompt, skill, and timing changes activate
+  without deleting the Manager container.
 
 **Bug Fixes**
 

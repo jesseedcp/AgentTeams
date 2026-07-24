@@ -133,7 +133,6 @@ type ManagerProvisioner interface {
 type ManagerDeployer interface {
 	DeployPackage(ctx context.Context, name, uri string, isUpdate bool) error
 	DeployManagerConfig(ctx context.Context, req ManagerDeployRequest) error
-	PushOnDemandSkills(ctx context.Context, name string, skills []string, remoteSkills []v1beta1.RemoteSkillSource) error
 	CleanupOSSData(ctx context.Context, name string) error
 }
 

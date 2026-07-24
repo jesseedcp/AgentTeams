@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	v1beta1 "github.com/agentscope-ai/AgentTeams/agentteams-controller/api/v1beta1"
 	"github.com/agentscope-ai/AgentTeams/agentteams-controller/internal/agentconfig"
@@ -183,14 +184,15 @@ type SyncTeamLeaderAssetsRequest struct {
 
 // DeployerConfig holds configuration for constructing a Deployer.
 type DeployerConfig struct {
-	AgentConfig    *agentconfig.Generator
-	OSS            oss.StorageClient
-	Executor       *executor.Shell
-	Packages       *executor.PackageResolver
-	Legacy         *LegacyCompat
-	AgentFSDir     string // embedded: /root/agentteams-fs/agents
-	WorkerAgentDir string // source for builtin agent files
-	MatrixDomain   string
+	AgentConfig     *agentconfig.Generator
+	OSS             oss.StorageClient
+	Executor        *executor.Shell
+	Packages        *executor.PackageResolver
+	Legacy          *LegacyCompat
+	AgentFSDir      string // embedded: /root/agentteams-fs/agents
+	WorkerAgentDir  string // source for builtin agent files
+	ManagerAgentDir string // source for Manager prompts and retained skills
+	MatrixDomain    string
 
 	RuntimeProjection RuntimeProjectionConfig
 
@@ -209,12 +211,17 @@ type Deployer struct {
 	legacy            *LegacyCompat
 	agentFSDir        string
 	workerAgentDir    string
+	managerAgentDir   string
 	matrixDomain      string
 	runtimeProjection RuntimeProjectionConfig
 	nacosCredClient   credprovider.Client
 }
 
 func NewDeployer(cfg DeployerConfig) *Deployer {
+	managerAgentDir := cfg.ManagerAgentDir
+	if managerAgentDir == "" && cfg.WorkerAgentDir != "" {
+		managerAgentDir = filepath.Dir(cfg.WorkerAgentDir)
+	}
 	return &Deployer{
 		agentConfig:       cfg.AgentConfig,
 		oss:               cfg.OSS,
@@ -223,6 +230,7 @@ func NewDeployer(cfg DeployerConfig) *Deployer {
 		legacy:            cfg.Legacy,
 		agentFSDir:        cfg.AgentFSDir,
 		workerAgentDir:    cfg.WorkerAgentDir,
+		managerAgentDir:   managerAgentDir,
 		matrixDomain:      cfg.MatrixDomain,
 		runtimeProjection: cfg.RuntimeProjection,
 		nacosCredClient:   cfg.NacosCredClient,
@@ -1103,14 +1111,21 @@ func (d *Deployer) ensureDirectoryObject(ctx context.Context, key string) error 
 
 // ManagerDeployRequest describes a Manager config deployment (create or update).
 type ManagerDeployRequest struct {
-	Name           string
-	Spec           v1beta1.ManagerSpec
+	Name            string
+	RuntimeRevision int64
+	MatrixUserID    string
+	Spec            v1beta1.ManagerSpec
+
+	// These compatibility fields are intentionally ignored by
+	// DeployManagerConfig. Manager credentials belong in process environment
+	// variables, never in the object-storage activation document.
 	MatrixToken    string
 	GatewayKey     string
 	MatrixPassword string
+	MinIOPassword  string
 
-	// MCP servers declared in spec.mcpServers. The deployer translates this into
-	// mcporter-servers.json and injects Authorization: Bearer <GatewayKey>.
+	// MCP servers declared in spec.mcpServers. Only the secret-free endpoint
+	// descriptors are written to the AgentScope runtime document.
 	McpServers []v1beta1.MCPServer
 
 	// AIGatewayURL overrides the cluster-wide AI Gateway URL when modelProvider is set.
@@ -1119,81 +1134,140 @@ type ManagerDeployRequest struct {
 	IsUpdate bool
 }
 
-// DeployManagerConfig generates and pushes Manager configuration files to OSS.
-// Unlike Worker, AGENTS.md and builtin skills are managed by the Manager container
-// itself (via upgrade-builtins.sh), so we only push runtime-generated files.
+// DeployManagerConfig publishes one atomic AgentScope Manager configuration
+// revision. Prompt and skill artifacts are uploaded first; the runtime document
+// is the activation barrier and is always uploaded last.
 func (d *Deployer) DeployManagerConfig(ctx context.Context, req ManagerDeployRequest) error {
-	logger := log.FromContext(ctx)
-	agentPrefix := fmt.Sprintf("agents/%s", req.Name)
+	if d.oss == nil {
+		return fmt.Errorf("Manager config deployment requires object storage")
+	}
+	if d.agentConfig == nil {
+		return fmt.Errorf("Manager config deployment requires agent config generator")
+	}
+	if d.managerAgentDir == "" {
+		return fmt.Errorf("Manager agent source directory is not configured")
+	}
 
-	// --- openclaw.json ---
-	// Manager's Matrix username is always "manager" regardless of the Manager
-	// CR name (which is typically "default"). Without this override the
-	// generated openclaw.json ends up with userId=@<crName>:<domain>, the
-	// Matrix client filters all DMs to that wrong localpart, and the agent
-	// silently never sees admin messages. See commit 3f8f84b which fixed this
-	// originally before the controller refactor accidentally reverted it.
-	configJSON, err := d.agentConfig.GenerateOpenClawConfig(agentconfig.WorkerConfigRequest{
-		WorkerName:   "manager",
-		MatrixToken:  req.MatrixToken,
-		GatewayKey:   req.GatewayKey,
-		ModelName:    req.Spec.Model,
-		AIGatewayURL: req.AIGatewayURL,
-	})
+	heartbeatSeconds, err := managerDurationSeconds(
+		req.Spec.Config.HeartbeatInterval,
+		30*time.Minute,
+		"heartbeatInterval",
+	)
 	if err != nil {
-		return fmt.Errorf("config generation failed: %w", err)
+		return err
 	}
-	// Use LegacyCompat to write Manager config with mutex protection,
-	// merging groupAllowFrom to avoid overwriting team leader additions.
-	if d.legacy != nil && d.legacy.Enabled() {
-		if err := d.legacy.PutManagerConfig(configJSON); err != nil {
-			return fmt.Errorf("config push to storage failed: %w", err)
-		}
-	} else {
-		if err := d.oss.PutObject(ctx, agentPrefix+"/openclaw.json", configJSON); err != nil {
-			return fmt.Errorf("config push to storage failed: %w", err)
-		}
+	idleSeconds, err := managerDurationSeconds(
+		req.Spec.Config.WorkerIdleTimeout,
+		12*time.Hour,
+		"workerIdleTimeout",
+	)
+	if err != nil {
+		return err
 	}
 
-	// --- SOUL.md: inline > external ref ---
-	soulContent := req.Spec.Soul
-	if soulContent != "" {
-		if err := d.oss.PutObject(ctx, agentPrefix+"/SOUL.md", []byte(soulContent)); err != nil {
-			logger.Error(err, "SOUL.md push failed (non-fatal)")
-		}
+	promptContent := map[string]string{
+		"SOUL.md":   req.Spec.Soul,
+		"AGENTS.md": req.Spec.Agents,
 	}
-
-	// --- AGENTS.md: inline > external ref ---
-	agentsContent := req.Spec.Agents
-	if agentsContent != "" {
-		if err := d.oss.PutObject(ctx, agentPrefix+"/AGENTS.md", []byte(agentsContent)); err != nil {
-			logger.Error(err, "AGENTS.md push failed (non-fatal)")
-		}
-	}
-
-	// --- mcporter-servers.json ---
-	if len(req.McpServers) > 0 {
-		mcporterJSON, err := d.agentConfig.GenerateMcporterConfig(req.GatewayKey, req.McpServers)
-		if err != nil {
-			logger.Error(err, "mcporter config generation failed (non-fatal)")
-		} else if mcporterJSON != nil {
-			if err := d.oss.PutObject(ctx, agentPrefix+"/mcporter-servers.json", mcporterJSON); err != nil {
-				logger.Error(err, "mcporter config push failed (non-fatal)")
+	for _, name := range []string{
+		"SOUL.md",
+		"AGENTS.md",
+		"TOOLS.md",
+		"HEARTBEAT.md",
+	} {
+		content := promptContent[name]
+		if content == "" {
+			data, readErr := os.ReadFile(filepath.Join(d.managerAgentDir, name))
+			if readErr != nil {
+				return fmt.Errorf("read Manager prompt %s: %w", name, readErr)
 			}
+			content = string(data)
+		}
+		key := "manager/" + name
+		if err := d.oss.PutObject(ctx, key, []byte(content)); err != nil {
+			return fmt.Errorf("publish Manager prompt %s: %w", name, err)
 		}
 	}
 
-	// --- Matrix password for E2EE re-login ---
-	if req.MatrixPassword != "" {
-		if err := d.oss.PutObject(ctx, agentPrefix+"/credentials/matrix/password", []byte(req.MatrixPassword)); err != nil {
-			logger.Error(err, "failed to write Matrix password to storage (non-fatal)")
-		}
+	skillsDir := filepath.Join(d.managerAgentDir, "skills")
+	if err := filepath.WalkDir(
+		skillsDir,
+		func(path string, entry fs.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if entry.IsDir() {
+				return nil
+			}
+			relativePath, err := filepath.Rel(skillsDir, path)
+			if err != nil {
+				return err
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			key := "manager/skills/" + filepath.ToSlash(relativePath)
+			if err := d.oss.PutObject(ctx, key, data); err != nil {
+				return fmt.Errorf("publish %s: %w", key, err)
+			}
+			return nil
+		},
+	); err != nil {
+		return fmt.Errorf("publish Manager skills: %w", err)
 	}
 
+	mcpServers := req.McpServers
+	if len(mcpServers) == 0 {
+		mcpServers = req.Spec.McpServers
+	}
+	runtimeDocument, err := d.agentConfig.GenerateManagerRuntimeDocument(
+		agentconfig.ManagerRuntimeRequest{
+			ManagerName:              req.Name,
+			Revision:                 req.RuntimeRevision,
+			ModelName:                req.Spec.Model,
+			Skills:                   req.Spec.Skills,
+			MCPServers:               mcpServers,
+			HeartbeatIntervalSeconds: heartbeatSeconds,
+			WorkerIdleTimeoutSeconds: idleSeconds,
+		},
+	)
+	if err != nil {
+		return fmt.Errorf("generate Manager runtime document: %w", err)
+	}
+	if err := d.oss.PutObject(
+		ctx,
+		"manager/agentscope-manager.json",
+		runtimeDocument,
+	); err != nil {
+		return fmt.Errorf("activate Manager runtime document: %w", err)
+	}
 	return nil
 }
 
 // --- Internal helpers ---
+
+func managerDurationSeconds(
+	raw string,
+	fallback time.Duration,
+	field string,
+) (int64, error) {
+	duration := fallback
+	if strings.TrimSpace(raw) != "" {
+		parsed, err := time.ParseDuration(strings.TrimSpace(raw))
+		if err != nil {
+			return 0, fmt.Errorf("invalid Manager %s: %w", field, err)
+		}
+		duration = parsed
+	}
+	if duration <= 0 || duration%time.Second != 0 {
+		return 0, fmt.Errorf(
+			"Manager %s must be a positive whole number of seconds",
+			field,
+		)
+	}
+	return int64(duration / time.Second), nil
+}
 
 func redactPackageURI(raw string) string {
 	u, err := url.Parse(raw)

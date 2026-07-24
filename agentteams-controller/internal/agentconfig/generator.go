@@ -22,6 +22,108 @@ func NewGenerator(cfg Config) *Generator {
 	return &Generator{config: cfg}
 }
 
+// GenerateManagerRuntimeDocument produces the secret-free activation document
+// consumed by the AgentScope Manager. Prompt files and skills must be uploaded
+// before this document because publishing it makes the revision eligible for
+// activation.
+func (g *Generator) GenerateManagerRuntimeDocument(
+	req ManagerRuntimeRequest,
+) ([]byte, error) {
+	managerName := strings.TrimSpace(req.ManagerName)
+	if managerName == "" {
+		return nil, fmt.Errorf("manager name is required")
+	}
+	if req.Revision < 0 {
+		return nil, fmt.Errorf("runtime revision must be non-negative")
+	}
+	if req.HeartbeatIntervalSeconds <= 0 {
+		return nil, fmt.Errorf("heartbeat interval must be positive")
+	}
+	if req.WorkerIdleTimeoutSeconds <= 0 {
+		return nil, fmt.Errorf("worker idle timeout must be positive")
+	}
+
+	modelName := strings.TrimSpace(req.ModelName)
+	if modelName == "" {
+		modelName = g.config.DefaultModel
+	}
+	modelName = strings.TrimPrefix(modelName, "agentteams-gateway/")
+	if modelName == "" {
+		return nil, fmt.Errorf("model name is required")
+	}
+	modelSpec := g.ResolveModelSpec(modelName)
+
+	mcpServers := make(
+		[]ManagerMCPServerDocument,
+		0,
+		len(req.MCPServers),
+	)
+	seenMCPNames := make(map[string]struct{}, len(req.MCPServers))
+	for _, server := range req.MCPServers {
+		name := strings.TrimSpace(server.Name)
+		endpoint := strings.TrimSpace(server.URL)
+		transport := strings.TrimSpace(server.Transport)
+		if transport == "" {
+			transport = "http"
+		}
+		if name == "" {
+			return nil, fmt.Errorf("MCP server name is required")
+		}
+		if _, exists := seenMCPNames[name]; exists {
+			return nil, fmt.Errorf("duplicate MCP server name %q", name)
+		}
+		if !strings.HasPrefix(endpoint, "http://") &&
+			!strings.HasPrefix(endpoint, "https://") {
+			return nil, fmt.Errorf(
+				"MCP server %q URL must use http or https",
+				name,
+			)
+		}
+		if transport != "http" && transport != "sse" {
+			return nil, fmt.Errorf(
+				"MCP server %q has unsupported transport %q",
+				name,
+				transport,
+			)
+		}
+		seenMCPNames[name] = struct{}{}
+		mcpServers = append(mcpServers, ManagerMCPServerDocument{
+			Name:      name,
+			URL:       endpoint,
+			Transport: transport,
+		})
+	}
+
+	document := ManagerRuntimeDocument{
+		SchemaVersion:   1,
+		Revision:        req.Revision,
+		ManagerName:     managerName,
+		Model:           modelName,
+		ContextWindow:   modelSpec.ContextWindow,
+		MaxTokens:       modelSpec.MaxTokens,
+		Reasoning:       modelSpec.Reasoning,
+		InputModalities: append([]string(nil), modelSpec.Input...),
+		Skills:          append([]string(nil), req.Skills...),
+		MCPServers:      mcpServers,
+		PromptSources: ManagerPromptSources{
+			Soul:      "manager/SOUL.md",
+			Agents:    "manager/AGENTS.md",
+			Tools:     "manager/TOOLS.md",
+			Heartbeat: "manager/HEARTBEAT.md",
+		},
+		HeartbeatIntervalSeconds: req.HeartbeatIntervalSeconds,
+		WorkerIdleTimeoutSeconds: req.WorkerIdleTimeoutSeconds,
+	}
+	if document.Skills == nil {
+		document.Skills = []string{}
+	}
+	if document.MCPServers == nil {
+		document.MCPServers = []ManagerMCPServerDocument{}
+	}
+
+	return json.MarshalIndent(document, "", "  ")
+}
+
 // GenerateOpenClawConfig produces the openclaw.json content for a worker.
 func (g *Generator) GenerateOpenClawConfig(req WorkerConfigRequest) ([]byte, error) {
 	modelName := req.ModelName
@@ -346,8 +448,10 @@ func (g *Generator) applyChannelPolicy(config map[string]interface{}, policy *Ch
 	}
 }
 
-// resolveModelSpec returns model parameters, applying config overrides.
-func (g *Generator) resolveModelSpec(modelName string) ModelSpec {
+// ResolveModelSpec returns model parameters, applying config overrides. Worker
+// configuration and the AgentScope Manager activation document share this
+// resolver so model limits cannot drift between runtimes.
+func (g *Generator) ResolveModelSpec(modelName string) ModelSpec {
 	spec := defaultModelSpec(modelName)
 
 	// Apply user overrides
@@ -461,12 +565,12 @@ func (g *Generator) allModelSpecs(selectedModel string) []ModelSpec {
 	specs := make([]ModelSpec, 0, len(allModels)+1)
 	seen := make(map[string]bool)
 	for _, name := range allModels {
-		specs = append(specs, g.resolveModelSpec(name))
+		specs = append(specs, g.ResolveModelSpec(name))
 		seen[name] = true
 	}
 	// Add custom model if not in the built-in list
 	if !seen[selectedModel] {
-		specs = append(specs, g.resolveModelSpec(selectedModel))
+		specs = append(specs, g.ResolveModelSpec(selectedModel))
 	}
 	return specs
 }

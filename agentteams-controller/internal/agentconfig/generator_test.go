@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	v1beta1 "github.com/agentscope-ai/AgentTeams/agentteams-controller/api/v1beta1"
 )
 
 func TestGenerateOpenClawConfig_Basic(t *testing.T) {
@@ -272,6 +274,78 @@ func TestDefaultModelSpec(t *testing.T) {
 	unknown := defaultModelSpec("unknown-model-xyz")
 	if unknown.ContextWindow != 150000 {
 		t.Errorf("unknown model ctx = %d, want 150000", unknown.ContextWindow)
+	}
+}
+
+func TestGenerateManagerRuntimeDocumentUsesResolvedModelAndNoCredentials(
+	t *testing.T,
+) {
+	g := NewGenerator(Config{
+		DefaultModel:       "qwen3.6-plus",
+		ModelContextWindow: 180000,
+		ModelMaxTokens:     96000,
+	})
+
+	data, err := g.GenerateManagerRuntimeDocument(
+		ManagerRuntimeRequest{
+			ManagerName: "default",
+			Revision:    7,
+			ModelName:   "qwen3.6-plus",
+			Skills:      []string{"worker-management"},
+			MCPServers: []v1beta1.MCPServer{{
+				Name: "github",
+				URL:  "http://higress/mcp",
+			}},
+			HeartbeatIntervalSeconds: 1800,
+			WorkerIdleTimeoutSeconds: 43200,
+		},
+	)
+	if err != nil {
+		t.Fatalf("GenerateManagerRuntimeDocument: %v", err)
+	}
+
+	var document map[string]any
+	if err := json.Unmarshal(data, &document); err != nil {
+		t.Fatalf("runtime document is invalid JSON: %v", err)
+	}
+	if got := int(document["revision"].(float64)); got != 7 {
+		t.Fatalf("revision=%d, want 7", got)
+	}
+	if got := document["manager_name"]; got != "default" {
+		t.Fatalf("manager_name=%v", got)
+	}
+	if got := int(document["context_window"].(float64)); got != 180000 {
+		t.Fatalf("context_window=%d, want 180000", got)
+	}
+	if got := int(document["max_tokens"].(float64)); got != 96000 {
+		t.Fatalf("max_tokens=%d, want 96000", got)
+	}
+	prompts := document["prompt_sources"].(map[string]any)
+	for field, want := range map[string]string{
+		"soul":      "manager/SOUL.md",
+		"agents":    "manager/AGENTS.md",
+		"tools":     "manager/TOOLS.md",
+		"heartbeat": "manager/HEARTBEAT.md",
+	} {
+		if got := prompts[field]; got != want {
+			t.Fatalf("prompt_sources.%s=%v, want %q", field, got, want)
+		}
+	}
+	mcp := document["mcp_servers"].([]any)[0].(map[string]any)
+	if mcp["transport"] != "http" {
+		t.Fatalf("MCP transport=%v, want http", mcp["transport"])
+	}
+	for _, forbidden := range []string{
+		"access_token",
+		"api_key",
+		"gateway_key",
+		"password",
+		"secret",
+		"authorization",
+	} {
+		if strings.Contains(strings.ToLower(string(data)), forbidden) {
+			t.Fatalf("runtime document contains credential field %q", forbidden)
+		}
 	}
 }
 

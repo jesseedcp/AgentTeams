@@ -15,6 +15,20 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
+type recordingStorage struct {
+	*ossfake.Memory
+	putKeys []string
+}
+
+func (s *recordingStorage) PutObject(
+	ctx context.Context,
+	key string,
+	data []byte,
+) error {
+	s.putKeys = append(s.putKeys, key)
+	return s.Memory.PutObject(ctx, key, data)
+}
+
 func TestDeployWorkerConfigSeedsLocalFilesWithoutOverwritingRuntimeState(t *testing.T) {
 	ctx := context.Background()
 	tmp := t.TempDir()
@@ -498,6 +512,141 @@ func TestDeployMemberRuntimeConfigWritesAgentScopedYaml(t *testing.T) {
 	storage := doc["storage"].(map[string]any)
 	if got := fmt.Sprint(storage["memberPrefix"]); got != "agents/worker-a" {
 		t.Fatalf("storage.memberPrefix=%q", got)
+	}
+}
+
+func TestDeployManagerAgentScopeDocumentContainsNoSecrets(t *testing.T) {
+	ctx := context.Background()
+	managerDir := filepath.Join(t.TempDir(), "manager")
+	for name, content := range map[string]string{
+		"SOUL.md":      "builtin soul",
+		"AGENTS.md":    "builtin agents",
+		"TOOLS.md":     "builtin tools",
+		"HEARTBEAT.md": "builtin heartbeat",
+	} {
+		path := filepath.Join(managerDir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	skillPath := filepath.Join(
+		managerDir,
+		"skills",
+		"worker-management",
+		"SKILL.md",
+	)
+	if err := os.MkdirAll(filepath.Dir(skillPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		skillPath,
+		[]byte("---\nname: worker-management\n---\n"),
+		0o644,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	store := &recordingStorage{Memory: ossfake.NewMemory()}
+	deployer := NewDeployer(DeployerConfig{
+		AgentConfig:     agentconfig.NewGenerator(agentconfig.Config{}),
+		OSS:             store,
+		ManagerAgentDir: managerDir,
+	})
+	err := deployer.DeployManagerConfig(ctx, ManagerDeployRequest{
+		Name:            "default",
+		RuntimeRevision: 7,
+		MatrixUserID:    "@manager:matrix.example.com",
+		Spec: v1beta1.ManagerSpec{
+			Model:  "qwen3.6-plus",
+			Soul:   "custom soul",
+			Skills: []string{"worker-management"},
+			Config: v1beta1.ManagerConfig{
+				HeartbeatInterval: "30m",
+				WorkerIdleTimeout: "12h",
+			},
+		},
+		MatrixToken:    "matrix-secret",
+		GatewayKey:     "gateway-secret",
+		MatrixPassword: "password-secret",
+		MinIOPassword:  "minio-secret",
+		McpServers: []v1beta1.MCPServer{{
+			Name: "github",
+			URL:  "http://higress/mcp",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("DeployManagerConfig: %v", err)
+	}
+
+	payload, err := store.GetObject(
+		ctx,
+		"manager/agentscope-manager.json",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(payload)
+	for _, secret := range []string{
+		"matrix-secret",
+		"gateway-secret",
+		"password-secret",
+		"minio-secret",
+	} {
+		if strings.Contains(text, secret) {
+			t.Fatalf("runtime document leaked %q", secret)
+		}
+	}
+	for key, want := range map[string]string{
+		"manager/SOUL.md":                           "custom soul",
+		"manager/AGENTS.md":                         "builtin agents",
+		"manager/TOOLS.md":                          "builtin tools",
+		"manager/HEARTBEAT.md":                      "builtin heartbeat",
+		"manager/skills/worker-management/SKILL.md": "---\nname: worker-management\n---\n",
+	} {
+		got, err := store.GetObject(ctx, key)
+		if err != nil {
+			t.Fatalf("get %s: %v", key, err)
+		}
+		if string(got) != want {
+			t.Fatalf("%s=%q, want %q", key, got, want)
+		}
+	}
+	for _, legacyKey := range []string{
+		"agents/default/openclaw.json",
+		"agents/default/mcporter-servers.json",
+		"agents/default/credentials/matrix/password",
+	} {
+		if _, err := store.GetObject(ctx, legacyKey); !os.IsNotExist(err) {
+			t.Fatalf("legacy Manager object exists: %s", legacyKey)
+		}
+	}
+
+	var document map[string]any
+	if err := json.Unmarshal(payload, &document); err != nil {
+		t.Fatalf("decode runtime document: %v", err)
+	}
+	if got := int(document["revision"].(float64)); got != 7 {
+		t.Fatalf("revision=%d, want 7", got)
+	}
+	if got := int(
+		document["heartbeat_interval_seconds"].(float64),
+	); got != 1800 {
+		t.Fatalf("heartbeat interval=%d, want 1800", got)
+	}
+	if got := int(
+		document["worker_idle_timeout_seconds"].(float64),
+	); got != 43200 {
+		t.Fatalf("worker idle timeout=%d, want 43200", got)
+	}
+	if len(store.putKeys) == 0 {
+		t.Fatal("no Manager objects were published")
+	}
+	if got, want := store.putKeys[len(store.putKeys)-1],
+		"manager/agentscope-manager.json"; got != want {
+		t.Fatalf("last published object=%q, want activation barrier %q", got, want)
 	}
 }
 

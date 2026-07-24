@@ -3,6 +3,7 @@ package oss
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -32,6 +33,9 @@ func TestMinIOClient_FullPathNoLeadingSlash(t *testing.T) {
 }
 
 func TestMinIOClient_PutObjectUsesCp(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake mc shell executable is POSIX-only")
+	}
 	dir := t.TempDir()
 	argsPath := filepath.Join(dir, "args")
 	mcPath := filepath.Join(dir, "mc")
@@ -56,6 +60,42 @@ func TestMinIOClient_PutObjectUsesCp(t *testing.T) {
 	if got := string(args); !strings.HasPrefix(got, "cp ") ||
 		!strings.HasSuffix(got, " agentteams/agentteams-storage/agents/worker-1/.agentteams-keep\n") {
 		t.Fatalf("mc args = %q, want cp <tmp> agentteams/agentteams-storage/agents/worker-1/.agentteams-keep", args)
+	}
+	const emptySHA256 = "e3b0c44298fc1c149afbf4c8996fb924" +
+		"27ae41e4649b934ca495991b7852b855"
+	if got := string(args); !strings.Contains(
+		got,
+		"--attr sha256="+emptySHA256,
+	) {
+		t.Fatalf("mc args = %q, want sha256 object metadata", args)
+	}
+}
+
+func TestMinIOClientCopyArgsIncludeSHA256Metadata(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.json")
+	if err := os.WriteFile(path, []byte("agentteams"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	client := NewMinIOClient(Config{
+		StoragePrefix: "agentteams/agentteams-storage",
+	})
+
+	args, err := client.copyArgs(
+		path,
+		"manager/agentscope-manager.json",
+	)
+	if err != nil {
+		t.Fatalf("copyArgs: %v", err)
+	}
+	joined := strings.Join(args, " ")
+	const wantSHA256 = "ae3e480a7ca4014b6134c146a808c399" +
+		"3a9a3e39e729e2add4118db5f93e7450"
+	if !strings.Contains(joined, "--attr sha256="+wantSHA256) {
+		t.Fatalf("copy args %q do not contain sha256 metadata", joined)
+	}
+	if got, want := args[len(args)-1],
+		"agentteams/agentteams-storage/manager/agentscope-manager.json"; got != want {
+		t.Fatalf("destination=%q, want %q", got, want)
 	}
 }
 
@@ -260,6 +300,9 @@ func TestMinIOAdminClient_BuildManagerPolicy(t *testing.T) {
 }
 
 func TestMinIOAdminClient_EnsurePolicyDetachesBeforeReplace(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake mc shell executable is POSIX-only")
+	}
 	dir := t.TempDir()
 	argsPath := filepath.Join(dir, "args")
 	mcPath := filepath.Join(dir, "mc")

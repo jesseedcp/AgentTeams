@@ -84,17 +84,14 @@ type CredentialBinding struct {
 	ToolWhitelist []string      `json:"toolWhitelist,omitempty"`
 }
 
-// MCPServer declares one MCP server the agent can call via mcporter.
-// Name maps to the key in mcporter-servers.json (used by tool calls as <name>.<tool>).
+// MCPServer declares one MCP server the agent can call. Worker runtimes project
+// it into their compatible configuration; the AgentScope Manager consumes the
+// same secret-free endpoint descriptor natively.
 // URL is the full endpoint (e.g. https://apig.example.com/mcp-servers/github/mcp).
 // Transport: "http" (Streamable HTTP, default) | "sse".
 //
-// The controller translates this slice directly into mcporter-servers.json and
-// injects an Authorization: Bearer <consumer-key> header using the same
-// gateway consumer key the agent uses for LLM access. The controller does not
-// perform any gateway-side authorization for MCP servers — upstream access
-// control is the gateway operator's responsibility (or, for local Higress
-// deployments, handled out-of-band by Manager skills).
+// Credentials are never stored in this declaration. Runtimes resolve their
+// scoped gateway or integration credentials from the process environment.
 type MCPServer struct {
 	Name      string `json:"name"`
 	URL       string `json:"url"`
@@ -756,12 +753,12 @@ type Manager struct {
 type ManagerSpec struct {
 	Model         string                     `json:"model"`
 	ModelProvider string                     `json:"modelProvider,omitempty"` // APIG Model API name for per-manager LLM provider
-	Runtime       string                     `json:"runtime,omitempty"`       // openclaw | copaw | hermes (default: openclaw)
+	Runtime       string                     `json:"runtime,omitempty"`       // agentscope (the only Manager runtime)
 	Image         string                     `json:"image,omitempty"`         // custom Docker image
 	Soul          string                     `json:"soul,omitempty"`          // custom SOUL.md content
 	Agents        string                     `json:"agents,omitempty"`        // custom AGENTS.md content
-	Skills        []string                   `json:"skills,omitempty"`        // on-demand skills to enable
-	McpServers    []MCPServer                `json:"mcpServers,omitempty"`    // MCP servers callable by the Manager via mcporter
+	Skills        []string                   `json:"skills,omitempty"`        // retained Manager skills advertised in the active revision
+	McpServers    []MCPServer                `json:"mcpServers,omitempty"`    // MCP servers callable natively through AgentScope
 	Package       string                     `json:"package,omitempty"`       // file://, http(s)://, or nacos://; optional ?authType= for Nacos
 	Config        ManagerConfig              `json:"config,omitempty"`
 	Resources     *AgentResourceRequirements `json:"resources,omitempty"`
@@ -798,8 +795,8 @@ func (s ManagerSpec) DesiredState() string {
 }
 
 type ManagerConfig struct {
-	HeartbeatInterval string `json:"heartbeatInterval,omitempty"` // default: 15m
-	WorkerIdleTimeout string `json:"workerIdleTimeout,omitempty"` // default: 720m
+	HeartbeatInterval string `json:"heartbeatInterval,omitempty"` // default: 30m
+	WorkerIdleTimeout string `json:"workerIdleTimeout,omitempty"` // default: 12h
 	NotifyChannel     string `json:"notifyChannel,omitempty"`     // default: admin-dm
 }
 

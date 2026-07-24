@@ -1,5 +1,7 @@
 package agentconfig
 
+import v1beta1 "github.com/agentscope-ai/AgentTeams/agentteams-controller/api/v1beta1"
+
 // Config holds parameters for generating agent runtime configurations.
 type Config struct {
 	MatrixDomain    string // Matrix domain for user IDs, e.g. "matrix-local.agentteams.io:8080"
@@ -61,6 +63,53 @@ type ModelSpec struct {
 	MaxTokens     int      `json:"maxTokens"`
 	Reasoning     bool     `json:"reasoning"`
 	Input         []string `json:"input"` // e.g. ["text", "image"]
+}
+
+// ManagerRuntimeRequest contains only secret-free desired state for the
+// AgentScope Manager runtime document. Runtime credentials are injected into
+// the Manager process environment and must never be added here.
+type ManagerRuntimeRequest struct {
+	ManagerName              string
+	Revision                 int64
+	ModelName                string
+	Skills                   []string
+	MCPServers               []v1beta1.MCPServer
+	HeartbeatIntervalSeconds int64
+	WorkerIdleTimeoutSeconds int64
+}
+
+// ManagerRuntimeDocument is the Controller-owned activation document consumed
+// by manager-agentscope. Its JSON shape mirrors Python's RuntimeDocument model.
+type ManagerRuntimeDocument struct {
+	SchemaVersion            int                        `json:"schema_version"`
+	Revision                 int64                      `json:"revision"`
+	ManagerName              string                     `json:"manager_name"`
+	Model                    string                     `json:"model"`
+	ContextWindow            int                        `json:"context_window"`
+	MaxTokens                int                        `json:"max_tokens"`
+	Reasoning                bool                       `json:"reasoning"`
+	InputModalities          []string                   `json:"input_modalities"`
+	Skills                   []string                   `json:"skills"`
+	MCPServers               []ManagerMCPServerDocument `json:"mcp_servers"`
+	PromptSources            ManagerPromptSources       `json:"prompt_sources"`
+	HeartbeatIntervalSeconds int64                      `json:"heartbeat_interval_seconds"`
+	WorkerIdleTimeoutSeconds int64                      `json:"worker_idle_timeout_seconds"`
+}
+
+// ManagerMCPServerDocument is the secret-free subset of an MCP declaration.
+type ManagerMCPServerDocument struct {
+	Name      string `json:"name"`
+	URL       string `json:"url"`
+	Transport string `json:"transport"`
+}
+
+// ManagerPromptSources declares the object keys that form the Manager's
+// ordered system prompt.
+type ManagerPromptSources struct {
+	Soul      string `json:"soul"`
+	Agents    string `json:"agents"`
+	Tools     string `json:"tools"`
+	Heartbeat string `json:"heartbeat"`
 }
 
 // BuiltinMarkers are the delimiters for merge-managed sections in AGENTS.md.

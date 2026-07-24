@@ -25,7 +25,7 @@ import (
 // ManagerEmbeddedConfig holds embedded-mode settings for the Manager Agent
 // container (workspace mount, host share, extra env from the controller's env).
 type ManagerEmbeddedConfig struct {
-	WorkspaceDir       string            // host path for /root/manager-workspace
+	WorkspaceDir       string            // host path for /var/lib/agentteams-manager
 	HostShareDir       string            // host path for /host-share
 	ExtraEnv           map[string]string // infrastructure env vars forwarded to agent
 	ManagerConsolePort string            // host port for manager console (default: 18888)

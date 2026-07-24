@@ -180,7 +180,7 @@ func TestManagerFinalizer_AddedOnCreate(t *testing.T) {
 // Manager Update test
 // ---------------------------------------------------------------------------
 
-func TestManagerUpdate_SpecChange_RecreatesContainer(t *testing.T) {
+func TestManagerUpdate_ConfigChangeHotReloadsWithoutContainerRecreate(t *testing.T) {
 	resetManagerMocks()
 
 	mgrName := fixtures.UniqueName("test-mgr-update")
@@ -216,11 +216,11 @@ func TestManagerUpdate_SpecChange_RecreatesContainer(t *testing.T) {
 	})
 
 	creates, deletes, _, _, _ := mockMgrBackend.CallSnapshot()
-	if len(deletes) == 0 {
-		t.Error("backend.Delete should have been called to remove old container")
+	if len(deletes) != 0 {
+		t.Errorf("backend.Delete called %d times for config-only update", len(deletes))
 	}
-	if len(creates) == 0 {
-		t.Error("backend.Create should have been called to create new container")
+	if len(creates) != 0 {
+		t.Errorf("backend.Create called %d times for config-only update", len(creates))
 	}
 }
 
@@ -388,7 +388,7 @@ func TestManagerDelete_ProvisionFailed_StillCleans(t *testing.T) {
 // Manager no infinite recreate loop
 // ---------------------------------------------------------------------------
 
-func TestManagerUpdate_NoInfiniteRecreate(t *testing.T) {
+func TestManagerUpdate_HotReloadDoesNotRecreateLater(t *testing.T) {
 	resetManagerMocks()
 
 	mgrName := fixtures.UniqueName("test-mgr-noloop")
@@ -422,12 +422,13 @@ func TestManagerUpdate_NoInfiniteRecreate(t *testing.T) {
 
 	time.Sleep(3 * time.Second)
 
-	creates, _, _, _, _ := mockMgrBackend.CallSnapshot()
-	if len(creates) == 0 {
-		t.Error("expected at least 1 Create from spec update")
-	}
-	if len(creates) > 2 {
-		t.Errorf("Create called %d times -- possible infinite recreate loop (want <=2)", len(creates))
+	creates, deletes, _, _, _ := mockMgrBackend.CallSnapshot()
+	if len(creates) != 0 || len(deletes) != 0 {
+		t.Errorf(
+			"config-only hot reload changed container: creates=%d deletes=%d",
+			len(creates),
+			len(deletes),
+		)
 	}
 }
 
