@@ -6,6 +6,10 @@ Record image-affecting changes to `manager/`, `worker/`, `copaw/`, `hermes/`, `o
 
 **Features**
 
+- **Single AgentScope Manager image**: Ship one Python 3.11 Manager process
+  with AgentScope 2.0, Matrix E2EE, `agt`, the retained 16-skill catalog, and
+  standard-library health/readiness/metrics on port 18799. OpenClaw, CoPaw,
+  Hermes, QwenPaw, and OpenHuman remain Worker runtimes.
 - **AgentScope resource administration**: Expose policy-scoped typed tools for
   Worker, Team, Human, Matrix, channel, and Nacos operations, with durable
   recovery and deterministic heartbeat reconciliation.
