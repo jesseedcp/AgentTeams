@@ -850,6 +850,9 @@ AGENTTEAMS_PORT_ELEMENT_WEB=$($Config.PORT_ELEMENT_WEB)
 # Matrix
 AGENTTEAMS_MATRIX_DOMAIN=$($Config.MATRIX_DOMAIN)
 AGENTTEAMS_MATRIX_CLIENT_DOMAIN=$($Config.MATRIX_CLIENT_DOMAIN)
+AGENTTEAMS_MATRIX_APPSERVICE_ENABLED=$($Config.MATRIX_APPSERVICE_ENABLED)
+AGENTTEAMS_MATRIX_APPSERVICE_AS_TOKEN=$($Config.MATRIX_APPSERVICE_AS_TOKEN)
+AGENTTEAMS_MATRIX_APPSERVICE_HS_TOKEN=$($Config.MATRIX_APPSERVICE_HS_TOKEN)
 
 # Gateway
 AGENTTEAMS_AI_GATEWAY_DOMAIN=$($Config.AI_GATEWAY_DOMAIN)
@@ -1039,11 +1042,38 @@ function Load-CurrentParamsFromEnv {
             if ($_ -match "^AGENTTEAMS_OPENAI_BASE_URL=(.*)$") {
                 $script:config.OPENAI_BASE_URL = $Matches[1].Trim()
             }
+            if ($_ -match "^AGENTTEAMS_LLM_API_KEY=(.*)$") {
+                $script:config.LLM_API_KEY = $Matches[1].Trim()
+            }
             if ($_ -match "^AGENTTEAMS_DEFAULT_MODEL=(.*)$") {
                 $script:config.DEFAULT_MODEL = $Matches[1].Trim()
             }
+            if ($_ -match "^AGENTTEAMS_MODEL_CONTEXT_WINDOW=(.*)$") {
+                $script:config.MODEL_CONTEXT_WINDOW = $Matches[1].Trim()
+            }
+            if ($_ -match "^AGENTTEAMS_MODEL_MAX_TOKENS=(.*)$") {
+                $script:config.MODEL_MAX_TOKENS = $Matches[1].Trim()
+            }
+            if ($_ -match "^AGENTTEAMS_MODEL_REASONING=(.*)$") {
+                $script:config.MODEL_REASONING = $Matches[1].Trim()
+            }
+            if ($_ -match "^AGENTTEAMS_MODEL_VISION=(.*)$") {
+                $script:config.MODEL_VISION = $Matches[1].Trim()
+            }
             if ($_ -match "^AGENTTEAMS_EMBEDDING_MODEL=(.*)$") {
                 $script:config.EMBEDDING_MODEL = $Matches[1].Trim()
+            }
+            if ($_ -match "^AGENTTEAMS_ADMIN_USER=(.*)$") {
+                $script:config.ADMIN_USER = $Matches[1].Trim()
+            }
+            if ($_ -match "^AGENTTEAMS_ADMIN_PASSWORD=(.*)$") {
+                $script:config.ADMIN_PASSWORD = $Matches[1].Trim()
+            }
+            if ($_ -match "^AGENTTEAMS_GITHUB_TOKEN=(.*)$") {
+                $script:config.GITHUB_TOKEN = $Matches[1].Trim()
+            }
+            if ($_ -match "^AGENTTEAMS_SKILLS_API_URL=(.*)$") {
+                $script:config.SKILLS_API_URL = $Matches[1].Trim()
             }
             if ($_ -match "^AGENTTEAMS_WORKSPACE_DIR=(.*)$") {
                 $script:config.WORKSPACE_DIR = $Matches[1].Trim()
@@ -2368,6 +2398,23 @@ function Install-Manager {
     $config.MINIO_USER = if ($env:AGENTTEAMS_MINIO_USER) { $env:AGENTTEAMS_MINIO_USER } else { $config.ADMIN_USER }
     $config.MINIO_PASSWORD = if ($env:AGENTTEAMS_MINIO_PASSWORD) { $env:AGENTTEAMS_MINIO_PASSWORD } else { $config.ADMIN_PASSWORD }
     $config.MANAGER_GATEWAY_KEY = if ($env:AGENTTEAMS_MANAGER_GATEWAY_KEY) { $env:AGENTTEAMS_MANAGER_GATEWAY_KEY } else { New-RandomKey }
+    $config.MATRIX_APPSERVICE_ENABLED = if ($env:AGENTTEAMS_MATRIX_APPSERVICE_ENABLED) {
+        $env:AGENTTEAMS_MATRIX_APPSERVICE_ENABLED
+    } else {
+        "true"
+    }
+    if ($config.MATRIX_APPSERVICE_ENABLED -notin @("false", "0")) {
+        $config.MATRIX_APPSERVICE_AS_TOKEN = if ($env:AGENTTEAMS_MATRIX_APPSERVICE_AS_TOKEN) {
+            $env:AGENTTEAMS_MATRIX_APPSERVICE_AS_TOKEN
+        } else {
+            New-RandomKey
+        }
+        $config.MATRIX_APPSERVICE_HS_TOKEN = if ($env:AGENTTEAMS_MATRIX_APPSERVICE_HS_TOKEN) {
+            $env:AGENTTEAMS_MATRIX_APPSERVICE_HS_TOKEN
+        } else {
+            New-RandomKey
+        }
+    }
 
     # Store additional config
     $config.LANGUAGE = $script:AGENTTEAMS_LANGUAGE
@@ -2525,6 +2572,9 @@ function Install-Manager {
             "-e", "AGENTTEAMS_ELEMENT_HOMESERVER_URL=http://127.0.0.1:$($config.PORT_GATEWAY)",
             "-e", "AGENTTEAMS_MATRIX_URL=http://127.0.0.1:6167",
             "-e", "AGENTTEAMS_MATRIX_E2EE=$($config.MATRIX_E2EE)",
+            "-e", "AGENTTEAMS_MATRIX_APPSERVICE_ENABLED=$($config.MATRIX_APPSERVICE_ENABLED)",
+            "-e", "AGENTTEAMS_MATRIX_APPSERVICE_AS_TOKEN=$($config.MATRIX_APPSERVICE_AS_TOKEN)",
+            "-e", "AGENTTEAMS_MATRIX_APPSERVICE_HS_TOKEN=$($config.MATRIX_APPSERVICE_HS_TOKEN)",
             "-e", "AGENTTEAMS_MINIO_ENDPOINT=http://127.0.0.1:9000",
             "-e", "AGENTTEAMS_MINIO_BUCKET=agentteams-storage",
             "-e", "AGENTTEAMS_STORAGE_PREFIX=agentteams/agentteams-storage",

@@ -7,8 +7,10 @@ on:
       - "manager/agent/**"
       - "manager/Dockerfile"
       - "manager/entrypoint.sh"
+      - "install/agentteams-install.ps1"
       - "scripts/export-debug-log.py"
       - "scripts/tests/test_export_debug_log.py"
+      - "tests/install/**"
       - "tests/manager-skill-parity.json"
       - "tests/test-28-agentscope-manager-parity.sh"
       - "docs/agentscope-manager-operations.md"
@@ -23,8 +25,10 @@ on:
       - "manager/agent/**"
       - "manager/Dockerfile"
       - "manager/entrypoint.sh"
+      - "install/agentteams-install.ps1"
       - "scripts/export-debug-log.py"
       - "scripts/tests/test_export_debug_log.py"
+      - "tests/install/**"
       - "tests/manager-skill-parity.json"
       - "tests/test-28-agentscope-manager-parity.sh"
       - "docs/agentscope-manager-operations.md"
@@ -64,3 +68,17 @@ jobs:
 
       - name: Run debug-export compatibility tests
         run: python -m unittest scripts.tests.test_export_debug_log -v
+
+  test-windows-installer:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify AgentScope Manager installer surface
+        shell: pwsh
+        run: ./tests/install/test-agentscope-manager-install.ps1
+
+      - name: Verify keep-all upgrade and Matrix AppService secrets
+        shell: pwsh
+        run: ./tests/install/test-windows-upgrade-appservice.ps1
