@@ -254,7 +254,7 @@ The `agt` CLI inside the container will:
 ### Step 5: Verify
 
 After the script completes, run `agt get workers my-worker -o json` and check
-the Worker in Element Web. The Controller starts the container and the Worker
+the Worker in Cinny. The Controller starts the container and the Worker
 should appear online within a minute.
 
 ### What Gets Migrated
@@ -429,6 +429,6 @@ You can edit the Dockerfile in the extracted ZIP and retry.
 ### Worker starts but doesn't respond
 
 1. Check Worker container logs: `docker logs agentteams-worker-<name>`
-2. Verify the Worker appears in Element Web in its dedicated room
+2. Verify the Worker appears in Cinny in its dedicated room
 3. Run `agt get workers <name> -o json` and verify the Controller resource
 4. Try sending `@<worker-name>:<matrix-domain> hello` in the Worker's room

@@ -154,7 +154,7 @@ $env:AGENTTEAMS_LLM_API_KEY = "your-api-key"
 | `AGENTTEAMS_ADMIN_PASSWORD` | Admin password | *(auto-generated)* |
 | `AGENTTEAMS_PORT_GATEWAY` | Gateway port | `18080` |
 | `AGENTTEAMS_PORT_CONSOLE` | Higress console port | `18001` |
-| `AGENTTEAMS_PORT_ELEMENT_WEB` | Element Web direct-access port | `18088` |
+| `AGENTTEAMS_PORT_CINNY` | Cinny direct-access port | `18088` |
 | `AGENTTEAMS_MANAGER_RUNTIME` | Manager runtime (fixed; other values are rejected) | `agentscope` |
 | `AGENTTEAMS_DEFAULT_WORKER_RUNTIME` | Default Worker runtime | `copaw` |
 | `AGENTTEAMS_MATRIX_DOMAIN` | Matrix domain | `matrix-local.agentteams.io:18080` |
@@ -185,7 +185,7 @@ $env:AGENTTEAMS_LLM_API_KEY = "your-api-key"
 
 After successful installation:
 
-1. Open the Element Web URL in your browser
+1. Open the Cinny URL in your browser
 2. Login with your admin credentials
 3. Start chatting with the Manager agent
 

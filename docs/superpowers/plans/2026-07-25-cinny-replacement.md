@@ -15,7 +15,8 @@
 - Keep the default install UI port `18088` and embedded container port `8088`.
 - Do not recreate or migrate Tuwunel, MinIO, Controller, Manager, Worker, rooms, users, or messages.
 - Pin the client image to `ghcr.io/cinnyapp/cinny:v4.12.3`; do not use `latest`.
-- Enable Cinny hash routing and expose the current gateway URL as homeserver index `0`.
+- Enable Cinny hash routing, use the public Cinny URL as discovery index `0`,
+  and return the Matrix gateway through `/.well-known/matrix/client`.
 - Do not add Redis, a database, or another runtime dependency.
 - Do not create a branch or use subagents; execute inline on `main`.
 - Commit messages must follow the repository Lore Commit Protocol.
@@ -43,6 +44,8 @@ grep -q '"defaultHomeserver": 0' "${render}"
 grep -Fq '"homeserverList": ["http://localhost:18080"]' "${render}"
 grep -q '"allowCustomHomeservers": true' "${render}"
 grep -q '"enabled": true' "${render}"
+grep -Fq 'location = /.well-known/matrix/client' "${render}"
+grep -q 'checksum/cinny-config:' "${render}"
 ! grep -q 'agentteams-element-web' "${render}"
 ! grep -q 'AGENTTEAMS_ELEMENT_WEB_URL' "${render}"
 ```
@@ -118,8 +121,10 @@ Render:
 
 - [ ] **Step 3: Create Deployment and Service**
 
-Mount the ConfigMap at `/app/config.json`, expose container port `80`, and let
-the ClusterIP Service expose the existing chart port `8080`.
+Mount the ConfigMap at `/app/config.json`, provide a custom Nginx config and
+well-known Matrix discovery response, expose container port `80`, and let the
+ClusterIP Service expose the existing chart port `8080`. Add a ConfigMap
+checksum annotation so configuration changes roll the Pod automatically.
 
 - [ ] **Step 4: Wire the controller and local Kind loader**
 
@@ -209,10 +214,12 @@ Expected: all packages pass.
 - Create or modify: relevant static deployment test script.
 
 **Interfaces:**
-- Consumes: `AGENTTEAMS_CINNY_HOMESERVER_URL`; legacy
+- Consumes: `AGENTTEAMS_CINNY_PUBLIC_URL`,
+  `AGENTTEAMS_CINNY_HOMESERVER_URL`; legacy
   `AGENTTEAMS_ELEMENT_HOMESERVER_URL` is a fallback.
 - Produces: Cinny static files under `/opt/cinny`, `config.json`, Nginx on
-  `8088`, and the unchanged Higress plugin server on `8002`.
+  `8088`, Matrix well-known discovery, WebAssembly with
+  `application/wasm`, and the unchanged Higress plugin server on `8002`.
 
 - [ ] **Step 1: Add a failing static contract test**
 
@@ -228,9 +235,11 @@ test ! -f manager/scripts/init/start-element-web.sh
 
 - [ ] **Step 2: Implement `start-cinny.sh`**
 
-Generate the same Cinny JSON contract as Helm, configure SPA fallback, disable
-cache for `config.json`/`index.html`, preserve the port `8002` plugin server,
-remove the default site, and run `nginx -g 'daemon off;'`.
+Generate the same Cinny JSON contract as Helm. Use the public Cinny URL for
+discovery and return the Matrix gateway URL from well-known. Configure SPA
+fallback, disable cache for `config.json`/well-known/`index.html`, serve
+`.wasm` as `application/wasm`, preserve the port `8002` plugin server, remove
+the default site, and run `nginx -g 'daemon off;'`.
 
 - [ ] **Step 3: Update the image and Supervisor**
 
@@ -261,7 +270,8 @@ Expected: both pass.
 - Consumes: canonical `AGENTTEAMS_PORT_CINNY` and legacy
   `AGENTTEAMS_PORT_ELEMENT_WEB`.
 - Produces: env files containing only `AGENTTEAMS_PORT_CINNY`, Docker
-  `-p <port>:8088`, and `AGENTTEAMS_CINNY_HOMESERVER_URL`.
+  `-p <port>:8088`, `AGENTTEAMS_CINNY_PUBLIC_URL`, and
+  `AGENTTEAMS_CINNY_HOMESERVER_URL`.
 
 - [ ] **Step 1: Change the Windows upgrade fixture to legacy input**
 
@@ -398,9 +408,12 @@ Check:
 ```text
 GET http://127.0.0.1:18388/                         -> 200, Cinny HTML
 GET http://127.0.0.1:18388/config.json              -> Cinny config
+GET http://127.0.0.1:18388/.well-known/matrix/client -> Matrix gateway JSON
+GET http://127.0.0.1:18388/assets/*.wasm            -> application/wasm
 GET http://127.0.0.1:18380/_matrix/client/versions  -> 200
 GET http://127.0.0.1:18480/                         -> 200, Cinny HTML
 GET http://127.0.0.1:18480/config.json              -> Cinny config
+GET http://127.0.0.1:18480/.well-known/matrix/client -> Matrix gateway JSON
 GET http://127.0.0.1:18480/_matrix/client/versions  -> 200
 ```
 

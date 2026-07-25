@@ -10,7 +10,7 @@ Controller 继续作为资源生命周期和部署的权威系统。
 | Controller | Manager、Worker、Team、Human、Matrix、存储和网关状态的 REST API 与协调 | Go；`agentteams-controller` 或嵌入式 Controller 镜像 |
 | Manager | Matrix 对话、房间权限工具、持久工作流、恢复、调度、委派 | AgentScope 2.0.4.post1；`agentteams-manager` |
 | Workers | 执行被委派的工作；每个 Worker/Team 成员使用一个可替换运行时 | OpenClaw、CoPaw、Hermes、QwenPaw 或 OpenHuman |
-| Matrix/Element | 人与 Agent 的房间、消息、线程、成员和媒体 | Tuwunel/Synapse 与 Element |
+| Matrix/Cinny | 人与 Agent 的房间、消息、线程、成员和媒体 | Tuwunel/Synapse 与 Cinny |
 | Higress | OpenAI 兼容模型路由、MCP、Consumer、服务发布 | 托管或已有网关 |
 | MinIO/S3/OSS | 日志、快照、prompt、任务、项目和文件 | 托管 MinIO 或兼容对象存储 |
 
@@ -21,7 +21,7 @@ OpenClaw、CoPaw、Hermes、QwenPaw 和 OpenHuman 都是 Worker 运行时，
 
 ```mermaid
 flowchart LR
-  H["Human / Element"] <--> X["Matrix"]
+  H["Human / Cinny"] <--> X["Matrix"]
   X <--> M["AgentScope Manager"]
   M -->|"typed AgtClient"| C["Controller API"]
   C --> R["Manager / Worker / Team / Human resources"]
@@ -106,7 +106,7 @@ AgentScope 接收的是无密钥 MCP 描述。
 ### 嵌入式 Docker/Podman
 
 嵌入式 Controller 容器运行 Go Controller、Higress、Tuwunel、MinIO 和
-Element，并创建独立的轻量 `agentteams-manager` 与 Worker 容器。宿主机
+Cinny，并创建独立的轻量 `agentteams-manager` 与 Worker 容器。宿主机
 持久化目录挂载到 Manager 的 `/var/lib/agentteams-manager`。
 
 ### Kubernetes

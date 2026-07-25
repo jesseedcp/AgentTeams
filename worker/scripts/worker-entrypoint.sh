@@ -310,7 +310,7 @@ if [ -n "${MATRIX_PASSWORD}" ]; then
                 && mv /tmp/openclaw-relogin.json "${WORKSPACE}/openclaw.json"
             log "Matrix re-login successful (new device: ${NEW_DEVICE}, token prefix: ${NEW_TOKEN:0:10}...)"
         else
-            log "WARNING: Matrix re-login failed, using existing access token (E2EE may not work with Element Web)"
+            log "WARNING: Matrix re-login failed, using existing access token (E2EE may not work with other Matrix clients)"
             log "  Response: ${LOGIN_RESP}"
         fi
     else

@@ -102,7 +102,7 @@ Manager will automatically propagate CMS configuration to newly created Workers.
 
 ## Step 4: Verify Integration
 
-1. Login to Element Web, interact with Manager and create a Worker to execute tasks
+1. Login to Cinny, interact with Manager and create a Worker to execute tasks
 2. Visit [CMS 2.0 Console](https://cmsnext.console.aliyun.com/next/home) → Select workspace → **Application Observability** → **AI Application Observability**
 3. You should see `agentteams-manager` and `agentteams-worker-*` in the application list
 4. Click on application name to view trace analysis, metrics, and other details

@@ -98,8 +98,8 @@ Shared runtime Secret name.
 {{- printf "%s-minio" (include "agentteams.fullname" .) | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
-{{- define "agentteams.elementWeb.fullname" -}}
-{{- printf "%s-element-web" (include "agentteams.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- define "agentteams.cinny.fullname" -}}
+{{- printf "%s-cinny" (include "agentteams.fullname" .) | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
 {{/* ── Component label helpers ─────────────────────────────────────────── */}}

@@ -250,7 +250,7 @@ bash agentteams-import.sh worker --name my-worker --zip migration-my-worker-2026
 
 ### 第 5 步：验证
 
-脚本完成后，先运行 `agt get workers my-worker -o json`，再到 Element Web
+脚本完成后，先运行 `agt get workers my-worker -o json`，再到 Cinny
 查看 Worker 状态。Controller 会启动容器，Worker 应在一分钟内上线。
 
 ### 迁移内容对照表
@@ -425,6 +425,6 @@ docker start agentteams-manager
 ### Worker 启动但无响应
 
 1. 查看 Worker 容器日志：`docker logs agentteams-worker-<name>`
-2. 在 Element Web 中确认 Worker 出现在其专属 Room 中
+2. 在 Cinny 中确认 Worker 出现在其专属 Room 中
 3. 运行 `agt get workers <name> -o json`，确认 Controller 资源正确
 4. 尝试在 Worker 的 Room 中发送 `@<worker-name>:<matrix-domain> hello`

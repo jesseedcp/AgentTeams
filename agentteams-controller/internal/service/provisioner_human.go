@@ -102,7 +102,7 @@ func (p *Provisioner) LoginWithPassword(ctx context.Context, username, password 
 // SetUserPassword **only** when RegisterAppServiceUser actually
 // created a new account. The previous implementation reset the
 // password on every reconcile that hit this method, which would
-// silently overwrite any password the user had rotated via Element
+// silently overwrite any password the user had rotated via Cinny
 // the moment the controller decided to "re-provision".
 
 // EnsureHumanUser registers (or logs in) a Matrix account for a Human CR.
@@ -119,7 +119,7 @@ func (p *Provisioner) EnsureHumanUser(ctx context.Context, username string) (*Hu
 		// Only assign an initial password on first registration. When
 		// the account already existed (Created=false) we return the
 		// AS-issued token without resetting whatever password the user
-		// may have rotated via Element.
+		// may have rotated via Cinny.
 		if creds.Created {
 			password, err := matrix.GeneratePassword(16)
 			if err != nil {
@@ -146,7 +146,7 @@ func (p *Provisioner) EnsureHumanUser(ctx context.Context, username string) (*Hu
 // the reconciler uses once Status.MatrixUserID is non-empty; it must NOT
 // fall back to EnsureUser on failure because EnsureUser's orphan-recovery
 // branch issues "!admin users reset-password", which would silently
-// overwrite any password the user changed via Element.
+// overwrite any password the user changed via Cinny.
 func (p *Provisioner) LoginAsHuman(ctx context.Context, username, password string) (string, error) {
 	if p.MatrixAppServiceEnabled() {
 		return p.LoginAppServiceUser(ctx, username)

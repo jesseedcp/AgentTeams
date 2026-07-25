@@ -1,0 +1,22 @@
+{{- if .Values.cinny.enabled }}
+{{- $comp := dict "root" . "component" "cinny" }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "agentteams.cinny.fullname" . }}
+  namespace: {{ include "agentteams.namespace" . }}
+  labels:
+    {{- include "agentteams.component.labels" $comp | nindent 4 }}
+spec:
+  type: {{ .Values.cinny.service.type }}
+  selector:
+    {{- include "agentteams.component.selectorLabels" $comp | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.cinny.service.port }}
+      targetPort: http
+      protocol: TCP
+      {{- if and (eq .Values.cinny.service.type "NodePort") .Values.cinny.service.nodePort }}
+      nodePort: {{ .Values.cinny.service.nodePort }}
+      {{- end }}
+{{- end }}

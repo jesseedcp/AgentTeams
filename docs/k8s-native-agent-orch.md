@@ -244,7 +244,7 @@ Deployment modes:
 
 **Embedded vs Helm (packaging):**
 
-- **Embedded** — `install/agentteams-install.sh` starts **`agentteams-controller`** (image bundles Higress, Tuwunel, MinIO, Element Web, and the controller binary). The controller then creates **`agentteams-manager`** and each **Worker** as separate containers on the same Docker/Podman host.
+- **Embedded** — `install/agentteams-install.sh` starts **`agentteams-controller`** (image bundles Higress, Tuwunel, MinIO, Cinny, and the controller binary). The controller then creates **`agentteams-manager`** and each **Worker** as separate containers on the same Docker/Podman host.
 - **Helm / in-cluster** — Chart [`helm/agentteams`](../helm/agentteams) deploys the same logical components as Kubernetes workloads (gateway, homeserver, storage, controller Deployment, and Manager/Worker Pods from CRs). CRD semantics match embedded; only the backend driver differs.
 
 Both modes share reconcilers; backends mirror how Kubernetes abstracts CRI/CSI/CNI.
@@ -259,7 +259,7 @@ AgentTeams uses Matrix instead of a bespoke RPC bus:
 | Human-in-the-loop | Same IM client; @mention any Agent anytime |
 | Open protocol | Federated design; less lock-in |
 | Audit | Persistent history |
-| Clients | Element, FluffyChat, mobile |
+| Clients | Cinny (bundled), Element, FluffyChat, mobile |
 
 Tuwunel is bundled as a high-performance homeserver for single-container installs.
 
@@ -476,7 +476,7 @@ The Worker backend could one day plug NemoClaw under each Worker—AgentTeams or
 | Controller | Go + controller-runtime | Standard kube builder style |
 | State | kine (SQLite) / etcd | Embedded vs incluster |
 | Comms | Matrix (Tuwunel) | Self-hosted |
-| IM UI | Element Web | Browser client |
+| IM UI | Cinny | Browser client |
 | Files | MinIO | S3 API |
 | AI Gateway | Higress (CNCF Sandbox) | LLM + MCP + consumer auth |
 | Runtimes | OpenClaw, QwenPaw, … | From large to lightweight images |

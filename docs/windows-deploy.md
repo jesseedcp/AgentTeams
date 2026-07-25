@@ -24,7 +24,7 @@ This guide explains how to deploy AgentTeams multi-agent collaboration platform 
 - [Step 11: Optional Configuration](#step-11-optional-configuration)
 - [Step 12: Select Worker Runtime](#step-12-select-worker-runtime)
 - [Step 13: Wait for Installation to Complete](#step-13-wait-for-installation-to-complete)
-- [Step 14: Log in to Element Web and Get Started](#step-14-log-in-to-element-web-and-get-started)
+- [Step 14: Log in to Cinny and Get Started](#step-14-log-in-to-cinny-and-get-started)
 - [Upgrade](#upgrade)
 - [Uninstall](#uninstall)
 - [FAQ](#faq)
@@ -261,10 +261,10 @@ The script will prompt for the following configurations one by one. **Just press
 |---------------|---------|-------------|
 | Gateway Host Port | 18080 | Higress gateway port |
 | Higress Console Port | 18001 | Management console |
-| Element Web Port | 18088 | IM client access port |
+| Cinny Port | 18088 | IM client access port |
 | Manager Health Port | 18888 | Loopback mapping for AgentScope health and metrics |
 | Matrix Domain | matrix-local.agentteams.io:18080 | Matrix server domain |
-| Element Web Domain | matrix-client-local.agentteams.io | IM client domain |
+| Cinny Domain | matrix-client-local.agentteams.io | IM client domain |
 | AI Gateway Domain | aigw-local.agentteams.io | AI gateway domain |
 | File System Domain | fs-local.agentteams.io | MinIO file system domain |
 
@@ -354,16 +354,16 @@ After successful installation, you'll see a panel with login information:
 
 ---
 
-## Step 14: Log in to Element Web and Get Started
+## Step 14: Log in to Cinny and Get Started
 
 1. Open a browser and visit http://127.0.0.1:18088/#/login
 2. Enter the username and password from the previous step
 3. After logging in, you'll see a conversation window with Manager
 4. Send a message in the chat box to start interacting with Manager
 
-![Element Web Login Page](zh-cn/images/windows-deploy/element-web-login.png)
+![Cinny Login Page](zh-cn/images/windows-deploy/cinny-login.png)
 
-![Element Web Home - Room list and welcome screen](zh-cn/images/windows-deploy/element-web-home.png)
+![Cinny Home - Room list and welcome screen](zh-cn/images/windows-deploy/cinny-home.png)
 
 **Quick Start**: Send the following message to have Manager create your first Worker:
 
@@ -484,7 +484,7 @@ This mirrors `install/agentteams-install.sh uninstall`: **`agentteams-controller
 
 ### Port Already in Use
 
-**Symptom**: Installation successful but cannot access Element Web.
+**Symptom**: Installation successful but cannot access Cinny.
 
 **Troubleshooting Steps**:
 1. Check if port 18088 is occupied by another program:
@@ -513,13 +513,13 @@ Select-String "AGENTTEAMS_ADMIN_PASSWORD" "$env:USERPROFILE\agentteams-manager.e
 
 ## Appendix: Other Management Consoles
 
-After installation, in addition to Element Web, you can access the following consoles:
+After installation, in addition to Cinny, you can access the following consoles:
 
 | Console | URL | Purpose |
 |---------|-----|---------|
-| Element Web | http://127.0.0.1:18088 | IM client to chat with Agents |
+| Cinny | http://127.0.0.1:18088 | IM client to chat with Agents |
 | Higress Console | http://localhost:18001 | AI gateway management, LLM switching, credential management |
 | Manager readiness | http://localhost:18888/readyz | AgentScope readiness (local access only) |
 | Manager metrics | http://localhost:18888/metrics | Prometheus text metrics (local access only) |
 
-> **Tip**: You can also ask Manager to help you configure LLM providers in Element Web chat, without manually operating the Higress console.
+> **Tip**: You can also ask Manager to help you configure LLM providers in Cinny chat, without manually operating the Higress console.

@@ -125,6 +125,10 @@ AGENTTEAMS_HOST_SHARE_DIR=$tempRoot
     Assert-Equal $saved["AGENTTEAMS_LLM_API_KEY"] "test-api-key-preserved" "LLM API key"
     Assert-Equal $saved["AGENTTEAMS_ADMIN_USER"] "test-admin" "admin username"
     Assert-Equal $saved["AGENTTEAMS_ADMIN_PASSWORD"] "test-password-preserved" "admin password"
+    Assert-Equal $saved["AGENTTEAMS_PORT_CINNY"] "29388" "Cinny port"
+    if ($saved.ContainsKey("AGENTTEAMS_PORT_ELEMENT_WEB")) {
+        throw "Legacy Element port was written back"
+    }
 
     $asToken = $saved["AGENTTEAMS_MATRIX_APPSERVICE_AS_TOKEN"]
     $hsToken = $saved["AGENTTEAMS_MATRIX_APPSERVICE_HS_TOKEN"]
@@ -148,8 +152,26 @@ AGENTTEAMS_HOST_SHARE_DIR=$tempRoot
     if ($runCommand -notlike "*AGENTTEAMS_MATRIX_APPSERVICE_HS_TOKEN=$hsToken*") {
         throw "Controller run command did not receive the persisted hs_token"
     }
+    if ($runCommand -notlike "*AGENTTEAMS_CINNY_HOMESERVER_URL=http://127.0.0.1:29380*") {
+        throw "Controller run command did not receive the Cinny homeserver URL"
+    }
+    if ($runCommand -notlike "*AGENTTEAMS_CINNY_PUBLIC_URL=http://127.0.0.1:29388*") {
+        throw "Controller run command did not receive the public Cinny discovery URL"
+    }
+    if ($runCommand -notlike "*AGENTTEAMS_CINNY_URL=http://127.0.0.1:8088*") {
+        throw "Controller run command did not receive the internal Cinny route URL"
+    }
+    if ($runCommand -notlike "*AGENTTEAMS_PORT_CINNY=29388*") {
+        throw "Controller run command did not receive the canonical Cinny port"
+    }
+    if ($runCommand -notlike "*29388:8088*") {
+        throw "Controller run command did not preserve the legacy UI port for Cinny"
+    }
+    if ($runCommand -like "*AGENTTEAMS_ELEMENT_HOMESERVER_URL*") {
+        throw "Controller run command emitted the legacy Element homeserver variable"
+    }
 
-    Write-Output "PASS: Windows keep-all upgrade preserves credentials and provisions Matrix AppService tokens"
+    Write-Output "PASS: Windows keep-all upgrade migrates Cinny settings and preserves credentials"
 }
 finally {
     if (Test-Path -LiteralPath $tempRoot) {

@@ -57,7 +57,7 @@ IMAGES=(
     "ghcr.io/matrix-construct/tuwunel:main|tuwunel|${DATE_TAG}"
     "quay.io/minio/minio:latest|minio|${DATE_TAG}"
     "quay.io/minio/mc:latest|mc|${DATE_TAG}"
-    "docker.io/vectorim/element-web:latest|element-web|${DATE_TAG}"
+    "ghcr.io/cinnyapp/cinny:v4.12.3|cinny|v4.12.3"
     "docker.io/library/node:20-slim|node|20-slim"
     "docker.io/library/ubuntu:24.04|ubuntu|24.04"
     "docker.io/library/golang:1.23-alpine|golang|1.23-alpine"

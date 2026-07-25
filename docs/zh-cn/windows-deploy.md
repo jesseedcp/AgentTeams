@@ -24,7 +24,7 @@
 - [步骤十一：可选配置](#步骤十一可选配置)
 - [步骤十二：选择 Worker 运行时](#步骤十二选择-worker-运行时)
 - [步骤十三：等待安装完成](#步骤十三等待安装完成)
-- [步骤十四：登录 Element Web 开始使用](#步骤十四登录-element-web-开始使用)
+- [步骤十四：登录 Cinny 开始使用](#步骤十四登录-cinny-开始使用)
 - [升级](#升级)
 - [卸载](#卸载)
 - [常见问题](#常见问题)
@@ -266,10 +266,10 @@ LLM API Key: ****
 |--------|--------|------|
 | 网关主机端口 | 18080 | Higress 网关端口 |
 | Higress 控制台端口 | 18001 | 管理控制台 |
-| Element Web 端口 | 18088 | IM 客户端访问端口 |
+| Cinny 端口 | 18088 | IM 客户端访问端口 |
 | Manager 健康端口 | 18888 | AgentScope 健康检查和指标的回环映射 |
 | Matrix 域名 | matrix-local.agentteams.io:18080 | Matrix 服务器域名 |
-| Element Web 域名 | matrix-client-local.agentteams.io | IM 客户端域名 |
+| Cinny 域名 | matrix-client-local.agentteams.io | IM 客户端域名 |
 | AI 网关域名 | aigw-local.agentteams.io | AI 网关域名 |
 | 文件系统域名 | fs-local.agentteams.io | MinIO 文件系统域名 |
 | OpenClaw 控制台域名 | console-local.agentteams.io | Agent 控制台域名 |
@@ -361,16 +361,16 @@ LLM API Key: ****
 
 ---
 
-## 步骤十四：登录 Element Web 开始使用
+## 步骤十四：登录 Cinny 开始使用
 
 1. 打开浏览器，访问 http://127.0.0.1:18088/#/login
 2. 输入上一步输出的用户名和密码
 3. 登录后，你会看到与 Manager 的对话窗口
 4. 在对话框中发送消息，开始与 Manager 交互
 
-![Element Web 登录页面](images/windows-deploy/element-web-login.png)
+![Cinny 登录页面](images/windows-deploy/cinny-login.png)
 
-![Element Web 主页 - 房间列表和欢迎界面](images/windows-deploy/element-web-home.png)
+![Cinny 主页 - 房间列表和欢迎界面](images/windows-deploy/cinny-home.png)
 
 **快速体验**：发送以下消息让 Manager 为你创建第一个 Worker：
 
@@ -491,7 +491,7 @@ Set-ExecutionPolicy Bypass -Scope Process -Force; Invoke-Expression "& { $(Invok
 
 ### 端口被占用
 
-**现象**：安装成功但无法访问 Element Web。
+**现象**：安装成功但无法访问 Cinny。
 
 **排查步骤**：
 1. 检查 18088 端口是否被其他程序占用：
@@ -520,13 +520,13 @@ Select-String "AGENTTEAMS_ADMIN_PASSWORD" "$env:USERPROFILE\agentteams-manager.e
 
 ## 附录：其他管理控制台
 
-安装完成后，除了 Element Web，你还可以访问以下控制台：
+安装完成后，除了 Cinny，你还可以访问以下控制台：
 
 | 控制台 | 地址 | 用途 |
 |--------|------|------|
-| Element Web | http://127.0.0.1:18088 | IM 客户端，与 Agent 对话 |
+| Cinny | http://127.0.0.1:18088 | IM 客户端，与 Agent 对话 |
 | Higress 控制台 | http://localhost:18001 | AI 网关管理、LLM 切换、凭证管理 |
 | Manager 就绪检查 | http://localhost:18888/readyz | AgentScope 就绪状态（仅本机访问） |
 | Manager 指标 | http://localhost:18888/metrics | Prometheus 文本指标（仅本机访问） |
 
-> **提示**：你也可以在 Element Web 聊天中让 Manager 帮你配置 LLM 提供商，无需手动操作 Higress 控制台。
+> **提示**：你也可以在 Cinny 聊天中让 Manager 帮你配置 LLM 提供商，无需手动操作 Higress 控制台。

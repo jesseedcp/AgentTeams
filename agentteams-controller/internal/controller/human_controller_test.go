@@ -493,7 +493,7 @@ func TestHumanReconciler_Delete_FinalizerCleanup(t *testing.T) {
 }
 
 // TestHumanReconciler_Login_StalePassword simulates the case where a
-// user changed their password in Element after the controller's initial
+// user changed their password in Cinny after the controller's initial
 // provisioning (so Status.InitialPassword no longer works). The
 // reconciler must:
 //  1. NOT fall back to EnsureHumanUser (that would trigger
@@ -503,7 +503,7 @@ func TestHumanReconciler_Delete_FinalizerCleanup(t *testing.T) {
 //     skip the /join step (no user token available)
 //  4. Leave Status.Rooms unchanged for rooms where the admin could only
 //     invite (the user must /join themselves next reconcile when we can
-//     log in again — or via Element directly).
+//     log in again — or via Cinny directly).
 func TestHumanReconciler_Login_StalePassword(t *testing.T) {
 	worker := newReadyWorker("w1", "!room-w1:localhost")
 	human := newHuman("alice", v1beta1.HumanSpec{

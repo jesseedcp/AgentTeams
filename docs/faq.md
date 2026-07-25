@@ -9,7 +9,7 @@
 - [Installation fails: "manifest unknown" for embedded image](#installation-fails-manifest-unknown-for-embedded-image)
 - [Manager Agent startup timeout or failure](#manager-agent-startup-timeout-or-failure)
 - [Accessing the web UI from other devices on the LAN](#accessing-the-web-ui-from-other-devices-on-the-lan)
-- [Element says the homeserver URL is not a valid Matrix server](#element-says-the-homeserver-url-is-not-a-valid-matrix-server)
+- [Cinny says the homeserver URL is not a valid Matrix server](#cinny-says-the-homeserver-url-is-not-a-valid-matrix-server)
 - [Cannot connect to Matrix server locally](#cannot-connect-to-matrix-server-locally)
 - [How to talk to a Worker directly](#how-to-talk-to-a-worker-directly)
 - [How to connect third-party, local, or multi-provider models](#how-to-connect-third-party-local-or-multi-provider-models)
@@ -65,7 +65,7 @@ Starting from v1.1.0, AgentTeams switched from a **single all-in-one container**
 
 | Component | Old (≤v1.0.9) | New (v1.1.0+) |
 |-----------|---------------|---------------|
-| Infrastructure (Higress, Tuwunel, MinIO, Element Web) | Bundled inside `agentteams-manager` | Runs in `agentteams-controller` container (from the `agentteams-embedded` image) |
+| Infrastructure (Higress, Tuwunel, MinIO, Cinny) | Bundled inside `agentteams-manager` | Runs in `agentteams-controller` container (from the `agentteams-embedded` image) |
 | Manager Agent | Inside `agentteams-manager` | Separate `agentteams-manager` container (lightweight, agent only) |
 | Worker management | Shell scripts (`create-worker.sh`) + `workers-registry.json` | Declarative CRDs via `agt` CLI (`agt create worker`, `agt apply`) |
 | Worker runtimes | OpenClaw only | OpenClaw, **QwenPaw** (Python; formerly **CoPaw**), or Hermes |
@@ -356,7 +356,7 @@ the mounted path.
 
 ## Accessing the web UI from other devices on the LAN
 
-**Accessing Element Web**
+**Accessing Cinny**
 
 On another device on the same network, open a browser and go to:
 
@@ -368,7 +368,7 @@ The browser may warn about an insecure connection — ignore it and click Contin
 
 **Updating the Matrix Server address**
 
-The default Matrix Server hostname resolves to `localhost`, which won't work from other devices. When logging into Element Web, change the Matrix Server address to:
+The default Matrix Server hostname resolves to `localhost`, which won't work from other devices. When logging into Cinny, change the Matrix Server address to:
 
 ```
 http://<LAN-IP>:18080
@@ -381,7 +381,7 @@ If the login page still reports a homeserver error:
 1. Confirm the installer was run with external access enabled. Local-only mode
    binds services to `127.0.0.1`, so other devices cannot reach them.
 2. Make sure the machine firewall allows ports `18080` (Matrix/Higress gateway)
-   and `18088` (Element Web).
+   and `18088` (Cinny).
 3. Do not use the default `matrix-local.agentteams.io` address from another device;
    that name resolves to the client machine's loopback address.
 
@@ -391,12 +391,12 @@ AgentTeams host can reach each other in the Tailscale network.
 
 ---
 
-## Element says the homeserver URL is not a valid Matrix server
+## Cinny says the homeserver URL is not a valid Matrix server
 
-When Element asks for a custom homeserver, do not enter the Element Web UI URL
+When Cinny asks for a custom homeserver, do not enter the Cinny UI URL
 or port. These two URLs serve different components:
 
-- Element Web UI: `http://<host>:18088`
+- Cinny UI: `http://<host>:18088`
 - Matrix/Higress gateway homeserver: `http://<host>:18080`
 
 If you see "homeserver URL is not a valid Matrix server", replace `:18088` with
@@ -417,7 +417,7 @@ Disable the proxy, or add `*-local.agentteams.io` / `127.0.0.1` to your proxy by
 
 After creating a Worker, Manager automatically adds you and the Worker to a shared group room. In that room, you must **@mention the Worker** for it to respond — messages without a mention are ignored.
 
-When using Element or similar clients, type `@` followed by the first letter(s) of the Worker's display name to trigger autocomplete and select the right user.
+When using Cinny or another Matrix client, type `@` followed by the first letter(s) of the Worker's display name to trigger autocomplete and select the right user.
 
 Alternatively, you can click the Worker's avatar and open a **direct message** (DM) conversation. In a DM you don't need to @mention — every message triggers the Worker. Keep in mind that Manager is not in the DM room and won't see any of that conversation.
 
@@ -710,9 +710,9 @@ With a `package` reference in the YAML pointing to a marketplace template.
 
 ## Does AgentTeams support sending and receiving files
 
-**Receiving files from you**: Yes. You can upload a file directly in Element Web (the attachment button), and Manager or Worker will receive it as a Matrix media message and can read its content.
+**Receiving files from you**: Yes. You can upload a file directly in Cinny (the attachment button), and Manager or Worker will receive it as a Matrix media message and can read its content.
 
-**Sending files to you**: Yes. When you ask Manager (or a Worker) to send you a file — such as a task output artifact, a generated report, or any file it has access to — it will upload the file to the Matrix media server and send it to the room as a downloadable attachment. You can then click to download it in Element Web.
+**Sending files to you**: Yes. When you ask Manager (or a Worker) to send you a file — such as a task output artifact, a generated report, or any file it has access to — it will upload the file to the Matrix media server and send it to the room as a downloadable attachment. You can then click to download it in Cinny.
 
 Paths printed by Manager or Worker are usually container-internal paths. If you
 cannot access a path directly from the host, ask the agent to send the file as
@@ -880,7 +880,7 @@ not a runtime console.
 ## How to connect Feishu/DingTalk/WeCom/Discord/Telegram
 
 The AgentScope Manager currently has one production conversation adapter:
-Matrix. Element is the bundled client. Do not add an OpenClaw channel file to
+Matrix. Cinny is the bundled client. Do not add an OpenClaw channel file to
 the Manager workspace; it is not loaded.
 
 Additional platforms require a new authenticated adapter that converts inbound

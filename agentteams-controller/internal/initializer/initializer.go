@@ -59,7 +59,7 @@ type Config struct {
 	OpenAIBaseURL              string // custom base URL for openai-compat providers
 	AIStreamIdleTimeoutSeconds int
 	TuwunelURL                 string // internal Tuwunel URL, e.g. http://tuwunel:6167
-	ElementWebURL              string // internal Element Web URL (optional)
+	CinnyURL                   string // internal Cinny URL (optional)
 	GitHubToken                string
 	SkillsDir                  string
 }
@@ -279,7 +279,7 @@ func (i *Initializer) waitForGateway(ctx context.Context) error {
 }
 
 // initGatewayRoutes registers service sources, LLM provider, AI route, and
-// infrastructure routes (Matrix, Element Web) in Higress. All calls are
+// infrastructure routes (Matrix, Cinny) in Higress. All calls are
 // idempotent — safe to re-run on controller restart.
 func (i *Initializer) initGatewayRoutes(ctx context.Context) error {
 	logger := ctrl.Log.WithName("initializer")
@@ -311,26 +311,31 @@ func (i *Initializer) initGatewayRoutes(ctx context.Context) error {
 		}
 	}
 
-	// 2. Element Web service source + route
-	if cfg.ElementWebURL != "" {
-		host, port, err := parseHostPort(cfg.ElementWebURL)
+	// 2. Cinny service source + route. Remove the old Element route first so
+	// upgrades do not leave two root routes competing for the same hostname.
+	if cfg.CinnyURL != "" {
+		if err := i.Gateway.DeleteRoute(ctx, "element-web"); err != nil {
+			logger.Error(err, "failed to remove legacy Element route (non-fatal)")
+		}
+
+		host, port, err := parseHostPort(cfg.CinnyURL)
 		if err != nil {
-			logger.Error(err, "failed to parse Element Web URL (non-fatal)")
+			logger.Error(err, "failed to parse Cinny URL (non-fatal)")
 		} else {
 			var svcSuffix string
 			if cfg.IsEmbedded {
-				if err := i.Gateway.EnsureStaticServiceSource(ctx, "element-web", host, port); err != nil {
-					logger.Error(err, "failed to register Element Web static service source (non-fatal)")
+				if err := i.Gateway.EnsureStaticServiceSource(ctx, "cinny", host, port); err != nil {
+					logger.Error(err, "failed to register Cinny static service source (non-fatal)")
 				}
 				svcSuffix = "static"
 			} else {
-				if err := i.Gateway.EnsureServiceSource(ctx, "element-web", host, port, "http"); err != nil {
-					logger.Error(err, "failed to register Element Web service source (non-fatal)")
+				if err := i.Gateway.EnsureServiceSource(ctx, "cinny", host, port, "http"); err != nil {
+					logger.Error(err, "failed to register Cinny service source (non-fatal)")
 				}
 				svcSuffix = "dns"
 			}
-			if err := i.Gateway.EnsureRoute(ctx, "element-web", nil, "element-web."+svcSuffix, port, "/"); err != nil {
-				logger.Error(err, "failed to create Element Web route (non-fatal)")
+			if err := i.Gateway.EnsureRoute(ctx, "cinny", nil, "cinny."+svcSuffix, port, "/"); err != nil {
+				logger.Error(err, "failed to create Cinny route (non-fatal)")
 			}
 		}
 	}

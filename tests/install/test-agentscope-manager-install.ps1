@@ -34,6 +34,7 @@ Assert-Contains $installer 'AGENTTEAMS_MANAGER_RUNTIME=agentscope' "PowerShell i
 Assert-Contains $installer 'http://127.0.0.1:18799/readyz' "PowerShell installer"
 Assert-Contains $installer 'QWENPAW_WORKER_IMAGE' "PowerShell installer"
 Assert-Contains $installer 'OPENHUMAN_WORKER_IMAGE' "PowerShell installer"
+Assert-Contains $installer 'AGENTTEAMS_CINNY_PUBLIC_URL' "PowerShell installer"
 Assert-Contains $verify 'http://127.0.0.1:18799/readyz' "verification script"
 
 @(

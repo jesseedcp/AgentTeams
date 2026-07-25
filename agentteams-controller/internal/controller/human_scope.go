@@ -22,7 +22,7 @@ type humanScope struct {
 	// pass, obtained either from the identity source's EnsurePrecreated
 	// (first-time) or EnsureUserToken (steady-state, e.g. LoginWithPassword
 	// for legacy_password). Empty when login failed (e.g. the user changed
-	// their password in Element); rooms phase then degrades to admin-only
+	// their password in Cinny); rooms phase then degrades to admin-only
 	// invite without /join.
 	userToken string
 }

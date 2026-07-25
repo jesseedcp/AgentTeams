@@ -5,7 +5,7 @@
 client, Matrix E2EE support, the 16 retained Manager skills, and the four
 image-owned prompt documents.
 
-The image does not run infrastructure. Higress, Matrix, MinIO, Element, and
+The image does not run infrastructure. Higress, Matrix, MinIO, Cinny, and
 the Controller remain separate Controller-stack services. OpenClaw, CoPaw,
 Hermes, QwenPaw, and OpenHuman remain supported Worker runtimes; none is a
 Manager runtime.
@@ -36,4 +36,4 @@ Operational HTTP is available on port 18799:
 - `GET /metrics`: dependency-free Prometheus text metrics
 
 These endpoints are operational only. Humans chat with the Manager through
-Matrix, normally using Element.
+Matrix, normally using Cinny.

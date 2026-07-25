@@ -117,7 +117,7 @@ type IdentitySource interface {
 	// EnsureUserToken returns a fresh user-scoped access token used
 	// by the rooms phase to /join private rooms. Returns ("", nil)
 	// when the controller cannot obtain one (e.g. the user rotated
-	// their password via Element); callers degrade to admin-only
+	// their password via Cinny); callers degrade to admin-only
 	// invite without surfacing it as an error.
 	EnsureUserToken(ctx context.Context, spec *v1beta1.HumanSpec, status *v1beta1.HumanStatus, metadataName string) (string, error)
 

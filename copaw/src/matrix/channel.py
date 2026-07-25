@@ -1210,9 +1210,9 @@ class MatrixChannel(BaseChannel):
         routing. The channel owns only text normalization; command execution is
         handled later by CoPaw's CommandRegistry/ControlCommand layer.
 
-        Element Web requires unknown slash commands to be sent as a leading
-        double slash, so normalize ``//stop`` to ``/stop``. Bare aliases are
-        only accepted when the caller explicitly allows them.
+        Matrix clients that reserve unknown slash commands may send them with
+        a leading double slash, so normalize ``//stop`` to ``/stop``. Bare
+        aliases are only accepted when the caller explicitly allows them.
         """
         registry = getattr(self, "_command_registry", None)
         if registry is None:

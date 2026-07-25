@@ -246,7 +246,7 @@ Controller Runtime
 
 **Embedded 与 Helm（交付形态）：**
 
-- **Embedded**：`install/agentteams-install.sh` 拉起 **`agentteams-controller`**（镜像内嵌 Higress、Tuwunel、MinIO、Element Web 与 controller 二进制），再由 controller 在同一 Docker/Podman 宿主机上创建 **`agentteams-manager`** 与各 **Worker** 容器。
+- **Embedded**：`install/agentteams-install.sh` 拉起 **`agentteams-controller`**（镜像内嵌 Higress、Tuwunel、MinIO、Cinny 与 controller 二进制），再由 controller 在同一 Docker/Podman 宿主机上创建 **`agentteams-manager`** 与各 **Worker** 容器。
 - **Helm / in-cluster**：使用仓库内 [`helm/agentteams`](../helm/agentteams) Chart，将网关、Homeserver、存储、**agentteams-controller** 与由 CR 驱动的 Manager/Worker Pod 部署为 Kubernetes 工作负载。CRD 语义与 Embedded 一致，仅后端驱动不同。
 
 两种模式共享同一套 Reconciler 逻辑，通过 Worker Backend 抽象层适配不同的基础设施。这与 Kubernetes 通过 CRI/CSI/CNI 抽象底层运行时的设计思路一致。
@@ -261,7 +261,7 @@ AgentTeams 选择 Matrix 作为 Agent 间通信协议，而非自建 RPC 框架�
 | Human-in-the-Loop | 人类用户使用同一个 IM 客户端，随时 @mention 任何 Agent 介入 |
 | 去中心化 | Matrix 是去中心化开放协议，无供应商锁定 |
 | 持久化 | 消息天然持久化，提供完整的审计轨迹 |
-| 生态 | Element、FluffyChat 等成熟客户端，移动端零配置接入 |
+| 生态 | 内置 Cinny，并兼容 Element、FluffyChat 等 Matrix 客户端 |
 
 内置 Tuwunel 作为高性能 Matrix Homeserver，单容器部署，无需外部依赖。
 
@@ -534,7 +534,7 @@ AgentTeams 的 Worker Backend 抽象层设计使其可以对接不同的底层�
 | Controller | Go + controller-runtime | 标准 K8s Controller 开发模式 |
 | 状态存储 | kine (SQLite) / K8s etcd | embedded 模式用 kine，incluster 用原生 etcd |
 | 通信协议 | Matrix (Tuwunel) | 去中心化开放协议，自托管 |
-| IM 客户端 | Element Web | 零配置浏览器客户端 |
+| IM 客户端 | Cinny | 零配置浏览器客户端 |
 | 文件存储 | MinIO | S3 兼容对象存储 |
 | AI Gateway | Higress (CNCF Sandbox) | 云原生 AI Gateway，LLM 代理 + MCP Server 托管 + Consumer 鉴权 |
 | Agent 运行时 | OpenClaw, QwenPaw, Hermes 等 | 多种运行时，从 500MB 到 <10MB 内存 |

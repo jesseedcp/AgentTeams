@@ -19,7 +19,7 @@ Manager 运行时固定为 AgentScope 2.0；Worker 执行层可在 OpenClaw、Co
 - 🤝 **多运行时协作**：OpenClaw、CoPaw、Hermes、QwenPaw 和 OpenHuman Worker 可在同一个 IM 房间中共存协作，AgentScope Manager 统一管理它们的生命周期和协作关系。
 - 📚 **引入 MinIO 共享文件系统**：用于 Agent 之间的信息共享，大幅降低多 Agent 协作带来的 Token 消耗。
 - ⛑️ **引入 Higress AI Gateway**：流量入口和各类凭证风险降低了，减少了用户对原生龙虾在安全上的顾虑。
-- 🎨 **使用 Element IM 客户端+Tuwunel IM 服务器（均基于 Matrix 实时通信协议）**：节省钉钉、飞书 IM 的接入和企业内的审批成本，方便用户快速体验在 IM 的交互环境中体验模型服务的"爽感"，同时支持以 OpenClaw 原生的方式接入 IM。
+- 🎨 **使用 Cinny IM 客户端+Tuwunel IM 服务器（均基于 Matrix 实时通信协议）**：节省钉钉、飞书 IM 的接入和企业内的审批成本，方便用户快速体验在 IM 的交互环境中体验模型服务的"爽感"，同时支持以 OpenClaw 原生的方式接入 IM。
 
 ![架构](https://img.alicdn.com/imgextra/i4/O1CN01c1VlDE1zYZ46EW3OA_!!6000000006726-49-tps-9895-8231.webp)
 
@@ -41,7 +41,7 @@ Manager 运行时固定为 AgentScope 2.0；Worker 执行层可在 OpenClaw、Co
 - **多 Agent 群聊网络**：Manager Agent 智能分解任务，协调多个 Worker Agent 并行执行，大幅提升复杂任务处理能力。
 - **Matrix 协议驱动**：基于开放的 Matrix IM 协议，所有 Agent 通信透明可审计，天然支持分布式部署和联邦通信。
 - **人工全程监督**：人类可随时进入任意 Matrix 房间观察 Agent 对话，实时干预或修正 Agent 行为，确保安全可控。
-- **真正开箱即用的 IM**：内置 Matrix 服务器，不需要申请飞书/钉钉机器人，不需要等待审批。浏览器打开 Element Web 就能对话，或者用手机上的 Matrix 客户端（Element、FluffyChat）随时指挥，iOS、Android、Web 全平台支持。
+- **真正开箱即用的 IM**：内置 Matrix 服务器，不需要申请飞书/钉钉机器人，不需要等待审批。浏览器打开 Cinny 就能对话，或者用手机上的 Matrix 客户端（Element、FluffyChat）随时指挥，iOS、Android、Web 全平台支持。
 - **Manager-Worker 架构**：清晰的 Manager-Worker 两层架构，职责分明，易于扩展自定义 Worker Agent 以适应不同场景，支持纳管 Copaw、NanoClaw、ZeroClaw 或是企业自建的 Agent
 
 - **一条命令启动**：一个 `curl | bash` 搞定所有组件 — Higress AI 网关、Matrix 服务器、文件存储、Web 客户端和 Manager Agent 本身。
@@ -100,7 +100,7 @@ Set-ExecutionPolicy Bypass -Scope Process -Force; $wc=New-Object Net.WebClient; 
 
 若测试不成功，您需要检查粘贴的模型 API Key 是否完整或无空格、Base URL 是否包含服务商要求的路径（常见为 `/v1`）、模型 ID 是否正确。再次尝试仍无法通过时，建议向对应模型服务厂商提交服务工单。
 
-第八步：选择网络访问模式。这里我们选择仅本机使用，若允许外部访问，例如和同事建立 Matrix roon，则选择允许外部访问。选择后，按回车键即可，确定端口号、网关主机端口、Higress 控制台主机端口、Maxtrix 域名、Element Web 直接访问的主机端口、文件系统域名等，均采用默认值，无须手动配置。
+第八步：选择网络访问模式。这里我们选择仅本机使用，若允许外部访问，例如和同事建立 Matrix room，则选择允许外部访问。选择后，按回车键即可，确定端口号、网关主机端口、Higress 控制台主机端口、Matrix 域名、Cinny 直接访问的主机端口、文件系统域名等，均采用默认值，无须手动配置。
 
 第九步：GitHub 集成、Skills 注册中心、数据持久化、Docker 卷、Manager 工作空间，按回车键即可，均采用默认配置，无须手动配置。
 
@@ -111,7 +111,10 @@ Set-ExecutionPolicy Bypass -Scope Process -Force; $wc=New-Object Net.WebClient; 
 若希望通过移动端来访问和使用，则需要使用美区账号下载 FluffyChat/Element Mobile。（之所以采用这两个 IM，是因为他们是支持 Matrix 协议的）下载后，连接您的 Matrix 服务器地址，就能随时随地管理您的 Agent 团队。
 ![测试](https://img.alicdn.com/imgextra/i3/O1CN01Tl4T8q29HIHtPVSJL_!!6000000008042-2-tps-2372-1282.png)
 
-第十二步：浏览器中，输入 http://127.0.0.1:18088/#/login，登录 Element，输入用户名和密码，就可以玩龙虾了，告诉 Manager 创建 Worker 并分配任务。
+第十二步：浏览器中输入 http://127.0.0.1:18088/#/login，登录 Cinny，输入用户名和密码，就可以告诉 Manager 创建 Worker 并分配任务。
+
+从使用 Element 的旧版本升级不会改变 Matrix 账号、房间、消息和媒体。
+但浏览器会话属于具体客户端，因此升级后需要用原 Matrix 凭据在 Cinny 中重新登录一次。
 ![登录](https://img.alicdn.com/imgextra/i1/O1CN01C5NvV41P6msPuucrs_!!6000000001792-2-tps-2748-1224.png)
 
 ⚠️ **注意：AgentTeams 内置了 Higress AI 网关，负责模型 API Key 管理以及入口流量的安全管控。模型 API Key 的切换、新增，以及路由、域名、证书管理，均可在 Higress 控制台管理。**
@@ -203,7 +206,7 @@ helm install agentteams higress.io/agentteams \
 | 参数 | 是否必填 | 说明 |
 |---|---|---|
 | `credentials.llmApiKey` | 必填 | LLM 服务商 API Key |
-| `gateway.publicURL` | 必填 | 用户访问 Element Web 的对外地址（端口转发场景填 `http://localhost:18080`，正式环境填 `https://agentteams.example.com` 等） |
+| `gateway.publicURL` | 必填 | 用户访问 Cinny 的对外地址（端口转发场景填 `http://localhost:18080`，正式环境填 `https://agentteams.example.com` 等） |
 | `credentials.adminPassword` | 推荐 | Matrix 管理员密码；留空时会自动生成（之后需要从 Secret 中读取） |
 | `credentials.llmProvider` | 可选 | LLM 服务商名，默认 `openai-compat` |
 | `credentials.defaultModel` | 可选 | 默认模型，默认 `gpt-5.4` |
@@ -264,11 +267,11 @@ helm install agentteams higress.io/agentteams \
 kubectl port-forward -n agentteams-system svc/higress-gateway 18080:80
 ```
 
-然后在浏览器中打开 http://localhost:18080 登录 Element Web。命令退出后转发即停止，
+然后在浏览器中打开 http://localhost:18080 登录 Cinny。命令退出后转发即停止，
 因此该方式不适合多人共享。
 
 公司内网或公网访问时，只需通过 HTTPS Ingress 或 LoadBalancer 暴露
-`svc/higress-gateway`。`gateway.publicURL` 会写入 Element Web 配置，作为 Matrix
+`svc/higress-gateway`。`gateway.publicURL` 会写入 Cinny 配置，作为 Matrix
 Homeserver 地址，因此必须与用户实际打开的公网 Origin 完全一致，例如
 `https://agentteams.example.com`。
 
@@ -425,7 +428,7 @@ agt update worker --runtime hermes
 ```
 ┌──────────────────────────────────────────────────────┐
 │                 agentteams-controller                │
-│        Higress │ Tuwunel │ MinIO │ Element Web       │
+│          Higress │ Tuwunel │ MinIO │ Cinny           │
 └─────────────────────────┬────────────────────────────┘
                           │ 类型化 API + Matrix + 存储
 ┌─────────────────────────▼────────────────────────────┐
@@ -444,7 +447,7 @@ agt update worker --runtime hermes
 | AgentScope 2.0 Manager | 对话式编排、策略校验、任务/团队工作流及 Matrix 流式回复 |
 | Higress AI 网关 | LLM 代理、MCP Server 托管、凭证管理 |
 | Tuwunel (Matrix) | 自建 IM 服务器，承载所有 Agent + 人类通信 |
-| Element Web | 浏览器客户端，零配置 |
+| Cinny | 浏览器客户端，零配置 |
 | MinIO | 集中式文件存储，Worker 无状态 |
 ## 常见问题
 

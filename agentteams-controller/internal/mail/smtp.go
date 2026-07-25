@@ -32,7 +32,7 @@ func ConfigFromEnv() *Config {
 }
 
 // SendWelcome sends a welcome email to a newly created human user.
-func SendWelcome(cfg *Config, to, displayName, matrixUserID, password, elementURL string) error {
+func SendWelcome(cfg *Config, to, displayName, matrixUserID, password, cinnyURL string) error {
 	if cfg == nil {
 		return fmt.Errorf("SMTP not configured")
 	}
@@ -46,9 +46,9 @@ Your AgentTeams account has been created:
   Password: %s
   Login URL: %s
 
-Please log in using Element Web and change your password immediately.
+Please log in using Cinny and change your password immediately.
 
-— AgentTeams`, displayName, matrixUserID, password, elementURL)
+— AgentTeams`, displayName, matrixUserID, password, cinnyURL)
 
 	msg := strings.Join([]string{
 		fmt.Sprintf("From: %s", cfg.From),

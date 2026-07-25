@@ -156,7 +156,7 @@ type HumanProvisioner interface {
 	// (Status.MatrixUserID == ""); steady-state reconciles must use
 	// LoginAsHuman with the stored password instead to avoid triggering
 	// the orphan-recovery password reset inside matrix.EnsureUser, which
-	// would clobber any user-initiated password change made in Element.
+	// would clobber any user-initiated password change made in Cinny.
 	//
 	// Retained for backward compatibility with the team-admin login
 	// path and existing mock-driven tests. New code that needs to
@@ -166,7 +166,7 @@ type HumanProvisioner interface {
 
 	// LoginAsHuman obtains a fresh access token for an already-provisioned
 	// human using the caller-supplied password. Returns an error when the
-	// password no longer matches (e.g. the user changed it in Element);
+	// password no longer matches (e.g. the user changed it in Cinny);
 	// callers treat that as a soft failure and fall back to admin-only
 	// room management on this reconcile pass.
 	LoginAsHuman(ctx context.Context, username, password string) (string, error)
@@ -244,7 +244,7 @@ type HumanCredentials struct {
 	// created a new account (true) or fell back to logging in to an
 	// existing one (false). Identity-source implementations gate
 	// password assignment on this flag — re-registering must not
-	// silently clobber a password rotated by the user via Element.
+	// silently clobber a password rotated by the user via Cinny.
 	Created bool
 }
 

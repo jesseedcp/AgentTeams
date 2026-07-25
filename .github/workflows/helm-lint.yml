@@ -7,6 +7,7 @@ on:
       - 'hack/local-k8s-up.sh'
       - 'openhuman/scripts/openhuman-worker-entrypoint.sh'
       - 'tests/check-agentteams-rename-defaults.sh'
+      - 'tests/check-cinny-replacement.sh'
       - 'tests/check-helm-agentteams.sh'
   push:
     branches: [main]
@@ -15,6 +16,7 @@ on:
       - 'hack/local-k8s-up.sh'
       - 'openhuman/scripts/openhuman-worker-entrypoint.sh'
       - 'tests/check-agentteams-rename-defaults.sh'
+      - 'tests/check-cinny-replacement.sh'
       - 'tests/check-helm-agentteams.sh'
   workflow_dispatch: ~
 
@@ -26,7 +28,9 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Check AgentTeams rename contracts
-        run: bash tests/check-agentteams-rename-defaults.sh
+        run: |
+          bash tests/check-agentteams-rename-defaults.sh
+          bash tests/check-cinny-replacement.sh
 
       - name: Set up Helm
         uses: azure/setup-helm@v4

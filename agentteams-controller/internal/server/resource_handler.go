@@ -30,7 +30,7 @@ const teamWorkerMembersField = "spec.workerMembers.name"
 //   - /workers (GET/LIST) return an aggregated view: standalone Worker CRs
 //     plus synthetic WorkerResponse entries for every member of every Team,
 //     enriched with live backend status so existing consumers (CLI, Manager,
-//     Element UI) keep functioning without creating child Worker CRs.
+//     Cinny UI) keep functioning without creating child Worker CRs.
 type ResourceHandler struct {
 	client    client.Client
 	namespace string

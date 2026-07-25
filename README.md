@@ -26,7 +26,7 @@ The Manager runtime is fixed to AgentScope 2.0. Worker execution remains pluggab
 
 - 🔐 **Higress AI Gateway**: Centralizes traffic management and mitigates credential-related risks, alleviating user concerns about security vulnerabilities in the native Lobster framework.
 
-- ☎️ **Element IM Client + Tuwunel IM Server (both Matrix protocol-based)**: Eliminating DingTalk/Lark integration overhead and enterprise approval workflows. Enables rapid user onboarding to experience the "delight" of model services within an IM environment, while maintaining compatibility with native OpenClaw IM integration.
+- ☎️ **Cinny IM Client + Tuwunel IM Server (both Matrix protocol-based)**: Eliminating DingTalk/Lark integration overhead and enterprise approval workflows. Enables rapid user onboarding to experience the "delight" of model services within an IM environment, while maintaining compatibility with native OpenClaw IM integration.
 
 ## News
 
@@ -50,7 +50,7 @@ The Manager runtime is fixed to AgentScope 2.0. Worker execution remains pluggab
 
 - **Human-in-the-Loop by Default**: Every Matrix room includes you, the Manager, and the relevant Workers. Watch everything. Jump in anytime. No black boxes.
 
-- **Zero Configuration IM**: Built-in Matrix server means no bot applications, no API approvals, no waiting. Just open Element Web and start chatting.
+- **Zero Configuration IM**: Built-in Matrix server means no bot applications, no API approvals, no waiting. Just open Cinny and start chatting.
 
 - **One Command Setup**: `curl | bash` and you're done — AI gateway, Matrix server, file storage, web client, and Manager Agent.
 
@@ -94,7 +94,11 @@ The installer walks you through:
 
 ### Access
 
-Open http://127.0.0.1:18088 in your browser and log in to Element Web. The Manager will greet you and explain how to create your first Worker.
+Open http://127.0.0.1:18088 in your browser and log in to Cinny. The Manager will greet you and explain how to create your first Worker.
+
+Upgrading from an Element-based build does not change Matrix accounts, rooms,
+messages, or media. Browser sessions are client-specific, so sign in to Cinny
+once with the same Matrix credentials after the upgrade.
 
 **Mobile**: Use any Matrix client (Element, FluffyChat) and connect to your server address.
 
@@ -180,7 +184,7 @@ helm install agentteams higress.io/agentteams \
 | Value | Required | Description |
 |---|---|---|
 | `credentials.llmApiKey` | yes | API key for your LLM provider |
-| `gateway.publicURL` | yes | Public URL where users will reach Element Web (e.g. `http://localhost:18080` for port-forward, or `https://agentteams.example.com` for an Ingress) |
+| `gateway.publicURL` | yes | Public URL where users will reach Cinny (e.g. `http://localhost:18080` for port-forward, or `https://agentteams.example.com` for an Ingress) |
 | `credentials.adminPassword` | recommended | Matrix admin password; auto-generated if left empty (you'll have to read it back from the Secret) |
 | `credentials.llmProvider` | no | LLM provider name, defaults to `openai-compat` |
 | `credentials.defaultModel` | no | Default model, defaults to `gpt-5.4` |
@@ -258,12 +262,12 @@ For a temporary local admin session, forward the Higress Gateway:
 kubectl port-forward -n agentteams-system svc/higress-gateway 18080:80
 ```
 
-Then open http://localhost:18080 and log in to Element Web. The port-forward
+Then open http://localhost:18080 and log in to Cinny. The port-forward
 ends when the command exits and is not suitable for shared access.
 
 For company or Internet access, expose only `svc/higress-gateway` through an
-HTTPS Ingress or LoadBalancer. `gateway.publicURL` is written into the Element
-Web configuration as its Matrix homeserver URL, so it must exactly match the
+HTTPS Ingress or LoadBalancer. `gateway.publicURL` is written into the Cinny
+configuration as its Matrix homeserver URL, so it must exactly match the
 public origin that users open (for example, `https://agentteams.example.com`).
 
 1. Point the public DNS name at your Ingress controller or load balancer.
@@ -406,7 +410,7 @@ agt update worker --runtime hermes
 ```
 ┌──────────────────────────────────────────────────────┐
 │                 agentteams-controller                │
-│        Higress │ Tuwunel │ MinIO │ Element Web       │
+│          Higress │ Tuwunel │ MinIO │ Cinny           │
 └─────────────────────────┬────────────────────────────┘
                           │ typed API + Matrix + storage
 ┌─────────────────────────▼────────────────────────────┐
@@ -425,7 +429,7 @@ agt update worker --runtime hermes
 | AgentScope 2.0 Manager | Conversational orchestration, policy enforcement, task/team workflows, and streaming Matrix replies |
 | Higress AI Gateway | LLM proxy, MCP Server hosting, credential management |
 | Tuwunel (Matrix) | Self-hosted IM server for all Agent + Human communication |
-| Element Web | Browser client, zero setup |
+| Cinny | Browser client, zero setup |
 | MinIO | Centralized file storage, Workers are stateless |
 
 ## AgentTeams vs OpenClaw Native

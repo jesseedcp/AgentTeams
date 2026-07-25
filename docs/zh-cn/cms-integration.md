@@ -102,7 +102,7 @@ Manager 会自动将 CMS 配置传播到新创建的 Worker。确保在配置 Ma
 
 ## 步骤四:验证接入
 
-1. 登录 Element Web,与 Manager 交互并创建 Worker 执行任务
+1. 登录 Cinny，与 Manager 交互并创建 Worker 执行任务
 2. 访问 [CMS 2.0 控制台](https://cmsnext.console.aliyun.com/next/home) → 选择工作空间 → **应用可观测** → **AI 应用可观测**
 3. 您应该看到应用列表中出现 `agentteams-manager` 和 `agentteams-worker-*`
 4. 单击应用名称可查看调用链分析、指标等详细信息

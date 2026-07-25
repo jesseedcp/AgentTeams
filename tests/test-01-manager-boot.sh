@@ -21,8 +21,8 @@ fi
 
 assert_http_code "http://${TEST_MANAGER_HOST}:${TEST_CONSOLE_PORT}/" "200" \
     "Higress Console is accessible"
-assert_http_code "http://${TEST_MANAGER_HOST}:${TEST_ELEMENT_PORT}/" "200" \
-    "Element Web is accessible"
+assert_http_code "http://${TEST_MANAGER_HOST}:${TEST_CINNY_PORT}/" "200" \
+    "Cinny is accessible"
 
 _INFRA_CTR="${TEST_CONTROLLER_CONTAINER:-agentteams-controller}"
 _AGENT_CTR="${TEST_AGENT_CONTAINER:-agentteams-manager}"

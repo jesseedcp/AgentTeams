@@ -146,7 +146,7 @@ if [ "$SKIP_BUILD" = "0" ]; then
         "higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/minio:20260216"
         "higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/mc:20260216"
         "higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/tuwunel:20260216"
-        "higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/element-web:20260216"
+        "ghcr.io/cinnyapp/cinny:v4.12.3"
         "higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/console:2.2.1"
         "higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/higress:2.2.1"
         "higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/pilot:2.2.1"
@@ -256,7 +256,7 @@ else
     fi
 fi
 echo ""
-log "Access Element Web:"
+log "Access Cinny:"
 log "  Then open: http://localhost:18080"
 echo ""
 log "View Controller logs:"

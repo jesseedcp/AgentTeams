@@ -51,7 +51,7 @@ The default **embedded** install starts two main containers (see [architecture.m
 
 | Container | Role |
 |-----------|------|
-| **`agentteams-controller`** | Bundles Higress, Tuwunel, MinIO, Element Web, and the Go controller (REST API on port **8090** inside the Docker network). |
+| **`agentteams-controller`** | Bundles Higress, Tuwunel, MinIO, Cinny, and the Go controller (REST API on port **8090** inside the Docker network). |
 | **`agentteams-manager`** | Lightweight AgentScope 2.0 Manager with typed tools and SQLite/MinIO recovery. |
 
 Worker containers are created when you add Workers. OpenClaw, CoPaw, Hermes,
@@ -66,7 +66,7 @@ docker exec agentteams-controller agt get workers
 
 For YAML-driven workflows, use `install/agentteams-apply.sh` (copies files into `agentteams-manager` and runs `agt apply -f`). Details: [Declarative Resource Management](declarative-resource-management.md).
 
-### 1.2 Login to Element Web
+### 1.2 Login to Cinny
 
 Open http://127.0.0.1:18088 in your browser (direct access port). Alternatively, access via the gateway at http://matrix-client-local.agentteams.io:18080 if you've added the domain to your `/etc/hosts`.
 
@@ -76,9 +76,9 @@ Login with your admin credentials.
 
 - [ ] **`agentteams-controller`** is running (embedded stack): `docker ps | grep agentteams-controller`
 - [ ] **`agentteams-manager`** is running: `docker ps | grep agentteams-manager`
-- [ ] Element Web loads in browser at http://127.0.0.1:18088
+- [ ] Cinny loads in browser at http://127.0.0.1:18088
 - [ ] Login with admin credentials succeeds
-- [ ] Higress Console at http://localhost:18001 (gateway **host** port defaults to **18080**; Matrix/Element use that gateway for `*-local.agentteams.io` hostnames)
+- [ ] Higress Console at http://localhost:18001 (gateway **host** port defaults to **18080**; Matrix/Cinny use that gateway for `*-local.agentteams.io` hostnames)
 - [ ] MinIO is reachable **inside** the controller container (embedded install does **not** publish MinIO console on the host by default): `docker exec agentteams-controller curl -sf http://127.0.0.1:9000/minio/health/live`
 - [ ] Manager readiness returns success: `curl -fsS http://127.0.0.1:18888/readyz`
 
@@ -93,9 +93,9 @@ interactive runtime console.
 
 ### 2.1 Chat with Manager
 
-**Option A: Via Element Web (GUI)**
+**Option A: Via Cinny (GUI)**
 
-In Element Web, start a direct message (DM) with the `manager` user.
+In Cinny, start a direct message (DM) with the `manager` user.
 
 Send:
 > Please create a new Worker named alice for frontend development tasks. She should have access to GitHub MCP.
@@ -144,7 +144,7 @@ The Manager will provide all the specific values in its reply.
 
 ### Verification Checklist
 
-- [ ] Alice's Room appears in Element Web (3 members: you, manager, alice)
+- [ ] Alice's Room appears in Cinny (3 members: you, manager, alice)
 - [ ] Higress Console shows `worker-alice` consumer (http://localhost:18001)
 - [ ] MinIO has `agents/alice/SOUL.md` file (accessible via MinIO Console or `mc ls`)
 - [ ] Worker container running: `docker ps | grep agentteams-worker-alice`
@@ -157,7 +157,7 @@ The Manager will provide all the specific values in its reply.
 
 ### 3.1 Send task in Alice's Room
 
-Open Alice's Room in Element Web and send:
+Open Alice's Room in Cinny and send:
 
 > Alice, please create a simple README.md for a hello-world project. Include the project name, description, and usage instructions. Save the result to the shared task folder.
 
@@ -257,7 +257,7 @@ In your DM with Manager, send:
 
 ### Verification Checklist
 
-- [ ] Bob's Room appears in Element Web (3 members)
+- [ ] Bob's Room appears in Cinny (3 members)
 - [ ] Higress Console shows `worker-bob` consumer
 - [ ] Manager splits task between Alice and Bob
 - [ ] Both Workers communicate progress in their respective Rooms
@@ -364,4 +364,4 @@ To completely remove AgentTeams and all its data:
 bash <(curl -fsSL https://raw.githubusercontent.com/jesseedcp/AgentTeams/main/install/agentteams-install.sh) uninstall
 ```
 
-This matches `install/agentteams-install.sh uninstall`: it stops and removes **`agentteams-manager`**, all **`agentteams-worker-*`** (and other worker) containers, **`agentteams-controller`** (embedded Higress / Tuwunel / MinIO / Element Web), optional **`agentteams-docker-proxy`**, the **`agentteams-data`** Docker volume, your **`agentteams-manager.env`** file, the workspace directory, the **`agentteams-net`** network, and the install log.
+This matches `install/agentteams-install.sh uninstall`: it stops and removes **`agentteams-manager`**, all **`agentteams-worker-*`** (and other worker) containers, **`agentteams-controller`** (embedded Higress / Tuwunel / MinIO / Cinny), optional **`agentteams-docker-proxy`**, the **`agentteams-data`** Docker volume, your **`agentteams-manager.env`** file, the workspace directory, the **`agentteams-net`** network, and the install log.

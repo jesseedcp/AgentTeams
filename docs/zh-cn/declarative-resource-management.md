@@ -544,7 +544,7 @@ Your AgentTeams account has been created:
 
   Username: {matrix_user_id}
   Password: {generated_password}
-  Login URL: {element_web_url}
+  Login URL: {cinny_url}
 
 Please log in and change your password immediately.
 

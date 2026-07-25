@@ -35,7 +35,7 @@ export TEST_MANAGER_HOST="127.0.0.1"
 # External host ports — auto-detected from container env in detect_manager_config()
 export TEST_GATEWAY_PORT="${TEST_GATEWAY_PORT:-18080}"
 export TEST_CONSOLE_PORT="${TEST_CONSOLE_PORT:-18001}"
-export TEST_ELEMENT_PORT="${TEST_ELEMENT_PORT:-18088}"
+export TEST_CINNY_PORT="${TEST_CINNY_PORT:-${TEST_ELEMENT_PORT:-18088}}"
 
 # Internal container URLs — always fixed; all callers use exec_in_manager
 export TEST_MATRIX_DIRECT_URL="http://127.0.0.1:6167"
@@ -708,19 +708,19 @@ detect_manager_config() {
 
     _cenv() { echo "${container_env}" | grep "^${1}=" | cut -d= -f2-; }
 
-    local detected_domain detected_gateway_port detected_console_port detected_element_port
+    local detected_domain detected_gateway_port detected_console_port detected_cinny_port
     detected_domain=$(        _cenv AGENTTEAMS_MATRIX_DOMAIN)
     detected_gateway_port=$(  _cenv AGENTTEAMS_PORT_GATEWAY)
     detected_console_port=$(  _cenv AGENTTEAMS_PORT_CONSOLE)
-    detected_element_port=$(  _cenv AGENTTEAMS_PORT_ELEMENT_WEB)
+    detected_cinny_port=$(    _cenv AGENTTEAMS_PORT_CINNY)
     detected_domain="${detected_domain:-$(_cenv AGENTTEAMS_MATRIX_DOMAIN)}"
     detected_gateway_port="${detected_gateway_port:-$(_cenv AGENTTEAMS_PORT_GATEWAY)}"
     detected_console_port="${detected_console_port:-$(_cenv AGENTTEAMS_PORT_CONSOLE)}"
-    detected_element_port="${detected_element_port:-$(_cenv AGENTTEAMS_PORT_ELEMENT_WEB)}"
+    detected_cinny_port="${detected_cinny_port:-$(_cenv AGENTTEAMS_PORT_ELEMENT_WEB)}"
 
     [ -n "${detected_gateway_port}" ] && export TEST_GATEWAY_PORT="${detected_gateway_port}"
     [ -n "${detected_console_port}" ] && export TEST_CONSOLE_PORT="${detected_console_port}"
-    [ -n "${detected_element_port}" ] && export TEST_ELEMENT_PORT="${detected_element_port}"
+    [ -n "${detected_cinny_port}" ] && export TEST_CINNY_PORT="${detected_cinny_port}"
 
     # Rebuild derived URLs after port detection
     export TEST_CONSOLE_URL="http://${TEST_MANAGER_HOST}:${TEST_CONSOLE_PORT}"

@@ -34,7 +34,7 @@
 #   AGENTTEAMS_INSTALL_OPENHUMAN_WORKER_IMAGE Override openhuman worker image (e.g., local build)
 #   AGENTTEAMS_PORT_GATEWAY       Host port for Higress gateway (default: 18080)
 #   AGENTTEAMS_PORT_CONSOLE       Host port for Higress console (default: 18001)
-#   AGENTTEAMS_PORT_ELEMENT_WEB   Host port for Element Web direct access (default: 18088)
+#   AGENTTEAMS_PORT_CINNY         Host port for Cinny direct access (default: 18088)
 
 #Requires -Version 5.1
 
@@ -354,7 +354,7 @@ $script:Messages = @{
     "port.title" = @{ zh = "--- 端口配置（按回车使用默认值）---"; en = "--- Port Configuration (press Enter for defaults) ---" }
     "port.gateway_prompt" = @{ zh = "网关主机端口（容器内 8080）"; en = "Host port for gateway (8080 inside container)" }
     "port.console_prompt" = @{ zh = "Higress 控制台主机端口（容器内 8001）"; en = "Host port for Higress console (8001 inside container)" }
-    "port.element_prompt" = @{ zh = "Element Web 直接访问主机端口（容器内 8088）"; en = "Host port for Element Web direct access (8088 inside container)" }
+    "port.cinny_prompt" = @{ zh = "Cinny 直接访问主机端口（容器内 8088）"; en = "Host port for Cinny direct access (8088 inside container)" }
     "port.local_only.title" = @{ zh = "--- 网络访问模式 ---"; en = "--- Network Access Mode ---" }
     "port.local_only.hint_yes" = @{ zh = "  仅本机使用，无需开放外部端口（推荐）"; en = "  Local use only, no external port exposure (recommended)" }
     "port.local_only.hint_no" = @{ zh = "  允许外部访问（局域网 / 公网）"; en = "  Allow external access (LAN / public network)" }
@@ -366,9 +366,9 @@ $script:Messages = @{
 
     # --- Domain Configuration ---
     "domain.title" = @{ zh = "--- 域名配置（按回车使用默认值）---"; en = "--- Domain Configuration (press Enter for defaults) ---" }
-    "domain.hint" = @{ zh = "提示: 自定义域名前必须事先做好 DNS 解析。单机 ECS 部署时无需修改 aigw、fs 等域名；Element Web 和 Matrix Server 也可通过 IP 直接访问。"; en = "Hint: Configure DNS resolution before customizing domains. For single ECS deployment, no need to change aigw, fs, etc.; Element Web and Matrix Server can also be accessed directly via IP." }
+    "domain.hint" = @{ zh = "提示: 自定义域名前必须事先做好 DNS 解析。单机 ECS 部署时无需修改 aigw、fs 等域名；Cinny 和 Matrix Server 也可通过 IP 直接访问。"; en = "Hint: Configure DNS resolution before customizing domains. For single ECS deployment, no need to change aigw, fs, etc.; Cinny and Matrix Server can also be accessed directly via IP." }
     "domain.matrix_prompt" = @{ zh = "Matrix 域名"; en = "Matrix Domain" }
-    "domain.element_prompt" = @{ zh = "Element Web 域名"; en = "Element Web Domain" }
+    "domain.cinny_prompt" = @{ zh = "Cinny 域名"; en = "Cinny Domain" }
     "domain.gateway_prompt" = @{ zh = "AI 网关域名"; en = "AI Gateway Domain" }
     "domain.fs_prompt" = @{ zh = "文件系统域名"; en = "File System Domain" }
 
@@ -410,8 +410,8 @@ $script:Messages = @{
     # --- Matrix E2EE ---
     "matrix_e2ee.title" = @{ zh = "--- Matrix 端到端加密（E2EE）---"; en = "--- Matrix End-to-End Encryption (E2EE) ---" }
     "matrix_e2ee.desc" = @{
-        zh = "E2EE 会对 Manager 与 Worker 之间的 Matrix 消息进行端到端加密。`n  启用后，即使 Matrix 服务器被入侵，消息内容也无法被窃取。`n  但 E2EE 会增加首次握手耗时，且要求所有 Agent 都支持 matrix-sdk-crypto。`n  如果不确定，建议保持禁用。`n  ⚠ 注意：禁用 E2EE 后，请勿在 Element 上创建默认启用加密的 Private 房间，`n  否则 Agent 将无法读取该房间中的加密消息。请改用 Public 房间或关闭房间加密。"
-        en = "E2EE encrypts Matrix messages between Manager and Workers end-to-end.`n  When enabled, message content stays private even if the Matrix server is compromised.`n  However, E2EE adds overhead to the initial handshake and requires all Agents`n  to support matrix-sdk-crypto. If unsure, keep it disabled.`n  ⚠ Note: When E2EE is disabled, do NOT create Private rooms in Element (which`n  enable encryption by default) — Agents cannot read encrypted messages without`n  E2EE support. Use Public rooms or turn off room encryption instead."
+        zh = "E2EE 会对 Manager 与 Worker 之间的 Matrix 消息进行端到端加密。`n  启用后，即使 Matrix 服务器被入侵，消息内容也无法被窃取。`n  但 E2EE 会增加首次握手耗时，且要求所有 Agent 都支持 matrix-sdk-crypto。`n  如果不确定，建议保持禁用。`n  ⚠ 注意：禁用 E2EE 后，请勿在 Cinny 或其他 Matrix 客户端中启用房间加密，`n  否则 Agent 将无法读取该房间中的加密消息。请使用未加密房间。"
+        en = "E2EE encrypts Matrix messages between Manager and Workers end-to-end.`n  When enabled, message content stays private even if the Matrix server is compromised.`n  However, E2EE adds overhead to the initial handshake and requires all Agents`n  to support matrix-sdk-crypto. If unsure, keep it disabled.`n  ⚠ Note: When E2EE is disabled, do NOT enable room encryption in Cinny or`n  another Matrix client — Agents cannot read encrypted messages without E2EE`n  support. Use unencrypted rooms instead."
     }
     "matrix_e2ee.enable" = @{ zh = "启用 E2EE"; en = "Enable E2EE" }
     "matrix_e2ee.disable" = @{ zh = "禁用 E2EE（推荐）"; en = "Disable E2EE (recommended)" }
@@ -506,8 +506,8 @@ $script:Messages = @{
     "install.welcome_msg.sent" = @{ zh = "欢迎消息已发送给 Manager"; en = "Welcome message sent to Manager" }
     "install.welcome_msg.waiting" = @{ zh = "等待 Manager 发送欢迎消息（Higress 路由授权 + LLM 探活，约 45-90s）..."; en = "Waiting for Manager to send the welcome message (Higress route auth + LLM probe, ~45-90s)..." }
     "install.welcome_msg.confirmed" = @{ zh = "Manager 已确认发送欢迎消息（status.welcomeSent=true，用时 {0}s）"; en = "Manager confirmed welcome message sent (status.welcomeSent=true, {0}s elapsed)" }
-    "install.welcome_msg.timeout" = @{ zh = "警告: 在 {0}s 内未观察到 Manager 发送欢迎消息（status.welcomeSent=true）。安装仍然成功，所有服务已就绪——可继续按下方提示登录 Element Web。"; en = "WARNING: Did not observe the Manager sending its welcome message (status.welcomeSent=true) within {0}s. Installation is still successful, all services are up — continue with the Element Web instructions below." }
-    "install.welcome_msg.timeout_hint" = @{ zh = "手动触发 onboarding: 登录 Element Web → 打开与 Manager 的 DM 房间 → 发送任意一句话（例如 `"hi`"），Manager 会接管对话并开始引导。"; en = "Manual onboarding: log in to Element Web -> open the DM with the Manager -> send any message (e.g. `"hi`") and the Manager will take over and start the guided setup." }
+    "install.welcome_msg.timeout" = @{ zh = "警告: 在 {0}s 内未观察到 Manager 发送欢迎消息（status.welcomeSent=true）。安装仍然成功，所有服务已就绪——可继续按下方提示登录 Cinny。"; en = "WARNING: Did not observe the Manager sending its welcome message (status.welcomeSent=true) within {0}s. Installation is still successful, all services are up — continue with the Cinny instructions below." }
+    "install.welcome_msg.timeout_hint" = @{ zh = "手动触发 onboarding: 登录 Cinny → 打开与 Manager 的 DM 房间 → 发送任意一句话（例如 `"hi`"），Manager 会接管对话并开始引导。"; en = "Manual onboarding: log in to Cinny -> open the DM with the Manager -> send any message (e.g. `"hi`") and the Manager will take over and start the guided setup." }
     "install.welcome_msg.timeout_inspect" = @{ zh = "排查命令: docker exec agentteams-controller agt get managers default"; en = "Inspect status: docker exec agentteams-controller agt get managers default" }
     "install.welcome_msg.poll_unavailable" = @{ zh = "提示: agentteams-manager 内未找到 AgentTeams CLI，跳过 welcome 等待（旧镜像？）"; en = "Note: AgentTeams CLI not found inside agentteams-manager; skipping welcome wait (old image?)" }
 
@@ -845,7 +845,7 @@ AGENTTEAMS_ADMIN_PASSWORD=$($Config.ADMIN_PASSWORD)
 AGENTTEAMS_LOCAL_ONLY=$($Config.LOCAL_ONLY)
 AGENTTEAMS_PORT_GATEWAY=$($Config.PORT_GATEWAY)
 AGENTTEAMS_PORT_CONSOLE=$($Config.PORT_CONSOLE)
-AGENTTEAMS_PORT_ELEMENT_WEB=$($Config.PORT_ELEMENT_WEB)
+AGENTTEAMS_PORT_CINNY=$($Config.PORT_CINNY)
 
 # Matrix
 AGENTTEAMS_MATRIX_DOMAIN=$($Config.MATRIX_DOMAIN)
@@ -1317,7 +1317,7 @@ function Clear-StepVars {
             [Environment]::SetEnvironmentVariable("AGENTTEAMS_LOCAL_ONLY", $null, "Process")
         }
         "Step-Ports" {
-            foreach ($k in @("AGENTTEAMS_PORT_GATEWAY","AGENTTEAMS_PORT_CONSOLE","AGENTTEAMS_PORT_ELEMENT_WEB")) {
+            foreach ($k in @("AGENTTEAMS_PORT_GATEWAY","AGENTTEAMS_PORT_CONSOLE","AGENTTEAMS_PORT_CINNY","AGENTTEAMS_PORT_ELEMENT_WEB")) {
                 [Environment]::SetEnvironmentVariable($k, $null, "Process")
             }
         }
@@ -1957,11 +1957,14 @@ function Step-Network {
 
 function Step-Ports {
     Write-Log (Get-Msg "port.title")
+    if (-not $env:AGENTTEAMS_PORT_CINNY -and $env:AGENTTEAMS_PORT_ELEMENT_WEB) {
+        $env:AGENTTEAMS_PORT_CINNY = $env:AGENTTEAMS_PORT_ELEMENT_WEB
+    }
     $script:config.PORT_GATEWAY = Read-Prompt -VarName "AGENTTEAMS_PORT_GATEWAY" -PromptText (Get-Msg "port.gateway_prompt") -Default "18080"
     if ($script:StepResult -eq "back") { return }
     $script:config.PORT_CONSOLE = Read-Prompt -VarName "AGENTTEAMS_PORT_CONSOLE" -PromptText (Get-Msg "port.console_prompt") -Default "18001"
     if ($script:StepResult -eq "back") { return }
-    $script:config.PORT_ELEMENT_WEB = Read-Prompt -VarName "AGENTTEAMS_PORT_ELEMENT_WEB" -PromptText (Get-Msg "port.element_prompt") -Default "18088"
+    $script:config.PORT_CINNY = Read-Prompt -VarName "AGENTTEAMS_PORT_CINNY" -PromptText (Get-Msg "port.cinny_prompt") -Default "18088"
     if ($script:StepResult -eq "back") { return }
     Write-Log ""
 }
@@ -1971,7 +1974,7 @@ function Step-Domains {
     Write-Log (Get-Msg "domain.hint")
     $script:config.MATRIX_DOMAIN = Read-Prompt -VarName "AGENTTEAMS_MATRIX_DOMAIN" -PromptText (Get-Msg "domain.matrix_prompt") -Default "matrix-local.agentteams.io:$($script:config.PORT_GATEWAY)"
     if ($script:StepResult -eq "back") { return }
-    $script:config.MATRIX_CLIENT_DOMAIN = Read-Prompt -VarName "AGENTTEAMS_MATRIX_CLIENT_DOMAIN" -PromptText (Get-Msg "domain.element_prompt") -Default "matrix-client-local.agentteams.io"
+    $script:config.MATRIX_CLIENT_DOMAIN = Read-Prompt -VarName "AGENTTEAMS_MATRIX_CLIENT_DOMAIN" -PromptText (Get-Msg "domain.cinny_prompt") -Default "matrix-client-local.agentteams.io"
     if ($script:StepResult -eq "back") { return }
     $script:config.AI_GATEWAY_DOMAIN = Read-Prompt -VarName "AGENTTEAMS_AI_GATEWAY_DOMAIN" -PromptText (Get-Msg "domain.gateway_prompt") -Default "aigw-local.agentteams.io"
     if ($script:StepResult -eq "back") { return }
@@ -2380,7 +2383,15 @@ function Install-Manager {
     if (-not $script:config.PORT_GATEWAY) {
         $script:config.PORT_GATEWAY = if ($env:AGENTTEAMS_PORT_GATEWAY) { $env:AGENTTEAMS_PORT_GATEWAY } else { "18080" }
         $script:config.PORT_CONSOLE = if ($env:AGENTTEAMS_PORT_CONSOLE) { $env:AGENTTEAMS_PORT_CONSOLE } else { "18001" }
-        $script:config.PORT_ELEMENT_WEB = if ($env:AGENTTEAMS_PORT_ELEMENT_WEB) { $env:AGENTTEAMS_PORT_ELEMENT_WEB } else { "18088" }
+    }
+    if (-not $script:config.PORT_CINNY) {
+        $script:config.PORT_CINNY = if ($env:AGENTTEAMS_PORT_CINNY) {
+            $env:AGENTTEAMS_PORT_CINNY
+        } elseif ($env:AGENTTEAMS_PORT_ELEMENT_WEB) {
+            $env:AGENTTEAMS_PORT_ELEMENT_WEB
+        } else {
+            "18088"
+        }
     }
     if (-not $script:config.MATRIX_DOMAIN) {
         $script:config.MATRIX_DOMAIN = if ($env:AGENTTEAMS_MATRIX_DOMAIN) { $env:AGENTTEAMS_MATRIX_DOMAIN } else { "matrix-local.agentteams.io:$($script:config.PORT_GATEWAY)" }
@@ -2527,7 +2538,7 @@ function Install-Manager {
         }
     }
 
-    # The controller hosts Higress, Tuwunel, MinIO and Element Web, then
+    # The controller hosts Higress, Tuwunel, MinIO and Cinny, then
     # reconciles the AgentScope Manager and the selected Worker runtimes.
 
         # Internal port: 8080 (Higress gateway inside the controller container).
@@ -2569,7 +2580,10 @@ function Install-Manager {
             "-e", "AGENTTEAMS_QWENPAW_WORKER_IMAGE=$($script:QWENPAW_WORKER_IMAGE)",
             "-e", "AGENTTEAMS_OPENHUMAN_WORKER_IMAGE=$($script:OPENHUMAN_WORKER_IMAGE)",
             "-e", "AGENTTEAMS_MATRIX_DOMAIN=$matrixDomain",
-            "-e", "AGENTTEAMS_ELEMENT_HOMESERVER_URL=http://127.0.0.1:$($config.PORT_GATEWAY)",
+            "-e", "AGENTTEAMS_CINNY_HOMESERVER_URL=http://127.0.0.1:$($config.PORT_GATEWAY)",
+            "-e", "AGENTTEAMS_CINNY_PUBLIC_URL=http://127.0.0.1:$($config.PORT_CINNY)",
+            "-e", "AGENTTEAMS_CINNY_URL=http://127.0.0.1:8088",
+            "-e", "AGENTTEAMS_PORT_CINNY=$($config.PORT_CINNY)",
             "-e", "AGENTTEAMS_MATRIX_URL=http://127.0.0.1:6167",
             "-e", "AGENTTEAMS_MATRIX_E2EE=$($config.MATRIX_E2EE)",
             "-e", "AGENTTEAMS_MATRIX_APPSERVICE_ENABLED=$($config.MATRIX_APPSERVICE_ENABLED)",
@@ -2646,11 +2660,11 @@ function Install-Manager {
         Write-Log (Get-Msg "host_share.sharing" -f $config.HOST_SHARE_DIR)
 
         # Externally exposed ports — only the gateway, Higress console, and
-        # Element Web. The Controller maps the AgentScope Manager health port
+        # Cinny. The Controller maps the AgentScope Manager health port
         # separately on loopback.
         $ctrlArgs += @("-p", "${portPrefix}$($config.PORT_GATEWAY):8080")
         $ctrlArgs += @("-p", "${portPrefix}$($config.PORT_CONSOLE):8001")
-        $ctrlArgs += @("-p", "${portPrefix}$($config.PORT_ELEMENT_WEB):8088")
+        $ctrlArgs += @("-p", "${portPrefix}$($config.PORT_CINNY):8088")
 
         $ctrlArgs += @("--restart", "unless-stopped")
         $ctrlArgs += $script:EMBEDDED_IMAGE
@@ -2764,7 +2778,7 @@ function Install-Manager {
             }
             if (-not $welcomeDone) {
                 # Non-fatal: install is still good. Keep going to the success
-                # banner so the admin can use Element Web to nudge Manager into
+                # banner so the admin can use Cinny to nudge Manager into
                 # onboarding manually (one DM message is enough).
                 Write-Log (Get-Msg "install.welcome_msg.timeout" $welcomeMax)
                 Write-Log (Get-Msg "install.welcome_msg.timeout_hint")
@@ -2792,7 +2806,7 @@ function Install-Manager {
     Write-Host "$($script:ESC)[33m===============================================================$($script:ESC)[0m"
     Write-Host "$($script:ESC)[33m  $(Get-Msg 'success.open_url')$($script:ESC)[0m"
     Write-Host "$($script:ESC)[33m                                                                                 $($script:ESC)[0m"
-    Write-Host "$($script:ESC)[1;36m    http://127.0.0.1:$($config.PORT_ELEMENT_WEB)/#/login$($script:ESC)[0m"
+    Write-Host "$($script:ESC)[1;36m    http://127.0.0.1:$($config.PORT_CINNY)/#/login$($script:ESC)[0m"
     Write-Host "$($script:ESC)[33m                                                                                 $($script:ESC)[0m"
     Write-Host "$($script:ESC)[33m  $(Get-Msg 'success.login_with')$($script:ESC)[0m"
     Write-Host "$($script:ESC)[33m  $(Get-Msg 'success.username' -f $config.ADMIN_USER)$($script:ESC)[0m"

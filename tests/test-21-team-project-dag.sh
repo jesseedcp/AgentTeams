@@ -439,7 +439,7 @@ curl -sf "http://127.0.0.1:6167/_matrix/client/v3/rooms/${ROOM_ENC}/messages?dir
     -H "Authorization: Bearer ${TOKEN}" | jq -r ".chunk[] | select(.type == \"m.room.message\") | \"\(.sender | split(\":\")[0]): \(.content.body[0:300])\""
 ' 2>&1
 
-log_info "Environment NOT cleaned up — inspect via Element at http://127.0.0.1:${TEST_ELEMENT_PORT:-18088}"
+log_info "Environment NOT cleaned up — inspect via Cinny at http://127.0.0.1:${TEST_CINNY_PORT:-18088}"
 
 test_teardown "21-team-project-dag"
 test_summary

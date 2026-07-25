@@ -16,7 +16,7 @@ import (
 // Manager Matrix user has not yet joined the Admin DM room. Kept short
 // because the gap between container start and the Manager's first /sync
 // auto-join is typically a few seconds; longer than this makes the
-// admin's Element Web window sit empty for an uncomfortable time on
+// admin's Cinny window sit empty for an uncomfortable time on
 // fresh installs. The cost of the 5s loop is one ListRoomMembers HTTP
 // call against the local Tuwunel — negligible — and the loop terminates
 // the moment the agent's auto-join lands.

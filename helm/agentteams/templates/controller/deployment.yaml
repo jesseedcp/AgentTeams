@@ -160,10 +160,10 @@ spec:
               value: {{ include "agentteams.manager.image" . | quote }}
             - name: AGENTTEAMS_MANAGER_SPEC
               value: {{ include "agentteams.manager.spec" . | quote }}
-            {{- /* Element Web URL (for Gateway route initialization) */}}
-            {{- if .Values.elementWeb.enabled }}
-            - name: AGENTTEAMS_ELEMENT_WEB_URL
-              value: {{ printf "http://%s-element-web.%s.svc.cluster.local:%d" (include "agentteams.fullname" .) (include "agentteams.namespace" .) (.Values.elementWeb.service.port | int) | quote }}
+            {{- /* Cinny URL (for Gateway route initialization) */}}
+            {{- if .Values.cinny.enabled }}
+            - name: AGENTTEAMS_CINNY_URL
+              value: {{ printf "http://%s-cinny.%s.svc.cluster.local:%d" (include "agentteams.fullname" .) (include "agentteams.namespace" .) (.Values.cinny.service.port | int) | quote }}
             {{- end }}
             {{- /* Credential persistence */}}
             - name: AGENTTEAMS_CREDS_DIR

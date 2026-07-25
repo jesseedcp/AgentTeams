@@ -31,7 +31,7 @@ import (
 // We deliberately never fall back to EnsureHumanUser after the first
 // provisioning: its orphan-recovery branch issues
 // "!admin users reset-password" and would silently overwrite a password
-// the user may have rotated via Element.
+// the user may have rotated via Cinny.
 func (r *HumanReconciler) reconcileHumanInfra(ctx context.Context, s *humanScope) error {
 	h := s.human
 	username := s.username

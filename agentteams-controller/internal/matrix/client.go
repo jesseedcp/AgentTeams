@@ -136,7 +136,7 @@ type Client interface {
 
 	// SetPasswordAsAdmin sets a user's password via the Tuwunel admin bot.
 	// Used to set initial passwords for Human users in AppService mode so
-	// they can still log in via Element.
+	// they can still log in via Cinny.
 	SetPasswordAsAdmin(ctx context.Context, userID, password string) error
 
 	// RegisterAppService registers an Application Service with the homeserver
@@ -440,7 +440,7 @@ func (c *TuwunelClient) LoginAppServiceUser(ctx context.Context, username string
 
 // SetPasswordAsAdmin sets a user's password via the Tuwunel admin bot command.
 // This is used in AppService mode to set initial passwords for Human users
-// so they can still log in via Element with username/password.
+// so they can still log in via Cinny with username/password.
 func (c *TuwunelClient) SetPasswordAsAdmin(ctx context.Context, userID, password string) error {
 	cmd := fmt.Sprintf("!admin users reset-password %s %s", userID, password)
 	return c.AdminCommand(ctx, cmd)

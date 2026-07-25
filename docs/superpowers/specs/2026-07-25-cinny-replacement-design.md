@@ -19,10 +19,14 @@ Matrix 服务、Agent 管理能力、数据卷以及用户访问地址不变。
 固定使用 Cinny `v4.12.3` 官方容器镜像，避免 `latest` 带来的不可重复部署。
 Cinny 通过运行时生成的 `config.json` 连接现有 Higress/Matrix 公网入口：
 
-- 当前网关 URL 作为默认 homeserver；
+- `homeserverList` 使用浏览器实际访问 Cinny 的公开 URL，作为 Matrix
+  自动发现入口；
+- Cinny 在 `/.well-known/matrix/client` 返回真实 Matrix 网关
+  `m.homeserver.base_url`；Docker 的 UI 与网关端口不同，Kubernetes
+  的二者共用 Higress 地址；
 - 允许用户在确有需要时输入自定义 homeserver；
 - 启用 hash router，使静态 Nginx 部署无需额外的路径重写规则；
-- 保持单页应用回退和 `config.json` 禁止缓存。
+- 保持单页应用回退，并禁止缓存 `config.json`、well-known 和入口 HTML。
 
 ### 2. Embedded Docker 部署
 
@@ -33,6 +37,10 @@ Cinny 通过运行时生成的 `config.json` 连接现有 Higress/Matrix 公网�
 - 以 `start-cinny.sh` 生成配置并启动同一个 Nginx；
 - Supervisor 程序名、日志名和注释全部改成 Cinny；
 - 内部继续监听 `8088`，因此宿主机现有的 `18388:8088` 映射无需改变；
+- 公开 UI URL 与 Matrix 网关 URL 分开配置，避免 Cinny 向 UI 端口请求
+  Matrix API；
+- 显式以 `application/wasm` 提供 Matrix 加密模块，兼容 Ubuntu 22.04
+  自带的旧 Nginx MIME 表；
 - Higress WASM 插件静态服务仍由同一个 Nginx 在 `8002` 提供。
 
 ### 3. Kubernetes/Helm 部署
@@ -44,13 +52,16 @@ Helm Chart 的公开配置从 `elementWeb` 改为 `cinny`，资源名称改为�
 - `agentteams-cinny-config` ConfigMap。
 
 Controller 接收内部 `AGENTTEAMS_CINNY_URL`，并在 Higress 中注册 `cinny`
-服务源和根路径路由。原网关地址和 NodePort 不变。
+服务源和根路径路由。ConfigMap 同时提供 well-known JSON 和 Nginx 配置；
+Deployment 使用 ConfigMap 校验和触发配置变更后的自动滚动。原网关地址和
+NodePort 不变。
 
 ### 4. 配置兼容
 
 新项目的规范变量使用：
 
 - `AGENTTEAMS_PORT_CINNY`
+- `AGENTTEAMS_CINNY_PUBLIC_URL`
 - `AGENTTEAMS_CINNY_HOMESERVER_URL`
 - `AGENTTEAMS_CINNY_URL`
 
@@ -69,6 +80,10 @@ Tuwunel 数据，但浏览器本地存储格式不同，因此 Element 的浏览
 交给 Cinny。管理员首次打开 Cinny 时需要使用原 Matrix 用户名和密码登录一次。
 登录后会看到原来的房间、消息和成员。
 
+两者的 IndexedDB 名称也不同：Element 使用 `riot-web-sync` /
+`matrix-js-sdk:crypto`，Cinny 使用 `web-sync-store` / `crypto-store`。
+因此保留同一浏览器地址不会让 Cinny 复用或破坏 Element 的本地加密库。
+
 ## 测试与验收
 
 1. 先更新测试，使其要求 Cinny 资源、镜像、配置与路由，并拒绝残留的 Element
@@ -78,8 +93,9 @@ Tuwunel 数据，但浏览器本地存储格式不同，因此 Element 的浏览
 4. 构建新的 embedded 镜像，复用当前 Docker 数据卷和环境配置替换容器。
 5. 升级当前 Kind/Helm 测试部署，确认所有 Pod Ready，Manager 与 Worker
    保持运行。
-6. 对 `18388` 和 `18480` 验证 Cinny 页面、`config.json`、Matrix
-   `/_matrix/client/versions` 接口，并确认页面不再包含 Element 资源。
+6. 对 `18388` 和 `18480` 验证 Cinny 页面、`config.json`、
+   `/.well-known/matrix/client`、Matrix `/_matrix/client/versions`
+   和 WebAssembly MIME，并确认页面不再包含 Element 资源。
 7. 使用现有管理员账号完成一次浏览器登录回归，不在日志或报告中输出密码。
 
 ## 不在本次范围
@@ -95,6 +111,7 @@ Tuwunel 数据，但浏览器本地存储格式不同，因此 Element 的浏览
 - **上游镜像拉取受限**：源码固定正式版本；当前 Kind 环境可先在 Docker 中拉取
   并本地导入，避免集群重复联网。
 - **旧变量升级断裂**：仅在读取阶段提供旧变量回退，生成结果统一为 Cinny。
-- **浏览器旧缓存**：`config.json` 和入口 HTML 禁止缓存，部署验证包含内容特征。
+- **浏览器旧缓存**：`config.json`、well-known 和入口 HTML 禁止缓存，部署
+  验证包含内容特征与 WebAssembly MIME。
 - **会话看似丢失**：文档明确说明需要重新登录；服务端数据不变并通过 Matrix
   API 与房间登录回归验证。

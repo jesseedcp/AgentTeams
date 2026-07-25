@@ -49,7 +49,7 @@ AGENTTEAMS_LLM_API_KEY="sk-xxx" make install
 
 | 容器 | 职责 |
 |------|------|
-| **`agentteams-controller`** | 内嵌 Higress、Tuwunel、MinIO、Element Web 与 Go controller（REST API 在容器网络内 **8090** 端口）。 |
+| **`agentteams-controller`** | 内嵌 Higress、Tuwunel、MinIO、Cinny 与 Go controller（REST API 在容器网络内 **8090** 端口）。 |
 | **`agentteams-manager`** | 轻量 AgentScope 2.0 Manager，提供 typed 工具和 SQLite/MinIO 恢复。 |
 
 创建 Worker 后会出现独立容器。Worker 可选择 OpenClaw、CoPaw、Hermes、
@@ -64,7 +64,7 @@ docker exec agentteams-controller agt get workers
 
 YAML 批量管理请使用 `install/agentteams-apply.sh`（将文件拷入 `agentteams-manager` 后执行 `agt apply -f`）。详见 [Declarative Resource Management](../declarative-resource-management.md)。
 
-### 1.2 登录 Element Web
+### 1.2 登录 Cinny
 
 在浏览器中打开 http://127.0.0.1:18088（直接访问端口）。如果已将域名添加到 `/etc/hosts`，也可通过网关访问 http://matrix-client-local.agentteams.io:18080。
 
@@ -74,9 +74,9 @@ YAML 批量管理请使用 `install/agentteams-apply.sh`（将文件拷入 `agen
 
 - [ ] **`agentteams-controller`** 正在运行：`docker ps | grep agentteams-controller`
 - [ ] **`agentteams-manager`** 正在运行：`docker ps | grep agentteams-manager`
-- [ ] 浏览器可访问 Element Web：http://127.0.0.1:18088
+- [ ] 浏览器可访问 Cinny：http://127.0.0.1:18088
 - [ ] 使用管理员凭据登录成功
-- [ ] Higress 控制台：http://localhost:18001（网关默认映射到宿主机 **18080**；Matrix / Element 的 `*-local.agentteams.io` 经该网关访问）
+- [ ] Higress 控制台：http://localhost:18001（网关默认映射到宿主机 **18080**；Matrix / Cinny 的 `*-local.agentteams.io` 经该网关访问）
 - [ ] MinIO 在 **controller 容器内**可访问（嵌入式安装默认**不**把 MinIO 控制台端口发布到宿主机）：`docker exec agentteams-controller curl -sf http://127.0.0.1:9000/minio/health/live`
 - [ ] Manager 就绪检查成功：`curl -fsS http://127.0.0.1:18888/readyz`
 
@@ -88,9 +88,9 @@ YAML 批量管理请使用 `install/agentteams-apply.sh`（将文件拷入 `agen
 
 ### 2.1 与 Manager 对话
 
-**方式 A：通过 Element Web（图形界面）**
+**方式 A：通过 Cinny（图形界面）**
 
-在 Element Web 中，向 `manager` 用户发起私信（DM）。
+在 Cinny 中，向 `manager` 用户发起私信（DM）。
 
 发送：
 > 请为我创建一个名为 alice 的 Worker，负责前端开发任务。她需要有 GitHub MCP 访问权限。
@@ -139,7 +139,7 @@ Manager 的回复中会提供所有具体参数值。
 
 ### 验证清单
 
-- [ ] Alice 的房间出现在 Element Web 中（3 名成员：你、manager、alice）
+- [ ] Alice 的房间出现在 Cinny 中（3 名成员：你、manager、alice）
 - [ ] Higress 控制台显示 `worker-alice` Consumer（http://localhost:18001）
 - [ ] MinIO 中存在 `agents/alice/SOUL.md` 文件（可通过 MinIO 控制台或 `mc ls` 查看）
 - [ ] Worker 容器正在运行：`docker ps | grep agentteams-worker-alice`
@@ -150,7 +150,7 @@ Manager 的回复中会提供所有具体参数值。
 
 ### 3.1 在 Alice 的房间发送任务
 
-在 Element Web 中打开 Alice 的房间，发送：
+在 Cinny 中打开 Alice 的房间，发送：
 
 > Alice，请为一个 hello-world 项目创建一个简单的 README.md，包含项目名称、描述和使用说明。将结果保存到共享任务文件夹。
 
@@ -243,7 +243,7 @@ Controller/Matrix 拓扑、恢复未完成的资源与任务操作、对到期�
 
 ### 验证清单
 
-- [ ] Bob 的房间出现在 Element Web 中（3 名成员）
+- [ ] Bob 的房间出现在 Cinny 中（3 名成员）
 - [ ] Higress 控制台显示 `worker-bob` Consumer
 - [ ] Manager 将任务拆分给 Alice 和 Bob
 - [ ] 两个 Worker 分别在各自房间中汇报进度
@@ -344,4 +344,4 @@ Alice 使用 `mcporter` 调用 Higress 托管的 GitHub MCP Server。MCP Server 
 bash <(curl -fsSL https://raw.githubusercontent.com/jesseedcp/AgentTeams/main/install/agentteams-install.sh) uninstall
 ```
 
-与 `install/agentteams-install.sh uninstall` 行为一致：停止并删除 **`agentteams-manager`**、所有 **`agentteams-worker-*`**（及其他 Worker）容器、**`agentteams-controller`**（内嵌 Higress / Tuwunel / MinIO / Element Web）、可选 **`agentteams-docker-proxy`**、**`agentteams-data`** 数据卷、**`agentteams-manager.env`**、工作空间目录、**`agentteams-net`** 网络及安装日志。
+与 `install/agentteams-install.sh uninstall` 行为一致：停止并删除 **`agentteams-manager`**、所有 **`agentteams-worker-*`**（及其他 Worker）容器、**`agentteams-controller`**（内嵌 Higress / Tuwunel / MinIO / Cinny）、可选 **`agentteams-docker-proxy`**、**`agentteams-data`** 数据卷、**`agentteams-manager.env`**、工作空间目录、**`agentteams-net`** 网络及安装日志。

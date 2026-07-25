@@ -1,0 +1,58 @@
+{{- if .Values.cinny.enabled }}
+{{- $matrixUrl := include "agentteams.gateway.publicURL" . }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "agentteams.cinny.fullname" . }}-config
+  namespace: {{ include "agentteams.namespace" . }}
+  labels:
+    {{- $comp := dict "root" . "component" "cinny" }}
+    {{- include "agentteams.component.labels" $comp | nindent 4 }}
+data:
+  config.json: |
+    {
+      "defaultHomeserver": 0,
+      "homeserverList": [{{ $matrixUrl | quote }}],
+      "allowCustomHomeservers": true,
+      "featuredCommunities": {
+        "openAsDefault": false,
+        "spaces": [],
+        "rooms": [],
+        "servers": []
+      },
+      "hashRouter": {
+        "enabled": true,
+        "basename": "/"
+      }
+    }
+  matrix-client: |
+    {"m.homeserver":{"base_url":{{ $matrixUrl | toJson }}}}
+  default.conf: |
+    server {
+      listen 80;
+      listen [::]:80;
+      root /app;
+      index index.html;
+
+      location = /config.json {
+        add_header Cache-Control "no-store, no-cache, must-revalidate";
+        try_files $uri =404;
+      }
+
+      location = /.well-known/matrix/client {
+        default_type application/json;
+        add_header Access-Control-Allow-Origin "*";
+        add_header Cache-Control "no-store, no-cache, must-revalidate";
+        try_files $uri =404;
+      }
+
+      location = /index.html {
+        add_header Cache-Control "no-store, no-cache, must-revalidate";
+        try_files $uri =404;
+      }
+
+      location / {
+        try_files $uri $uri/ /index.html;
+      }
+    }
+{{- end }}

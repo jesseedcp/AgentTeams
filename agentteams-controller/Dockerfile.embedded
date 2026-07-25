@@ -2,7 +2,7 @@
 # AgentTeams Embedded Controller - All-in-One Infrastructure Container
 # ============================================================
 # Based on Higress all-in-one (which includes supervisord + Ubuntu 22.04).
-# Layers on: Tuwunel, MinIO, mc, Element Web, nginx, agentteams-controller.
+# Layers on: Tuwunel, MinIO, mc, Cinny, nginx, agentteams-controller.
 #
 # This image does NOT include the Manager Agent — it is created as a
 # separate container by the controller's ManagerReconciler via DockerBackend.
@@ -24,8 +24,8 @@ FROM ${HIGRESS_REGISTRY}/higress/minio:20260216 AS minio
 # ============ Stage 3: MinIO Client (mc) ============
 FROM ${HIGRESS_REGISTRY}/higress/mc:20260216 AS mc
 
-# ============ Stage 4: Element Web ============
-FROM ${HIGRESS_REGISTRY}/higress/element-web:20260216 AS element-web
+# ============ Stage 4: Cinny Matrix Client ============
+FROM ghcr.io/cinnyapp/cinny:v4.12.3 AS cinny
 
 # ============ Stage 5: agentteams-controller (pre-built image) ============
 FROM ${AGENTTEAMS_CONTROLLER_IMAGE} AS agentteams-controller
@@ -46,8 +46,8 @@ COPY --from=minio /usr/bin/minio /usr/local/bin/minio
 # mc (MinIO Client)
 COPY --from=mc /usr/bin/mc /usr/local/bin/mc
 
-# Element Web static files
-COPY --from=element-web /app /opt/element-web
+# Cinny static files
+COPY --from=cinny /app /opt/cinny
 
 # agentteams-controller + AgentTeams CLI + kube-apiserver
 COPY --from=agentteams-controller /usr/local/bin/agentteams-controller /usr/local/bin/agentteams-controller
@@ -55,7 +55,7 @@ COPY --from=agentteams-controller /usr/local/bin/agt /usr/local/bin/agt
 COPY --from=agentteams-controller /usr/local/bin/kube-apiserver /usr/local/bin/kube-apiserver
 COPY --from=agentteams-controller /opt/agentteams/config/crd/ /opt/agentteams/config/crd/
 
-# nginx (for Element Web serving) + jq + curl + zip/unzip
+# nginx (for Cinny serving) + jq + curl + zip/unzip
 ARG APT_MIRROR=
 RUN if [ -n "${APT_MIRROR}" ]; then \
         sed -i "s|ports.ubuntu.com|${APT_MIRROR}|g; s|archive.ubuntu.com|${APT_MIRROR}|g; s|security.ubuntu.com|${APT_MIRROR}|g" \
@@ -73,7 +73,7 @@ COPY agentteams-controller/supervisord.embedded.conf /etc/supervisor/conf.d/supe
 # Infrastructure startup scripts (shared with manager image)
 COPY manager/scripts/init/start-minio.sh /opt/agentteams/scripts/init/start-minio.sh
 COPY manager/scripts/init/start-tuwunel.sh /opt/agentteams/scripts/init/start-tuwunel.sh
-COPY manager/scripts/init/start-element-web.sh /opt/agentteams/scripts/init/start-element-web.sh
+COPY manager/scripts/init/start-cinny.sh /opt/agentteams/scripts/init/start-cinny.sh
 COPY manager/scripts/init/start-mc-mirror.sh /opt/agentteams/scripts/init/start-mc-mirror.sh
 COPY manager/scripts/lib/base.sh /opt/agentteams/scripts/lib/base.sh
 COPY shared/lib/ /opt/agentteams/scripts/lib/

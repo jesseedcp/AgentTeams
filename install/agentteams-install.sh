@@ -45,7 +45,7 @@
 #   AGENTTEAMS_CMS_METRICS_ENABLED         Enable diagnostics-otel metrics for Manager AND all Workers (default: false)
 #   AGENTTEAMS_PORT_GATEWAY       Host port for Higress gateway (default: 18080)
 #   AGENTTEAMS_PORT_CONSOLE       Host port for Higress console (default: 18001)
-#   AGENTTEAMS_PORT_ELEMENT_WEB   Host port for Element Web direct access (default: 18088)
+#   AGENTTEAMS_PORT_CINNY         Host port for Cinny direct access (default: 18088)
 #   AGENTTEAMS_WORKER_IDLE_TIMEOUT  Worker idle timeout in minutes (default: 720, i.e. 12 hours)
 
 set -e
@@ -479,8 +479,8 @@ msg() {
         "port.gateway_prompt.en") text="Host port for gateway (8080 inside container)" ;;
         "port.console_prompt.zh") text="Higress 控制台主机端口（容器内 8001）" ;;
         "port.console_prompt.en") text="Host port for Higress console (8001 inside container)" ;;
-        "port.element_prompt.zh") text="Element Web 直接访问主机端口（容器内 8088）" ;;
-        "port.element_prompt.en") text="Host port for Element Web direct access (8088 inside container)" ;;
+        "port.cinny_prompt.zh") text="Cinny 直接访问主机端口（容器内 8088）" ;;
+        "port.cinny_prompt.en") text="Host port for Cinny direct access (8088 inside container)" ;;
         # --- Local-only binding ---
         "port.local_only.title.zh") text="--- 网络访问模式 ---" ;;
         "port.local_only.title.en") text="--- Network Access Mode ---" ;;
@@ -503,12 +503,12 @@ msg() {
         # --- Domain Configuration ---
         "domain.title.zh") text="--- 域名配置（按回车使用默认值）---" ;;
         "domain.title.en") text="--- Domain Configuration (press Enter for defaults) ---" ;;
-        "domain.hint.zh") text="提示: 自定义域名前必须事先做好 DNS 解析。单机 ECS 部署时无需修改 aigw、fs 等域名；Element Web 和 Matrix Server 也可通过 IP 直接访问。" ;;
-        "domain.hint.en") text="Hint: Configure DNS resolution before customizing domains. For single ECS deployment, no need to change aigw, fs, etc.; Element Web and Matrix Server can also be accessed directly via IP." ;;
+        "domain.hint.zh") text="提示: 自定义域名前必须事先做好 DNS 解析。单机 ECS 部署时无需修改 aigw、fs 等域名；Cinny 和 Matrix Server 也可通过 IP 直接访问。" ;;
+        "domain.hint.en") text="Hint: Configure DNS resolution before customizing domains. For single ECS deployment, no need to change aigw, fs, etc.; Cinny and Matrix Server can also be accessed directly via IP." ;;
         "domain.matrix_prompt.zh") text="Matrix 域名" ;;
         "domain.matrix_prompt.en") text="Matrix Domain" ;;
-        "domain.element_prompt.zh") text="Element Web 域名" ;;
-        "domain.element_prompt.en") text="Element Web Domain" ;;
+        "domain.cinny_prompt.zh") text="Cinny 域名" ;;
+        "domain.cinny_prompt.en") text="Cinny Domain" ;;
         "domain.gateway_prompt.zh") text="AI 网关域名" ;;
         "domain.gateway_prompt.en") text="AI Gateway Domain" ;;
         "domain.fs_prompt.zh") text="文件系统域名" ;;
@@ -579,8 +579,8 @@ msg() {
         # --- Matrix E2EE ---
         "matrix_e2ee.title.zh") text="--- Matrix 端到端加密（E2EE）---" ;;
         "matrix_e2ee.title.en") text="--- Matrix End-to-End Encryption (E2EE) ---" ;;
-        "matrix_e2ee.desc.zh") text="E2EE 会对 Manager 与 Worker 之间的 Matrix 消息进行端到端加密。\n  启用后，即使 Matrix 服务器被入侵，消息内容也无法被窃取。\n  但 E2EE 会增加首次握手耗时，且要求所有 Agent 都支持 matrix-sdk-crypto。\n  如果不确定，建议保持禁用。\n  ⚠ 注意：禁用 E2EE 后，请勿在 Element 上创建默认启用加密的 Private 房间，\n  否则 Agent 将无法读取该房间中的加密消息。请改用 Public 房间或关闭房间加密。" ;;
-        "matrix_e2ee.desc.en") text="E2EE encrypts Matrix messages between Manager and Workers end-to-end.\n  When enabled, message content stays private even if the Matrix server is compromised.\n  However, E2EE adds overhead to the initial handshake and requires all Agents\n  to support matrix-sdk-crypto. If unsure, keep it disabled.\n  ⚠ Note: When E2EE is disabled, do NOT create Private rooms in Element (which\n  enable encryption by default) — Agents cannot read encrypted messages without\n  E2EE support. Use Public rooms or turn off room encryption instead." ;;
+        "matrix_e2ee.desc.zh") text="E2EE 会对 Manager 与 Worker 之间的 Matrix 消息进行端到端加密。\n  启用后，即使 Matrix 服务器被入侵，消息内容也无法被窃取。\n  但 E2EE 会增加首次握手耗时，且要求所有 Agent 都支持 matrix-sdk-crypto。\n  如果不确定，建议保持禁用。\n  ⚠ 注意：禁用 E2EE 后，请勿在 Cinny 或其他 Matrix 客户端中启用房间加密，\n  否则 Agent 将无法读取该房间中的加密消息。请使用未加密房间。" ;;
+        "matrix_e2ee.desc.en") text="E2EE encrypts Matrix messages between Manager and Workers end-to-end.\n  When enabled, message content stays private even if the Matrix server is compromised.\n  However, E2EE adds overhead to the initial handshake and requires all Agents\n  to support matrix-sdk-crypto. If unsure, keep it disabled.\n  ⚠ Note: When E2EE is disabled, do NOT enable room encryption in Cinny or\n  another Matrix client — Agents cannot read encrypted messages without E2EE\n  support. Use unencrypted rooms instead." ;;
         "matrix_e2ee.enable.zh") text="启用 E2EE" ;;
         "matrix_e2ee.enable.en") text="Enable E2EE" ;;
         "matrix_e2ee.disable.zh") text="禁用 E2EE（推荐）" ;;
@@ -764,10 +764,10 @@ msg() {
         "install.welcome_msg.waiting.en") text="Waiting for Manager to send the welcome message (Higress route auth + LLM probe, ~45-90s)..." ;;
         "install.welcome_msg.confirmed.zh") text="Manager 已确认发送欢迎消息（status.welcomeSent=true，用时 %ss）" ;;
         "install.welcome_msg.confirmed.en") text="Manager confirmed welcome message sent (status.welcomeSent=true, %ss elapsed)" ;;
-        "install.welcome_msg.timeout.zh") text="警告: 在 %ss 内未观察到 Manager 发送欢迎消息（status.welcomeSent=true）。安装仍然成功，所有服务已就绪——可继续按下方提示登录 Element Web。" ;;
-        "install.welcome_msg.timeout.en") text="WARNING: Did not observe the Manager sending its welcome message (status.welcomeSent=true) within %ss. Installation is still successful, all services are up — continue with the Element Web instructions below." ;;
-        "install.welcome_msg.timeout_hint.zh") text="手动触发 onboarding: 登录 Element Web → 打开与 Manager 的 DM 房间 → 发送任意一句话（例如 \"hi\"），Manager 会接管对话并开始引导。" ;;
-        "install.welcome_msg.timeout_hint.en") text="Manual onboarding: log in to Element Web → open the DM with the Manager → send any message (e.g. \"hi\") and the Manager will take over and start the guided setup." ;;
+        "install.welcome_msg.timeout.zh") text="警告: 在 %ss 内未观察到 Manager 发送欢迎消息（status.welcomeSent=true）。安装仍然成功，所有服务已就绪——可继续按下方提示登录 Cinny。" ;;
+        "install.welcome_msg.timeout.en") text="WARNING: Did not observe the Manager sending its welcome message (status.welcomeSent=true) within %ss. Installation is still successful, all services are up — continue with the Cinny instructions below." ;;
+        "install.welcome_msg.timeout_hint.zh") text="手动触发 onboarding: 登录 Cinny → 打开与 Manager 的 DM 房间 → 发送任意一句话（例如 \"hi\"），Manager 会接管对话并开始引导。" ;;
+        "install.welcome_msg.timeout_hint.en") text="Manual onboarding: log in to Cinny → open the DM with the Manager → send any message (e.g. \"hi\") and the Manager will take over and start the guided setup." ;;
         "install.welcome_msg.timeout_inspect.zh") text="排查命令: docker exec agentteams-controller agt get managers default" ;;
         "install.welcome_msg.timeout_inspect.en") text="Inspect status: docker exec agentteams-controller agt get managers default" ;;
         "install.welcome_msg.poll_unavailable.zh") text="提示: agentteams-manager 内未找到 AgentTeams CLI，跳过 welcome 等待（旧镜像？）" ;;
@@ -1504,7 +1504,7 @@ clear_step_vars() {
         step_network) unset AGENTTEAMS_LOCAL_ONLY ;;
         step_ports)
             unset AGENTTEAMS_PORT_GATEWAY AGENTTEAMS_PORT_CONSOLE
-            unset AGENTTEAMS_PORT_ELEMENT_WEB
+            unset AGENTTEAMS_PORT_CINNY AGENTTEAMS_PORT_ELEMENT_WEB
             ;;
         step_domains)
             unset AGENTTEAMS_MATRIX_DOMAIN AGENTTEAMS_MATRIX_CLIENT_DOMAIN
@@ -2195,9 +2195,13 @@ step_network() {
 
 step_ports() {
     log "$(msg port.title)"
+    if [ -z "${AGENTTEAMS_PORT_CINNY:-}" ] && [ -n "${AGENTTEAMS_PORT_ELEMENT_WEB:-}" ]; then
+        AGENTTEAMS_PORT_CINNY="${AGENTTEAMS_PORT_ELEMENT_WEB}"
+        export AGENTTEAMS_PORT_CINNY
+    fi
     prompt AGENTTEAMS_PORT_GATEWAY "$(msg port.gateway_prompt)" "18080" || return 0
     prompt AGENTTEAMS_PORT_CONSOLE "$(msg port.console_prompt)" "18001" || return 0
-    prompt AGENTTEAMS_PORT_ELEMENT_WEB "$(msg port.element_prompt)" "18088" || return 0
+    prompt AGENTTEAMS_PORT_CINNY "$(msg port.cinny_prompt)" "18088" || return 0
     log ""
 }
 
@@ -2205,7 +2209,7 @@ step_domains() {
     log "$(msg domain.title)"
     log "$(msg domain.hint)"
     prompt AGENTTEAMS_MATRIX_DOMAIN "$(msg domain.matrix_prompt)" "matrix-local.agentteams.io:${AGENTTEAMS_PORT_GATEWAY}" || return 0
-    prompt AGENTTEAMS_MATRIX_CLIENT_DOMAIN "$(msg domain.element_prompt)" "matrix-client-local.agentteams.io" || return 0
+    prompt AGENTTEAMS_MATRIX_CLIENT_DOMAIN "$(msg domain.cinny_prompt)" "matrix-client-local.agentteams.io" || return 0
     prompt AGENTTEAMS_AI_GATEWAY_DOMAIN "$(msg domain.gateway_prompt)" "aigw-local.agentteams.io" || return 0
     prompt AGENTTEAMS_FS_DOMAIN "$(msg domain.fs_prompt)" "fs-local.agentteams.io" || return 0
     log ""
@@ -2671,6 +2675,8 @@ install_manager() {
 
     # Post-machine defaults for any steps that were skipped
     AGENTTEAMS_DATA_DIR="${AGENTTEAMS_DATA_DIR:-agentteams-data}"
+    AGENTTEAMS_PORT_CINNY="${AGENTTEAMS_PORT_CINNY:-${AGENTTEAMS_PORT_ELEMENT_WEB:-18088}}"
+    export AGENTTEAMS_PORT_CINNY
     if [ -z "${AGENTTEAMS_WORKSPACE_DIR+x}" ] || [ -z "${AGENTTEAMS_WORKSPACE_DIR}" ]; then
         AGENTTEAMS_WORKSPACE_DIR="${HOME}/agentteams-manager"
         export AGENTTEAMS_WORKSPACE_DIR
@@ -2751,7 +2757,7 @@ AGENTTEAMS_ADMIN_PASSWORD=${AGENTTEAMS_ADMIN_PASSWORD}
 AGENTTEAMS_LOCAL_ONLY=${AGENTTEAMS_LOCAL_ONLY}
 AGENTTEAMS_PORT_GATEWAY=${AGENTTEAMS_PORT_GATEWAY}
 AGENTTEAMS_PORT_CONSOLE=${AGENTTEAMS_PORT_CONSOLE}
-AGENTTEAMS_PORT_ELEMENT_WEB=${AGENTTEAMS_PORT_ELEMENT_WEB}
+AGENTTEAMS_PORT_CINNY=${AGENTTEAMS_PORT_CINNY}
 
 # Manager runtime is fixed; Worker runtime remains independently configurable.
 AGENTTEAMS_MANAGER_RUNTIME=agentscope
@@ -2989,7 +2995,10 @@ EOF
             -e "AGENTTEAMS_QWENPAW_WORKER_IMAGE=${QWENPAW_WORKER_IMAGE}"
             -e "AGENTTEAMS_OPENHUMAN_WORKER_IMAGE=${OPENHUMAN_WORKER_IMAGE}"
             -e "AGENTTEAMS_MATRIX_DOMAIN=${_matrix_domain}"
-            -e "AGENTTEAMS_ELEMENT_HOMESERVER_URL=http://127.0.0.1:${AGENTTEAMS_PORT_GATEWAY}"
+            -e "AGENTTEAMS_CINNY_HOMESERVER_URL=http://127.0.0.1:${AGENTTEAMS_PORT_GATEWAY}"
+            -e "AGENTTEAMS_CINNY_PUBLIC_URL=http://127.0.0.1:${AGENTTEAMS_PORT_CINNY}"
+            -e "AGENTTEAMS_CINNY_URL=http://127.0.0.1:8088"
+            -e "AGENTTEAMS_PORT_CINNY=${AGENTTEAMS_PORT_CINNY}"
             -e "AGENTTEAMS_MATRIX_URL=http://127.0.0.1:6167"
             -e "AGENTTEAMS_MATRIX_E2EE=${AGENTTEAMS_MATRIX_E2EE:-0}"
             -e "AGENTTEAMS_MATRIX_APPSERVICE_ENABLED=${AGENTTEAMS_MATRIX_APPSERVICE_ENABLED:-true}"
@@ -3074,7 +3083,7 @@ EOF
             -v "${AGENTTEAMS_WORKSPACE_DIR}:/root/agentteams-fs/agents/manager" \
             -p "${_port_prefix}${AGENTTEAMS_PORT_GATEWAY}:8080" \
             -p "${_port_prefix}${AGENTTEAMS_PORT_CONSOLE}:8001" \
-            -p "${_port_prefix}${AGENTTEAMS_PORT_ELEMENT_WEB:-18088}:8088" \
+            -p "${_port_prefix}${AGENTTEAMS_PORT_CINNY:-18088}:8088" \
             --restart unless-stopped \
             "${EMBEDDED_IMAGE}"
 
@@ -3176,7 +3185,7 @@ EOF
             done
             if [ $_welcome_done -ne 1 ]; then
                 # Non-fatal: install is still good. Keep going to the success
-                # banner so the admin can use Element Web to nudge Manager into
+                # banner so the admin can use Cinny to nudge Manager into
                 # onboarding manually (one DM message is enough).
                 log "$(msg install.welcome_msg.timeout "${_welcome_max}")"
                 log "$(msg install.welcome_msg.timeout_hint)"
@@ -3212,7 +3221,7 @@ EOF
     echo -e "\033[33m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
     echo -e "\033[33m  $(msg success.open_url)\033[0m"
     echo -e "\033[33m                                                                                 \033[0m"
-    echo -e "\033[1;36m    http://127.0.0.1:${AGENTTEAMS_PORT_ELEMENT_WEB:-18088}/#/login\033[0m"
+    echo -e "\033[1;36m    http://127.0.0.1:${AGENTTEAMS_PORT_CINNY:-18088}/#/login\033[0m"
     echo -e "\033[33m                                                                                 \033[0m"
     echo -e "\033[33m  $(msg success.login_with)\033[0m"
     echo -e "\033[33m    $(msg success.username "${AGENTTEAMS_ADMIN_USER}")\033[0m"

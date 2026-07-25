@@ -192,7 +192,7 @@ func (a *App) Start(ctx context.Context) error {
 				OpenAIBaseURL:              a.cfg.OpenAIBaseURL,
 				AIStreamIdleTimeoutSeconds: a.cfg.AIStreamIdleTimeoutSeconds,
 				TuwunelURL:                 a.cfg.MatrixServerURL,
-				ElementWebURL:              a.cfg.ElementWebURL,
+				CinnyURL:                   a.cfg.CinnyURL,
 				GitHubToken:                a.cfg.GitHubToken,
 				SkillsDir:                  a.cfg.SkillsDir,
 				ControllerName:             a.cfg.ControllerName,

@@ -61,6 +61,41 @@ func TestLoadConfigMetricsBindAddrPrefersAgentTeamsEnv(t *testing.T) {
 	}
 }
 
+func TestLoadConfigPrefersCanonicalCinnyURL(t *testing.T) {
+	t.Setenv("AGENTTEAMS_CINNY_URL", "http://agentteams-cinny:8080")
+	t.Setenv("AGENTTEAMS_ELEMENT_WEB_URL", "http://legacy-element:8080")
+
+	cfg := LoadConfig()
+
+	if cfg.CinnyURL != "http://agentteams-cinny:8080" {
+		t.Fatalf("CinnyURL = %q, want canonical Cinny URL", cfg.CinnyURL)
+	}
+}
+
+func TestLoadConfigAcceptsLegacyElementURLAsFallback(t *testing.T) {
+	t.Setenv("AGENTTEAMS_CINNY_URL", "")
+	t.Setenv("AGENTTEAMS_ELEMENT_WEB_URL", "http://legacy-element:8080")
+
+	cfg := LoadConfig()
+
+	if cfg.CinnyURL != "http://legacy-element:8080" {
+		t.Fatalf("CinnyURL = %q, want legacy fallback URL", cfg.CinnyURL)
+	}
+}
+
+func TestManagerAgentEnvWritesOnlyCanonicalCinnyURL(t *testing.T) {
+	cfg := Config{CinnyURL: "http://agentteams-cinny:8080"}
+
+	env := cfg.ManagerAgentEnv()
+
+	if env["AGENTTEAMS_CINNY_URL"] != "http://agentteams-cinny:8080" {
+		t.Fatalf("AGENTTEAMS_CINNY_URL = %q", env["AGENTTEAMS_CINNY_URL"])
+	}
+	if _, ok := env["AGENTTEAMS_ELEMENT_WEB_URL"]; ok {
+		t.Fatal("ManagerAgentEnv emitted legacy Element URL")
+	}
+}
+
 func TestLoadConfigAppliesManagerSpec(t *testing.T) {
 	t.Setenv("AGENTTEAMS_MANAGER_SPEC", `{
 		"model":"qwen-max",

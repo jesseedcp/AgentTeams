@@ -333,8 +333,8 @@ class Worker:
 
         Under E2EE, crypto state is not persisted across restarts. Reusing
         the old access token keeps the same device_id but with a new identity
-        key, which causes other clients (Element Web) to reject key
-        distribution. A fresh login creates a new device_id, matching the
+        key, which causes other Matrix clients to reject key distribution.
+        A fresh login creates a new device_id, matching the
         Manager's restart behavior.
 
         The password is read directly from MinIO (never written to disk).

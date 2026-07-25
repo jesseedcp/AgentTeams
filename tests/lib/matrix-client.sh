@@ -93,7 +93,7 @@ matrix_send_message() {
         }'
 }
 
-# Send a message that visibly mentions another Matrix user, the way Element does.
+# Send a message that visibly mentions another Matrix user, as Matrix clients do.
 # Usage: matrix_send_mention_message <access_token> <room_id> <mention_user_id> <message_body>
 # Returns: JSON with event_id
 #

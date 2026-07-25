@@ -207,7 +207,7 @@ class Worker:
         The Manager publishes ``credentials/matrix/password`` for each worker
         and rotates it as needed.  Logging in from scratch issues a *new*
         ``device_id`` and access token, which keeps the per-restart Olm
-        identity rotation invisible to other clients (Element Web).
+        identity rotation invisible to other Matrix clients.
         """
         import json
         import urllib.error

@@ -11,7 +11,7 @@ resource lifecycle and deployment.
 | Controller | REST API and reconciliation for Manager, Worker, Team, Human, Matrix, storage, and gateway state | Go; `agentteams-controller` or embedded controller image |
 | Manager | Matrix conversation, policy-bound tools, durable workflows, recovery, scheduling, delegation | AgentScope 2.0.4.post1; `agentteams-manager` |
 | Workers | Execute delegated work; one replaceable runtime per Worker/Team member | OpenClaw, CoPaw, Hermes, QwenPaw, or OpenHuman images |
-| Matrix/Element | Human and agent rooms, messages, threads, membership, media | Tuwunel/Synapse plus Element |
+| Matrix/Cinny | Human and agent rooms, messages, threads, membership, media | Tuwunel/Synapse plus Cinny |
 | Higress | OpenAI-compatible model routes, MCP, consumers, service publishing | managed or existing gateway |
 | MinIO/S3/OSS | journals, snapshots, prompts, tasks, projects, files | managed MinIO or compatible object storage |
 
@@ -22,7 +22,7 @@ not Manager fallback runtimes.
 
 ```mermaid
 flowchart LR
-  H["Human / Element"] <--> X["Matrix"]
+  H["Human / Cinny"] <--> X["Matrix"]
   X <--> M["AgentScope Manager"]
   M -->|"typed AgtClient"| C["Controller API"]
   C --> R["Manager / Worker / Team / Human resources"]
@@ -113,7 +113,7 @@ MCP descriptor.
 ### Embedded Docker/Podman
 
 The embedded Controller container runs the Go Controller plus Higress,
-Tuwunel, MinIO, and Element. It creates a separate lightweight
+Tuwunel, MinIO, and Cinny. It creates a separate lightweight
 `agentteams-manager` container and separate Worker containers. Host persistence
 is mounted into the Manager at `/var/lib/agentteams-manager`.
 

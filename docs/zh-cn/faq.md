@@ -9,7 +9,7 @@
 - [安装失败：embedded 镜像 "manifest unknown"](#安装失败embedded-镜像-manifest-unknown)
 - [Manager Agent 启动超时或失败](#manager-agent-启动超时或失败)
 - [局域网其他电脑如何访问 Web 端](#局域网其他电脑如何访问-web-端)
-- [Element 提示 homeserver 不是有效的 Matrix 服务器](#element-提示-homeserver-不是有效的-matrix-服务器)
+- [Cinny 提示 homeserver 不是有效的 Matrix 服务器](#cinny-提示-homeserver-不是有效的-matrix-服务器)
 - [本地访问 Matrix 服务器不通](#本地访问-matrix-服务器不通)
 - [如何主动指挥 Worker](#如何主动指挥-worker)
 - [如何接入第三方、本地或多供应商模型](#如何接入第三方本地或多供应商模型)
@@ -64,7 +64,7 @@ AGENTTEAMS_VERSION=v1.1.0 bash <(curl -sSL https://raw.githubusercontent.com/jes
 
 | 组件 | 旧架构（≤v1.0.9） | 新架构（v1.1.0+） |
 |------|-------------------|-------------------|
-| 基础设施（Higress、Tuwunel、MinIO、Element Web） | 打包在 `agentteams-manager` 内 | 运行在 `agentteams-controller` 容器中（使用 `agentteams-embedded` 镜像） |
+| 基础设施（Higress、Tuwunel、MinIO、Cinny） | 打包在 `agentteams-manager` 内 | 运行在 `agentteams-controller` 容器中（使用 `agentteams-embedded` 镜像） |
 | Manager Agent | 在 `agentteams-manager` 内 | 独立的 `agentteams-manager` 容器（轻量级，仅 Agent） |
 | Worker 管理 | Shell 脚本（`create-worker.sh`）+ `workers-registry.json` | 声明式 CRD，通过 `agt` CLI（`agt create worker`、`agt apply`） |
 | Worker 运行时 | 仅 OpenClaw | OpenClaw、**QwenPaw**（Python；旧称 **CoPaw**）或 Hermes |
@@ -349,7 +349,7 @@ SELinux 标签。请在 Docker/Podman 允许挂载的位置重新执行安装；
 
 ## 局域网其他电脑如何访问 Web 端
 
-**访问 Element Web**
+**访问 Cinny**
 
 在局域网其他电脑的浏览器中输入：
 
@@ -361,7 +361,7 @@ http://<局域网IP>:18088
 
 **修改 Matrix Server 地址**
 
-默认配置的 Matrix Server 域名解析到 `localhost`，在其他电脑上无法连通。登录 Element Web 时，需要将 Matrix Server 地址改为：
+默认配置的 Matrix Server 域名解析到 `localhost`，在其他电脑上无法连通。登录 Cinny 时，需要将 Matrix Server 地址改为：
 
 ```
 http://<局域网IP>:18080
@@ -372,7 +372,7 @@ http://<局域网IP>:18080
 如果登录页仍然提示 homeserver 错误：
 
 1. 确认安装时选择了允许外部访问。本机模式只绑定到 `127.0.0.1`，局域网其他设备无法访问。
-2. 确认 Manager 所在机器的防火墙放行 `18080`（Matrix/Higress Gateway）和 `18088`（Element Web）。
+2. 确认 Manager 所在机器的防火墙放行 `18080`（Matrix/Higress Gateway）和 `18088`（Cinny）。
 3. 不要在其他设备上使用默认的 `matrix-local.agentteams.io`；该域名会解析到当前设备自己的 loopback 地址。
 
 如果通过 Tailscale 使用 FluffyChat 或 Element Mobile，规则相同：homeserver 填
@@ -380,11 +380,11 @@ http://<局域网IP>:18080
 
 ---
 
-## Element 提示 homeserver 不是有效的 Matrix 服务器
+## Cinny 提示 homeserver 不是有效的 Matrix 服务器
 
-Element 要求填写自定义 homeserver 时，不要填写 Element Web UI 的地址或端口。这两个地址对应不同组件：
+Cinny 要求填写自定义 homeserver 时，不要填写 Cinny UI 的地址或端口。这两个地址对应不同组件：
 
-- Element Web UI：`http://<host>:18088`
+- Cinny UI：`http://<host>:18088`
 - Matrix/Higress gateway homeserver：`http://<host>:18080`
 
 如果看到“homeserver 不是有效的 Matrix 服务器”一类提示，请将 `:18088` 改成 `:18080` 后重新登录。局域网或 Tailscale 访问时，使用客户端能访问到的主机 IP，例如 `http://192.168.1.100:18080`。
@@ -403,7 +403,7 @@ Element 要求填写自定义 homeserver 时，不要填写 Element Web UI 的�
 
 创建 Worker 后，Manager 会自动将你和 Worker 拉入同一个群聊房间。在群聊中，必须 **@ Worker** 才能让它响应，没有 @ 的消息会被忽略。
 
-在 Element 等客户端中，输入 `@` 后再输入 Worker 昵称的首字母，才会出现补全列表，选择对应用户即可。
+在 Cinny 等 Matrix 客户端中，输入 `@` 后再输入 Worker 昵称的首字母，才会出现补全列表，选择对应用户即可。
 
 也可以点击 Worker 的头像，进入**私聊**。私聊中不需要 @，每条消息都会触发 Worker 响应。但注意：私聊对 Manager 不可见，Manager 不会感知到这部分对话内容。
 
@@ -679,9 +679,9 @@ agt apply -f my-worker.yaml
 
 ## AgentTeams 支持发送和接收文件吗
 
-**接收你发送的文件**：支持。在 Element Web 中点击附件按钮上传文件，Manager 或 Worker 会收到 Matrix 媒体消息并可以读取其内容。
+**接收你发送的文件**：支持。在 Cinny 中点击附件按钮上传文件，Manager 或 Worker 会收到 Matrix 媒体消息并可以读取其内容。
 
-**向你发送文件**：支持。当你要求 Manager（或 Worker）发送文件时——例如任务产物、生成的报告或它能访问的任意文件——它会将文件上传到 Matrix 媒体服务器，并以可下载附件的形式发送到房间中，你在 Element Web 里点击即可下载。
+**向你发送文件**：支持。当你要求 Manager（或 Worker）发送文件时——例如任务产物、生成的报告或它能访问的任意文件——它会将文件上传到 Matrix 媒体服务器，并以可下载附件的形式发送到房间中，你在 Cinny 里点击即可下载。
 
 Manager 或 Worker 输出的路径通常是容器内部路径。如果你在宿主机上无法直接访问该路径，
 请要求 Agent 把文件作为附件发送，或提供可下载链接，而不是依赖原始容器路径。
@@ -833,7 +833,7 @@ docker exec -it agentteams-controller cat /var/log/agentteams/higress-console.lo
 
 ## 如何对接飞书/钉钉/企业微信/Discord/Telegram
 
-AgentScope Manager 当前只有一个生产对话适配器：Matrix，Element 是内置客户端。
+AgentScope Manager 当前只有一个生产对话适配器：Matrix，Cinny 是内置客户端。
 不要向 Manager 工作空间添加 OpenClaw channel 文件，它不会被加载。
 
 接入其他平台需要新的认证适配器，把入站事件转换到同一个房间权限契约，并保持

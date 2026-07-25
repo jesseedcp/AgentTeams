@@ -177,8 +177,8 @@ type Config struct {
 	OpenAIBaseURL              string // AGENTTEAMS_OPENAI_BASE_URL — custom base URL for openai-compat providers
 	AIStreamIdleTimeoutSeconds int    // AGENTTEAMS_AI_STREAM_IDLE_TIMEOUT_SECONDS
 
-	// Element Web URL (for Gateway route initialization)
-	ElementWebURL string
+	// Cinny URL (for Gateway route initialization)
+	CinnyURL string
 
 	// Locale used to render the first-boot Manager onboarding prompt
 	// (welcome message). Sourced from the install-time AGENTTEAMS_LANGUAGE
@@ -397,7 +397,10 @@ func LoadConfig() *Config {
 		GitHubToken:                firstNonEmpty(os.Getenv("AGENTTEAMS_MCP_GITHUB_TOKEN"), os.Getenv("AGENTTEAMS_GITHUB_TOKEN")),
 		OpenAIBaseURL:              os.Getenv("AGENTTEAMS_OPENAI_BASE_URL"),
 		AIStreamIdleTimeoutSeconds: envOrDefaultInt("AGENTTEAMS_AI_STREAM_IDLE_TIMEOUT_SECONDS", 900),
-		ElementWebURL:              os.Getenv("AGENTTEAMS_ELEMENT_WEB_URL"),
+		CinnyURL: firstNonEmpty(
+			os.Getenv("AGENTTEAMS_CINNY_URL"),
+			os.Getenv("AGENTTEAMS_ELEMENT_WEB_URL"),
+		),
 
 		UserLanguage: envOrDefault("AGENTTEAMS_LANGUAGE", "zh"),
 		UserTimezone: envOrDefault("TZ", "Asia/Shanghai"),
@@ -825,7 +828,7 @@ func (c *Config) ManagerAgentEnv() map[string]string {
 	if c.AIStreamIdleTimeoutSeconds > 0 {
 		env["AGENTTEAMS_AI_STREAM_IDLE_TIMEOUT_SECONDS"] = strconv.Itoa(c.AIStreamIdleTimeoutSeconds)
 	}
-	setIfNonEmpty("AGENTTEAMS_ELEMENT_WEB_URL", c.ElementWebURL)
+	setIfNonEmpty("AGENTTEAMS_CINNY_URL", c.CinnyURL)
 	if c.MatrixE2EE {
 		env["AGENTTEAMS_MATRIX_E2EE"] = "1"
 	}

@@ -26,7 +26,7 @@ Manager ランタイムは AgentScope 2.0 に固定されています。Worker �
 
 - 🔐 **Higress AI ゲートウェイ**: トラフィック管理を一元化し、認証情報に関連するリスクを軽減します。ネイティブの Lobster フレームワークにおけるセキュリティ上の懸念を解消します。
 
-- ☎️ **Element IM クライアント + Tuwunel IM サーバー（共に Matrix プロトコルベース）**: DingTalk/Lark 統合の手間や企業承認ワークフローを排除します。IM 環境でモデルサービスの「快適さ」を素早く体験でき、ネイティブの OpenClaw IM 統合との互換性も維持します。
+- ☎️ **Cinny IM クライアント + Tuwunel IM サーバー（共に Matrix プロトコルベース）**: DingTalk/Lark 統合の手間や企業承認ワークフローを排除します。IM 環境でモデルサービスの「快適さ」を素早く体験でき、ネイティブの OpenClaw IM 統合との互換性も維持します。
 
 ## ニュース
 
@@ -49,7 +49,7 @@ Manager ランタイムは AgentScope 2.0 に固定されています。Worker �
 
 - **デフォルトで Human-in-the-Loop**: すべての Matrix ルームにあなた、Manager、関連する Worker が参加しています。すべてを観察でき、いつでも介入できます。ブラックボックスはありません。
 
-- **ゼロ設定の IM**: 内蔵の Matrix サーバーにより、ボットアプリケーション不要、API 承認不要、待ち時間なし。Element Web を開いてすぐにチャットを開始できます。
+- **ゼロ設定の IM**: 内蔵の Matrix サーバーにより、ボットアプリケーション不要、API 承認不要、待ち時間なし。Cinny を開いてすぐにチャットを開始できます。
 
 - **ワンコマンドセットアップ**: `curl | bash` だけで完了 — AI ゲートウェイ、Matrix サーバー、ファイルストレージ、Web クライアント、Manager Agent のすべてが揃います。
 
@@ -93,7 +93,11 @@ Set-ExecutionPolicy Bypass -Scope Process -Force; $wc=New-Object Net.WebClient; 
 
 ### アクセス
 
-ブラウザで http://127.0.0.1:18088 を開き、Element Web にログインしてください。Manager が挨拶し、最初の Worker の作成方法を説明してくれます。
+ブラウザで http://127.0.0.1:18088 を開き、Cinny にログインしてください。Manager が挨拶し、最初の Worker の作成方法を説明してくれます。
+
+Element ベースの旧版から更新しても Matrix のアカウント、ルーム、メッセージ、
+メディアは変わりません。ただしブラウザセッションはクライアント固有のため、
+更新後に同じ Matrix 認証情報で Cinny へ一度ログインしてください。
 
 **モバイル**: 任意の Matrix クライアント（Element、FluffyChat）を使い、サーバーアドレスに接続してください。
 
@@ -179,7 +183,7 @@ helm install agentteams higress.io/agentteams \
 | 値 | 必須 | 説明 |
 |---|---|---|
 | `credentials.llmApiKey` | 必須 | LLM プロバイダーの API キー |
-| `gateway.publicURL` | 必須 | ユーザーが Element Web にアクセスする公開 URL（port-forward 環境では `http://localhost:18080`、本番では `https://agentteams.example.com` 等） |
+| `gateway.publicURL` | 必須 | ユーザーが Cinny にアクセスする公開 URL（port-forward 環境では `http://localhost:18080`、本番では `https://agentteams.example.com` 等） |
 | `credentials.adminPassword` | 推奨 | Matrix 管理者パスワード。空のままだと自動生成（後で Secret から読み出す必要あり） |
 | `credentials.llmProvider` | 任意 | LLM プロバイダー名、デフォルトは `openai-compat` |
 | `credentials.defaultModel` | 任意 | デフォルトモデル、デフォルトは `gpt-5.4` |
@@ -235,7 +239,7 @@ helm install agentteams higress.io/agentteams \
 kubectl port-forward -n agentteams-system svc/higress-gateway 18080:80
 ```
 
-ブラウザで http://localhost:18080 を開き Element Web にログインしてください。本番クラスタでは Ingress / LoadBalancer / DNS を `svc/higress-gateway` に向け、それに合わせて `gateway.publicURL` を設定してください。
+ブラウザで http://localhost:18080 を開き Cinny にログインしてください。本番クラスタでは Ingress / LoadBalancer / DNS を `svc/higress-gateway` に向け、それに合わせて `gateway.publicURL` を設定してください。
 
 **アップグレード**
 
@@ -325,7 +329,7 @@ agt update worker --runtime hermes
 ```
 ┌──────────────────────────────────────────────────────┐
 │                 agentteams-controller                │
-│        Higress │ Tuwunel │ MinIO │ Element Web       │
+│          Higress │ Tuwunel │ MinIO │ Cinny           │
 └─────────────────────────┬────────────────────────────┘
                           │ typed API + Matrix + storage
 ┌─────────────────────────▼────────────────────────────┐
@@ -344,7 +348,7 @@ agt update worker --runtime hermes
 | AgentScope 2.0 Manager | 対話型オーケストレーション、ポリシー検証、タスク/チームワークフロー、Matrix ストリーミング応答 |
 | Higress AI ゲートウェイ | LLM プロキシ、MCP Server ホスティング、認証情報管理 |
 | Tuwunel（Matrix） | すべての Agent + 人間のコミュニケーション用セルフホスト IM サーバー |
-| Element Web | ブラウザクライアント、ゼロ設定 |
+| Cinny | ブラウザクライアント、ゼロ設定 |
 | MinIO | 一元化ファイルストレージ、Worker はステートレス |
 ## AgentTeams vs OpenClaw ネイティブ
 
