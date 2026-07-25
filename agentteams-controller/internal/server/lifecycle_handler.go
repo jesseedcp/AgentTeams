@@ -1,14 +1,18 @@
 package server
 
 import (
+	"encoding/json"
 	"errors"
+	"io"
 	"log"
 	"net/http"
 	"sync"
+	"time"
 
 	v1beta1 "github.com/agentscope-ai/AgentTeams/agentteams-controller/api/v1beta1"
 	"github.com/agentscope-ai/AgentTeams/agentteams-controller/internal/backend"
 	"github.com/agentscope-ai/AgentTeams/agentteams-controller/internal/httputil"
+	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -170,6 +174,57 @@ func (h *LifecycleHandler) Ready(w http.ResponseWriter, r *http.Request) {
 	// Authorization (self-only for workers) is enforced by RequireAuthz middleware.
 	h.setReady(name, true)
 	log.Printf("[READY] Worker %s reported ready", name)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// Heartbeat handles POST /api/v1/workers/{name}/heartbeat. A successful
+// heartbeat refreshes liveness and may advance (but never move backward)
+// the runtime-reported business activity timestamp.
+func (h *LifecycleHandler) Heartbeat(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if name == "" {
+		httputil.WriteError(w, http.StatusBadRequest, "worker name is required")
+		return
+	}
+
+	var payload struct {
+		LastActiveAt string `json:"lastActiveAt,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil && !errors.Is(err, io.EOF) {
+		httputil.WriteError(w, http.StatusBadRequest, "invalid heartbeat request")
+		return
+	}
+	if payload.LastActiveAt != "" {
+		if _, err := time.Parse(time.RFC3339, payload.LastActiveAt); err != nil {
+			httputil.WriteError(w, http.StatusBadRequest, "lastActiveAt must be RFC3339")
+			return
+		}
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		var worker v1beta1.Worker
+		if err := h.k8s.Get(
+			r.Context(),
+			client.ObjectKey{Name: name, Namespace: h.namespace},
+			&worker,
+		); err != nil {
+			return err
+		}
+		worker.Status.LastHeartbeat = now
+		if isLastActiveNewer(payload.LastActiveAt, worker.Status.LastActiveAt) {
+			worker.Status.LastActiveAt = payload.LastActiveAt
+		}
+		return h.k8s.Status().Update(r.Context(), &worker)
+	})
+	if err != nil {
+		writeK8sError(w, "update worker heartbeat", err)
+		return
+	}
+
+	// A heartbeat is stronger evidence of readiness than the one-shot ready
+	// event and restores the in-memory ready flag after a controller restart.
+	h.setReady(name, true)
 	w.WriteHeader(http.StatusNoContent)
 }
 

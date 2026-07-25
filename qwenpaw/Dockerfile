@@ -84,6 +84,9 @@ RUN /opt/venv/qwenpaw/bin/pip install \
         loongsuite-instrumentation-agentscope==0.6.1 \
         opentelemetry-exporter-otlp
 
+# Fail the image build if dependency resolution selects an incompatible ACP API.
+RUN /opt/venv/qwenpaw/bin/python -c "from acp import SetSessionModelResponse"
+
 # Keep Node CLI tooling out of the qwenpaw pip dependency cache key.
 RUN npm config set registry ${NPM_REGISTRY} && \
     npm install -g mcporter skills @nacos-group/cli@1.1.2 && \

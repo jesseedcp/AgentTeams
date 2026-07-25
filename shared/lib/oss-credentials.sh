@@ -1,14 +1,18 @@
 #!/bin/bash
 # oss-credentials.sh - STS credential management for mc (MinIO Client)
 #
-# Controller-mediated STS (cloud mode):
+# Credential modes, in priority order:
+# 1. Static object-storage credentials (local/self-hosted mode):
+#    AGENTTEAMS_FS_ENDPOINT + AGENTTEAMS_FS_ACCESS_KEY +
+#    AGENTTEAMS_FS_SECRET_KEY → configure MC_HOST_<alias> directly.
+#
+# 2. Controller-mediated STS (cloud mode):
 #    AGENTTEAMS_CONTROLLER_URL + bearer token (AGENTTEAMS_AUTH_TOKEN or token
 #    file at AGENTTEAMS_AUTH_TOKEN_FILE) →
 #    call controller /api/v1/credentials/sts. The controller obtains STS
 #    tokens from its credential-provider sidecar.
 #
-# 2. No controller creds configured → no-op (local mode, mc alias
-#    configured with static credentials against MinIO/self-hosted S3).
+# 3. No usable credentials configured → no-op.
 #
 # STS tokens expire after 1 hour. Credentials are cached and lazy-refreshed.
 #
@@ -77,7 +81,32 @@ _oss_has_controller_url() {
 }
 
 # --------------------------------------------------------------------------
-# Path 1: STS via Controller
+# Path 1: static credentials for local/self-hosted storage
+# --------------------------------------------------------------------------
+
+_oss_has_static_credentials() {
+    [ -n "${AGENTTEAMS_FS_ENDPOINT:-}" ] && \
+        [ -n "${AGENTTEAMS_FS_ACCESS_KEY:-}" ] && \
+        [ -n "${AGENTTEAMS_FS_SECRET_KEY:-}" ]
+}
+
+_oss_export_static_credentials() {
+    local endpoint="${AGENTTEAMS_FS_ENDPOINT}"
+    local creds="${AGENTTEAMS_FS_ACCESS_KEY}:${AGENTTEAMS_FS_SECRET_KEY}"
+    local mc_host_var mc_host_value
+
+    case "${endpoint}" in
+        http://*|https://*) ;;
+        *) endpoint="http://${endpoint}" ;;
+    esac
+
+    mc_host_value="${endpoint%%://*}://${creds}@${endpoint#*://}"
+    mc_host_var="$(_oss_mc_host_var)"
+    export "${mc_host_var}=${mc_host_value}"
+}
+
+# --------------------------------------------------------------------------
+# Path 2: STS via Controller
 # --------------------------------------------------------------------------
 
 _oss_refresh_sts_via_controller() {
@@ -153,6 +182,13 @@ EOF
 # --------------------------------------------------------------------------
 
 ensure_mc_credentials() {
+    # Local/self-hosted mode can still have a controller URL and bearer token.
+    # Complete static credentials therefore take priority over cloud-only STS.
+    if _oss_has_static_credentials; then
+        _oss_export_static_credentials
+        return 0
+    fi
+
     # Cloud mode: Controller URL + any resolvable bearer token → controller-mediated STS
     if _oss_has_controller_url; then
         local bearer
@@ -163,7 +199,7 @@ ensure_mc_credentials() {
         fi
     fi
 
-    # Local mode: mc alias already configured with static credentials
+    # No usable credential source configured.
     return 0
 }
 

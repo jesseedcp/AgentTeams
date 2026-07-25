@@ -198,6 +198,12 @@ spec:
 
 **kubectl 短名（安装 CRD 后）**：`wk`、`tm`、`hm`、`mgr`。
 
+in-cluster 模式下如果直接执行 `kubectl apply`，每个 AgentTeams CR 都必须带有
+`metadata.labels.agentteams.io/controller: <controller-name>`。默认 Helm release
+名为 `agentteams` 时，该值是 `agentteams-controller`。`agt` CLI 和 Controller
+REST API 会自动补上此标签；未带标签的 CR 会被有意忽略，以隔离同一 namespace
+中的多个 release。
+
 ### 3.3 Controller 架构
 
 AgentTeams Controller 采用标准的 Kubernetes Controller 模式。

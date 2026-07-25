@@ -13,7 +13,8 @@ COMMON_ARGS=(
 )
 
 render="$(mktemp)"
-trap 'rm -f "${render}"' EXIT
+kind_render="$(mktemp)"
+trap 'rm -f "${render}" "${kind_render}"' EXIT
 
 helm template agentteams "${CHART}" "${COMMON_ARGS[@]}" > "${render}"
 
@@ -48,5 +49,23 @@ if helm template agentteams "${CHART}" "${COMMON_ARGS[@]}" \
     echo "FAIL: Helm accepted a non-AgentScope Manager runtime" >&2
     exit 1
 fi
+
+helm template agentteams "${CHART}" "${COMMON_ARGS[@]}" \
+    -f "${CHART}/values-kind.yaml" > "${kind_render}"
+grep -q 'type: NodePort' "${kind_render}"
+grep -q 'nodePort: 30080' "${kind_render}"
+grep -Fq -- '-f "${CHART_DIR}/values-kind.yaml"' \
+    "${ROOT_DIR}/hack/local-k8s-up.sh"
+for image in console higress pilot gateway proxyv2; do
+    grep -Fq "higress/${image}:2.2.1" "${ROOT_DIR}/hack/local-k8s-up.sh"
+done
+
+for doc in \
+    docs/declarative-resource-management.md \
+    docs/k8s-native-agent-orch.md \
+    docs/zh-cn/declarative-resource-management.md \
+    docs/zh-cn/k8s-native-agent-orch.md; do
+    grep -Fq 'metadata.labels.agentteams.io/controller' "${ROOT_DIR}/${doc}"
+done
 
 echo "PASS: AgentTeams Helm release renders an AgentScope-only Manager"

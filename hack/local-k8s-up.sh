@@ -147,11 +147,11 @@ if [ "$SKIP_BUILD" = "0" ]; then
         "higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/mc:20260216"
         "higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/tuwunel:20260216"
         "higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/element-web:20260216"
-        "higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/console:2.2.0"
-        "higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/higress:2.2.0"
-        "higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/pilot:2.2.0"
-        "higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/gateway:2.2.0"
-        "higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/proxyv2:2.2.0"
+        "higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/console:2.2.1"
+        "higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/higress:2.2.1"
+        "higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/pilot:2.2.1"
+        "higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/gateway:2.2.1"
+        "higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/proxyv2:2.2.1"
     )
     PLATFORM="linux/$(uname -m | sed 's/x86_64/amd64/' | sed 's/aarch64/arm64/')"
     for img in "${PRELOAD_IMAGES[@]}"; do
@@ -200,6 +200,7 @@ fi
 log "Installing AgentTeams via Helm..."
 helm upgrade --install agentteams "$CHART_DIR" \
     --namespace "$NAMESPACE" --create-namespace \
+    -f "${CHART_DIR}/values-kind.yaml" \
     --set gateway.publicURL="http://localhost:18080" \
     --set credentials.llmApiKey="$LLM_API_KEY" \
     ${HELM_SET_OVERRIDES} \

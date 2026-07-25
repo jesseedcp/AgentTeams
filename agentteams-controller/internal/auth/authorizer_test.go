@@ -35,6 +35,7 @@ func TestAuthorizer_TeamLeaderOwnTeam(t *testing.T) {
 		{Action: ActionSleep, ResourceKind: "worker", ResourceName: "alpha-dev", ResourceTeam: "alpha-team"},
 		{Action: ActionEnsureReady, ResourceKind: "worker", ResourceName: "alpha-dev", ResourceTeam: "alpha-team"},
 		{Action: ActionReady, ResourceKind: "worker", ResourceName: "alpha-dev", ResourceTeam: "alpha-team"},
+		{Action: ActionHeartbeat, ResourceKind: "worker", ResourceName: "alpha-dev", ResourceTeam: "alpha-team"},
 		{Action: ActionList, ResourceKind: "worker"},
 		{Action: ActionGet, ResourceKind: "status"},
 	}
@@ -52,6 +53,7 @@ func TestAuthorizer_TeamLeaderCrossTeamDenied(t *testing.T) {
 	deniedCases := []AuthzRequest{
 		{Action: ActionGet, ResourceKind: "worker", ResourceName: "beta-dev", ResourceTeam: "beta-team"},
 		{Action: ActionReady, ResourceKind: "worker", ResourceName: "beta-dev", ResourceTeam: "beta-team"},
+		{Action: ActionHeartbeat, ResourceKind: "worker", ResourceName: "beta-dev", ResourceTeam: "beta-team"},
 		{Action: ActionWake, ResourceKind: "worker", ResourceName: "beta-dev", ResourceTeam: "beta-team"},
 		{Action: ActionDelete, ResourceKind: "team", ResourceName: "beta-team"},
 		{Action: ActionGateway, ResourceKind: "gateway"},
@@ -70,6 +72,7 @@ func TestAuthorizer_WorkerSelfOnly(t *testing.T) {
 	// Self-actions should be allowed
 	selfAllowed := []AuthzRequest{
 		{Action: ActionReady, ResourceKind: "worker", ResourceName: "alice"},
+		{Action: ActionHeartbeat, ResourceKind: "worker", ResourceName: "alice"},
 		{Action: ActionSTS, ResourceKind: "worker", ResourceName: "alice"},
 		{Action: ActionGet, ResourceKind: "worker", ResourceName: "alice"},
 		{Action: ActionStatus, ResourceKind: "worker", ResourceName: "alice"},
@@ -84,6 +87,7 @@ func TestAuthorizer_WorkerSelfOnly(t *testing.T) {
 	// Other worker's resources should be denied
 	otherDenied := []AuthzRequest{
 		{Action: ActionReady, ResourceKind: "worker", ResourceName: "bob"},
+		{Action: ActionHeartbeat, ResourceKind: "worker", ResourceName: "bob"},
 		{Action: ActionSTS, ResourceKind: "worker", ResourceName: "bob"},
 		{Action: ActionGet, ResourceKind: "worker", ResourceName: "bob"},
 	}

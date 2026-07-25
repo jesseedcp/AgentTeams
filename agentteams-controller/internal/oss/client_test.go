@@ -299,20 +299,18 @@ func TestMinIOAdminClient_BuildManagerPolicy(t *testing.T) {
 	}
 }
 
-func TestMinIOAdminClient_EnsurePolicyDetachesBeforeReplace(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("the fake mc shell executable is POSIX-only")
-	}
+func TestMinIOAdminClient_EnsurePolicyReplacesInPlaceWithoutAccessGap(t *testing.T) {
 	dir := t.TempDir()
 	argsPath := filepath.Join(dir, "args")
 	mcPath := filepath.Join(dir, "mc")
 	script := `#!/bin/sh
 printf '%s\n' "$*" >> "$MC_ARGS_FILE"
-case "$*" in
-  "admin policy detach "*|"admin policy remove "*) exit 1 ;;
-esac
 exit 0
 `
+	if runtime.GOOS == "windows" {
+		mcPath += ".cmd"
+		script = "@echo off\r\necho %*>>\"%MC_ARGS_FILE%\"\r\nexit /b 0\r\n"
+	}
 	if err := os.WriteFile(mcPath, []byte(script), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -331,12 +329,10 @@ exit 0
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
-	if len(lines) != 4 {
-		t.Fatalf("mc calls = %v, want detach/remove/create/attach", lines)
+	if len(lines) != 2 {
+		t.Fatalf("mc calls = %v, want create/attach without detach/remove", lines)
 	}
 	wantPrefixes := []string{
-		"admin policy detach agentteams worker-worker-1 --user worker-1",
-		"admin policy remove agentteams worker-worker-1",
 		"admin policy create agentteams worker-worker-1 ",
 		"admin policy attach agentteams worker-worker-1 --user worker-1",
 	}

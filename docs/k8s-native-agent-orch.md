@@ -196,6 +196,12 @@ spec:
 
 **kubectl short names** (after CRDs are installed): `wk`, `tm`, `hm`, `mgr`.
 
+For direct `kubectl apply` in in-cluster mode, every AgentTeams CR must carry
+`metadata.labels.agentteams.io/controller: <controller-name>`. The default
+Helm release named `agentteams` uses `agentteams-controller`. The `agt` CLI and
+Controller REST API add this label automatically; unlabeled CRs are ignored by
+design to isolate multiple releases in one namespace.
+
 ### 3.3 Controller architecture
 
 AgentTeams follows the standard Kubernetes controller pattern.

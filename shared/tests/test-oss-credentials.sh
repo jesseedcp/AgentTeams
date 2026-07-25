@@ -86,11 +86,52 @@ run_refresh() {
     cat "${curl_log}"
 }
 
+run_static_credentials() {
+    local case_name="$1"
+    local mockbin="${TMPDIR_ROOT}/${case_name}-bin"
+    local curl_log="${TMPDIR_ROOT}/${case_name}-curl.log"
+    create_mock_tools "${mockbin}"
+    : > "${curl_log}"
+
+    (
+        . "${PROJECT_ROOT}/shared/lib/oss-credentials.sh"
+        _OSS_CRED_FILE="${TMPDIR_ROOT}/${case_name}-mc.env"
+        export PATH="${mockbin}:${PATH}"
+        export TEST_CURL_LOG="${curl_log}"
+        export AGENTTEAMS_CONTROLLER_URL="http://controller:8090"
+        export AGENTTEAMS_AUTH_TOKEN="controller-token"
+        export AGENTTEAMS_FS_ENDPOINT="http://minio.test:9000"
+        export AGENTTEAMS_FS_ACCESS_KEY="local-user"
+        export AGENTTEAMS_FS_SECRET_KEY="local-secret"
+        ensure_mc_credentials >/dev/null
+        printf '%s\n' "${MC_HOST_agentteams:-}"
+    )
+
+    if [ -s "${curl_log}" ]; then
+        printf '%s' "STS_REQUESTED=true"
+    else
+        printf '%s' "STS_REQUESTED=false"
+    fi
+}
+
 echo ""
 echo "=== oss credentials STS controller request ==="
 
 request="$(run_refresh sts-request)"
 assert_not_contains "cluster header should not be sent" "X-AgentTeams-Cluster-ID:" "${request}"
 assert_contains "bearer token should be sent" "Authorization: Bearer controller-token" "${request}"
+
+echo ""
+echo "=== oss credentials static MinIO takes priority ==="
+
+static_host="$(run_static_credentials static-priority)"
+assert_contains \
+    "local MinIO credentials should configure the mc alias without STS" \
+    "http://local-user:local-secret@minio.test:9000" \
+    "${static_host}"
+assert_contains \
+    "local MinIO credentials should bypass the controller STS endpoint" \
+    "STS_REQUESTED=false" \
+    "${static_host}"
 
 echo "All oss-credentials tests passed"

@@ -38,6 +38,13 @@ All resources share a unified API version: `apiVersion: agentteams.io/v1beta1`.
 
 **kubectl short names** (when CRDs are installed): `wk` (Worker), `tm` (Team), `hm` (Human), `mgr` (Manager).
 
+In in-cluster mode, resources created through `agt apply` or the Controller REST
+API are labeled automatically. If you use `kubectl apply` directly, add
+`metadata.labels.agentteams.io/controller: <controller-name>` to every
+Worker/Team/Human/Manager. For the default Helm release named `agentteams`, the
+value is `agentteams-controller`. Unlabeled CRs are intentionally ignored so
+multiple AgentTeams releases can safely share a namespace.
+
 ## Worker
 
 A Worker is the basic execution unit in AgentTeams — an AI Agent running in a Docker container with its own Matrix communication account and MinIO storage space.

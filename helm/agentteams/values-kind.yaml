@@ -1,0 +1,17 @@
+# Local Kind overrides used by hack/local-k8s-up.sh.
+# hack/kind-config.yaml maps node port 30080 to host port 18080.
+higress:
+  higress-core:
+    gateway:
+      service:
+        type: NodePort
+        ports:
+          - name: http2
+            port: 80
+            protocol: TCP
+            targetPort: 80
+            nodePort: 30080
+          - name: https
+            port: 443
+            protocol: TCP
+            targetPort: 443

@@ -38,6 +38,13 @@ Admin (人类管理员)
 
 **kubectl 短名**（安装 CRD 后）：`wk`（Worker）、`tm`（Team）、`hm`（Human）、`mgr`（Manager）。
 
+在 in-cluster 模式下，通过 `agt apply` 或 Controller REST API 创建资源时会自动
+补上 Controller 标签。如果直接使用 `kubectl apply`，必须为每个
+Worker/Team/Human/Manager 添加
+`metadata.labels.agentteams.io/controller: <controller-name>`。默认 Helm release
+名为 `agentteams` 时，该值是 `agentteams-controller`。未带此标签的 CR 会被有意
+忽略，从而允许同一 namespace 内的多个 AgentTeams release 相互隔离。
+
 ## Worker
 
 Worker 是 AgentTeams 中最基本的执行单元——一个运行在 Docker 容器中的 AI Agent，拥有独立的 Matrix 通信账号和 MinIO 存储空间。

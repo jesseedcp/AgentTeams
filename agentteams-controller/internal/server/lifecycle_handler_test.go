@@ -5,15 +5,75 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	v1beta1 "github.com/agentscope-ai/AgentTeams/agentteams-controller/api/v1beta1"
+	authpkg "github.com/agentscope-ai/AgentTeams/agentteams-controller/internal/auth"
 	"github.com/agentscope-ai/AgentTeams/agentteams-controller/internal/backend"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
+
+func TestHTTPServerRoutesWorkerHeartbeatAndUpdatesStatus(t *testing.T) {
+	scheme := newLifecycleTestScheme(t)
+	worker := &v1beta1.Worker{
+		ObjectMeta: metav1.ObjectMeta{Name: "alpha-dev", Namespace: "default"},
+		Status: v1beta1.WorkerStatus{
+			Phase:        "Running",
+			LastActiveAt: "2026-05-13T00:01:00Z",
+		},
+	}
+	k8sClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&v1beta1.Worker{}).
+		WithObjects(worker).
+		Build()
+	authMw := authpkg.NewMiddleware(
+		nil,
+		nil,
+		authpkg.NewAuthorizer(),
+		k8sClient,
+		"default",
+	)
+	server := NewHTTPServer(":0", ServerDeps{
+		Client:    k8sClient,
+		Backend:   backend.NewRegistry(nil),
+		AuthMw:    authMw,
+		Namespace: "default",
+	})
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/workers/alpha-dev/heartbeat",
+		strings.NewReader(`{"lastActiveAt":"2026-05-13T00:04:00Z"}`),
+	)
+	rec := httptest.NewRecorder()
+
+	server.Mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusNoContent, rec.Code, rec.Body.String())
+	}
+
+	var updated v1beta1.Worker
+	if err := k8sClient.Get(
+		context.Background(),
+		client.ObjectKey{Name: "alpha-dev", Namespace: "default"},
+		&updated,
+	); err != nil {
+		t.Fatalf("get worker: %v", err)
+	}
+	if _, err := time.Parse(time.RFC3339, updated.Status.LastHeartbeat); err != nil {
+		t.Fatalf("lastHeartbeat=%q is not RFC3339: %v", updated.Status.LastHeartbeat, err)
+	}
+	if updated.Status.LastActiveAt != "2026-05-13T00:04:00Z" {
+		t.Fatalf("lastActiveAt=%q, want newer runtime value", updated.Status.LastActiveAt)
+	}
+}
 
 func TestLifecycleSleepSetsSleepingPhase(t *testing.T) {
 	scheme := newLifecycleTestScheme(t)

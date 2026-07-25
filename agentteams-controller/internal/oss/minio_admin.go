@@ -97,14 +97,8 @@ func (c *MinIOAdminClient) EnsurePolicy(ctx context.Context, req PolicyRequest) 
 	}
 	policyFile.Close()
 
-	// Detach before remove so a worker keeps the freshly generated policy
-	// after bucket/prefix rename changes instead of an older attached policy.
-	if _, err := c.runMCAdmin(ctx, "policy", "detach", c.config.Alias, policyName, "--user", req.WorkerName); err != nil {
-		logger.Info("MinIO worker policy detach skipped", "worker", req.WorkerName, "policy", policyName, "error", err.Error())
-	}
-	if _, err := c.runMCAdmin(ctx, "policy", "remove", c.config.Alias, policyName); err != nil {
-		logger.Info("MinIO worker policy remove skipped", "worker", req.WorkerName, "policy", policyName, "error", err.Error())
-	}
+	// `mc admin policy create` replaces an existing policy in place. Keeping
+	// the policy attached avoids a transient authorization gap for live workers.
 	if _, err := c.runMCAdmin(ctx, "policy", "create", c.config.Alias, policyName, policyFile.Name()); err != nil {
 		return fmt.Errorf("create policy %s: %w", policyName, err)
 	}
