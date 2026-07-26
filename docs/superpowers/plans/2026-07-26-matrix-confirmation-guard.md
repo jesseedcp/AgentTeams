@@ -28,13 +28,13 @@
 - Consumes: `MatrixSessionRunner.handle(event, policy)` and `pending_confirmation(AgentState)`.
 - Produces: regression coverage proving invalid pending-confirmation input never reaches `ConfirmationAgent.reply_stream()`.
 
-- [ ] **Step 1: Record all inputs received by the test Agent**
+- [x] **Step 1: Record all inputs received by the test Agent**
 
 Add `self.inputs: list[object] = []` to `ConfirmationAgent` and append `inputs`
 at the beginning of `reply_stream()`. Existing assertions continue to use
 `confirmation_results`.
 
-- [ ] **Step 2: Add the ordinary-message regression test**
+- [x] **Step 2: Add the ordinary-message regression test**
 
 Create a pending confirmation with `"delete alice"`, then send
 `"告诉我你的名字"` as a second event. Assert:
@@ -47,14 +47,14 @@ assert "/deny reply-delete" in matrix.sent[-1].text
 assert pending_confirmation(stored.state).reply_id == "reply-delete"
 ```
 
-- [ ] **Step 3: Add the mismatched-ID regression test**
+- [x] **Step 3: Add the mismatched-ID regression test**
 
 After creating the same pending confirmation, send
 `"/confirm wrong-reply"`. Assert that no `UserConfirmResultEvent` reached the
 Agent, the reminder contains the current `reply-delete` commands, and the
 durable pending state remains unchanged.
 
-- [ ] **Step 4: Run the two tests and verify RED**
+- [x] **Step 4: Run the two tests and verify RED**
 
 Run:
 
@@ -81,13 +81,13 @@ Expected: both tests fail because the second input currently enters
   `MatrixOutput.send_text()`.
 - Produces: `_send_pending_confirmation_reminder(event, pending) -> None`.
 
-- [ ] **Step 1: Read pending state before constructing `UserMsg`**
+- [x] **Step 1: Read pending state before constructing `UserMsg`**
 
 At the start of `handle()`, parse the command, load the room session, and read
 its durable pending confirmation. When none exists, retain the existing
 message path unchanged.
 
-- [ ] **Step 2: Permit only the matching formal command**
+- [x] **Step 2: Permit only the matching formal command**
 
 When pending state exists:
 
@@ -102,7 +102,7 @@ return
 Retain the existing administrator and `ADMIN_DM` permission check before
 revealing or resolving confirmation data.
 
-- [ ] **Step 3: Send a deterministic reminder**
+- [x] **Step 3: Send a deterministic reminder**
 
 Implement a helper that sends:
 
@@ -117,7 +117,7 @@ Use `operation_id_for(room_id, event_id, reply_id)` and
 `matrix_transaction_id(..., 0)` so replaying the same Matrix event remains
 idempotent. Include only tool names, never tool inputs.
 
-- [ ] **Step 4: Run the focused tests and verify GREEN**
+- [x] **Step 4: Run the focused tests and verify GREEN**
 
 Run:
 
@@ -129,7 +129,7 @@ python -m pytest `
 Expected: ordinary text and a mismatched ID produce reminders; the correct
 confirmation and non-admin permission tests still pass.
 
-- [ ] **Step 5: Run restart recovery coverage**
+- [x] **Step 5: Run restart recovery coverage**
 
 Run:
 
@@ -153,29 +153,29 @@ Expected: confirmation still resumes after process reconstruction.
 - Consumes: the passing Manager package and existing deployment scripts/images.
 - Produces: verified Docker/K8s Manager images and a pushed Lore commit on `jesseedcp/main`.
 
-- [ ] **Step 1: Run Manager verification**
+- [x] **Step 1: Run Manager verification**
 
 Run the Manager package test suite, formatting/lint checks already configured
 by the repository, and `git diff --check`. Expected: zero failures.
 
-- [ ] **Step 2: Build the AgentScope Manager image**
+- [x] **Step 2: Build the AgentScope Manager image**
 
 Build a new image from the repository’s existing Manager Docker target without
 changing Controller, Cinny, Matrix, or data volumes.
 
-- [ ] **Step 3: Upgrade Docker and Kind Manager only**
+- [x] **Step 3: Upgrade Docker and Kind Manager only**
 
 Replace only the Manager runtime image/container. Preserve the current
 workspace volume, SQLite database, Matrix credentials, room IDs, and pending
 confirmation.
 
-- [ ] **Step 4: Run live regression**
+- [x] **Step 4: Run live regression**
 
 In the current admin room, verify that ordinary text while the persisted
 confirmation is pending receives the reminder and produces no Manager
 traceback. Do not automatically resolve the user’s pending identity update.
 
-- [ ] **Step 5: Final verification**
+- [x] **Step 5: Final verification**
 
 Confirm Manager readiness, all Kind Pods Ready, no new
 `Matrix event processing failed` entry for the probe event, and the pending
@@ -185,3 +185,21 @@ SQLite record remains `awaiting`.
 
 Create a Lore-format implementation commit, push directly to
 `jesseedcp/main`, and verify `git ls-remote` matches local `HEAD`.
+
+## Execution Notes
+
+- The local validation image reused the already downloaded
+  `agentteams/manager:a8a08d0` layers and replaced only the installed
+  `session_runner.py`; the repository source remains the reproducible build
+  input for CI and future releases.
+- Docker recreation exposed an upstream embedded-mode endpoint bug: generated
+  Manager containers received controller-local `127.0.0.1` service URLs.
+  The running Manager was recreated with the same mounts, credentials, port,
+  and image but Docker-network service URLs.
+- The Kind Manager workspace is not PVC-mounted in the current chart. Recovery
+  therefore restored the still-unresolved `update_manager_identity` request
+  from MinIO/Matrix replay with a new reply ID. No confirmation or denial was
+  issued, and the recovered request remains `awaiting`.
+- A redundant root-suite evidence entry was removed from
+  `tests/manager-skill-parity.json` because it violated the manifest contract;
+  the referenced shell test itself remains in the repository.

@@ -31,9 +31,11 @@ from tests.integration.test_matrix_agent_turn import RecordingMatrix
 class ConfirmationAgent:
     def __init__(self, room_id: str) -> None:
         self.state = AgentState(session_id=f"matrix:{room_id}")
+        self.inputs: list[object] = []
         self.confirmation_results: list[UserConfirmResultEvent] = []
 
     async def reply_stream(self, *, inputs: object):
+        self.inputs.append(inputs)
         if isinstance(inputs, UserConfirmResultEvent):
             self.confirmation_results.append(inputs)
             yield TextBlockDeltaEvent(
@@ -131,6 +133,101 @@ async def test_confirmation_continues_same_reply(tmp_path: Path) -> None:
     assert result.reply_id == "reply-delete"
     assert result.confirm_results[0].confirmed
     assert matrix.sent[-1].text == "Deleted alice."
+
+
+@pytest.mark.asyncio
+async def test_pending_confirmation_blocks_ordinary_message(
+    tmp_path: Path,
+) -> None:
+    database = Database(tmp_path / "manager.db")
+    await database.open()
+    repository = SessionRepository(database)
+    factory = Factory()
+    sessions = RoomSessionManager(factory=factory, sessions=repository)
+    matrix = RecordingMatrix()
+    runner = MatrixSessionRunner(
+        sessions=sessions,
+        matrix=matrix,
+        admin_user_id="@admin:local",
+    )
+
+    await runner.handle(_event("delete alice", "$delete"), _policy())
+    await runner.handle(
+        _event("告诉我你的名字", "$ordinary"),
+        _policy(),
+    )
+
+    assert factory.agent is not None
+    assert len(factory.agent.inputs) == 1
+    reminder = matrix.sent[-1].text
+    assert "Your message was not processed" in reminder
+    assert "/confirm reply-delete" in reminder
+    assert "/deny reply-delete" in reminder
+    stored = await repository.load("!admin:local")
+    assert stored is not None
+    assert pending_confirmation(stored.state).reply_id == "reply-delete"
+
+
+@pytest.mark.asyncio
+async def test_pending_confirmation_rejects_mismatched_id(
+    tmp_path: Path,
+) -> None:
+    database = Database(tmp_path / "manager.db")
+    await database.open()
+    repository = SessionRepository(database)
+    factory = Factory()
+    sessions = RoomSessionManager(factory=factory, sessions=repository)
+    matrix = RecordingMatrix()
+    runner = MatrixSessionRunner(
+        sessions=sessions,
+        matrix=matrix,
+        admin_user_id="@admin:local",
+    )
+
+    await runner.handle(_event("delete alice", "$delete"), _policy())
+    await runner.handle(
+        _event("/confirm wrong-reply", "$wrong"),
+        _policy(),
+    )
+
+    assert factory.agent is not None
+    assert len(factory.agent.inputs) == 1
+    assert factory.agent.confirmation_results == []
+    reminder = matrix.sent[-1].text
+    assert "/confirm reply-delete" in reminder
+    assert "/deny reply-delete" in reminder
+    stored = await repository.load("!admin:local")
+    assert stored is not None
+    assert pending_confirmation(stored.state).reply_id == "reply-delete"
+
+
+@pytest.mark.asyncio
+async def test_non_admin_cannot_read_pending_confirmation(
+    tmp_path: Path,
+) -> None:
+    database = Database(tmp_path / "manager.db")
+    await database.open()
+    factory = Factory()
+    sessions = RoomSessionManager(
+        factory=factory,
+        sessions=SessionRepository(database),
+    )
+    runner = MatrixSessionRunner(
+        sessions=sessions,
+        matrix=RecordingMatrix(),
+        admin_user_id="@admin:local",
+    )
+    await runner.handle(_event("delete alice", "$delete"), _policy())
+
+    with pytest.raises(PermissionError, match="admin"):
+        await runner.handle(
+            _event(
+                "what is pending?",
+                "$intruder-text",
+                sender="@intruder:local",
+            ),
+            _policy("@intruder:local"),
+        )
 
 
 @pytest.mark.asyncio

@@ -95,6 +95,18 @@ class MatrixSessionRunner:
                 "agentteams_manager_model_turns_total",
             )
         command = _confirmation_command(event.body)
+        session = await self._sessions.get_or_create(
+            event.room_id,
+            policy,
+        )
+        pending = pending_confirmation(session.agent.state)
+        if pending is not None:
+            self._require_confirmation_admin(event, policy)
+            if command is not None and command[1] == pending.reply_id:
+                await self._handle_confirmation(event, policy, *command)
+                return
+            await self._send_pending_confirmation_reminder(event, pending)
+            return
         if command is not None:
             await self._handle_confirmation(event, policy, *command)
             return
@@ -132,13 +144,7 @@ class MatrixSessionRunner:
         confirmed: bool,
         reply_id: str,
     ) -> None:
-        if (
-            event.sender_id != self._admin_user_id
-            or policy.kind is not RoomKind.ADMIN_DM
-        ):
-            raise PermissionError(
-                "only the admin may resolve Manager confirmations",
-            )
+        self._require_confirmation_admin(event, policy)
         session = await self._sessions.get_or_create(
             event.room_id,
             policy,
@@ -162,6 +168,44 @@ class MatrixSessionRunner:
         )
         clear_pending_confirmation(session.agent.state)
         await self._sessions.persist(event.room_id)
+
+    def _require_confirmation_admin(
+        self,
+        event: InboundEvent,
+        policy: RoomPolicy,
+    ) -> None:
+        if (
+            event.sender_id != self._admin_user_id
+            or policy.kind is not RoomKind.ADMIN_DM
+        ):
+            raise PermissionError(
+                "only the admin may resolve Manager confirmations",
+            )
+
+    async def _send_pending_confirmation_reminder(
+        self,
+        event: InboundEvent,
+        pending: PendingConfirmation,
+    ) -> None:
+        tools = ", ".join(call.name for call in pending.tool_calls)
+        prompt = (
+            f"A confirmation is still pending for: {tools}\n"
+            "Your message was not processed. "
+            "Resolve the pending request first:\n"
+            f"/confirm {pending.reply_id}\n"
+            f"/deny {pending.reply_id}"
+        )
+        reminder_operation = operation_id_for(
+            event.room_id,
+            event.event_id,
+            pending.reply_id,
+        )
+        await self._matrix.send_text(
+            event.room_id,
+            prompt,
+            txn_id=matrix_transaction_id(reminder_operation, 0),
+            thread_id=event.thread_id,
+        )
 
     async def _run_and_project(
         self,
