@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from agentteams_manager.clients.minio import MinioClient
+from agentteams_manager.domain.errors import ConflictError
 from agentteams_manager.state.database import Database
 from agentteams_manager.state.projects import ProjectRepository
 from agentteams_manager.state.tasks import (
@@ -42,6 +43,7 @@ async def test_project_task_uses_worker_room_and_project_identity(
     )
     supervisor = TaskSupervisor(clock)
     tasks = TaskRepository(database)
+    graph = ProjectGraphRepository(database)
     task_service = TaskService(
         tasks=OrderedTaskRepository(tasks, order),
         storage=storage,
@@ -51,6 +53,7 @@ async def test_project_task_uses_worker_room_and_project_identity(
         clock=clock,
         cache_root=tmp_path / "cache",
         matrix_domain="example",
+        project_graph=graph,
     )
     service = ProjectService(
         projects=ProjectRepository(database),
@@ -60,7 +63,7 @@ async def test_project_task_uses_worker_room_and_project_identity(
         controller=controller,
         matrix=matrix,
         topology=TopologyRepository(database),
-        graph=ProjectGraphRepository(database),
+        graph=graph,
         supervisor=supervisor,
         clock=clock,
         admin_user_id="@admin:example",
@@ -95,3 +98,40 @@ async def test_project_task_uses_worker_room_and_project_identity(
     assert stored.project_id == project.project_id
     assert stored.room_id == "!alice:example"
     assert matrix.messages[-1]["room_id"] == project.room_id
+
+    dependent = await service.add_task(
+        project_id=project.project_id,
+        title="Publish release",
+        specification="Publish after build",
+        assigned_to="alice",
+        dependencies=(task.task_id,),
+        context=MutationContext(
+            room_id=project.room_id,
+            event_id="$dependent",
+            tool_call_id="add-dependent-task",
+        ),
+    )
+    waiting = await tasks.get(dependent.task_id)
+    assert waiting is not None
+    assert waiting.status == "pending"
+
+    with pytest.raises(ConflictError, match="not task"):
+        await service.complete_task(
+            project_id=project.project_id,
+            task_id=task.task_id,
+            worker_event_id="$spoofed",
+            sender_id="@worker-mallory:example",
+            structured_result={"summary": "spoofed"},
+        )
+
+    await service.complete_task(
+        project_id=project.project_id,
+        task_id=task.task_id,
+        worker_event_id="$completed",
+        sender_id="@worker-alice:example",
+        structured_result={"summary": "build ready"},
+    )
+
+    released = await tasks.get(dependent.task_id)
+    assert released is not None
+    assert released.status == "dispatched"

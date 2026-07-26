@@ -45,6 +45,7 @@ async def test_room_timeout_is_reconciled_by_project_marker(
     )
     supervisor = TaskSupervisor(clock)
     tasks = TaskRepository(database)
+    graph = ProjectGraphRepository(database)
     task_service = TaskService(
         tasks=OrderedTaskRepository(tasks, order),
         storage=storage,
@@ -54,6 +55,7 @@ async def test_room_timeout_is_reconciled_by_project_marker(
         clock=clock,
         cache_root=tmp_path / "cache",
         matrix_domain="example",
+        project_graph=graph,
     )
     service = ProjectService(
         projects=ProjectRepository(database),
@@ -63,7 +65,7 @@ async def test_room_timeout_is_reconciled_by_project_marker(
         controller=controller,
         matrix=matrix,
         topology=TopologyRepository(database),
-        graph=ProjectGraphRepository(database),
+        graph=graph,
         supervisor=supervisor,
         clock=clock,
         admin_user_id="@admin:example",

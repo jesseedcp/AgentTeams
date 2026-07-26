@@ -97,6 +97,17 @@ class ProjectGraphPort(Protocol):
         now: datetime,
     ) -> object: ...
 
+    async def set_dependencies(
+        self,
+        task_id: str,
+        dependencies: tuple[str, ...],
+    ) -> None: ...
+
+    async def promote_ready(
+        self,
+        project_id: str,
+    ) -> tuple[TaskRecord, ...]: ...
+
 
 class ProjectCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -381,6 +392,7 @@ class ProjectService:
         assigned_to: str,
         context: MutationContext,
         delegated_to_team: str | None = None,
+        dependencies: tuple[str, ...] = (),
     ) -> TaskReceipt:
         project = await self._require_project(project_id)
         if project.status != "active":
@@ -400,7 +412,22 @@ class ProjectService:
             project_id=project_id,
             project_room_id=project.room_id,
             context=context,
+            defer_dispatch=True,
         )
+        await self._graph.set_dependencies(task.task_id, dependencies)
+        for ready in await self._graph.promote_ready(project_id):
+            dispatched = await self._task_service.dispatch_ready(
+                task_id=ready.task_id,
+                context=MutationContext(
+                    room_id=project.room_id,
+                    event_id=context.event_id,
+                    tool_call_id=(
+                        f"{context.tool_call_id}:ready:{ready.task_id}"
+                    ),
+                ),
+            )
+            if ready.task_id == task.task_id:
+                task = dispatched
         update_operation_id = operation_id_for(
             context.room_id,
             context.event_id,
@@ -492,14 +519,51 @@ class ProjectService:
         project_id: str,
         task_id: str,
         worker_event_id: str,
+        sender_id: str,
         structured_result: dict[str, Any] | None = None,
     ) -> TaskReceipt:
         project = await self._require_project(project_id)
+        task_record = next(
+            (
+                item
+                for item in await self._tasks.list_by_project(project_id)
+                if item.task_id == task_id
+            ),
+            None,
+        )
+        if task_record is None:
+            raise NotFoundError(f"task/{task_id} does not exist")
+        assignee = await self._controller.get_worker(
+            task_record.assigned_to,
+        )
+        assignee_user_id = (
+            assignee.matrix_user_id
+            if assignee is not None and assignee.matrix_user_id
+            else (
+                _fallback_worker_user(assignee)
+                if assignee is not None
+                else None
+            )
+        )
+        if sender_id not in {self._admin_user_id, assignee_user_id}:
+            raise ConflictError(
+                f"sender {sender_id} is not task/{task_id} assignee",
+            )
         task = await self._task_service.record_completion(
             task_id=task_id,
             worker_event_id=worker_event_id,
             structured_result=structured_result,
+            actor_id=sender_id,
         )
+        for ready in await self._graph.promote_ready(project_id):
+            await self._task_service.dispatch_ready(
+                task_id=ready.task_id,
+                context=MutationContext(
+                    room_id=project.room_id,
+                    event_id=worker_event_id,
+                    tool_call_id=f"dependency-ready:{ready.task_id}",
+                ),
+            )
         operation_id = operation_id_for(
             project.room_id,
             worker_event_id,

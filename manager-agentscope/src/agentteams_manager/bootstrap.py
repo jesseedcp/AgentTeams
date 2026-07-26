@@ -525,6 +525,7 @@ def build_application(
         cache_root=config.workspace,
         matrix_domain=config.matrix_domain,
         notifications=notification_service,
+        project_graph=project_graph,
     )
     project_service = ProjectService(
         projects=projects,

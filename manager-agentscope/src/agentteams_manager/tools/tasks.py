@@ -144,6 +144,7 @@ class AddProjectTaskInput(_Input):
         default=None,
         pattern=r"^[a-z0-9][a-z0-9-]*$",
     )
+    dependencies: tuple[str, ...] = ()
 
 
 class UpdateProjectInput(_ProjectIdInput):
@@ -166,6 +167,7 @@ class UpdateProjectInput(_ProjectIdInput):
         pattern=r"^[a-z0-9][a-z0-9-]*$",
     )
     result: dict[str, Any] | None = None
+    dependencies: tuple[str, ...] = ()
 
     @model_validator(mode="after")
     def validate_action_fields(self) -> UpdateProjectInput:
@@ -347,6 +349,7 @@ class ProjectTools:
             specification=request.specification,
             assigned_to=request.assigned_to,
             delegated_to_team=request.delegated_to_team,
+            dependencies=request.dependencies,
             context=context,
         )
 
@@ -707,6 +710,14 @@ class TaskToolkit:
                 f"task/{item.task_id} is outside this room's scope",
             )
         context = await self._context()
+        if task.project_id:
+            return await self._project_service.complete_task(
+                project_id=task.project_id,
+                task_id=task.task_id,
+                worker_event_id=context.event_id,
+                sender_id=_policy_sender(self._policy),
+                structured_result=item.result,
+            )
         if task.task_type in {"infinite", "recurring"}:
             return await self._task_service.record_execution(
                 task_id=item.task_id,
@@ -775,6 +786,7 @@ class TaskToolkit:
                 project_id=item.project_id,
                 task_id=item.task_id,
                 worker_event_id=context.event_id,
+                sender_id=_policy_sender(self._policy),
                 structured_result=item.result,
             )
         assert item.title is not None
@@ -786,6 +798,7 @@ class TaskToolkit:
             specification=item.specification,
             assigned_to=item.assigned_to,
             delegated_to_team=item.delegated_to_team,
+            dependencies=item.dependencies,
             context=context,
         )
 
@@ -970,3 +983,11 @@ def _current_mutation_context() -> MutationContext:
         event_id=invocation.event_id,
         tool_call_id=invocation.tool_call_id,
     )
+
+
+def _policy_sender(policy: RoomPolicy) -> str:
+    if len(policy.allowed_senders) != 1:
+        raise PermissionDeniedError(
+            "project mutation requires one resolved Matrix sender",
+        )
+    return next(iter(policy.allowed_senders))

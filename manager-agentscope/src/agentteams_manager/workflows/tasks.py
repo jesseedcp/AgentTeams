@@ -122,6 +122,18 @@ class CompletionNotificationPort(Protocol):
     ) -> object: ...
 
 
+class ProjectGraphPort(Protocol):
+    async def transition(
+        self,
+        task_id: str,
+        *,
+        expected: set[Any],
+        target: Any,
+        actor_id: str,
+        reason: str | None = None,
+    ) -> TaskRecord: ...
+
+
 class TaskCreateRequest(BaseModel):
     """Durable request saved in the operation journal."""
 
@@ -134,6 +146,7 @@ class TaskCreateRequest(BaseModel):
     project_id: str | None = None
     project_room_id: str | None = None
     requester_room_id: str = Field(min_length=1)
+    defer_dispatch: bool = False
 
 
 class RecurringTaskCreateRequest(TaskCreateRequest):
@@ -215,6 +228,7 @@ class TaskService:
         cache_root: Path,
         matrix_domain: str,
         notifications: CompletionNotificationPort | None = None,
+        project_graph: ProjectGraphPort | None = None,
     ) -> None:
         if not matrix_domain.strip():
             raise ValueError("matrix_domain must not be empty")
@@ -227,6 +241,7 @@ class TaskService:
         self._cache_root = cache_root.resolve()
         self._matrix_domain = matrix_domain
         self._notifications = notifications
+        self._project_graph = project_graph
 
     async def create_finite(
         self,
@@ -238,6 +253,7 @@ class TaskService:
         delegated_to_team: str | None = None,
         project_id: str | None = None,
         project_room_id: str | None = None,
+        defer_dispatch: bool = False,
     ) -> TaskReceipt:
         request = TaskCreateRequest(
             title=title,
@@ -247,6 +263,7 @@ class TaskService:
             project_id=project_id,
             project_room_id=project_room_id,
             requester_room_id=context.room_id,
+            defer_dispatch=defer_dispatch,
         )
         operation = await self._supervisor.begin(
             operation_id=context.operation_id,
@@ -321,6 +338,7 @@ class TaskService:
                     "matrix_user_id": matrix_user_id,
                     "project_room_id": request.project_room_id,
                     "requester_room_id": request.requester_room_id,
+                    "defer_dispatch": request.defer_dispatch,
                 },
                 created_at=now,
                 updated_at=now,
@@ -380,7 +398,9 @@ class TaskService:
             task = TaskRecord(
                 task_id=task_id,
                 task_type="finite",
-                status="prepared",
+                status=(
+                    "pending" if request.defer_dispatch else "prepared"
+                ),
                 title=request.title,
                 assigned_to=request.assigned_to,
                 room_id=room_id,
@@ -391,6 +411,7 @@ class TaskService:
                     "matrix_user_id": matrix_user_id,
                     "project_room_id": request.project_room_id,
                     "requester_room_id": request.requester_room_id,
+                    "defer_dispatch": request.defer_dispatch,
                 },
                 created_at=now,
                 updated_at=now,
@@ -424,6 +445,17 @@ class TaskService:
             content_type="text/markdown",
             operation_name="write_task_specification",
         )
+
+        if task.status == "pending":
+            await self._supervisor.effect_succeeded(
+                operation.operation_id,
+                ExternalEffect.STORAGE,
+                {
+                    "task_id": task_id,
+                    "status": "pending",
+                },
+            )
+            return _task_receipt(operation.operation_id, task)
 
         if task.status == "prepared":
             transaction_id = matrix_transaction_id(
@@ -506,12 +538,129 @@ class TaskService:
         )
         return _task_receipt(operation.operation_id, task)
 
+    async def dispatch_ready(
+        self,
+        *,
+        task_id: str,
+        context: MutationContext,
+    ) -> TaskReceipt:
+        from agentteams_manager.state.tasks import ProjectTaskState
+
+        if self._project_graph is None:
+            raise RuntimeError("project graph is not configured")
+        task = await self._require_task(task_id)
+        operation_id = operation_id_for(
+            context.room_id,
+            context.event_id,
+            f"{context.tool_call_id}:dispatch:{task_id}",
+        )
+        operation = await self._supervisor.begin(
+            operation_id=operation_id,
+            kind=OperationKind.DELEGATE_TASK,
+            target_key=f"project-task/{task_id}/dispatch",
+            request={
+                "action": "dispatch_project_ready",
+                "task_id": task_id,
+            },
+        )
+        return await self._resume_ready_dispatch(operation)
+
+    async def _resume_ready_dispatch(
+        self,
+        operation: OperationRecord,
+    ) -> TaskReceipt:
+        from agentteams_manager.state.tasks import ProjectTaskState
+
+        task_id = str(operation.request.get("task_id", ""))
+        if not task_id:
+            raise RecoveryError("ready dispatch is missing task identity")
+        task = await self._require_task(task_id)
+        operation_id = operation.operation_id
+        txn_id = matrix_transaction_id(operation_id, 0)
+        if operation.status is OperationStatus.SUCCEEDED:
+            current = await self._require_task(task_id)
+            return _task_receipt(operation_id, current)
+        if task.status == ProjectTaskState.DISPATCHED:
+            await self._supervisor.effect_succeeded(
+                operation_id,
+                ExternalEffect.MATRIX,
+                {
+                    "task_id": task_id,
+                    "status": "dispatched",
+                    "event_id": task.metadata.get("assignment_event_id"),
+                },
+            )
+            return _task_receipt(operation_id, task)
+        if task.status != ProjectTaskState.READY:
+            raise ConflictError(
+                f"task {task_id} is not ready for dispatch",
+            )
+        matrix_user_id = str(task.metadata["matrix_user_id"])
+        await self._supervisor.before_effect(
+            operation_id,
+            ExternalEffect.MATRIX,
+            {
+                "operation": "dispatch_project_ready_task",
+                "task_id": task_id,
+                "room_id": task.room_id,
+                "txn_id": txn_id,
+            },
+        )
+        try:
+            event_id = await self._matrix.send_text(
+                task.room_id,
+                TaskMessageFormatter.assignment(
+                    task_id=task_id,
+                    title=task.title,
+                    matrix_user_id=matrix_user_id,
+                ),
+                txn_id=txn_id,
+                mentions=(matrix_user_id,),
+            )
+        except Exception as exc:
+            await self._record_external_failure(
+                operation_id,
+                ExternalEffect.MATRIX,
+                exc,
+            )
+            raise
+        updated = await self._project_graph.transition(
+            task_id,
+            expected={ProjectTaskState.READY},
+            target=ProjectTaskState.DISPATCHED,
+            actor_id="@manager:system",
+            reason="ready task dispatched",
+        )
+        changed = await self._tasks.transition(
+            task_id,
+            expected={"dispatched"},
+            target="dispatched",
+            metadata={
+                **updated.metadata,
+                "assignment_event_id": event_id,
+                "assignment_txn_id": txn_id,
+            },
+        )
+        task = changed or updated
+        await self._supervisor.effect_succeeded(
+            operation_id,
+            ExternalEffect.MATRIX,
+            {
+                "task_id": task_id,
+                "status": "dispatched",
+                "event_id": event_id,
+                "txn_id": txn_id,
+            },
+        )
+        return _task_receipt(operation_id, task)
+
     async def record_completion(
         self,
         *,
         task_id: str,
         worker_event_id: str,
         structured_result: dict[str, Any] | None = None,
+        actor_id: str = "@manager:system",
     ) -> TaskReceipt:
         task = await self._require_task(task_id)
         operation_id = operation_id_for(
@@ -557,7 +706,12 @@ class TaskService:
                 task,
                 summary=summary,
             )
-        if task.status not in {"assigned", "active"}:
+        if task.status not in {
+            "assigned",
+            "active",
+            "dispatched",
+            "in_progress",
+        }:
             raise ConflictError(
                 f"task {task_id} cannot complete from {task.status}",
             )
@@ -649,13 +803,34 @@ class TaskService:
             "completion_summary": summary,
             "completion_metadata_etag": receipt.etag,
         }
-        changed = await self._tasks.transition(
-            task_id,
-            expected={"assigned", "active"},
-            target="completed",
-            metadata=local_metadata,
-        )
-        task = changed or await self._require_task(task_id)
+        if task.project_id and self._project_graph is not None:
+            from agentteams_manager.state.tasks import ProjectTaskState
+
+            task = await self._project_graph.transition(
+                task_id,
+                expected={
+                    ProjectTaskState.DISPATCHED,
+                    ProjectTaskState.IN_PROGRESS,
+                },
+                target=ProjectTaskState.COMPLETED,
+                actor_id=actor_id,
+                reason="completion accepted",
+            )
+            changed = await self._tasks.transition(
+                task_id,
+                expected={"completed"},
+                target="completed",
+                metadata=local_metadata,
+            )
+            task = changed or task
+        else:
+            changed = await self._tasks.transition(
+                task_id,
+                expected={"assigned", "active"},
+                target="completed",
+                metadata=local_metadata,
+            )
+            task = changed or await self._require_task(task_id)
         if task.status != "completed":
             raise ConflictError(
                 f"task {task_id} completion did not converge",
@@ -962,6 +1137,8 @@ class TaskService:
     ) -> object:
         """Resume one task-owned operation from its durable request."""
         if operation.kind is OperationKind.DELEGATE_TASK:
+            if operation.request.get("action") == "dispatch_project_ready":
+                return await self._resume_ready_dispatch(operation)
             if operation.request.get("action") == "dispatch_recurring":
                 task_id = str(operation.request.get("task_id", ""))
                 task = await self._require_task(task_id)
@@ -1219,6 +1396,7 @@ class TaskService:
             "project_id": request.project_id,
             "delegated_to_team": request.delegated_to_team,
             "operation_id": operation.operation_id,
+            "defer_dispatch": request.defer_dispatch,
         }
         actual = {
             "title": task.title,
@@ -1226,6 +1404,9 @@ class TaskService:
             "project_id": task.project_id,
             "delegated_to_team": task.delegated_to_team,
             "operation_id": task.metadata.get("operation_id"),
+            "defer_dispatch": bool(
+                task.metadata.get("defer_dispatch", False),
+            ),
         }
         if actual != expected:
             raise ConflictError(

@@ -48,6 +48,7 @@ async def test_project_room_contains_admin_and_selected_workers(
         order,
     )
     supervisor = TaskSupervisor(clock)
+    graph = ProjectGraphRepository(database)
     task_service = TaskService(
         tasks=OrderedTaskRepository(TaskRepository(database), order),
         storage=storage,
@@ -57,6 +58,7 @@ async def test_project_room_contains_admin_and_selected_workers(
         clock=clock,
         cache_root=tmp_path / "cache",
         matrix_domain="example",
+        project_graph=graph,
     )
     service = ProjectService(
         projects=ProjectRepository(database),
@@ -66,7 +68,7 @@ async def test_project_room_contains_admin_and_selected_workers(
         controller=controller,
         matrix=matrix,
         topology=TopologyRepository(database),
-        graph=ProjectGraphRepository(database),
+        graph=graph,
         supervisor=supervisor,
         clock=clock,
         admin_user_id="@admin:example",
@@ -94,7 +96,6 @@ async def test_project_room_contains_admin_and_selected_workers(
     }
     assert order.index("minio.meta") < order.index("matrix.project_room")
     assert order.index("minio.spec") < order.index("matrix.project_room")
-    graph = ProjectGraphRepository(database)
     assert await graph.participants(project.project_id) == ("alice", "bob")
     revisions = await graph.plan_revisions(project.project_id)
     assert len(revisions) == 1
