@@ -181,7 +181,7 @@ Confirm Manager readiness, all Kind Pods Ready, no new
 `Matrix event processing failed` entry for the probe event, and the pending
 SQLite record remains `awaiting`.
 
-- [ ] **Step 6: Commit and push**
+- [x] **Step 6: Commit and push**
 
 Create a Lore-format implementation commit, push directly to
 `jesseedcp/main`, and verify `git ls-remote` matches local `HEAD`.
