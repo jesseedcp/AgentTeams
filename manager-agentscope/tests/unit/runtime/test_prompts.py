@@ -41,6 +41,25 @@ def test_prompt_uses_typed_tools_not_legacy_manager_commands() -> None:
     assert "workers-registry.json" not in prompt
 
 
+def test_prompt_renders_tools_from_the_registered_toolkit() -> None:
+    builder = PromptBuilder(Path("manager/agent"))
+    policy = RoomPolicy(
+        room_id="!admin:example",
+        kind=RoomKind.ADMIN_DM,
+        revision=3,
+        allowed_tools=frozenset({"stale_policy_name"}),
+    )
+
+    prompt = builder.build(
+        policy,
+        runtime_document(),
+        registered_tools=("actual_tool", "skill_viewer"),
+    )
+
+    assert "Registered tools: actual_tool, skill_viewer" in prompt
+    assert "Registered tools: stale_policy_name" not in prompt
+
+
 def test_prompt_source_cannot_escape_prompt_root(tmp_path: Path) -> None:
     builder = PromptBuilder(tmp_path)
     runtime = runtime_document().model_copy(
@@ -65,4 +84,3 @@ def test_prompt_source_cannot_escape_prompt_root(tmp_path: Path) -> None:
         assert "escapes prompt root" in str(error)
     else:
         raise AssertionError("path traversal was accepted")
-

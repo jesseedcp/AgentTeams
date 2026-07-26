@@ -1,6 +1,6 @@
 """Initial SQLite schema for durable operations."""
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS operations (
@@ -47,6 +47,60 @@ CREATE TABLE IF NOT EXISTS sessions (
   policy_revision INTEGER NOT NULL,
   last_event_id TEXT,
   updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS session_settings (
+  room_id TEXT PRIMARY KEY,
+  model_override TEXT,
+  timezone TEXT NOT NULL,
+  next_reset_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS session_settings_reset_idx
+  ON session_settings(next_reset_at);
+
+CREATE TABLE IF NOT EXISTS daily_memories (
+  memory_id TEXT PRIMARY KEY,
+  room_id TEXT NOT NULL,
+  memory_day TEXT NOT NULL,
+  content TEXT NOT NULL,
+  source_event_id TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE(room_id, source_event_id)
+);
+CREATE INDEX IF NOT EXISTS daily_memories_room_day_idx
+  ON daily_memories(room_id, memory_day, created_at);
+
+CREATE TABLE IF NOT EXISTS long_term_memories (
+  memory_id TEXT PRIMARY KEY,
+  scope TEXT NOT NULL,
+  category TEXT NOT NULL,
+  content TEXT NOT NULL,
+  importance REAL NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS long_term_memories_scope_idx
+  ON long_term_memories(scope, importance DESC, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS project_decisions (
+  decision_id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  decision TEXT NOT NULL,
+  rationale TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS project_decisions_project_idx
+  ON project_decisions(project_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS worker_capability_assessments (
+  worker_name TEXT NOT NULL,
+  capability TEXT NOT NULL,
+  score REAL NOT NULL,
+  evidence TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY(worker_name, capability),
+  CHECK(score >= 0.0 AND score <= 1.0)
 );
 
 CREATE TABLE IF NOT EXISTS tasks (

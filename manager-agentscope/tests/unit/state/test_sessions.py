@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -29,3 +30,31 @@ async def test_agent_state_round_trip(tmp_path: Path) -> None:
     assert restored.policy_revision == 3
     assert restored.last_event_id == "$event"
 
+
+@pytest.mark.asyncio
+async def test_room_settings_persist_model_and_daily_reset(
+    tmp_path: Path,
+) -> None:
+    database = Database(tmp_path / "manager.db")
+    await database.open()
+    repository = SessionRepository(database)
+    now = datetime(2026, 7, 26, 12, 0, tzinfo=UTC)
+
+    settings = await repository.configure(
+        "!room:example",
+        model_override="qwen-custom",
+        timezone="Asia/Shanghai",
+        now=now,
+    )
+    restored = await repository.settings("!room:example", now=now)
+
+    assert restored == settings
+    assert restored.model_override == "qwen-custom"
+    assert restored.next_reset_at == datetime(
+        2026,
+        7,
+        26,
+        20,
+        0,
+        tzinfo=UTC,
+    )

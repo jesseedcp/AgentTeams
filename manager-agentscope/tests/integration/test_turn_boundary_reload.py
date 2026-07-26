@@ -124,7 +124,8 @@ async def test_active_turn_finishes_before_runtime_replacement(
 
     assert new_agent.model == "new"
     assert new_agent.state is not old_agent.state
-    assert new_agent.state.summary == "new:second"
+    assert new_agent.state.summary.startswith("new:[Current message]")
+    assert new_agent.state.summary.endswith("second")
     assert factory.retired == [old_agent]
 
     new_agent.release.set()

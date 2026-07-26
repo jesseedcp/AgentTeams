@@ -70,6 +70,7 @@ from .state.confirmations import (
 from .state.database import Database
 from .state.journal import S3Journal
 from .state.leases import LeaseRepository
+from .state.memory import MemoryRepository
 from .state.notifications import NotificationRepository
 from .state.operations import OperationRepository
 from .state.projects import ProjectRepository
@@ -409,6 +410,7 @@ def build_application(
     notifications = NotificationRepository(database)
     leases = LeaseRepository(database)
     session_repository = SessionRepository(database)
+    memory_repository = MemoryRepository(database)
     confirmations = ConfirmationService(
         ConfirmationRepository(database),
         now=clock.now,
@@ -640,6 +642,7 @@ def build_application(
     sessions = RoomSessionManager(
         factory=agent_factory,
         sessions=session_repository,
+        session_timezone=config.session_timezone,
     )
     runner = MatrixSessionRunner(
         sessions=sessions,
@@ -650,6 +653,7 @@ def build_application(
         confirmation_notifications=notification_service,
         history=matrix.history,
         media=MatrixMedia(matrix),
+        memory=memory_repository,
         metrics=metrics,
     )
     policy = RoomPolicyResolver(

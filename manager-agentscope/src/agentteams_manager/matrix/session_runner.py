@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
@@ -28,6 +29,7 @@ from agentteams_manager.domain.models import (
     RoomPolicy,
 )
 from agentteams_manager.runtime.event_stream import EventStreamProjector
+from agentteams_manager.runtime.messages import current_message_text
 from agentteams_manager.runtime.session_manager import RoomSessionManager
 from agentteams_manager.state.confirmations import (
     ConfirmationRequest,
@@ -68,6 +70,27 @@ class ConfirmationNotifications(Protocol):
     ) -> object: ...
 
 
+class SessionMemory(Protocol):
+    async def append_daily(
+        self,
+        *,
+        room_id: str,
+        content: str,
+        source_event_id: str,
+        now: datetime,
+    ) -> object: ...
+
+    async def curate_long_term(
+        self,
+        *,
+        scope: str,
+        category: str,
+        content: str,
+        importance: float,
+        now: datetime,
+    ) -> object: ...
+
+
 class MatrixSessionRunner:
     """Drive one room-scoped Agent through its native streaming API."""
 
@@ -82,6 +105,7 @@ class MatrixSessionRunner:
         confirmation_notifications: ConfirmationNotifications | None = None,
         history: RoomHistory | None = None,
         media: MediaAdapter | None = None,
+        memory: SessionMemory | None = None,
         monotonic: Callable[[], float] = time.monotonic,
         now: Callable[[], datetime] | None = None,
         confirmation_ttl: timedelta = timedelta(minutes=15),
@@ -96,6 +120,7 @@ class MatrixSessionRunner:
         self._confirmation_notifications = confirmation_notifications
         self._history = history or RoomHistory(limit=0)
         self._media = media
+        self._memory = memory
         self._monotonic = monotonic
         self._now = now or (lambda: datetime.now(UTC))
         self._confirmation_ttl = confirmation_ttl
@@ -114,6 +139,16 @@ class MatrixSessionRunner:
             self._metrics.increment(
                 "agentteams_manager_model_turns_total",
             )
+        await self._expire_confirmations()
+        pending = await self._confirmations.pending()
+        await self._sessions.reset_due(
+            self._now(),
+            exclude_rooms=frozenset(
+                request.source_room_id for request in pending
+            ),
+        )
+        if await self._handle_session_command(event, policy):
+            return
         if await self._handle_global_confirmation(event, policy):
             return
         await self._run_user_turn(event, policy)
@@ -128,14 +163,14 @@ class MatrixSessionRunner:
             if self._media is None:
                 raise RuntimeError("Matrix media adapter is not configured")
             attachments = await self._media.download(event)
-        history_prefix = self._history.prefix(
+        history_projection = self._history.prefix(
             event.room_id,
             exclude_event_id=event.event_id,
         )
         message = UserMsg(
             name=event.sender_id,
             content=[
-                TextBlock(text=history_prefix + event.body),
+                TextBlock(text=current_message_text(event)),
                 *attachments,
             ],
             id=event.event_id,
@@ -147,22 +182,18 @@ class MatrixSessionRunner:
                 "thread_id": event.thread_id,
             },
         )
-        await self._run_and_project(event, policy, message)
+        await self._run_and_project(
+            event,
+            policy,
+            message,
+            transient_context=history_projection,
+        )
 
     async def _handle_global_confirmation(
         self,
         event: InboundEvent,
         policy: RoomPolicy,
     ) -> bool:
-        for expired in await self._confirmations.expire_due():
-            await self._sessions.reset(expired.source_room_id)
-            await self._send_confirmation_notice(
-                expired.source_room_id,
-                expired.confirmation_id,
-                "审批请求已过期，原房间会话已解除等待状态。",
-                sequence=3,
-            )
-
         parsed = _global_confirmation_command(event.body)
         if parsed is not None:
             action, confirmation_id = parsed
@@ -192,6 +223,164 @@ class MatrixSessionRunner:
             await self._send_pending_confirmation_reminder(event, pending)
             return True
         return False
+
+    async def _expire_confirmations(self) -> None:
+        for expired in await self._confirmations.expire_due():
+            await self._sessions.reset(expired.source_room_id)
+            await self._send_confirmation_notice(
+                expired.source_room_id,
+                expired.confirmation_id,
+                "审批请求已过期，原房间会话已解除等待状态。",
+                sequence=3,
+            )
+
+    async def _handle_session_command(
+        self,
+        event: InboundEvent,
+        policy: RoomPolicy,
+    ) -> bool:
+        try:
+            parsed = _session_command(event.body)
+        except ValueError as error:
+            await self._send_session_command_result(
+                event,
+                f"无法执行会话命令：{error}",
+                action="error",
+            )
+            return True
+        if parsed is None:
+            return False
+        action, argument = parsed
+        pending = await self._confirmations.pending()
+        source_pending = tuple(
+            request
+            for request in pending
+            if request.source_room_id == event.room_id
+        )
+        if (
+            action == "reset"
+            and pending
+            and event.sender_id == self._admin_user_id
+            and policy.kind is RoomKind.ADMIN_DM
+        ):
+            return False
+        if action in {"new", "compact"} and source_pending:
+            await self._send_session_command_result(
+                event,
+                "当前会话有操作等待审批，请先批准、拒绝或取消审批。",
+                action=action,
+            )
+            return True
+        if action == "new":
+            status = await self._sessions.new(
+                event.room_id,
+                model_override=argument,
+                now=self._now(),
+            )
+            model = status.model_override or "运行时默认模型"
+            await self._send_session_command_result(
+                event,
+                f"已创建全新会话。模型：{model}",
+                action=action,
+            )
+            return True
+        if action == "reset":
+            current = await self._sessions.status(event.room_id)
+            await self._sessions.new(
+                event.room_id,
+                model_override=current.model_override,
+                now=self._now(),
+            )
+            await self._send_session_command_result(
+                event,
+                "已清空当前会话上下文，房间模型设置保持不变。",
+                action=action,
+            )
+            return True
+        if action == "compact":
+            status = await self._sessions.compact(event.room_id)
+            summary = status.summary.strip() or (
+                f"Session context contains "
+                f"{status.context_messages} retained messages."
+            )
+            if self._memory is not None:
+                now = self._now().astimezone(UTC)
+                await self._memory.append_daily(
+                    room_id=event.room_id,
+                    content=summary,
+                    source_event_id=event.event_id,
+                    now=now,
+                )
+                await self._memory.curate_long_term(
+                    scope=f"room:{event.room_id}",
+                    category="session_summary",
+                    content=summary,
+                    importance=5,
+                    now=now,
+                )
+            await self._send_session_command_result(
+                event,
+                "会话压缩完成："
+                f"保留 {status.context_messages} 条上下文，"
+                f"摘要 {status.summary_characters} 个字符。",
+                action=action,
+            )
+            return True
+        await self._send_session_status(event, policy, pending)
+        return True
+
+    async def _send_session_status(
+        self,
+        event: InboundEvent,
+        policy: RoomPolicy,
+        pending: tuple[ConfirmationRequest, ...],
+    ) -> None:
+        status = await self._sessions.status(event.room_id)
+        model = status.model_override or "运行时默认模型"
+        lines = [
+            "会话状态：",
+            f"- 房间类型：{policy.kind.value}",
+            f"- 会话 ID：{status.session_id or '(尚未创建)'}",
+            f"- 模型：{model}",
+            f"- 上下文消息：{status.context_messages}",
+            f"- 摘要字符：{status.summary_characters}",
+            f"- 下次 04:00 重置：{status.next_reset_at.isoformat()}",
+        ]
+        if pending:
+            lines.append(f"- 等待审批：{len(pending)}")
+            lines.extend(
+                f"  - {request.confirmation_id}: "
+                f"{', '.join(call.name for call in request.tool_calls)}"
+                for request in pending
+            )
+        else:
+            lines.append("- 等待审批：0")
+        await self._send_session_command_result(
+            event,
+            "\n".join(lines),
+            action="status",
+        )
+
+    async def _send_session_command_result(
+        self,
+        event: InboundEvent,
+        text: str,
+        *,
+        action: str,
+    ) -> None:
+        await self._matrix.send_text(
+            event.room_id,
+            text,
+            txn_id=matrix_transaction_id(
+                operation_id_for(
+                    event.room_id,
+                    event.event_id,
+                    f"session-{action}",
+                ),
+                0,
+            ),
+            thread_id=event.thread_id,
+        )
 
     async def _send_confirmation_error(
         self,
@@ -394,6 +583,7 @@ class MatrixSessionRunner:
         inputs: Any,
         *,
         tool_event_id: str | None = None,
+        transient_context: str = "",
     ) -> None:
         projector = EventStreamProjector()
         operation_id = operation_id_for(
@@ -423,6 +613,7 @@ class MatrixSessionRunner:
             inputs,
             tool_event_id=tool_event_id,
             on_event=remember_confirmation,
+            transient_context=transient_context,
         ):
             projection = await projector.accept(agent_event)
             if isinstance(agent_event, TextBlockDeltaEvent) and projection.text:
@@ -569,6 +760,26 @@ def _global_confirmation_command(
     if action == "status" and len(parts) != 1:
         return None
     return action, parts[1] if len(parts) == 2 else None
+
+
+_MODEL_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
+
+
+def _session_command(
+    body: str,
+) -> tuple[str, str | None] | None:
+    parts = body.strip().split()
+    if not parts:
+        return None
+    command = parts[0].lower()
+    if command == "/new" and len(parts) <= 2:
+        model = parts[1] if len(parts) == 2 else None
+        if model is not None and _MODEL_NAME.fullmatch(model) is None:
+            raise ValueError("invalid model name")
+        return "new", model
+    if command in {"/reset", "/compact", "/status"} and len(parts) == 1:
+        return command[1:], None
+    return None
 
 
 def _approval_prompt(request: ConfirmationRequest) -> str:

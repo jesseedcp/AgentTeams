@@ -80,6 +80,7 @@ class AgentFactory:
         room_id: str,
         policy: RoomPolicy,
         state: AgentState | None = None,
+        model_override: str | None = None,
     ) -> Agent:
         runtime = self._current_runtime()
         credential = OpenAICredential(
@@ -88,7 +89,7 @@ class AgentFactory:
         )
         model = OpenAIChatModel(
             credential=credential,
-            model=runtime.model,
+            model=model_override or runtime.model,
             context_size=runtime.context_window,
             parameters=OpenAIChatModel.Parameters(
                 max_tokens=runtime.max_tokens,
@@ -102,9 +103,20 @@ class AgentFactory:
                 revision=runtime.revision,
             )
             toolkit.tool_groups[0].mcps.extend(clients)
+        tool_schemas = await toolkit.get_tool_schemas()
+        registered_tools = tuple(
+            sorted(
+                str(schema["function"]["name"])
+                for schema in tool_schemas
+            ),
+        )
         agent = Agent(
             name=self._config.manager_name,
-            system_prompt=self._prompt_builder.build(policy, runtime),
+            system_prompt=self._prompt_builder.build(
+                policy,
+                runtime,
+                registered_tools=registered_tools,
+            ),
             model=model,
             toolkit=toolkit,
             state=state

@@ -4,57 +4,94 @@ All management actions use typed AgentScope tools. Skill documents explain
 when to choose them; Python workflows enforce the actual sequence and recovery
 rules.
 
-## Resource tools
+The following block is generated from the same canonical tool-name registry
+used by Matrix authorization. CI rejects a stale or manually divergent block.
+At runtime the prompt is rendered again from the concrete AgentScope Toolkit,
+so optional MCP tools and room-specific restrictions remain truthful.
 
-- `list_workers`, `get_worker`, `create_worker`, `update_worker`
-- `sleep_worker`, `wake_worker`, `delete_worker`
-- `find_worker_candidates`, `import_worker_package`
-- `list_teams`, `get_team`, `create_team`, `update_team`, `delete_team`
+<!-- BEGIN GENERATED AGENTSCOPE TOOLS -->
+## Registered Manager tools
+
+- `ban_matrix_user`
+- `complete_task`
+- `configure_mcp`
+- `create_channel`
+- `create_human`
+- `create_project`
+- `create_task`
+- `create_team`
+- `create_worker`
+- `delegate_task`
 - `delegate_team_task`
-- `list_humans`, `get_human`, `create_human`, `update_human`,
-  `delete_human`
-- `inspect_room`, `create_private_room`, `invite_room_member`,
-  `remove_room_member`, `ban_room_member`, `unban_room_member`
+- `delete_channel`
+- `delete_human`
+- `delete_project`
+- `delete_task`
+- `delete_team`
+- `delete_worker`
+- `download_matrix_media`
+- `find_worker`
+- `get_human`
+- `get_matrix_room_state`
+- `get_project`
+- `get_task`
+- `get_team`
+- `get_worker`
+- `git_delegate`
+- `git_delegate_high_risk`
+- `import_worker`
+- `inspect_git_request`
+- `invite_matrix_user`
+- `kick_matrix_user`
+- `list_channels`
+- `list_humans`
+- `list_matrix_members`
+- `list_matrix_rooms`
+- `list_mcp_servers`
+- `list_projects`
+- `list_tasks`
+- `list_teams`
+- `list_workers`
+- `lookup_matrix_user`
+- `publish_service`
+- `reassign_project_task`
+- `remove_mcp`
+- `report_project_blocked`
+- `request_project_revision`
+- `revise_project_plan`
+- `revise_project_plan_major`
+- `schedule_task`
+- `send_notification`
+- `sleep_worker`
+- `switch_model`
+- `switch_worker_model`
+- `sync_files`
+- `unban_matrix_user`
+- `update_channel`
+- `update_human`
+- `update_manager_identity`
+- `update_project`
+- `update_project_participants`
+- `update_task`
+- `update_team`
+- `update_worker`
+- `upload_matrix_media`
+- `wake_worker`
+
+<!-- END GENERATED AGENTSCOPE TOOLS -->
 
 Resource mutations are Controller-backed and return typed reconciliation
-receipts. Room membership tools are Matrix-backed. Never substitute a direct
-HTTP request or generated command.
-
-`create_team` and `update_team` accept existing Worker names only:
-`leader_name`, `worker_names`, optional `team_name`, `description`,
-`heartbeat_every`, `admin_name`, `admin_matrix_id`, and `peer_mentions`.
-Configure each Worker's model, runtime, image, skills, package, and lifecycle
-through the Worker tools before composing the Team. Deleting a Team preserves
-every referenced Worker and reports their names in `preservedWorkers`.
-
-## Task, project, storage, and Git tools
-
-- `create_finite_task`, `create_recurring_task`, `get_task`, `list_tasks`
-- `complete_task`, `cancel_task`, `retry_task`
-- `create_project`, `get_project`, `update_project_plan`, `close_project`
-- `sync_artifacts_down`, `sync_artifacts_up`
-- `prepare_git_delegation`, `execute_git_delegation`
-
-Task and project mutations write durable intent before uploads or messages.
-Artifact sync returns a checksum manifest. Git writes require confirmation and
-an active processing lease.
-
-## Configuration and integration tools
-
-- `inspect_runtime_configuration`
-- `switch_manager_model`, `switch_worker_model`
-- `list_mcp_servers`, `configure_mcp_server`, `delete_mcp_server`
-- `discover_mcp_tools`, `call_mcp_tool`
-- `publish_worker_service`, `unpublish_worker_service`
-
-Model changes run a gateway preflight before desired state changes. MCP
-configuration is reconciled through Higress and Controller descriptors.
-`discover_mcp_tools` and `call_mcp_tool` are AgentScope Toolkit operations;
-they do not invoke an external compatibility CLI.
+receipts. Matrix membership tools are Matrix-backed. Task and project
+mutations write durable SQLite intent before storage or message effects.
+File synchronization returns a checksum manifest. Git writes require
+confirmation and an active processing lease. Model changes run a gateway
+preflight before desired state changes. Never substitute a direct HTTP request
+or generated shell command for a registered Manager tool.
 
 ## Retained skill catalog
 
-The Manager ships exactly these skills:
+The Manager requires these built-in skills. Additional valid local skills are
+allowed:
 
 1. `agentteams-find-worker`
 2. `channel-management`

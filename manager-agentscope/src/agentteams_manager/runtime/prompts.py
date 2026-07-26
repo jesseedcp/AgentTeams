@@ -26,6 +26,8 @@ class PromptBuilder:
         self,
         policy: RoomPolicy,
         runtime: RuntimeDocument,
+        *,
+        registered_tools: tuple[str, ...] | None = None,
     ) -> str:
         sources = runtime.prompt_sources
         ordered = (
@@ -38,7 +40,13 @@ class PromptBuilder:
             self._read_source(label, source)
             for label, source in ordered
         ]
+        active_tools = (
+            tuple(sorted(registered_tools))
+            if registered_tools is not None
+            else tuple(sorted(policy.allowed_tools))
+        )
         allowed = ", ".join(sorted(policy.allowed_tools)) or "(read-only)"
+        registered = ", ".join(active_tools) or "(read-only)"
         confirmations = (
             ", ".join(sorted(policy.confirm_tools)) or "(none)"
         )
@@ -50,6 +58,7 @@ class PromptBuilder:
                     "Use only registered typed AgentScope tools.",
                     f"Room policy: {policy.kind.value}",
                     f"Room policy revision: {policy.revision}",
+                    f"Registered tools: {registered}",
                     f"Allowed tools: {allowed}",
                     f"Confirmation tools: {confirmations}",
                     f"Enabled skills: {skills}",
@@ -78,4 +87,3 @@ class PromptBuilder:
                 f"prompt source checksum mismatch for {label}",
             )
         return data.decode("utf-8").strip()
-

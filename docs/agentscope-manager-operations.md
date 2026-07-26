@@ -181,3 +181,31 @@ state store.
 
 Completing the final task closes the project and emits idempotent completion
 messages to the project room and original administrator room.
+
+## Session commands and memory
+
+Every model-visible Matrix input is delimited by `[Current message]` and
+includes verified sender, room, and thread metadata. Recent Matrix history is
+used only as a bounded cold-session projection; it is removed before
+AgentScope state is persisted, so prior messages are not copied into every
+new `UserMsg`.
+
+- `/new` starts a clean session on the runtime default model.
+- `/new <model>` starts a clean room session with a persisted model override.
+- `/reset` clears AgentScope context while preserving the room model setting.
+- `/compact` folds older context into a bounded summary and records the
+  summary in daily and curated long-term SQLite memory.
+- `/status` reports the session ID, model, context and summary sizes, next
+  reset boundary, and durable pending confirmations.
+
+Each room has a persisted IANA timezone and resets at the next local 04:00
+boundary. Rooms parked on a pending global confirmation are excluded until
+that approval is resolved or expires. SQLite also stores bounded daily
+entries, curated long-term memory, project decisions, and Worker capability
+assessments; no Redis service is required.
+
+The active tool list shown to the model comes from the concrete AgentScope
+Toolkit for that room. The checked-in `manager/agent/TOOLS.md` catalog is a
+generated, CI-validated projection of the canonical Manager tool registry.
+Required built-in skills must remain present, while additional valid local
+skills are allowed.

@@ -11,7 +11,7 @@ from agentscope.tool import ToolBase, Toolkit
 from agentteams_manager.domain.models import RoomPolicy
 from agentteams_manager.tools.base import ManagerToolkit
 
-EXPECTED_MANAGER_SKILLS = frozenset(
+REQUIRED_MANAGER_SKILLS = frozenset(
     {
         "agentteams-find-worker",
         "channel-management",
@@ -31,6 +31,7 @@ EXPECTED_MANAGER_SKILLS = frozenset(
         "worker-model-switch",
     },
 )
+EXPECTED_MANAGER_SKILLS = REQUIRED_MANAGER_SKILLS
 
 
 class SkillRegistry:
@@ -49,12 +50,10 @@ class SkillRegistry:
         if len(names) != len(set(names)):
             raise RuntimeError("duplicate AgentTeams Manager skill name")
         actual = frozenset(names)
-        if actual != EXPECTED_MANAGER_SKILLS:
-            missing = sorted(EXPECTED_MANAGER_SKILLS - actual)
-            extra = sorted(actual - EXPECTED_MANAGER_SKILLS)
+        if not REQUIRED_MANAGER_SKILLS.issubset(actual):
+            missing = sorted(REQUIRED_MANAGER_SKILLS - actual)
             raise RuntimeError(
-                f"invalid Manager skill catalog; missing={missing}, "
-                f"extra={extra}",
+                f"invalid Manager skill catalog; missing={missing}",
             )
         return tuple(sorted(skills, key=lambda skill: skill.name))
 

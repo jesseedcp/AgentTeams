@@ -12,6 +12,7 @@ from agentteams_manager.config import (
 from agentteams_manager.domain.models import RoomKind, RoomPolicy
 from agentteams_manager.runtime.agent_factory import AgentFactory
 from agentteams_manager.runtime.prompts import PromptBuilder
+from agentteams_manager.tools.base import ManagerTool
 
 
 class EmptyToolkitFactory:
@@ -20,9 +21,31 @@ class EmptyToolkitFactory:
         return Toolkit()
 
 
+class RegisteredToolkitFactory:
+    async def for_policy(self, policy: RoomPolicy) -> Toolkit:
+        return Toolkit(
+            tools=[
+                ManagerTool(
+                    name="actual_tool",
+                    description="Actual registered tool.",
+                    input_schema={
+                        "type": "object",
+                        "properties": {},
+                        "additionalProperties": False,
+                    },
+                    policy=policy,
+                    handler=lambda: {},
+                ),
+            ],
+        )
+
+
 class MCP:
     name = "github"
     is_stateful = False
+
+    async def list_tools(self):
+        return []
 
 
 class RecordingMCPRegistry:
@@ -105,6 +128,29 @@ async def test_factory_creates_direct_agentscope_agent(
     assert agent.state.session_id == "matrix:!room:example"
     assert agent.model.model == "qwen3.6-plus"
     assert agent.model.context_size == 150_000
+
+
+@pytest.mark.asyncio
+async def test_factory_prompt_uses_actual_toolkit_names(
+    tmp_path: Path,
+) -> None:
+    factory = AgentFactory(
+        config=manager_config(tmp_path),
+        runtime=runtime_document(),
+        prompt_builder=PromptBuilder(Path("manager/agent")),
+        toolkit_factory=RegisteredToolkitFactory(),
+    )
+    policy = RoomPolicy(
+        room_id="!room:example",
+        kind=RoomKind.ADMIN_DM,
+        revision=1,
+        allowed_tools=frozenset({"stale_policy_name"}),
+    )
+
+    agent = await factory.create("!room:example", policy)
+
+    assert "Registered tools: actual_tool" in agent._system_prompt
+    assert "Registered tools: stale_policy_name" not in agent._system_prompt
 
 
 @pytest.mark.asyncio

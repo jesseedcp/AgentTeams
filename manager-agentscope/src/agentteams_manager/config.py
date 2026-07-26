@@ -112,6 +112,7 @@ class ManagerConfig(BaseModel):
     admin_user_id: str = ""
     manager_admin_room_id: str = ""
     runtime_mode: str = "local"
+    session_timezone: str = "Asia/Shanghai"
     higress_admin_url: str | None = None
     higress_admin_user: str | None = None
     higress_admin_password: SecretStr | None = None
@@ -189,6 +190,10 @@ class ManagerConfig(BaseModel):
                 "AGENTTEAMS_MANAGER_ADMIN_ROOM_ID"
             ],
             runtime_mode=env.get("AGENTTEAMS_RUNTIME", "local"),
+            session_timezone=env.get(
+                "AGENTTEAMS_MANAGER_TIMEZONE",
+                "Asia/Shanghai",
+            ),
             higress_admin_url=(
                 env["AGENTTEAMS_AI_GATEWAY_ADMIN_URL"].rstrip("/")
                 if env.get("AGENTTEAMS_AI_GATEWAY_ADMIN_URL")

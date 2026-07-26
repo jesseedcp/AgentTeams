@@ -28,6 +28,10 @@ Record image-affecting changes to `manager/`, `worker/`, `copaw/`, `hermes/`, `o
   revision tasks, atomically reassign live tasks, synchronize confirmed
   participant changes with Matrix, version minor and major plans in SQLite,
   and close completed projects with idempotent project/Admin notifications.
+- **Truthful AgentScope sessions**: Render active tools from the concrete
+  room Toolkit, delimit current Matrix input, keep cold-history projection
+  transient, allow additive skills, persist per-room model and 04:00 reset
+  settings, and bound daily, long-term, project, and Worker memory in SQLite.
 - **Five-runtime release parity**: Build and inject OpenClaw, CoPaw, Hermes,
   QwenPaw, and OpenHuman Worker images consistently across Make, local kind,
   Helm, and both installers while keeping the Manager fixed to AgentScope.

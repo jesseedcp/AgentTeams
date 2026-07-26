@@ -6,6 +6,11 @@ from pathlib import Path
 
 from agentteams_manager.matrix.policy import ALL_MANAGER_TOOLS
 from agentteams_manager.runtime.skills import EXPECTED_MANAGER_SKILLS
+from agentteams_manager.runtime.tool_docs import (
+    documented_tool_names,
+    render_tool_catalog,
+    replace_tool_catalog,
+)
 
 ROOT = Path(".")
 SKILL_ROOT = ROOT / "manager" / "agent" / "skills"
@@ -88,6 +93,16 @@ def test_manifest_tools_are_typed_registered_and_documented() -> None:
             covered.add(tool)
 
     assert covered == ALL_MANAGER_TOOLS
+
+
+def test_generated_tool_guide_matches_canonical_registry() -> None:
+    guide = (ROOT / "manager" / "agent" / "TOOLS.md").read_text(
+        encoding="utf-8",
+    )
+
+    assert documented_tool_names(guide) == ALL_MANAGER_TOOLS
+    assert replace_tool_catalog(guide, ALL_MANAGER_TOOLS) == guide
+    assert render_tool_catalog(ALL_MANAGER_TOOLS) in guide
 
 
 def test_only_mcporter_declares_namespaced_dynamic_mcp_tools() -> None:

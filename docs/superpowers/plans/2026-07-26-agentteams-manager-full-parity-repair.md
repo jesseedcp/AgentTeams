@@ -192,13 +192,13 @@ python -m pytest manager-agentscope/tests/unit/clients/test_agt.py manager-agent
 - Current input is always delimited by `[Current message]`.
 - Commands: `/new`, `/new <model>`, `/reset`, `/compact`, `/status`.
 
-- [ ] Add a contract test that fails whenever documented tool names differ from registered tool names.
-- [ ] Generate the active tool section from the registry instead of maintaining a second manual name list.
-- [ ] Stop copying recent history into every durable UserMsg; use AgentScope session memory and a transient bounded context projection.
-- [ ] Add explicit current-message delimiters and sender metadata.
-- [ ] Implement the five session commands and daily 04:00 reset using persisted timezone-aware scheduling.
-- [ ] Replace the exact-16-skill guard with required-builtins validation plus allowed additional skills.
-- [ ] Add daily memory, curated long-term memory, project decisions, and Worker capability assessments with bounded compaction.
+- [x] Add a contract test that fails whenever documented tool names differ from registered tool names.
+- [x] Generate the active tool section from the registry instead of maintaining a second manual name list.
+- [x] Stop copying recent history into every durable UserMsg; use AgentScope session memory and a transient bounded context projection.
+- [x] Add explicit current-message delimiters and sender metadata.
+- [x] Implement the five session commands and daily 04:00 reset using persisted timezone-aware scheduling.
+- [x] Replace the exact-16-skill guard with required-builtins validation plus allowed additional skills.
+- [x] Add daily memory, curated long-term memory, project decisions, and Worker capability assessments with bounded compaction.
 
 ### Task 7: Restore supervision, file synchronization, notifications, and Worker controls
 
