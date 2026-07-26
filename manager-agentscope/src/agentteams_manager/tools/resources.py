@@ -792,11 +792,19 @@ class ResourceToolkit:
     async def _delete_team(self, request: BaseModel) -> object:
         item = _NameInput.model_validate(request)
         self._target("team", item.name)
-        await self._resources.delete_team(
+        preserved_workers = await self._resources.delete_team(
             item.name,
             context=await self._context(),
         )
-        return _deleted("delete_team", "team", item.name)
+        return ToolReceipt(
+            tool="delete_team",
+            resource_type="team",
+            name=item.name,
+            result={
+                "deleted": True,
+                "preservedWorkers": list(preserved_workers),
+            },
+        )
 
     async def _list_humans(self, request: BaseModel) -> object:
         del request

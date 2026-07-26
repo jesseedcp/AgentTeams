@@ -26,7 +26,6 @@ from .resources import (
     ResourceRecoveryReport,
     ResourceReconciler,
     ResourceService,
-    TeamMemberSpec,
     TeamSpec,
     TopologyResolver,
 )
@@ -62,7 +61,6 @@ __all__ = [
     "ResourceReconciler",
     "ResourceService",
     "RecurringDispatchReceipt",
-    "TeamMemberSpec",
     "TeamSpec",
     "TaskMessageFormatter",
     "TaskReceipt",

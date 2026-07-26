@@ -1,42 +1,27 @@
 # Create a Team
 
-Call `create_team` with one Leader and zero or more Workers:
+Create and configure each Worker separately with `create_worker` or
+`update_worker`. After every referenced Worker exists, call `create_team`:
 
 ```json
 {
   "name": "alpha",
   "description": "Release engineering",
-  "leader": {
-    "name": "alpha-lead",
-    "runtime": "qwenpaw",
-    "model": "qwen3.6-plus"
-  },
-  "workers": [
-    {
-      "name": "researcher",
-      "runtime": "hermes",
-      "model": "qwen3.6-plus"
-    },
-    {
-      "name": "coder",
-      "runtime": "openclaw",
-      "model": "qwen3.6-plus",
-      "skills": ["github-operations"]
-    }
-  ],
-  "leader_heartbeat_every": "30m",
-  "worker_idle_timeout": "12h"
+  "leader_name": "alpha-lead",
+  "worker_names": ["researcher", "coder"],
+  "heartbeat_every": "30m",
+  "admin_name": "reviewer",
+  "admin_matrix_id": "@reviewer:example.com",
+  "peer_mentions": true
 }
 ```
 
-Names must be unique. Leader skills are package-managed; Worker skills may be
-declared explicitly. Each member may also declare image, identity, soul, or a
-package URI.
+Names must be unique. The Leader must not also appear in `worker_names`. If any
+Worker is missing, the workflow reports the complete missing-name list and
+does not create a partial Team.
 
-The workflow chooses the simple Controller create form only when the request is
-representable there; otherwise it applies the full v1beta1 Team document. It
-then waits for every member, validates Matrix membership, refreshes topology,
-and returns the Leader Room.
+The workflow sends only the current `workerMembers` contract, waits for Team
+readiness, refreshes topology, and returns the Leader Room.
 
-Use `get_team` after creation for a fresh status view. Never send instructions
-to Team Workers from the Manager.
+Use `get_team` after creation for a fresh status view. Configure Workers only
+through Worker tools and never send instructions to Team Workers directly.

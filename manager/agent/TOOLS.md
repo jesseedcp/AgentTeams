@@ -7,10 +7,10 @@ rules.
 ## Resource tools
 
 - `list_workers`, `get_worker`, `create_worker`, `update_worker`
-- `start_worker`, `stop_worker`, `reset_worker`, `delete_worker`
+- `sleep_worker`, `wake_worker`, `delete_worker`
 - `find_worker_candidates`, `import_worker_package`
 - `list_teams`, `get_team`, `create_team`, `update_team`, `delete_team`
-- `delegate_to_team_leader`
+- `delegate_team_task`
 - `list_humans`, `get_human`, `create_human`, `update_human`,
   `delete_human`
 - `inspect_room`, `create_private_room`, `invite_room_member`,
@@ -19,6 +19,13 @@ rules.
 Resource mutations are Controller-backed and return typed reconciliation
 receipts. Room membership tools are Matrix-backed. Never substitute a direct
 HTTP request or generated command.
+
+`create_team` and `update_team` accept existing Worker names only:
+`leader_name`, `worker_names`, optional `team_name`, `description`,
+`heartbeat_every`, `admin_name`, `admin_matrix_id`, and `peer_mentions`.
+Configure each Worker's model, runtime, image, skills, package, and lifecycle
+through the Worker tools before composing the Team. Deleting a Team preserves
+every referenced Worker and reports their names in `preservedWorkers`.
 
 ## Task, project, storage, and Git tools
 

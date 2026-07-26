@@ -5,9 +5,11 @@ description: Use when an admin wants to create, inspect, reconfigure, or delete 
 
 # Team Management
 
-The Controller owns Team resources and member containers. The Manager
-coordinates a Team only through its Leader Room and never enters or instructs
-the Team-private room.
+The Controller owns Team coordination resources. Every Team member is an
+independent Worker resource whose model, runtime, image, skills, package, and
+lifecycle are managed through Worker tools. The Manager coordinates a Team
+only through its Leader Room and never enters or instructs the Team-private
+room.
 
 ## Tools
 
@@ -22,8 +24,12 @@ the Team-private room.
 Create, update, and delete require AgentScope confirmation. A successful
 resource receipt means Controller readiness and Matrix topology both converged.
 
-Teams may mix OpenClaw, CoPaw, Hermes, QwenPaw, and OpenHuman members. Preserve
-the hierarchy: admin → Manager → Team Leader → Team Workers.
+Create or update all required Workers first. Then compose the Team with
+`leader_name` and `worker_names`; never embed Worker runtime configuration in
+the Team request. Deleting a Team preserves its referenced Workers and returns
+their names in `preservedWorkers`.
+
+Preserve the hierarchy: admin → Manager → Team Leader → Team Workers.
 
 Read `references/create-team.md` for typed Team input,
 `references/team-lifecycle.md` for changes, and

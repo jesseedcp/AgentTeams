@@ -148,12 +148,13 @@ class WorkerUpdateRequest(_Request):
 class TeamCreateRequest(_Request):
     name: ResourceName
     leader_name: ResourceName
-    workers: tuple[ResourceName, ...] = ()
+    worker_names: tuple[ResourceName, ...] = ()
     team_name: ResourceName | None = None
-    leader_model: str | None = None
     description: str | None = None
-    leader_heartbeat_every: str | None = None
-    worker_idle_timeout: str | None = None
+    heartbeat_every: str | None = None
+    admin_name: ResourceName | None = None
+    admin_matrix_id: str | None = None
+    peer_mentions: bool = True
 
 
 class HumanCreateRequest(_Request):
@@ -605,20 +606,17 @@ class AgtClient:
             "--leader-name",
             request.leader_name,
         ]
-        _csv_flag(argv, "--workers", request.workers)
+        _csv_flag(argv, "--workers", request.worker_names)
         _flag(argv, "--team-name", request.team_name)
-        _flag(argv, "--leader-model", request.leader_model)
         _flag(argv, "--description", request.description)
         _flag(
             argv,
             "--leader-heartbeat-every",
-            request.leader_heartbeat_every,
+            request.heartbeat_every,
         )
-        _flag(
-            argv,
-            "--worker-idle-timeout",
-            request.worker_idle_timeout,
-        )
+        _flag(argv, "--admin", request.admin_name)
+        _flag(argv, "--admin-matrix-id", request.admin_matrix_id)
+        _flag(argv, "--peer-mentions", str(request.peer_mentions).lower())
         await self._command(tuple(argv))
 
     async def apply_team(self, name: str, document: bytes) -> TeamResource:

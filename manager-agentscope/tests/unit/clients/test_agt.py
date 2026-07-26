@@ -387,7 +387,7 @@ async def test_create_team_and_human_use_typed_argv() -> None:
         TeamCreateRequest(
             name="alpha",
             leader_name="alpha-lead",
-            workers=("dev", "qa"),
+            worker_names=("dev", "qa"),
         ),
     )
     assert process.argv[:5] == (
@@ -422,6 +422,53 @@ async def test_create_team_and_human_use_typed_argv() -> None:
         "--accessible-teams",
         "alpha",
     )
+
+
+@pytest.mark.asyncio
+async def test_create_team_uses_only_standalone_worker_reference_flags() -> None:
+    process = FakeProcess()
+    process.queue_error("", returncode=0)
+    client = AgtClient(process)
+
+    await client.create_team(
+        TeamCreateRequest(
+            name="alpha",
+            leader_name="alpha-lead",
+            worker_names=("dev", "qa"),
+            team_name="alpha-runtime",
+            heartbeat_every="30m",
+            description="Reference-only Team",
+            admin_name="reviewer",
+            admin_matrix_id="@reviewer:example.com",
+            peer_mentions=False,
+        ),
+    )
+
+    assert process.argv == (
+        "agt",
+        "create",
+        "team",
+        "--name",
+        "alpha",
+        "--leader-name",
+        "alpha-lead",
+        "--workers",
+        "dev,qa",
+        "--team-name",
+        "alpha-runtime",
+        "--description",
+        "Reference-only Team",
+        "--leader-heartbeat-every",
+        "30m",
+        "--admin",
+        "reviewer",
+        "--admin-matrix-id",
+        "@reviewer:example.com",
+        "--peer-mentions",
+        "false",
+    )
+    assert "--leader-model" not in process.argv
+    assert "--worker-idle-timeout" not in process.argv
 
 
 @pytest.mark.asyncio

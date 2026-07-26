@@ -73,6 +73,15 @@ class Resources:
         del name
         return None
 
+    async def delete_team(
+        self,
+        name: str,
+        *,
+        context: MutationContext,
+    ) -> tuple[str, ...]:
+        del name, context
+        return ("alpha-lead", "researcher", "coder")
+
     async def list_humans(self) -> tuple[HumanResource, ...]:
         return ()
 
@@ -261,6 +270,22 @@ async def test_scoped_list_filters_controller_results() -> None:
     payload = json.loads(chunk.content[0].text)
 
     assert [item["name"] for item in payload["items"]] == ["alice"]
+
+
+@pytest.mark.asyncio
+async def test_delete_team_reports_that_worker_resources_are_preserved() -> None:
+    toolkit, _ = _toolkit()
+    tool = next(
+        item for item in toolkit.tools if item.name == "delete_team"
+    )
+
+    chunk = await tool.call(name="alpha")
+    payload = json.loads(chunk.content[0].text)
+
+    assert payload["result"] == {
+        "deleted": True,
+        "preservedWorkers": ["alpha-lead", "researcher", "coder"],
+    }
 
 
 def test_resource_tool_source_has_no_direct_controller_transport() -> None:

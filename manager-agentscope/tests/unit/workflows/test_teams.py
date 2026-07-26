@@ -9,11 +9,12 @@ import pytest
 from agentteams_manager.domain.models import (
     OperationStatus,
     TeamResource,
+    WorkerResource,
 )
+from agentteams_manager.domain.errors import NotFoundError
 from agentteams_manager.workflows.resources import (
     MutationContext,
     ResourceService,
-    TeamMemberSpec,
     TeamSpec,
 )
 
@@ -54,11 +55,15 @@ class Supervisor:
 
 class Controller:
     def __init__(self) -> None:
+        self.workers: dict[str, WorkerResource] = {}
         self.teams: dict[str, TeamResource] = {}
         self.get_sequences: dict[str, list[TeamResource | None]] = {}
         self.simple_requests: list[object] = []
         self.apply_documents: list[bytes] = []
         self.deleted: list[str] = []
+
+    async def get_worker(self, name: str) -> WorkerResource | None:
+        return self.workers.get(name)
 
     async def get_team(self, name: str) -> TeamResource | None:
         sequence = self.get_sequences.get(name)
@@ -157,45 +162,38 @@ def make_service(
     )
 
 
-def mixed_spec() -> TeamSpec:
+def reference_spec() -> TeamSpec:
     return TeamSpec(
         name="alpha",
-        description="Mixed runtime team",
-        leader=TeamMemberSpec(
-            name="alpha-lead",
-            runtime="qwenpaw",
-            model="qwen3.6-plus",
-        ),
-        workers=(
-            TeamMemberSpec(
-                name="researcher",
-                runtime="hermes",
-                model="qwen3.6-plus",
-            ),
-            TeamMemberSpec(
-                name="coder",
-                runtime="openclaw",
-                model="qwen3.6-plus",
-                skills=("github-operations",),
-            ),
-        ),
+        description="Reference-only team",
+        leader_name="alpha-lead",
+        worker_names=("researcher", "coder"),
+        heartbeat_every="45m",
+        admin_name="reviewer",
+        admin_matrix_id="@reviewer:example.com",
+        peer_mentions=False,
     )
 
 
 def test_team_apply_document_uses_current_v1beta1_contract() -> None:
-    document = json.loads(mixed_spec().to_apply_document())
+    document = json.loads(reference_spec().to_apply_document())
 
     assert document["apiVersion"] == "agentteams.io/v1beta1"
     assert document["kind"] == "Team"
     assert document["metadata"] == {"name": "alpha"}
-    assert document["spec"]["leader"]["runtime"] == "qwenpaw"
-    assert [
-        worker["runtime"]
-        for worker in document["spec"]["workers"]
-    ] == ["hermes", "openclaw"]
-    assert document["spec"]["workers"][1]["skills"] == [
-        "github-operations",
+    assert document["spec"]["workerMembers"] == [
+        {"name": "alpha-lead", "role": "team_leader"},
+        {"name": "researcher", "role": "worker"},
+        {"name": "coder", "role": "worker"},
     ]
+    assert document["spec"]["heartbeatEvery"] == "45m"
+    assert document["spec"]["admin"] == {
+        "name": "reviewer",
+        "matrixUserId": "@reviewer:example.com",
+    }
+    assert document["spec"]["peerMentions"] is False
+    assert "leader" not in document["spec"]
+    assert "workers" not in document["spec"]
 
 
 @pytest.mark.parametrize(
@@ -208,27 +206,28 @@ def test_team_apply_document_uses_current_v1beta1_contract() -> None:
         ),
     ),
 )
-def test_team_crds_accept_every_supported_runtime(path: Path) -> None:
+def test_team_crds_only_define_worker_references(path: Path) -> None:
     text = path.read_text(encoding="utf-8")
-    leader = text.split("                leader:", 1)[1].split(
-        "                workers:",
-        1,
-    )[0]
-    workers = text.split("                workers:", 1)[1]
-
-    assert "runtime:" in leader
-    assert "qwenpaw" in leader
-    assert "qwenpaw" in workers
+    assert "workerMembers:" in text
+    assert "team_leader" in text
+    assert "\n                leader:" not in text
+    assert "\n                workers:" not in text
 
 
 @pytest.mark.asyncio
-async def test_mixed_runtime_team_uses_apply_then_controller_get() -> None:
+async def test_reference_team_uses_apply_then_controller_get() -> None:
     controller = Controller()
+    for name in ("alpha-lead", "researcher", "coder"):
+        controller.workers[name] = WorkerResource(
+            name=name,
+            runtime="copaw",
+            phase="Ready",
+        )
     controller.get_sequences["alpha"] = [None, team_ready()]
     service, topology = make_service(controller)
 
     team = await service.apply_team(
-        mixed_spec(),
+        reference_spec(),
         context=context("apply-alpha"),
     )
 
@@ -241,6 +240,12 @@ async def test_mixed_runtime_team_uses_apply_then_controller_get() -> None:
 @pytest.mark.asyncio
 async def test_simple_team_uses_typed_create_command() -> None:
     controller = Controller()
+    for name in ("simple-lead", "dev"):
+        controller.workers[name] = WorkerResource(
+            name=name,
+            runtime="copaw",
+            phase="Ready",
+        )
     controller.get_sequences["simple"] = [
         None,
         team_ready(
@@ -252,12 +257,8 @@ async def test_simple_team_uses_typed_create_command() -> None:
     service, _ = make_service(controller)
     spec = TeamSpec(
         name="simple",
-        leader=TeamMemberSpec(
-            name="simple-lead",
-            runtime="copaw",
-            model="qwen3.6-plus",
-        ),
-        workers=(TeamMemberSpec(name="dev"),),
+        leader_name="simple-lead",
+        worker_names=("dev",),
     )
 
     team = await service.create_team(
@@ -276,11 +277,40 @@ async def test_delete_team_is_proved_absent_before_topology_refresh() -> None:
     controller.teams["alpha"] = team_ready()
     service, topology = make_service(controller)
 
-    await service.delete_team(
+    preserved_workers = await service.delete_team(
         "alpha",
         context=context("delete-alpha"),
     )
 
     assert controller.deleted == ["alpha"]
     assert await controller.get_team("alpha") is None
+    assert preserved_workers == ("alpha-lead", "researcher", "coder")
     assert topology.refreshes == 1
+
+
+@pytest.mark.asyncio
+async def test_create_team_reports_every_missing_worker_before_mutation() -> None:
+    controller = Controller()
+    controller.workers["alpha-lead"] = WorkerResource(
+        name="alpha-lead",
+        runtime="copaw",
+        phase="Ready",
+    )
+    service, _ = make_service(controller)
+    spec = TeamSpec(
+        name="alpha",
+        leader_name="alpha-lead",
+        worker_names=("researcher", "coder"),
+    )
+
+    with pytest.raises(
+        NotFoundError,
+        match=r"researcher, coder",
+    ):
+        await service.create_team(
+            spec,
+            context=context("create-missing"),
+        )
+
+    assert controller.simple_requests == []
+    assert controller.apply_documents == []

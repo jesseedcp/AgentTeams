@@ -5,14 +5,16 @@
 Use `get_team` for one Team or `list_teams` for all visible Teams. Report phase,
 Leader, roster, readiness counts, and Leader Room.
 
-## Add, Remove, or Reconfigure a Member
+## Add or Remove a Member
 
 Call `update_team` with the complete desired Team spec. It is replacement-style
-for the typed roster: include every member that must remain.
+for the typed roster: include `leader_name` and every `worker_names` entry that
+must remain. Every referenced Worker must already exist.
 
-Before changing a busy Team, explain that affected member containers may be
-reconciled. AgentScope requests confirmation before applying the new document.
-The workflow returns only after the new roster and rooms converge.
+To reconfigure a member's model, runtime, image, skills, package, or lifecycle,
+use `update_worker`; Team membership changes do not own Worker runtime state.
+AgentScope requests confirmation before applying the new Team document. The
+workflow returns only after the new roster and rooms converge.
 
 ## Delete
 
@@ -23,5 +25,6 @@ Call `delete_team`:
 ```
 
 Deletion is complete only when the Controller no longer reports the Team and
-the topology refresh removes its Leader and private-room bindings. Do not
-individually delete Team members as a substitute for deleting the Team.
+the topology refresh removes its Leader and private-room bindings. All
+referenced Worker resources remain running and the receipt lists them under
+`preservedWorkers`.

@@ -364,101 +364,74 @@ class WorkerImportConfirmation(BaseModel):
 Sleeper = Callable[[float], Awaitable[None]]
 
 
-class TeamMemberSpec(BaseModel):
-    """Closed per-member configuration accepted by Team manifests."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    name: ResourceName
-    runtime: WorkerRuntime | None = None
-    model: str | None = None
-    image: str | None = None
-    identity: str | None = None
-    soul: str | None = None
-    skills: tuple[str, ...] = ()
-    package_uri: str | None = None
-
-    def to_document(self, *, leader: bool) -> dict[str, object]:
-        document: dict[str, object] = {
-            "name": self.name,
-        }
-        _document_value(document, "runtime", self.runtime)
-        _document_value(document, "model", self.model)
-        _document_value(document, "image", self.image)
-        _document_value(document, "identity", self.identity)
-        _document_value(document, "soul", self.soul)
-        _document_value(document, "package", self.package_uri)
-        if self.skills and not leader:
-            document["skills"] = list(self.skills)
-        return document
-
-
 class TeamSpec(BaseModel):
     """Typed subset of the current AgentTeams v1beta1 Team contract."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     name: ResourceName
-    leader: TeamMemberSpec
-    workers: tuple[TeamMemberSpec, ...] = ()
+    leader_name: ResourceName
+    worker_names: tuple[ResourceName, ...] = ()
     team_name: ResourceName | None = None
     description: str = ""
-    leader_heartbeat_every: str | None = "30m"
-    worker_idle_timeout: str | None = "12h"
+    heartbeat_every: str | None = "30m"
+    admin_name: ResourceName | None = None
+    admin_matrix_id: str | None = None
+    peer_mentions: bool = True
 
     @model_validator(mode="after")
     def validate_roster(self) -> TeamSpec:
-        names = [self.leader.name, *(worker.name for worker in self.workers)]
+        names = [self.leader_name, *self.worker_names]
         if len(names) != len(set(names)):
             raise ValueError("Team member names must be unique")
-        if self.leader.skills:
+        if self.admin_matrix_id and not self.admin_name:
             raise ValueError(
-                "Leader skills are Controller-managed; use a package instead",
+                "admin_name is required when admin_matrix_id is set",
             )
         return self
 
     @property
     def is_simple_create(self) -> bool:
-        if not _simple_team_member(self.leader, leader=True):
-            return False
-        return all(
-            _simple_team_member(worker, leader=False)
-            for worker in self.workers
-        )
+        return True
+
+    @property
+    def member_names(self) -> tuple[ResourceName, ...]:
+        return (self.leader_name, *self.worker_names)
 
     def to_create_request(self) -> TeamCreateRequest:
-        if not self.is_simple_create:
-            raise ValueError("Team spec requires declarative apply")
         return TeamCreateRequest(
             name=self.name,
-            leader_name=self.leader.name,
-            workers=tuple(worker.name for worker in self.workers),
+            leader_name=self.leader_name,
+            worker_names=self.worker_names,
             team_name=self.team_name,
-            leader_model=self.leader.model,
             description=self.description or None,
-            leader_heartbeat_every=self.leader_heartbeat_every,
-            worker_idle_timeout=self.worker_idle_timeout,
+            heartbeat_every=self.heartbeat_every,
+            admin_name=self.admin_name,
+            admin_matrix_id=self.admin_matrix_id,
+            peer_mentions=self.peer_mentions,
         )
 
     def to_apply_document(self) -> bytes:
-        leader = self.leader.to_document(leader=True)
-        if self.leader_heartbeat_every:
-            leader["heartbeat"] = {
-                "enabled": True,
-                "every": self.leader_heartbeat_every,
-            }
-        if self.worker_idle_timeout:
-            leader["workerIdleTimeout"] = self.worker_idle_timeout
         spec: dict[str, object] = {
             "teamName": self.team_name or self.name,
-            "leader": leader,
-            "workers": [
-                worker.to_document(leader=False)
-                for worker in self.workers
+            "workerMembers": [
+                {"name": self.leader_name, "role": "team_leader"},
+                *[
+                    {"name": name, "role": "worker"}
+                    for name in self.worker_names
+                ],
             ],
+            "peerMentions": self.peer_mentions,
         }
         if self.description:
             spec["description"] = self.description
+        if self.heartbeat_every:
+            spec["heartbeatEvery"] = self.heartbeat_every
+        if self.admin_name:
+            spec["admin"] = {
+                "name": self.admin_name,
+                "matrixUserId": self.admin_matrix_id or "",
+            }
         return json.dumps(
             {
                 "apiVersion": "agentteams.io/v1beta1",
@@ -1164,12 +1137,28 @@ class ResourceService:
         name: str,
         *,
         context: MutationContext,
-    ) -> None:
+    ) -> tuple[str, ...]:
+        existing = await self._controller.get_team(name)
+        current_members = (
+            (existing.leader, *existing.workers)
+            if existing is not None
+            else ()
+        )
         operation = await self._supervisor.begin(
             operation_id=context.operation_id,
             kind=OperationKind.DELETE_TEAM,
             target_key=f"team/{name}",
-            request={"name": name, "action": "delete"},
+            request={
+                "name": name,
+                "action": "delete",
+                "preserved_workers": list(current_members),
+            },
+        )
+        recorded_members = operation.request.get("preserved_workers", ())
+        preserved_workers = tuple(
+            str(worker)
+            for worker in recorded_members
+            if str(worker)
         )
         if operation.status is OperationStatus.FAILED:
             raise ConflictError(f"delete team/{name} previously failed")
@@ -1178,9 +1167,9 @@ class ResourceService:
                 raise ConflictError(
                     f"team/{name} exists after a completed delete",
                 )
-            return
+            return preserved_workers
         if operation.status is OperationStatus.PLANNED:
-            if await self._controller.get_team(name) is None:
+            if existing is None:
                 await self._supervisor.effect_failed(
                     operation.operation_id,
                     ExternalEffect.CONTROLLER,
@@ -1221,8 +1210,13 @@ class ResourceService:
         await self._supervisor.effect_succeeded(
             operation.operation_id,
             ExternalEffect.CONTROLLER,
-            {"name": name, "deleted": True},
+            {
+                "name": name,
+                "deleted": True,
+                "preserved_workers": list(preserved_workers),
+            },
         )
+        return preserved_workers
 
     async def create_human(
         self,
@@ -1539,6 +1533,21 @@ class ResourceService:
 
         team: TeamResource | None = None
         if operation.status is OperationStatus.PLANNED:
+            missing_workers: list[str] = []
+            for worker_name in spec.member_names:
+                if await self._controller.get_worker(worker_name) is None:
+                    missing_workers.append(worker_name)
+            if missing_workers:
+                reason = (
+                    "Team references missing Workers: "
+                    + ", ".join(missing_workers)
+                )
+                await self._supervisor.effect_failed(
+                    operation.operation_id,
+                    ExternalEffect.CONTROLLER,
+                    reason,
+                )
+                raise NotFoundError(reason)
             existing = await self._controller.get_team(spec.name)
             if reject_existing and existing is not None:
                 await self._supervisor.effect_failed(
@@ -1597,8 +1606,8 @@ class ResourceService:
             initial=team,
         )
         if (
-            ready.leader != spec.leader.name
-            or ready.workers != tuple(item.name for item in spec.workers)
+            ready.leader != spec.leader_name
+            or ready.workers != spec.worker_names
         ):
             await self._supervisor.effect_ambiguous(
                 operation.operation_id,
@@ -1640,7 +1649,10 @@ class ResourceService:
                     raise ConflictError(
                         message or f"team/{spec.name} entered {phase}",
                     )
-                if _team_is_ready(team, expected_workers=len(spec.workers)):
+                if _team_is_ready(
+                    team,
+                    expected_workers=len(spec.worker_names),
+                ):
                     return team
             if index < len(self._team_poll_delays):
                 await self._sleeper(self._team_poll_delays[index])
@@ -1923,9 +1935,9 @@ class ResourceService:
             spec=spec,
             initial=team,
         )
-        expected_workers = tuple(item.name for item in spec.workers)
+        expected_workers = spec.worker_names
         if (
-            ready.leader != spec.leader.name
+            ready.leader != spec.leader_name
             or ready.workers != expected_workers
         ):
             raise AmbiguousEffectError(
@@ -2511,29 +2523,6 @@ def _document_value(
 ) -> None:
     if value is not None and value != "":
         document[key] = value
-
-
-def _simple_team_member(
-    member: TeamMemberSpec,
-    *,
-    leader: bool,
-) -> bool:
-    if leader and member.runtime not in {None, "copaw"}:
-        return False
-    if not leader and member.runtime is not None:
-        return False
-    if any(
-        value
-        for value in (
-            member.image,
-            member.identity,
-            member.soul,
-            member.skills,
-            member.package_uri,
-        )
-    ):
-        return False
-    return leader or member.model is None
 
 
 def _team_is_ready(
