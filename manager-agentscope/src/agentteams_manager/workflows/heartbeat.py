@@ -16,6 +16,7 @@ from agentteams_manager.domain.models import (
     OperationRecord,
     TaskRecord,
     TopologySnapshot,
+    WorkerResource,
 )
 
 from .resources import ResourceRecoveryReport
@@ -359,6 +360,174 @@ class SnapshotScheduler(Protocol):
     async def snapshot_if_due(self) -> bool: ...
 
 
+class SupervisionTaskReader(Protocol):
+    async def list_all(self) -> tuple[TaskRecord, ...]: ...
+
+
+class SupervisionWorkerReader(Protocol):
+    async def list_workers(self) -> tuple[WorkerResource, ...]: ...
+
+
+class SupervisionNotifications(Protocol):
+    async def send_once(
+        self,
+        *,
+        source_operation_id: str,
+        text: str,
+    ) -> object: ...
+
+
+class SupervisionAlert(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: str
+    subject: str
+    source_operation_id: str
+    message: str
+
+
+class SupervisionReport(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    inspected_tasks: int = Field(ge=0)
+    inspected_workers: int = Field(ge=0)
+    alerts: tuple[SupervisionAlert, ...] = ()
+    notified: int = Field(ge=0)
+
+
+class SemanticSupervisor:
+    """Escalate only durable facts that cross explicit time thresholds."""
+
+    _ACTIVE_TASK_STATES = frozenset(
+        {"assigned", "dispatched", "in_progress"},
+    )
+
+    def __init__(
+        self,
+        *,
+        tasks: SupervisionTaskReader,
+        workers: SupervisionWorkerReader,
+        notifications: SupervisionNotifications,
+        overdue_after: timedelta = timedelta(hours=2),
+        blocked_after: timedelta = timedelta(minutes=30),
+        worker_silence_after: timedelta = timedelta(minutes=45),
+    ) -> None:
+        for label, threshold in (
+            ("overdue", overdue_after),
+            ("blocked", blocked_after),
+            ("worker silence", worker_silence_after),
+        ):
+            if threshold <= timedelta(0):
+                raise ValueError(f"{label} threshold must be positive")
+        self._tasks = tasks
+        self._workers = workers
+        self._notifications = notifications
+        self._overdue_after = overdue_after
+        self._blocked_after = blocked_after
+        self._worker_silence_after = worker_silence_after
+
+    async def inspect(self, now: datetime) -> SupervisionReport:
+        if now.tzinfo is None or now.utcoffset() is None:
+            raise ValueError("supervision time must be timezone-aware")
+        utc_now = now.astimezone(UTC)
+        tasks = await self._tasks.list_all()
+        workers = await self._workers.list_workers()
+        alerts: list[SupervisionAlert] = []
+        for task in tasks:
+            deadline = _task_deadline(task, self._overdue_after)
+            if (
+                task.status in self._ACTIVE_TASK_STATES
+                and utc_now > deadline
+            ):
+                alerts.append(
+                    _supervision_alert(
+                        "task_overdue",
+                        task.task_id,
+                        task.updated_at.isoformat(),
+                        f"[Task Overdue] {task.task_id}: {task.title}; "
+                        f"assignee={task.assigned_to}; "
+                        f"threshold={deadline.isoformat()}",
+                    ),
+                )
+            if (
+                task.status == "blocked"
+                and utc_now > task.updated_at + self._blocked_after
+            ):
+                alerts.append(
+                    _supervision_alert(
+                        "project_blocker",
+                        task.task_id,
+                        task.updated_at.isoformat(),
+                        f"[Project Blocker] {task.task_id}: {task.title}; "
+                        f"assignee={task.assigned_to}",
+                    ),
+                )
+        responsive: set[str] = set()
+        for worker in workers:
+            heartbeat = _worker_heartbeat(worker)
+            is_running = (
+                (worker.phase or "").casefold() in {"ready", "running"}
+                and str(
+                    worker.status.get("containerState", "running"),
+                ).casefold()
+                in {"ready", "running"}
+            )
+            stale = (
+                heartbeat is not None
+                and utc_now > heartbeat + self._worker_silence_after
+            )
+            if is_running and not stale:
+                responsive.add(worker.name)
+            if is_running and stale:
+                alerts.append(
+                    _supervision_alert(
+                        "worker_nonresponsive",
+                        worker.name,
+                        heartbeat.isoformat(),
+                        f"[Worker Nonresponsive] {worker.name}; "
+                        f"last heartbeat={heartbeat.isoformat()}",
+                    ),
+                )
+        waiting = tuple(
+            task
+            for task in tasks
+            if task.status in {"pending", "ready"}
+        )
+        if waiting and len(waiting) > len(responsive):
+            fingerprint = ",".join(
+                (
+                    *(task.task_id for task in waiting),
+                    "|",
+                    *sorted(responsive),
+                ),
+            )
+            alerts.append(
+                _supervision_alert(
+                    "capacity_shortage",
+                    "workers",
+                    fingerprint,
+                    "[Capacity Shortage] "
+                    f"{len(waiting)} waiting tasks but only "
+                    f"{len(responsive)} responsive Workers.",
+                ),
+            )
+        for alert in alerts:
+            await self._notifications.send_once(
+                source_operation_id=alert.source_operation_id,
+                text=alert.message,
+            )
+        return SupervisionReport(
+            inspected_tasks=len(tasks),
+            inspected_workers=len(workers),
+            alerts=tuple(alerts),
+            notified=len(alerts),
+        )
+
+
+class SemanticSupervisionRunner(Protocol):
+    async def inspect(self, now: datetime) -> SupervisionReport: ...
+
+
 class HeartbeatReport(BaseModel):
     """Typed evidence from one model-free reconciliation pass."""
 
@@ -394,6 +563,9 @@ class HeartbeatReport(BaseModel):
     notification_failed: int = Field(default=0, ge=0)
     notification_needs_attention: int = Field(default=0, ge=0)
     snapshot_created: bool = False
+    supervision_alerts: int = Field(default=0, ge=0)
+    supervision_tasks: int = Field(default=0, ge=0)
+    supervision_workers: int = Field(default=0, ge=0)
 
 
 class Heartbeat:
@@ -413,6 +585,7 @@ class Heartbeat:
         runtime_watcher: RuntimeWatcher | None = None,
         integration_recovery: IntegrationRecoveryRunner | None = None,
         notification_recovery: NotificationRecoveryRunner | None = None,
+        semantic_supervision: SemanticSupervisionRunner | None = None,
     ) -> None:
         self._recovery = recovery
         self._topology = topology
@@ -425,6 +598,7 @@ class Heartbeat:
         self._runtime_watcher = runtime_watcher
         self._integration_recovery = integration_recovery
         self._notification_recovery = notification_recovery
+        self._semantic_supervision = semantic_supervision
 
     async def run_once(self) -> HeartbeatReport:
         runtime_change = (
@@ -465,6 +639,15 @@ class Heartbeat:
             await self._completions.reconcile_pending_completions()
             if self._completions is not None
             else CompletionRecoveryReport(inspected=0)
+        )
+        supervision_report = (
+            await self._semantic_supervision.inspect(now)
+            if self._semantic_supervision is not None
+            else SupervisionReport(
+                inspected_tasks=0,
+                inspected_workers=0,
+                notified=0,
+            )
         )
 
         notification_count = 0
@@ -531,6 +714,9 @@ class Heartbeat:
                 notification_recovery.needs_attention,
             ),
             snapshot_created=snapshot_created,
+            supervision_alerts=supervision_report.notified,
+            supervision_tasks=supervision_report.inspected_tasks,
+            supervision_workers=supervision_report.inspected_workers,
         )
 
 
@@ -598,3 +784,55 @@ class TaskHeartbeat:
             pending=tuple(pending),
             late=tuple(late),
         )
+
+
+def _task_deadline(
+    task: TaskRecord,
+    default_after: timedelta,
+) -> datetime:
+    raw = task.metadata.get("deadline") or task.metadata.get("due_at")
+    parsed = _parse_timestamp(raw)
+    return parsed or task.updated_at + default_after
+
+
+def _worker_heartbeat(worker: WorkerResource) -> datetime | None:
+    for key in (
+        "lastHeartbeatAt",
+        "lastActiveAt",
+        "lastSeenAt",
+    ):
+        parsed = _parse_timestamp(worker.status.get(key))
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _parse_timestamp(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        return None
+    return parsed.astimezone(UTC)
+
+
+def _supervision_alert(
+    kind: str,
+    subject: str,
+    version: str,
+    message: str,
+) -> SupervisionAlert:
+    import hashlib
+
+    fingerprint = hashlib.sha256(
+        f"{kind}\0{subject}\0{version}".encode(),
+    ).hexdigest()[:24]
+    return SupervisionAlert(
+        kind=kind,
+        subject=subject,
+        source_operation_id=f"supervision:{kind}:{fingerprint}",
+        message=message,
+    )

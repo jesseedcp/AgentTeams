@@ -58,6 +58,7 @@ so optional MCP tools and room-specific restrictions remain truthful.
 - `remove_mcp`
 - `report_project_blocked`
 - `request_project_revision`
+- `reset_worker`
 - `revise_project_plan`
 - `revise_project_plan_major`
 - `schedule_task`

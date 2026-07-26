@@ -184,3 +184,21 @@ revision 未生效时：
 模型看到的活动工具清单来自该房间实际创建的 AgentScope Toolkit。
 `manager/agent/TOOLS.md` 中的清单则是由 Manager 标准工具注册表生成并由 CI
 校验的静态投影。内置必需技能必须存在，但允许加入其它合法的本地技能。
+
+## 语义监督与文件同步
+
+心跳始终先执行确定性恢复，之后才进入基于明确阈值的语义监督阶段。该阶段会对
+超期活动任务、持续阻塞的项目任务、失去响应但仍标记运行的 Worker，以及等待
+任务超过可响应 Worker 数量的容量不足发出管理员通知。告警 ID 包含持久化事实
+版本，因此未变化的问题复用同一条 exactly-once 通知，发生新状态迁移后才能
+产生新的告警。
+
+`sync_files` 支持三个受限根：`task_artifacts`、`worker_workspace` 和
+`shared_knowledge`。构造路径前会验证 Worker 名称和任务 ID；解析后的路径必须
+位于配置的缓存根之下，并拒绝符号链接。任务 push 的 MinIO 条件上传和对负责人
+Worker 的 Matrix 提醒属于同一个持久化 `FILE_SYNC` 操作，使用稳定事务 ID，
+进程重启后可以恢复。
+
+`reset_worker` 在删除前先持久化完整的 typed Worker 创建请求，然后严格按该
+副本重建、验证就绪并刷新拓扑。`get_worker` 会暴露实际容器与服务端口状态；
+`get_team` 会暴露生效的 `peerMentions` 策略和协作房间事实。

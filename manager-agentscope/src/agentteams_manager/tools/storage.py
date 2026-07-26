@@ -4,22 +4,30 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from agentteams_manager.domain.errors import NotFoundError
+from agentteams_manager.domain.errors import NotFoundError, RecoveryError
+from agentteams_manager.domain.ids import matrix_transaction_id
 from agentteams_manager.domain.models import (
+    ExternalEffect,
     MirrorReceipt,
     ObjectReceipt,
+    OperationKind,
+    OperationRecord,
+    OperationStatus,
     TaskMetadata,
     TaskRecord,
 )
+from agentteams_manager.domain.ports import MatrixPort
 from agentteams_manager.workflows.git_delegation import (
     ProcessingLease,
     ProcessingLeaseService,
 )
+from agentteams_manager.workflows.resources import MutationContext
 
 
 class VersionedObjectStorage(Protocol):
@@ -100,6 +108,56 @@ class FileSyncReceipt(BaseModel):
     instruction: str = "Run `agentteams-sync` before reading the files."
 
 
+class FileRootReceipt(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    root: Literal["worker_workspace", "shared_knowledge"]
+    target: str
+    prefix: str
+    files: int = Field(ge=0)
+    bytes_transferred: int = Field(ge=0)
+    manifest_sha256: str
+
+
+class FileSyncSupervisor(Protocol):
+    async def begin(
+        self,
+        *,
+        operation_id: str,
+        kind: OperationKind,
+        target_key: str,
+        request: dict[str, object],
+    ) -> OperationRecord: ...
+
+    async def before_effect(
+        self,
+        operation_id: str,
+        effect: ExternalEffect,
+        request: dict[str, object],
+    ) -> object: ...
+
+    async def effect_acknowledged(
+        self,
+        operation_id: str,
+        effect: ExternalEffect,
+        receipt: dict[str, object],
+    ) -> OperationRecord: ...
+
+    async def effect_succeeded(
+        self,
+        operation_id: str,
+        effect: ExternalEffect,
+        receipt: dict[str, object],
+    ) -> OperationRecord: ...
+
+    async def effect_ambiguous(
+        self,
+        operation_id: str,
+        effect: ExternalEffect,
+        reason: str,
+    ) -> OperationRecord: ...
+
+
 class FileSyncService:
     """Make remote pull and protected Worker push explicit."""
 
@@ -110,11 +168,187 @@ class FileSyncService:
         leases: ProcessingLeaseService,
         tasks: SyncTaskReader,
         cache_root: Path,
+        supervisor: FileSyncSupervisor | None = None,
+        matrix: MatrixPort | None = None,
     ) -> None:
         self._storage = storage
         self._leases = leases
         self._tasks = tasks
         self._cache_root = cache_root.resolve()
+        self._supervisor = supervisor
+        self._matrix = matrix
+
+    def root_path(
+        self,
+        root: Literal[
+            "worker_workspace",
+            "shared_knowledge",
+            "task_artifacts",
+        ],
+        *,
+        worker_name: str | None = None,
+        task_id: str | None = None,
+    ) -> Path:
+        local, _ = self._root_spec(
+            root,
+            worker_name=worker_name,
+            task_id=task_id,
+        )
+        return local
+
+    async def push_root(
+        self,
+        root: Literal["worker_workspace", "shared_knowledge"],
+        *,
+        processor: str,
+        worker_name: str | None = None,
+    ) -> FileRootReceipt:
+        del processor
+        local, prefix = self._root_spec(
+            root,
+            worker_name=worker_name,
+            task_id=None,
+        )
+        entries, transferred = await self._push_tree(
+            local,
+            prefix,
+            protect_manager_files=False,
+        )
+        return FileRootReceipt(
+            root=root,
+            target=worker_name or "shared",
+            prefix=prefix,
+            files=len(entries),
+            bytes_transferred=transferred,
+            manifest_sha256=_manifest_sha256(entries),
+        )
+
+    async def pull_root(
+        self,
+        root: Literal["worker_workspace", "shared_knowledge"],
+        *,
+        worker_name: str | None = None,
+    ) -> Path:
+        local, prefix = self._root_spec(
+            root,
+            worker_name=worker_name,
+            task_id=None,
+        )
+        await self._storage.mirror_down(prefix, local)
+        return local
+
+    async def sync_task(
+        self,
+        task_id: str,
+        *,
+        direction: Literal["pull", "push"],
+        processor: str,
+        context: MutationContext,
+    ) -> FileSyncReceipt | Path:
+        if direction == "pull":
+            return await self.pull_task(task_id)
+        if self._supervisor is None or self._matrix is None:
+            return await self.push_task(
+                task_id,
+                processor=processor,
+            )
+        task = await self._require_task(task_id)
+        request = {
+            "action": "push_task",
+            "task_id": task_id,
+            "processor": processor,
+            "source_room_id": context.room_id,
+            "source_event_id": context.event_id,
+            "source_tool_call_id": context.tool_call_id,
+        }
+        operation = await self._supervisor.begin(
+            operation_id=context.operation_id,
+            kind=OperationKind.FILE_SYNC,
+            target_key=f"task/{task_id}/files",
+            request=request,
+        )
+        if operation.status is OperationStatus.SUCCEEDED:
+            return _sync_receipt_from_operation(operation)
+        await self._supervisor.before_effect(
+            operation.operation_id,
+            ExternalEffect.STORAGE,
+            {
+                "operation": "upload_task_files",
+                "task_id": task_id,
+                "prefix": f"shared/tasks/{task_id}/",
+            },
+        )
+        receipt = await self.push_task(
+            task_id,
+            processor=processor,
+        )
+        await self._supervisor.effect_acknowledged(
+            operation.operation_id,
+            ExternalEffect.STORAGE,
+            {"sync": receipt.model_dump(mode="json")},
+        )
+        txn_id = matrix_transaction_id(operation.operation_id, 1)
+        matrix_user_id = str(
+            task.metadata.get("matrix_user_id")
+            or f"@{task.assigned_to}:local"
+        )
+        await self._supervisor.before_effect(
+            operation.operation_id,
+            ExternalEffect.MATRIX,
+            {
+                "operation": "mention_worker_after_file_upload",
+                "task_id": task_id,
+                "room_id": task.room_id,
+                "txn_id": txn_id,
+            },
+        )
+        try:
+            event_id = await self._matrix.send_text(
+                task.room_id,
+                f"{matrix_user_id} Files for task {task_id} are synchronized.",
+                txn_id=txn_id,
+                mentions=(matrix_user_id,),
+            )
+        except Exception as error:
+            await self._supervisor.effect_ambiguous(
+                operation.operation_id,
+                ExternalEffect.MATRIX,
+                type(error).__name__,
+            )
+            raise
+        await self._supervisor.effect_succeeded(
+            operation.operation_id,
+            ExternalEffect.MATRIX,
+            {
+                "sync": receipt.model_dump(mode="json"),
+                "event_id": event_id,
+                "txn_id": txn_id,
+            },
+        )
+        return receipt
+
+    async def resume_operation(
+        self,
+        operation: OperationRecord,
+    ) -> FileSyncReceipt | Path:
+        if operation.kind is not OperationKind.FILE_SYNC:
+            raise RecoveryError("operation is not a file sync")
+        request = operation.request
+        if request.get("action") != "push_task":
+            raise RecoveryError("unsupported file sync recovery action")
+        context = MutationContext(
+            room_id=str(request["source_room_id"]),
+            event_id=str(request["source_event_id"]),
+            tool_call_id=str(request["source_tool_call_id"]),
+        )
+        if context.operation_id != operation.operation_id:
+            raise RecoveryError("file sync operation identity changed")
+        return await self.sync_task(
+            str(request["task_id"]),
+            direction="push",
+            processor=str(request["processor"]),
+            context=context,
+        )
 
     async def pull_task(self, task_id: str) -> Path:
         await self._require_task(task_id)
@@ -239,6 +473,58 @@ class FileSyncService:
             manifest_sha256=hashlib.sha256(encoded).hexdigest(),
         )
 
+    async def _push_tree(
+        self,
+        root: Path,
+        prefix: str,
+        *,
+        protect_manager_files: bool,
+    ) -> tuple[list[dict[str, object]], int]:
+        if not root.is_dir():
+            raise FileNotFoundError(root)
+        entries: list[dict[str, object]] = []
+        transferred = 0
+        for candidate in sorted(root.rglob("*")):
+            if candidate.is_symlink():
+                raise ValueError(
+                    f"sync path must not be a symlink: {candidate}",
+                )
+            if not candidate.is_file():
+                continue
+            absolute = candidate.resolve(strict=True)
+            if not absolute.is_relative_to(root):
+                raise ValueError(f"sync path escapes root: {candidate}")
+            relative = absolute.relative_to(root)
+            if protect_manager_files and _manager_owned(relative):
+                continue
+            data = absolute.read_bytes()
+            digest = hashlib.sha256(data).hexdigest()
+            key = f"{prefix}{relative.as_posix()}"
+            current = await self._storage.head(key)
+            if (
+                current is None
+                or current.sha256 != digest
+                or current.size != len(data)
+            ):
+                receipt = await self._storage.put_bytes_if_version(
+                    key,
+                    data,
+                    expected_etag=current.etag if current else None,
+                    content_type=_content_type(absolute),
+                )
+                transferred += len(data)
+            else:
+                receipt = current
+            entries.append(
+                {
+                    "etag": receipt.etag,
+                    "key": key,
+                    "sha256": receipt.sha256,
+                    "size": receipt.size,
+                },
+            )
+        return entries, transferred
+
     async def _require_task(self, task_id: str) -> TaskRecord:
         task = await self._tasks.get(task_id)
         if task is None:
@@ -254,6 +540,45 @@ class FileSyncService:
         ):
             raise ValueError(f"invalid task ID: {task_id!r}")
         return self._cache_root / "shared" / "tasks" / task_id
+
+    def _root_spec(
+        self,
+        root: str,
+        *,
+        worker_name: str | None,
+        task_id: str | None,
+    ) -> tuple[Path, str]:
+        if root == "worker_workspace":
+            if (
+                worker_name is None
+                or re.fullmatch(
+                    r"[a-z0-9][a-z0-9-]*",
+                    worker_name,
+                )
+                is None
+            ):
+                raise ValueError(f"invalid Worker name: {worker_name!r}")
+            return (
+                self._cache_root
+                / "workers"
+                / worker_name
+                / "workspace",
+                f"workers/{worker_name}/workspace/",
+            )
+        if root == "shared_knowledge":
+            if worker_name is not None or task_id is not None:
+                raise ValueError(
+                    "shared knowledge root has no Worker or task target",
+                )
+            return (
+                self._cache_root / "shared" / "knowledge",
+                "shared/knowledge/",
+            )
+        if root == "task_artifacts":
+            if task_id is None:
+                raise ValueError("task artifact root requires task_id")
+            return self._task_root(task_id), f"shared/tasks/{task_id}/"
+        raise ValueError(f"unknown sync root: {root!r}")
 
 
 def _manager_owned(relative: Path) -> bool:
@@ -275,3 +600,23 @@ def _content_type(path: Path) -> str:
         ".yaml": "application/yaml",
         ".yml": "application/yaml",
     }.get(path.suffix.casefold(), "application/octet-stream")
+
+
+def _manifest_sha256(entries: list[dict[str, object]]) -> str:
+    encoded = json.dumps(
+        entries,
+        ensure_ascii=False,
+        allow_nan=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _sync_receipt_from_operation(
+    operation: OperationRecord,
+) -> FileSyncReceipt:
+    raw = operation.result.get("sync")
+    if not isinstance(raw, dict):
+        raise RecoveryError("succeeded file sync has no durable receipt")
+    return FileSyncReceipt.model_validate(raw)

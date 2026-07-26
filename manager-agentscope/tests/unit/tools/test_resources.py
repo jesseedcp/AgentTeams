@@ -27,6 +27,7 @@ from agentteams_manager.workflows.resources import MutationContext
 class Resources:
     def __init__(self) -> None:
         self.created: list[tuple[WorkerCreateRequest, MutationContext]] = []
+        self.reset: list[tuple[str, MutationContext]] = []
         self.workers = (
             WorkerResource(
                 name="alice",
@@ -65,6 +66,17 @@ class Resources:
             phase="Running",
             room_id=f"!{request.name}:example",
         )
+
+    async def reset_worker(
+        self,
+        name: str,
+        *,
+        context: MutationContext,
+    ) -> WorkerResource:
+        self.reset.append((name, context))
+        worker = await self.get_worker(name)
+        assert worker is not None
+        return worker
 
     async def list_teams(self) -> tuple[TeamResource, ...]:
         return ()
@@ -219,6 +231,17 @@ async def test_create_worker_uses_typed_request_and_turn_context_once() -> None:
             model="qwen3.6-plus",
             unknown=True,
         )
+
+
+@pytest.mark.asyncio
+async def test_reset_worker_uses_one_confirmable_resource_operation() -> None:
+    toolkit, resources = _toolkit()
+    tool = next(item for item in toolkit.tools if item.name == "reset_worker")
+
+    chunk = await tool.call(name="alice")
+
+    assert resources.reset == [("alice", _context())]
+    assert json.loads(chunk.content[0].text)["tool"] == "reset_worker"
 
 
 @pytest.mark.asyncio

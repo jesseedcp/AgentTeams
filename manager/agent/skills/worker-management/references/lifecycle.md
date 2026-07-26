@@ -32,6 +32,15 @@ package changes can replace the managed container while preserving the
 Controller identity and durable external data. Confirm interruption is
 acceptable first.
 
+## Reset
+
+Use `reset_worker` when the same Worker identity must be recreated without
+changing its desired model, runtime, image, identity, soul, skills, package,
+or exposed ports. The workflow records that complete desired state before
+deletion, recreates from the saved copy, verifies Controller readiness, and
+refreshes Matrix topology. A retry resumes the saved reset operation rather
+than issuing a second independent delete.
+
 ## Delete
 
 Use `delete_worker` only when permanent removal is intended. State the exact

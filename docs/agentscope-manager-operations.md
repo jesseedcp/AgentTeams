@@ -209,3 +209,25 @@ Toolkit for that room. The checked-in `manager/agent/TOOLS.md` catalog is a
 generated, CI-validated projection of the canonical Manager tool registry.
 Required built-in skills must remain present, while additional valid local
 skills are allowed.
+
+## Semantic supervision and synchronized files
+
+The heartbeat always runs deterministic recovery first. Its later semantic
+phase uses explicit thresholds to notify the administrator about overdue
+active tasks, long-lived project blockers, nonresponsive running Workers, and
+waiting-task capacity shortages. Alert IDs include the durable fact version,
+so an unchanged condition reuses the same exactly-once notification while a
+new state transition can create a new alert.
+
+`sync_files` supports three confined roots: `task_artifacts`,
+`worker_workspace`, and `shared_knowledge`. Worker names and task IDs are
+validated before path construction; resolved paths must remain below the
+configured cache root, and symlinks are rejected. For a task push, conditional
+MinIO upload and the assigned Worker mention are one durable `FILE_SYNC`
+operation with a stable Matrix transaction and restart recovery.
+
+`reset_worker` persists a complete typed Worker create request before
+deletion, then recreates, proves readiness, and refreshes topology from that
+saved request. `get_worker` exposes observed container and service-port state;
+`get_team` exposes the effective `peerMentions` policy and coordination-room
+facts.

@@ -32,6 +32,11 @@ Record image-affecting changes to `manager/`, `worker/`, `copaw/`, `hermes/`, `o
   room Toolkit, delimit current Matrix input, keep cold-history projection
   transient, allow additive skills, persist per-room model and 04:00 reset
   settings, and bound daily, long-term, project, and Worker memory in SQLite.
+- **Recoverable supervision and file control**: Detect overdue, blocked,
+  nonresponsive, and capacity conditions after deterministic recovery; confine
+  task, Worker-workspace, and shared-knowledge sync roots; join task upload and
+  Worker mention in one durable operation; and recreate Workers from a saved
+  desired-state copy.
 - **Five-runtime release parity**: Build and inject OpenClaw, CoPaw, Hermes,
   QwenPaw, and OpenHuman Worker images consistently across Make, local kind,
   Helm, and both installers while keeping the Manager fixed to AgentScope.

@@ -147,7 +147,7 @@
     {
       "name": "worker-management",
       "skillFile": "manager/agent/skills/worker-management/SKILL.md",
-      "tools": ["list_workers", "get_worker", "create_worker", "update_worker", "sleep_worker", "wake_worker", "delete_worker"],
+      "tools": ["list_workers", "get_worker", "create_worker", "update_worker", "sleep_worker", "wake_worker", "reset_worker", "delete_worker"],
       "evidence": [
         "manager-agentscope/tests/integration/test_worker_lifecycle.py",
         "manager-agentscope/tests/contract/test_resource_skill_parity.py"

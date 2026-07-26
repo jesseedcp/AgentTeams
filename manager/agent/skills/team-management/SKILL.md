@@ -23,6 +23,8 @@ room.
 
 Create, update, and delete require AgentScope confirmation. A successful
 resource receipt means Controller readiness and Matrix topology both converged.
+`get_team` also returns the effective `peerMentions` policy, Leader and Team
+room identifiers, ready-member counts, and the current roster.
 
 Create or update all required Workers first. Then compose the Team with
 `leader_name` and `worker_names`; never embed Worker runtime configuration in

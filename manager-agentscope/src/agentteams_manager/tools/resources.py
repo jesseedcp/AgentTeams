@@ -52,6 +52,7 @@ RESOURCE_TOOL_NAMES = frozenset(
         "update_worker",
         "sleep_worker",
         "wake_worker",
+        "reset_worker",
         "delete_worker",
         "list_teams",
         "get_team",
@@ -416,6 +417,13 @@ class ResourceToolkit:
                 False,
             ),
             (
+                "reset_worker",
+                "Recreate one Worker from its saved desired configuration.",
+                _NameInput,
+                self._reset_worker,
+                False,
+            ),
+            (
                 "delete_worker",
                 "Delete one Worker after explicit confirmation.",
                 _NameInput,
@@ -726,6 +734,19 @@ class ResourceToolkit:
 
     async def _wake_worker(self, request: BaseModel) -> object:
         return await self._worker_lifecycle("wake", request)
+
+    async def _reset_worker(self, request: BaseModel) -> object:
+        item = _NameInput.model_validate(request)
+        self._target("worker", item.name)
+        worker = await self._resources.reset_worker(
+            item.name,
+            context=await self._context(),
+        )
+        return _resource_receipt(
+            "reset_worker",
+            "worker",
+            worker,
+        )
 
     async def _worker_lifecycle(
         self,

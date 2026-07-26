@@ -16,6 +16,8 @@ from agentteams_manager.workflows.git_delegation import (
 )
 from tests.fixtures.fake_s3 import FakeS3
 from tests.fixtures.task_workflow import FixedClock
+from agentteams_manager.workflows.resources import MutationContext
+from tests.fixtures.task_workflow import TaskMatrix, TaskSupervisor
 
 
 @pytest.mark.asyncio
@@ -122,3 +124,124 @@ async def test_worker_push_cannot_overwrite_manager_owned_files(
         f"shared/tasks/{task_id}/result.md",
     ) == b"done"
     assert receipt.files == 1
+
+
+@pytest.mark.asyncio
+async def test_sync_roots_cover_workspace_and_shared_knowledge(
+    tmp_path: Path,
+) -> None:
+    database = Database(tmp_path / "manager.db")
+    await database.open()
+    storage = MinioClient(FakeS3(), bucket="agentteams")
+    service = FileSyncService(
+        storage=storage,
+        leases=ProcessingLeaseService(
+            leases=LeaseRepository(database),
+            storage=storage,
+            clock=FixedClock(),
+        ),
+        tasks=TaskRepository(database),
+        cache_root=tmp_path / "cache",
+    )
+    workspace = service.root_path(
+        "worker_workspace",
+        worker_name="alice",
+    )
+    workspace.mkdir(parents=True)
+    (workspace / "notes.md").write_text("worker notes", encoding="utf-8")
+    knowledge = service.root_path("shared_knowledge")
+    knowledge.mkdir(parents=True)
+    (knowledge / "guide.md").write_text("shared guide", encoding="utf-8")
+
+    worker_receipt = await service.push_root(
+        "worker_workspace",
+        worker_name="alice",
+        processor="manager",
+    )
+    knowledge_receipt = await service.push_root(
+        "shared_knowledge",
+        processor="manager",
+    )
+
+    assert worker_receipt.prefix == "workers/alice/workspace/"
+    assert knowledge_receipt.prefix == "shared/knowledge/"
+    assert await storage.get_bytes(
+        "workers/alice/workspace/notes.md",
+    ) == b"worker notes"
+    assert await storage.get_bytes(
+        "shared/knowledge/guide.md",
+    ) == b"shared guide"
+    with pytest.raises(ValueError, match="invalid Worker name"):
+        service.root_path(
+            "worker_workspace",
+            worker_name="../alice",
+        )
+
+
+@pytest.mark.asyncio
+async def test_task_upload_and_worker_mention_share_one_operation(
+    tmp_path: Path,
+) -> None:
+    database = Database(tmp_path / "manager.db")
+    await database.open()
+    task_id = "task-20260723-120000-abc123"
+    now = datetime(2026, 7, 23, 12, tzinfo=UTC)
+    tasks = TaskRepository(database)
+    await tasks.create(
+        TaskRecord(
+            task_id=task_id,
+            task_type="finite",
+            status="assigned",
+            title="Task",
+            assigned_to="alice",
+            room_id="!alice:example",
+            metadata={"matrix_user_id": "@alice:example"},
+            created_at=now,
+            updated_at=now,
+        ),
+    )
+    storage = MinioClient(FakeS3(), bucket="agentteams")
+    cache_root = tmp_path / "cache"
+    root = cache_root / "shared" / "tasks" / task_id
+    root.mkdir(parents=True)
+    (root / "result.md").write_text("done", encoding="utf-8")
+    clock = FixedClock()
+    supervisor = TaskSupervisor(clock)
+    matrix = TaskMatrix([])
+    service = FileSyncService(
+        storage=storage,
+        leases=ProcessingLeaseService(
+            leases=LeaseRepository(database),
+            storage=storage,
+            clock=clock,
+        ),
+        tasks=tasks,
+        cache_root=cache_root,
+        supervisor=supervisor,
+        matrix=matrix,
+    )
+    context = MutationContext(
+        room_id="!admin:example",
+        event_id="$sync",
+        tool_call_id="sync-files",
+    )
+
+    first = await service.sync_task(
+        task_id,
+        direction="push",
+        processor="manager",
+        context=context,
+    )
+    second = await service.sync_task(
+        task_id,
+        direction="push",
+        processor="manager",
+        context=context,
+    )
+
+    assert first == second
+    assert len(matrix.visible) == 1
+    assert matrix.attempts[0].mentions == ("@alice:example",)
+    assert supervisor.operations[context.operation_id].status.value == (
+        "succeeded"
+    )

@@ -212,12 +212,12 @@ python -m pytest manager-agentscope/tests/unit/clients/test_agt.py manager-agent
 - Test: `manager-agentscope/tests/fault_injection/test_completion_notification.py`
 - Test: `manager-agentscope/tests/integration/test_worker_lifecycle.py`
 
-- [ ] Keep deterministic recovery heartbeat as the first phase.
-- [ ] Add threshold-based semantic supervision for overdue tasks, nonresponsive Workers, project blockers, and capacity shortages.
-- [ ] Add Worker workspace, shared knowledge, and task-artifact sync roots with path traversal protection.
-- [ ] Make a successful upload and Worker mention one durable operation with retry-safe outbox records.
-- [ ] Add atomic Worker reset/recreate while preserving desired Worker CR configuration.
-- [ ] Expose peer-mention policy and Worker service state through typed Manager tools.
+- [x] Keep deterministic recovery heartbeat as the first phase.
+- [x] Add threshold-based semantic supervision for overdue tasks, nonresponsive Workers, project blockers, and capacity shortages.
+- [x] Add Worker workspace, shared knowledge, and task-artifact sync roots with path traversal protection.
+- [x] Make a successful upload and Worker mention one durable operation with retry-safe outbox records.
+- [x] Add atomic Worker reset/recreate while preserving desired Worker CR configuration.
+- [x] Expose peer-mention policy and Worker service state through typed Manager tools.
 
 ### Task 8: Complete Matrix UX, persistence, Admin UI, and approved external access
 

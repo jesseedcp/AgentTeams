@@ -31,6 +31,7 @@ from agentteams_manager.domain.errors import (
     AmbiguousEffectError,
     ConflictError,
     NotFoundError,
+    RecoveryError,
 )
 from agentteams_manager.domain.ids import (
     matrix_transaction_id,
@@ -1080,6 +1081,26 @@ class ResourceService:
             raise NotFoundError(f"worker/{name} disappeared")
         return result
 
+    async def reset_worker(
+        self,
+        name: str,
+        *,
+        context: MutationContext,
+    ) -> WorkerResource:
+        """Recreate one Worker from a journaled copy of its desired state."""
+        current = await self._require_worker(name)
+        desired = _worker_create_from_resource(current)
+        operation = await self._supervisor.begin(
+            operation_id=context.operation_id,
+            kind=OperationKind.UPDATE_WORKER,
+            target_key=f"worker/{name}",
+            request={
+                "action": "reset",
+                "desired": desired.model_dump(mode="json"),
+            },
+        )
+        return await self._resume_worker_reset(operation)
+
     async def delete_worker(
         self,
         name: str,
@@ -1884,12 +1905,14 @@ class ResourceService:
         operation: OperationRecord,
     ) -> WorkerResource:
         name = _target_name(operation.target_key, "worker")
+        action = str(operation.request.get("action", ""))
+        if action == "reset":
+            return await self._resume_worker_reset(operation)
         worker = await self._controller.get_worker(name)
         if worker is None:
             raise AmbiguousEffectError(
                 f"worker/{name} disappeared during recovery",
             )
-        action = str(operation.request.get("action", ""))
         proven = False
         if action == "update":
             request = WorkerUpdateRequest.model_validate(
@@ -1916,6 +1939,112 @@ class ResourceService:
             )
         await self._finish_recovered_resource(operation, worker)
         return worker
+
+    async def _resume_worker_reset(
+        self,
+        operation: OperationRecord,
+    ) -> WorkerResource:
+        name = _target_name(operation.target_key, "worker")
+        raw_desired = operation.request.get("desired")
+        if not isinstance(raw_desired, dict):
+            raise RecoveryError("Worker reset has no desired-state copy")
+        desired = WorkerCreateRequest.model_validate(raw_desired)
+        if desired.name != name:
+            raise RecoveryError("Worker reset target does not match desired")
+        if operation.status is OperationStatus.SUCCEEDED:
+            worker = await self._require_worker(name)
+            if not _matches_worker_create(worker, desired):
+                raise RecoveryError(
+                    f"succeeded reset worker/{name} changed desired state",
+                )
+            return worker
+        if operation.status is OperationStatus.FAILED:
+            raise ConflictError(f"reset worker/{name} previously failed")
+
+        if operation.result.get("reset_stage") != "deleted":
+            await self._supervisor.before_effect(
+                operation.operation_id,
+                ExternalEffect.CONTROLLER,
+                {
+                    "operation": "delete_worker_for_reset",
+                    "name": name,
+                },
+            )
+            existing = await self._controller.get_worker(name)
+            if existing is not None:
+                await self._controller.delete_worker(name)
+            await self._supervisor.effect_acknowledged(
+                operation.operation_id,
+                ExternalEffect.CONTROLLER,
+                {
+                    "name": name,
+                    "reset_stage": "deleted",
+                    "desired": desired.model_dump(mode="json"),
+                },
+            )
+
+        worker = await self._controller.get_worker(name)
+        if worker is None:
+            await self._supervisor.before_effect(
+                operation.operation_id,
+                ExternalEffect.CONTROLLER,
+                {
+                    "operation": "recreate_worker_from_saved_state",
+                    "name": name,
+                    "runtime": desired.runtime,
+                    "model": desired.model,
+                },
+            )
+            try:
+                worker = await self._controller.create_worker(desired)
+            except Exception as exc:
+                worker = await self._handle_ambiguous_worker_effect(
+                    operation_id=operation.operation_id,
+                    name=name,
+                    effect=ExternalEffect.CONTROLLER,
+                    exc=exc,
+                )
+            await self._supervisor.effect_acknowledged(
+                operation.operation_id,
+                ExternalEffect.CONTROLLER,
+                {
+                    "name": name,
+                    "reset_stage": "recreated",
+                },
+            )
+        ready = await self._wait_for_worker_room(
+            operation_id=operation.operation_id,
+            name=name,
+            initial=worker,
+        )
+        if not _matches_worker_create(ready, desired):
+            await self._supervisor.effect_ambiguous(
+                operation.operation_id,
+                ExternalEffect.CONTROLLER,
+                "recreated Worker does not match saved desired state",
+            )
+            raise AmbiguousEffectError(
+                f"reset worker/{name} is not proven",
+            )
+        try:
+            await self._topology.refresh()
+        except Exception as exc:
+            await self._supervisor.effect_ambiguous(
+                operation.operation_id,
+                ExternalEffect.MATRIX,
+                f"topology not converged: {type(exc).__name__}",
+            )
+            raise
+        await self._supervisor.effect_succeeded(
+            operation.operation_id,
+            ExternalEffect.CONTROLLER,
+            {
+                **_resource_receipt(ready),
+                "reset": True,
+                "desired": desired.model_dump(mode="json"),
+            },
+        )
+        return ready
 
     async def _resume_team_upsert(
         self,
@@ -2438,6 +2567,27 @@ def _matches_worker_create(
             not request.expose
             or tuple(worker.spec.get("expose", ())) == request.expose
         )
+    )
+
+
+def _worker_create_from_resource(
+    worker: WorkerResource,
+) -> WorkerCreateRequest:
+    if not worker.model:
+        raise ConflictError(
+            f"worker/{worker.name} has no desired model to preserve",
+        )
+    spec = worker.spec
+    return WorkerCreateRequest(
+        name=worker.name,
+        runtime=worker.runtime,
+        model=worker.model,
+        image=str(spec.get("image") or "") or None,
+        identity=str(spec.get("identity") or "") or None,
+        soul=str(spec.get("soul") or "") or None,
+        skills=worker.skills,
+        package_uri=str(spec.get("package") or "") or None,
+        expose=tuple(int(port) for port in spec.get("expose", ())),
     )
 
 

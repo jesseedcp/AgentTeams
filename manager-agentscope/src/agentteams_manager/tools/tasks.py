@@ -238,8 +238,34 @@ class UpdateProjectParticipantsInput(_ProjectIdInput):
         return self
 
 
-class SyncFilesInput(_TaskIdInput):
+class SyncFilesInput(_Input):
     direction: Literal["pull", "push"]
+    root: Literal[
+        "task_artifacts",
+        "worker_workspace",
+        "shared_knowledge",
+    ] = "task_artifacts"
+    task_id: str | None = None
+    worker_name: str | None = Field(
+        default=None,
+        pattern=r"^[a-z0-9][a-z0-9-]*$",
+    )
+
+    @model_validator(mode="after")
+    def validate_target(self) -> SyncFilesInput:
+        if self.root == "task_artifacts":
+            if not self.task_id or self.worker_name is not None:
+                raise ValueError(
+                    "task_artifacts requires only task_id",
+                )
+        elif self.root == "worker_workspace":
+            if not self.worker_name or self.task_id is not None:
+                raise ValueError(
+                    "worker_workspace requires only worker_name",
+                )
+        elif self.task_id is not None or self.worker_name is not None:
+            raise ValueError("shared_knowledge has no target")
+        return self
 
 
 class GitDelegationInput(_Input):
@@ -261,7 +287,9 @@ class LookupReceipt(_Input):
 class SyncReceipt(_Input):
     tool: Literal["sync_files"] = "sync_files"
     direction: Literal["pull", "push"]
-    task_id: str
+    root: str = "task_artifacts"
+    task_id: str | None = None
+    worker_name: str | None = None
     result: dict[str, Any]
 
 
@@ -285,6 +313,30 @@ class FileSyncPort(Protocol):
         task_id: str,
         *,
         processor: str,
+    ) -> object: ...
+
+    async def sync_task(
+        self,
+        task_id: str,
+        *,
+        direction: Literal["pull", "push"],
+        processor: str,
+        context: MutationContext,
+    ) -> object: ...
+
+    async def pull_root(
+        self,
+        root: Literal["worker_workspace", "shared_knowledge"],
+        *,
+        worker_name: str | None = None,
+    ) -> object: ...
+
+    async def push_root(
+        self,
+        root: Literal["worker_workspace", "shared_knowledge"],
+        *,
+        processor: str,
+        worker_name: str | None = None,
     ) -> object: ...
 
 
@@ -988,23 +1040,54 @@ class TaskToolkit:
 
     async def _sync_files(self, request: BaseModel) -> object:
         item = SyncFilesInput.model_validate(request)
-        await self._require_visible_task(item.task_id)
-        if item.direction == "pull":
-            path = await self._file_sync.pull_task(item.task_id)
-            result = {"path": str(path)}
-        else:
-            receipt = await self._file_sync.push_task(
+        if item.root == "task_artifacts":
+            assert item.task_id is not None
+            await self._require_visible_task(item.task_id)
+            synced = await self._file_sync.sync_task(
                 item.task_id,
+                direction=item.direction,
                 processor=self._policy.resource_name or "manager",
+                context=await self._context(),
             )
+            result = (
+                synced.model_dump(mode="json")
+                if isinstance(synced, BaseModel)
+                else {"path": str(synced)}
+            )
+        else:
+            if (
+                item.root == "worker_workspace"
+                and not self._policy.resource_scope_all
+                and item.worker_name != self._policy.resource_name
+                and item.worker_name
+                not in self._policy.allowed_worker_names
+            ):
+                raise PermissionDeniedError(
+                    f"worker/{item.worker_name} is outside room scope",
+                )
+            method = (
+                self._file_sync.pull_root
+                if item.direction == "pull"
+                else self._file_sync.push_root
+            )
+            kwargs: dict[str, object] = {
+                "worker_name": item.worker_name,
+            }
+            if item.direction == "push":
+                kwargs["processor"] = (
+                    self._policy.resource_name or "manager"
+                )
+            receipt = await method(item.root, **kwargs)
             result = (
                 receipt.model_dump(mode="json")
                 if isinstance(receipt, BaseModel)
-                else {"receipt": str(receipt)}
+                else {"path": str(receipt)}
             )
         return SyncReceipt(
             direction=item.direction,
+            root=item.root,
             task_id=item.task_id,
+            worker_name=item.worker_name,
             result=result,
         )
 

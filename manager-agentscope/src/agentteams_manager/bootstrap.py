@@ -91,6 +91,7 @@ from .workflows.heartbeat import (
     Heartbeat,
     IntegrationRecovery,
     NotificationRecovery,
+    SemanticSupervisor,
     TaskCompletionRecovery,
     TaskHeartbeat,
     TaskRecovery,
@@ -516,6 +517,8 @@ def build_application(
         leases=lease_service,
         tasks=tasks,
         cache_root=config.workspace,
+        supervisor=supervisor,
+        matrix=matrix,
     )
     task_service = TaskService(
         tasks=tasks,
@@ -688,6 +691,7 @@ def build_application(
             tasks=task_service,
             projects=project_service,
             git=git_service,
+            files=file_sync,
         ),
         leases=lease_service,
         task_scheduler=TaskHeartbeat(
@@ -712,6 +716,11 @@ def build_application(
         ),
         notification_recovery=NotificationRecovery(
             operations=operations,
+            notifications=notification_service,
+        ),
+        semantic_supervision=SemanticSupervisor(
+            tasks=tasks,
+            workers=resource_service,
             notifications=notification_service,
         ),
     )

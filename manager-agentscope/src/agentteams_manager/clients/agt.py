@@ -282,6 +282,7 @@ class _TeamPayload(BaseModel):
     ready_workers: int = Field(default=0, alias="readyWorkers")
     total_workers: int = Field(default=0, alias="totalWorkers")
     message: str = ""
+    peer_mentions: bool = Field(default=True, alias="peerMentions")
 
     def domain(self) -> TeamResource:
         return TeamResource(
@@ -293,6 +294,7 @@ class _TeamPayload(BaseModel):
                 "description": self.description,
                 "teamRoomID": self.team_room_id,
                 "leaderDMRoomID": self.leader_dm_room_id,
+                "peerMentions": self.peer_mentions,
             },
             status={
                 "leaderReady": self.leader_ready,

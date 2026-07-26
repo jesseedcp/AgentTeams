@@ -20,6 +20,7 @@ secret-free receipts.
 | Change a Worker's desired configuration | `update_worker` |
 | Stop an idle Worker without deleting it | `sleep_worker` |
 | Start a sleeping Worker | `wake_worker` |
+| Recreate a Worker from saved desired state | `reset_worker` |
 | Permanently remove a Worker | `delete_worker` |
 
 For a registry search or `nacos://` package import, use the
@@ -35,6 +36,11 @@ For a registry search or `nacos://` package import, use the
   skill set. Do not silently invent business configuration.
 - Before `sleep_worker`, confirm the Worker has no active assignment or
   unfinished handoff.
+- `reset_worker` journals the complete desired Worker configuration before
+  deletion, then recreates and verifies exactly that configuration. It
+  requires the normal confirmation gate.
+- `get_worker` includes observed `containerState` and `exposedPorts` facts;
+  do not infer service health from desired ports alone.
 - A runtime, image, or package change can replace the Worker container.
   Explain that ephemeral in-container state can be lost before
   `update_worker`.
