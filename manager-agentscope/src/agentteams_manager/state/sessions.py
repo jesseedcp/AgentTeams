@@ -5,11 +5,8 @@ from __future__ import annotations
 import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Literal
 
-from agentscope.message import ToolCallBlock
 from agentscope.state import AgentState
-from pydantic import BaseModel, ConfigDict
 
 from .database import Database
 
@@ -21,43 +18,6 @@ class StoredSession:
     policy_revision: int
     last_event_id: str | None
     updated_at: datetime
-
-
-class PendingConfirmation(BaseModel):
-    """Durable continuation data for a parked AgentScope reply."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    reply_id: str
-    event_id: str
-    tool_calls: tuple[ToolCallBlock, ...]
-    status: Literal["awaiting", "resolving"] = "awaiting"
-    decision: bool | None = None
-
-
-_PENDING_CONFIRMATION_KEY = "agentteams.matrix.pending_confirmation"
-
-
-def pending_confirmation(
-    state: AgentState,
-) -> PendingConfirmation | None:
-    raw = state.middle_context.get(_PENDING_CONFIRMATION_KEY)
-    if raw is None:
-        return None
-    return PendingConfirmation.model_validate(raw)
-
-
-def set_pending_confirmation(
-    state: AgentState,
-    pending: PendingConfirmation,
-) -> None:
-    state.middle_context[_PENDING_CONFIRMATION_KEY] = pending.model_dump(
-        mode="json",
-    )
-
-
-def clear_pending_confirmation(state: AgentState) -> None:
-    state.middle_context.pop(_PENDING_CONFIRMATION_KEY, None)
 
 
 class SessionRepository:

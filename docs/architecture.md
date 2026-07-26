@@ -101,7 +101,11 @@ Admin confirmation
 Tools are selected from Controller topology and Matrix room type. Admin DM,
 Worker, Leader, Project, Human/channel, and unknown rooms receive different
 tool sets. Mutating tools require a confirmation continuation unless trusted
-YOLO mode was explicitly enabled. Tool invocation rechecks the same policy.
+YOLO mode was explicitly enabled. Approval requests are stored globally in
+SQLite, sent to the Admin DM, and resume the original room's AgentScope
+continuation after `/confirm <id>` or `/deny <id>`. `/status` lists pending
+requests and `/reset <id>` cancels one and releases its parked room. Tool
+invocation rechecks the same policy.
 
 Secrets do not enter model prompts, SQLite, MinIO journals, runtime documents,
 or Worker CRs. The Controller injects the GitHub MCP token only into the

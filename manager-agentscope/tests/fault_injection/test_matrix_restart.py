@@ -23,10 +23,12 @@ from agentteams_manager.matrix.media import MediaAdapter
 from agentteams_manager.matrix.session_runner import MatrixSessionRunner
 from agentteams_manager.runtime.session_manager import RoomSessionManager
 from agentteams_manager.state.database import Database
-from agentteams_manager.state.sessions import (
-    SessionRepository,
-    pending_confirmation,
+from agentteams_manager.state.confirmations import (
+    ConfirmationRepository,
+    ConfirmationService,
+    ConfirmationStatus,
 )
+from agentteams_manager.state.sessions import SessionRepository
 from tests.integration.test_matrix_agent_turn import RecordingMatrix
 
 
@@ -97,6 +99,9 @@ async def test_confirmation_survives_process_reconstruction(
     database = Database(tmp_path / "manager.db")
     await database.open()
     repository = SessionRepository(database)
+    first_confirmations = ConfirmationService(
+        ConfirmationRepository(database),
+    )
     first_factory = Factory()
     first_runner = MatrixSessionRunner(
         sessions=RoomSessionManager(
@@ -105,13 +110,86 @@ async def test_confirmation_survives_process_reconstruction(
         ),
         matrix=RecordingMatrix(),
         admin_user_id="@admin:local",
+        admin_room_id="!admin:local",
+        confirmations=first_confirmations,
     )
     await first_runner.handle(_event("delete alice", "$delete"), _policy())
 
     stored = await repository.load("!admin:local")
     assert stored is not None
-    assert pending_confirmation(stored.state) is not None
+    assert "agentteams.matrix.pending_confirmation" not in (
+        stored.state.middle_context
+    )
+    approval = (await first_confirmations.pending())[0]
 
+    second_factory = Factory()
+    second_confirmations = ConfirmationService(
+        ConfirmationRepository(database),
+    )
+    second_runner = MatrixSessionRunner(
+        sessions=RoomSessionManager(
+            factory=second_factory,
+            sessions=repository,
+        ),
+        matrix=RecordingMatrix(),
+        admin_user_id="@admin:local",
+        admin_room_id="!admin:local",
+        confirmations=second_confirmations,
+    )
+    await second_runner.handle(
+        _event(f"/confirm {approval.confirmation_id}", "$confirm"),
+        _policy(),
+    )
+
+    assert second_factory.agent is not None
+    assert second_factory.agent.results[0].confirm_results[0].confirmed
+
+
+@pytest.mark.asyncio
+async def test_cross_room_confirmation_survives_process_reconstruction(
+    tmp_path: Path,
+) -> None:
+    database = Database(tmp_path / "manager.db")
+    await database.open()
+    repository = SessionRepository(database)
+    confirmations = ConfirmationService(
+        ConfirmationRepository(database),
+    )
+    project_policy = RoomPolicy(
+        room_id="!project:local",
+        kind=RoomKind.PROJECT_ROOM,
+        revision=1,
+        allowed_tools=frozenset({"delete_worker"}),
+        confirm_tools=frozenset({"delete_worker"}),
+        allowed_senders=frozenset({"@worker:local"}),
+        project_id="project-1",
+    )
+    first_runner = MatrixSessionRunner(
+        sessions=RoomSessionManager(
+            factory=Factory(),
+            sessions=repository,
+        ),
+        matrix=RecordingMatrix(),
+        admin_user_id="@admin:local",
+        admin_room_id="!admin:local",
+        confirmations=confirmations,
+    )
+    await first_runner.handle(
+        InboundEvent(
+            room_id="!project:local",
+            event_id="$delete-project",
+            sender="@worker:local",
+            body="delete alice",
+            timestamp=datetime.now(UTC),
+            is_direct=False,
+        ),
+        project_policy,
+    )
+    approval = (await confirmations.pending())[0]
+
+    restarted_confirmations = ConfirmationService(
+        ConfirmationRepository(database),
+    )
     second_factory = Factory()
     second_runner = MatrixSessionRunner(
         sessions=RoomSessionManager(
@@ -120,14 +198,24 @@ async def test_confirmation_survives_process_reconstruction(
         ),
         matrix=RecordingMatrix(),
         admin_user_id="@admin:local",
+        admin_room_id="!admin:local",
+        confirmations=restarted_confirmations,
     )
     await second_runner.handle(
-        _event("/confirm reply-restart", "$confirm"),
+        _event(
+            f"/confirm {approval.confirmation_id}",
+            "$confirm-project",
+        ),
         _policy(),
     )
 
     assert second_factory.agent is not None
     assert second_factory.agent.results[0].confirm_results[0].confirmed
+    completed = await restarted_confirmations.get(
+        approval.confirmation_id,
+    )
+    assert completed is not None
+    assert completed.status is ConfirmationStatus.APPROVED
 
 
 @pytest.mark.asyncio

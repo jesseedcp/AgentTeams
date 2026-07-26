@@ -112,13 +112,13 @@ python -m pytest manager-agentscope/tests/unit/clients/test_agt.py manager-agent
 - Produces: `RoomPolicyResolver.should_wake(event, binding, actor) -> bool`.
 - Rule: direct rooms wake without a mention; group/project/leader rooms wake only when `m.mentions` contains the Manager user ID.
 
-- [ ] Add failing tests for a Project Worker mentioning Manager, a Worker message without a mention, Manager self-events, bot acknowledgements, Human access, and persisted trusted contacts.
-- [ ] Index Worker, Team Leader, Human, Admin, and trusted-contact identities by Matrix user ID during topology refresh.
-- [ ] Query persisted trusted relationships from SQLite instead of constructor-only static contacts.
-- [ ] Apply mention gating before claiming or recording a Matrix event.
-- [ ] Permit a Project participant Worker to use only project-reporting tools; never grant global resource-management tools.
-- [ ] Ignore Manager self-events, edit echoes, redactions, and bot-only acknowledgements to prevent loops.
-- [ ] Run the Matrix policy, router, topology, and project integration tests.
+- [x] Add failing tests for a Project Worker mentioning Manager, a Worker message without a mention, Manager self-events, bot acknowledgements, Human access, and persisted trusted contacts.
+- [x] Index Worker, Team Leader, Human, Admin, and trusted-contact identities by Matrix user ID during topology refresh.
+- [x] Query persisted trusted relationships from SQLite instead of constructor-only static contacts.
+- [x] Apply mention gating before claiming or recording a Matrix event.
+- [x] Permit a Project participant Worker to use only project-reporting tools; never grant global resource-management tools.
+- [x] Ignore Manager self-events, edit echoes, redactions, and bot-only acknowledgements to prevent loops.
+- [x] Run the Matrix policy, router, topology, and project integration tests.
 
 ### Task 4: Replace room-local confirmation with a global approval workflow
 
@@ -136,14 +136,14 @@ python -m pytest manager-agentscope/tests/unit/clients/test_agt.py manager-agent
 - Produces durable `ConfirmationRequest(id, source_room_id, source_event_id, source_reply_id, requester_id, tool_calls, status, created_at, expires_at)`.
 - Produces `ConfirmationService.resolve(id, admin_id, decision)` that resumes the source room's AgentScope continuation.
 
-- [ ] Add failing tests proving a risky call from Project Room sends approval to Admin DM and resumes the Project Room session after Admin confirmation.
-- [ ] Move pending confirmation metadata out of room-local `AgentState` into SQLite while retaining the AgentScope continuation reference.
-- [ ] Send the Admin a Chinese approval message containing source room, requester, exact tool names, summarized arguments, `/confirm <id>`, and `/deny <id>`.
-- [ ] Accept slash commands globally in Admin DM; when exactly one approval is pending, also accept deterministic Chinese `确认/同意/拒绝/取消`.
-- [ ] Notify the source room that approval is pending and notify it again after approval or denial.
-- [ ] Add expiry, cancellation, `/status`, and `/reset` handling so no room can remain permanently wedged.
-- [ ] Preserve YOLO behavior by bypassing creation of a confirmation request when `AGENTTEAMS_YOLO=true`.
-- [ ] Test restart between request and approval.
+- [x] Add failing tests proving a risky call from Project Room sends approval to Admin DM and resumes the Project Room session after Admin confirmation.
+- [x] Move pending confirmation metadata out of room-local `AgentState` into SQLite while retaining the AgentScope continuation reference.
+- [x] Send the Admin a Chinese approval message containing source room, requester, exact tool names, summarized arguments, `/confirm <id>`, and `/deny <id>`.
+- [x] Accept slash commands globally in Admin DM; when exactly one approval is pending, also accept deterministic Chinese `确认/同意/拒绝/取消`.
+- [x] Notify the source room that approval is pending and notify it again after approval or denial.
+- [x] Add expiry, cancellation, `/status`, and `/reset` handling so no room can remain permanently wedged.
+- [x] Preserve YOLO behavior by bypassing creation of a confirmation request when `AGENTTEAMS_YOLO=true`.
+- [x] Test restart between request and approval.
 
 ### Task 5: Implement the complete Project DAG state machine
 

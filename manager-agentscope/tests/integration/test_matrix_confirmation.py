@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -21,10 +21,12 @@ from agentteams_manager.domain.models import (
 from agentteams_manager.matrix.session_runner import MatrixSessionRunner
 from agentteams_manager.runtime.session_manager import RoomSessionManager
 from agentteams_manager.state.database import Database
-from agentteams_manager.state.sessions import (
-    SessionRepository,
-    pending_confirmation,
+from agentteams_manager.state.confirmations import (
+    ConfirmationRepository,
+    ConfirmationService,
+    ConfirmationStatus,
 )
+from agentteams_manager.state.sessions import SessionRepository
 from tests.integration.test_matrix_agent_turn import RecordingMatrix
 
 
@@ -75,6 +77,26 @@ class Factory:
         return self.agent
 
 
+class MultiRoomFactory:
+    runtime_revision = 1
+
+    def __init__(self) -> None:
+        self.agents: dict[str, ConfirmationAgent] = {}
+
+    async def create(
+        self,
+        room_id: str,
+        policy: RoomPolicy,
+        state: AgentState | None = None,
+    ) -> ConfirmationAgent:
+        del policy
+        agent = ConfirmationAgent(room_id)
+        if state is not None:
+            agent.state = state
+        self.agents[room_id] = agent
+        return agent
+
+
 def _event(body: str, event_id: str, sender: str = "@admin:local") -> InboundEvent:
     return InboundEvent(
         room_id="!admin:local",
@@ -95,6 +117,293 @@ def _policy(sender: str = "@admin:local") -> RoomPolicy:
     )
 
 
+def _room_event(
+    *,
+    room_id: str,
+    body: str,
+    event_id: str,
+    sender: str,
+    is_direct: bool,
+) -> InboundEvent:
+    return InboundEvent(
+        room_id=room_id,
+        event_id=event_id,
+        sender=sender,
+        body=body,
+        timestamp=datetime.now(UTC),
+        is_direct=is_direct,
+    )
+
+
+def _project_policy() -> RoomPolicy:
+    return RoomPolicy(
+        room_id="!project:local",
+        kind=RoomKind.PROJECT_ROOM,
+        revision=1,
+        allowed_tools=frozenset({"delete_worker"}),
+        confirm_tools=frozenset({"delete_worker"}),
+        allowed_senders=frozenset({"@worker:local"}),
+        project_id="project-1",
+    )
+
+
+@pytest.mark.asyncio
+async def test_project_confirmation_is_approved_from_admin_dm(
+    tmp_path: Path,
+) -> None:
+    database = Database(tmp_path / "manager.db")
+    await database.open()
+    confirmations = ConfirmationService(
+        ConfirmationRepository(database),
+    )
+    factory = MultiRoomFactory()
+    matrix = RecordingMatrix()
+    runner = MatrixSessionRunner(
+        sessions=RoomSessionManager(
+            factory=factory,
+            sessions=SessionRepository(database),
+        ),
+        matrix=matrix,
+        admin_user_id="@admin:local",
+        admin_room_id="!admin:local",
+        confirmations=confirmations,
+    )
+
+    await runner.handle(
+        _room_event(
+            room_id="!project:local",
+            body="delete alice",
+            event_id="$project-delete",
+            sender="@worker:local",
+            is_direct=False,
+        ),
+        _project_policy(),
+    )
+
+    pending = await confirmations.pending()
+    assert len(pending) == 1
+    approval = pending[0]
+    assert approval.source_room_id == "!project:local"
+    stored_session = await SessionRepository(database).load(
+        "!project:local",
+    )
+    assert stored_session is not None
+    assert "agentteams.matrix.pending_confirmation" not in (
+        stored_session.state.middle_context
+    )
+    assert any(
+        item.room_id == "!admin:local"
+        and f"/confirm {approval.confirmation_id}" in item.text
+        and "delete_worker" in item.text
+        for item in matrix.sent
+    )
+    assert any(
+        item.room_id == "!project:local"
+        and "已发送给管理员审批" in item.text
+        for item in matrix.sent
+    )
+
+    await runner.handle(
+        _room_event(
+            room_id="!admin:local",
+            body="确认保存",
+            event_id="$approve",
+            sender="@admin:local",
+            is_direct=True,
+        ),
+        _policy(),
+    )
+
+    source_agent = factory.agents["!project:local"]
+    result = source_agent.confirmation_results[0]
+    assert result.reply_id == "reply-delete"
+    assert result.confirm_results[0].confirmed
+    stored = await confirmations.get(approval.confirmation_id)
+    assert stored is not None
+    assert stored.status is ConfirmationStatus.APPROVED
+    assert any(
+        item.room_id == "!project:local"
+        and item.text == "Deleted alice."
+        for item in matrix.sent
+    )
+
+
+@pytest.mark.asyncio
+async def test_status_and_reset_release_parked_source_room(
+    tmp_path: Path,
+) -> None:
+    database = Database(tmp_path / "manager.db")
+    await database.open()
+    confirmations = ConfirmationService(
+        ConfirmationRepository(database),
+    )
+    sessions_repository = SessionRepository(database)
+    matrix = RecordingMatrix()
+    runner = MatrixSessionRunner(
+        sessions=RoomSessionManager(
+            factory=MultiRoomFactory(),
+            sessions=sessions_repository,
+        ),
+        matrix=matrix,
+        admin_user_id="@admin:local",
+        admin_room_id="!admin:local",
+        confirmations=confirmations,
+    )
+    await runner.handle(
+        _room_event(
+            room_id="!project:local",
+            body="delete alice",
+            event_id="$project-delete",
+            sender="@worker:local",
+            is_direct=False,
+        ),
+        _project_policy(),
+    )
+    approval = (await confirmations.pending())[0]
+
+    await runner.handle(
+        _event("/status", "$status"),
+        _policy(),
+    )
+    assert approval.confirmation_id in matrix.sent[-1].text
+
+    await runner.handle(
+        _event(f"/reset {approval.confirmation_id}", "$reset"),
+        _policy(),
+    )
+
+    cancelled = await confirmations.get(approval.confirmation_id)
+    assert cancelled is not None
+    assert cancelled.status is ConfirmationStatus.CANCELLED
+    assert await sessions_repository.load("!project:local") is None
+    assert "会话已重置" in matrix.sent[-1].text
+
+
+@pytest.mark.asyncio
+async def test_chinese_confirmation_requires_unique_pending_request(
+    tmp_path: Path,
+) -> None:
+    database = Database(tmp_path / "manager.db")
+    await database.open()
+    confirmations = ConfirmationService(
+        ConfirmationRepository(database),
+    )
+    factory = MultiRoomFactory()
+    matrix = RecordingMatrix()
+    runner = MatrixSessionRunner(
+        sessions=RoomSessionManager(
+            factory=factory,
+            sessions=SessionRepository(database),
+        ),
+        matrix=matrix,
+        admin_user_id="@admin:local",
+        admin_room_id="!admin:local",
+        confirmations=confirmations,
+    )
+    for index in (1, 2):
+        room_id = f"!project-{index}:local"
+        await runner.handle(
+            _room_event(
+                room_id=room_id,
+                body="delete alice",
+                event_id=f"$delete-{index}",
+                sender="@worker:local",
+                is_direct=False,
+            ),
+            _project_policy().model_copy(
+                update={"room_id": room_id},
+            ),
+        )
+
+    await runner.handle(
+        _event("确认", "$ambiguous"),
+        _policy(),
+    )
+
+    assert "多个等待审批" in matrix.sent[-1].text
+    assert len(await confirmations.pending()) == 2
+    assert all(
+        not agent.confirmation_results
+        for agent in factory.agents.values()
+    )
+
+
+@pytest.mark.asyncio
+async def test_unknown_global_confirmation_id_returns_safe_error(
+    tmp_path: Path,
+) -> None:
+    database = Database(tmp_path / "manager.db")
+    await database.open()
+    matrix = RecordingMatrix()
+    runner = MatrixSessionRunner(
+        sessions=RoomSessionManager(
+            factory=MultiRoomFactory(),
+            sessions=SessionRepository(database),
+        ),
+        matrix=matrix,
+        admin_user_id="@admin:local",
+        admin_room_id="!admin:local",
+        confirmations=ConfirmationService(
+            ConfirmationRepository(database),
+        ),
+    )
+
+    await runner.handle(
+        _event("/confirm missing", "$missing"),
+        _policy(),
+    )
+
+    assert "无法处理审批请求" in matrix.sent[-1].text
+    assert "missing" in matrix.sent[-1].text
+
+
+@pytest.mark.asyncio
+async def test_expired_confirmation_resets_parked_room(
+    tmp_path: Path,
+) -> None:
+    current = [datetime(2026, 7, 26, 8, 0, tzinfo=UTC)]
+    database = Database(tmp_path / "manager.db")
+    await database.open()
+    sessions_repository = SessionRepository(database)
+    confirmations = ConfirmationService(
+        ConfirmationRepository(database),
+        now=lambda: current[0],
+    )
+    matrix = RecordingMatrix()
+    runner = MatrixSessionRunner(
+        sessions=RoomSessionManager(
+            factory=MultiRoomFactory(),
+            sessions=sessions_repository,
+        ),
+        matrix=matrix,
+        admin_user_id="@admin:local",
+        admin_room_id="!admin:local",
+        confirmations=confirmations,
+        now=lambda: current[0],
+        confirmation_ttl=timedelta(seconds=1),
+    )
+    await runner.handle(
+        _room_event(
+            room_id="!project:local",
+            body="delete alice",
+            event_id="$project-delete",
+            sender="@worker:local",
+            is_direct=False,
+        ),
+        _project_policy(),
+    )
+    approval = (await confirmations.pending())[0]
+    current[0] += timedelta(seconds=2)
+
+    await runner.handle(_event("/status", "$status"), _policy())
+
+    expired = await confirmations.get(approval.confirmation_id)
+    assert expired is not None
+    assert expired.status is ConfirmationStatus.EXPIRED
+    assert await sessions_repository.load("!project:local") is None
+    assert any("审批请求已过期" in item.text for item in matrix.sent)
+
+
 @pytest.mark.asyncio
 async def test_confirmation_continues_same_reply(tmp_path: Path) -> None:
     database = Database(tmp_path / "manager.db")
@@ -103,10 +412,15 @@ async def test_confirmation_continues_same_reply(tmp_path: Path) -> None:
     factory = Factory()
     sessions = RoomSessionManager(factory=factory, sessions=repository)
     matrix = RecordingMatrix()
+    confirmations = ConfirmationService(
+        ConfirmationRepository(database),
+    )
     runner = MatrixSessionRunner(
         sessions=sessions,
         matrix=matrix,
         admin_user_id="@admin:local",
+        admin_room_id="!admin:local",
+        confirmations=confirmations,
     )
 
     await asyncio.wait_for(
@@ -117,14 +431,17 @@ async def test_confirmation_continues_same_reply(tmp_path: Path) -> None:
         timeout=1,
     )
 
+    approval = (await confirmations.pending())[0]
     prompt = matrix.sent[-1]
-    assert "/confirm reply-delete" in prompt.text
+    assert f"/confirm {approval.confirmation_id}" in prompt.text
     stored = await repository.load("!admin:local")
     assert stored is not None
-    assert pending_confirmation(stored.state).reply_id == "reply-delete"
+    assert "agentteams.matrix.pending_confirmation" not in (
+        stored.state.middle_context
+    )
 
     await runner.handle(
-        _event("/confirm reply-delete", "$confirm"),
+        _event(f"/confirm {approval.confirmation_id}", "$confirm"),
         _policy(),
     )
 
@@ -132,7 +449,7 @@ async def test_confirmation_continues_same_reply(tmp_path: Path) -> None:
     result = factory.agent.confirmation_results[0]
     assert result.reply_id == "reply-delete"
     assert result.confirm_results[0].confirmed
-    assert matrix.sent[-1].text == "Deleted alice."
+    assert any(item.text == "Deleted alice." for item in matrix.sent)
 
 
 @pytest.mark.asyncio
@@ -145,10 +462,15 @@ async def test_pending_confirmation_blocks_ordinary_message(
     factory = Factory()
     sessions = RoomSessionManager(factory=factory, sessions=repository)
     matrix = RecordingMatrix()
+    confirmations = ConfirmationService(
+        ConfirmationRepository(database),
+    )
     runner = MatrixSessionRunner(
         sessions=sessions,
         matrix=matrix,
         admin_user_id="@admin:local",
+        admin_room_id="!admin:local",
+        confirmations=confirmations,
     )
 
     await runner.handle(_event("delete alice", "$delete"), _policy())
@@ -160,12 +482,15 @@ async def test_pending_confirmation_blocks_ordinary_message(
     assert factory.agent is not None
     assert len(factory.agent.inputs) == 1
     reminder = matrix.sent[-1].text
-    assert "Your message was not processed" in reminder
-    assert "/confirm reply-delete" in reminder
-    assert "/deny reply-delete" in reminder
+    assert "这条消息尚未交给模型处理" in reminder
+    approval = (await confirmations.pending())[0]
+    assert f"/confirm {approval.confirmation_id}" in reminder
+    assert f"/deny {approval.confirmation_id}" in reminder
     stored = await repository.load("!admin:local")
     assert stored is not None
-    assert pending_confirmation(stored.state).reply_id == "reply-delete"
+    assert "agentteams.matrix.pending_confirmation" not in (
+        stored.state.middle_context
+    )
 
 
 @pytest.mark.asyncio
@@ -178,10 +503,15 @@ async def test_pending_confirmation_rejects_mismatched_id(
     factory = Factory()
     sessions = RoomSessionManager(factory=factory, sessions=repository)
     matrix = RecordingMatrix()
+    confirmations = ConfirmationService(
+        ConfirmationRepository(database),
+    )
     runner = MatrixSessionRunner(
         sessions=sessions,
         matrix=matrix,
         admin_user_id="@admin:local",
+        admin_room_id="!admin:local",
+        confirmations=confirmations,
     )
 
     await runner.handle(_event("delete alice", "$delete"), _policy())
@@ -193,41 +523,8 @@ async def test_pending_confirmation_rejects_mismatched_id(
     assert factory.agent is not None
     assert len(factory.agent.inputs) == 1
     assert factory.agent.confirmation_results == []
-    reminder = matrix.sent[-1].text
-    assert "/confirm reply-delete" in reminder
-    assert "/deny reply-delete" in reminder
-    stored = await repository.load("!admin:local")
-    assert stored is not None
-    assert pending_confirmation(stored.state).reply_id == "reply-delete"
-
-
-@pytest.mark.asyncio
-async def test_non_admin_cannot_read_pending_confirmation(
-    tmp_path: Path,
-) -> None:
-    database = Database(tmp_path / "manager.db")
-    await database.open()
-    factory = Factory()
-    sessions = RoomSessionManager(
-        factory=factory,
-        sessions=SessionRepository(database),
-    )
-    runner = MatrixSessionRunner(
-        sessions=sessions,
-        matrix=RecordingMatrix(),
-        admin_user_id="@admin:local",
-    )
-    await runner.handle(_event("delete alice", "$delete"), _policy())
-
-    with pytest.raises(PermissionError, match="admin"):
-        await runner.handle(
-            _event(
-                "what is pending?",
-                "$intruder-text",
-                sender="@intruder:local",
-            ),
-            _policy("@intruder:local"),
-        )
+    assert "无法处理审批请求" in matrix.sent[-1].text
+    assert len(await confirmations.pending()) == 1
 
 
 @pytest.mark.asyncio
@@ -239,17 +536,23 @@ async def test_non_admin_cannot_resolve_confirmation(tmp_path: Path) -> None:
         factory=factory,
         sessions=SessionRepository(database),
     )
+    confirmations = ConfirmationService(
+        ConfirmationRepository(database),
+    )
     runner = MatrixSessionRunner(
         sessions=sessions,
         matrix=RecordingMatrix(),
         admin_user_id="@admin:local",
+        admin_room_id="!admin:local",
+        confirmations=confirmations,
     )
     await runner.handle(_event("delete alice", "$delete"), _policy())
+    approval = (await confirmations.pending())[0]
 
     with pytest.raises(PermissionError, match="admin"):
         await runner.handle(
             _event(
-                "/confirm reply-delete",
+                f"/confirm {approval.confirmation_id}",
                 "$intruder",
                 sender="@intruder:local",
             ),

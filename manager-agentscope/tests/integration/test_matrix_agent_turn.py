@@ -16,6 +16,10 @@ from agentteams_manager.domain.models import (
 from agentteams_manager.matrix.session_runner import MatrixSessionRunner
 from agentteams_manager.runtime.session_manager import RoomSessionManager
 from agentteams_manager.state.database import Database
+from agentteams_manager.state.confirmations import (
+    ConfirmationRepository,
+    ConfirmationService,
+)
 from agentteams_manager.state.sessions import SessionRepository
 
 
@@ -137,6 +141,9 @@ async def test_runner_calls_reply_stream_directly(tmp_path: Path) -> None:
         sessions=sessions,
         matrix=matrix,
         admin_user_id="@admin:local",
+        confirmations=ConfirmationService(
+            ConfirmationRepository(database),
+        ),
         monotonic=iter((0.0, 0.1)).__next__,
     )
 

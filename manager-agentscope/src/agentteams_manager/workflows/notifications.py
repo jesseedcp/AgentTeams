@@ -188,6 +188,18 @@ class NotificationService:
             recipient=self._admin_user_id,
         )
 
+    async def send_confirmation_request(
+        self,
+        *,
+        confirmation_id: str,
+        text: str,
+    ) -> NotificationReceipt:
+        """Deliver one approval prompt idempotently to the admin channel."""
+        return await self.send_once(
+            source_operation_id=f"confirmation:{confirmation_id}",
+            text=text,
+        )
+
     async def send_once(
         self,
         *,

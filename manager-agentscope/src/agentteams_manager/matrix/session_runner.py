@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import time
 from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 
 from agentscope.event import (
@@ -15,6 +17,7 @@ from agentscope.event import (
 from agentscope.message import TextBlock, UserMsg
 from agentscope.state import AgentState
 
+from agentteams_manager.domain.errors import ConflictError, NotFoundError
 from agentteams_manager.domain.ids import (
     matrix_transaction_id,
     operation_id_for,
@@ -26,11 +29,9 @@ from agentteams_manager.domain.models import (
 )
 from agentteams_manager.runtime.event_stream import EventStreamProjector
 from agentteams_manager.runtime.session_manager import RoomSessionManager
-from agentteams_manager.state.sessions import (
-    PendingConfirmation,
-    clear_pending_confirmation,
-    pending_confirmation,
-    set_pending_confirmation,
+from agentteams_manager.state.confirmations import (
+    ConfirmationRequest,
+    ConfirmationService,
 )
 
 from .media import MediaAdapter
@@ -58,6 +59,15 @@ class MatrixOutput(Protocol):
     ) -> str: ...
 
 
+class ConfirmationNotifications(Protocol):
+    async def send_confirmation_request(
+        self,
+        *,
+        confirmation_id: str,
+        text: str,
+    ) -> object: ...
+
+
 class MatrixSessionRunner:
     """Drive one room-scoped Agent through its native streaming API."""
 
@@ -67,18 +77,28 @@ class MatrixSessionRunner:
         sessions: RoomSessionManager,
         matrix: MatrixOutput,
         admin_user_id: str,
+        confirmations: ConfirmationService,
+        admin_room_id: str = "!admin:local",
+        confirmation_notifications: ConfirmationNotifications | None = None,
         history: RoomHistory | None = None,
         media: MediaAdapter | None = None,
         monotonic: Callable[[], float] = time.monotonic,
+        now: Callable[[], datetime] | None = None,
+        confirmation_ttl: timedelta = timedelta(minutes=15),
         edit_interval_seconds: float = 0.5,
         metrics: Any | None = None,
     ) -> None:
         self._sessions = sessions
         self._matrix = matrix
         self._admin_user_id = admin_user_id
+        self._admin_room_id = admin_room_id
+        self._confirmations = confirmations
+        self._confirmation_notifications = confirmation_notifications
         self._history = history or RoomHistory(limit=0)
         self._media = media
         self._monotonic = monotonic
+        self._now = now or (lambda: datetime.now(UTC))
+        self._confirmation_ttl = confirmation_ttl
         self._edit_interval = edit_interval_seconds
         self._metrics = metrics
 
@@ -94,23 +114,15 @@ class MatrixSessionRunner:
             self._metrics.increment(
                 "agentteams_manager_model_turns_total",
             )
-        command = _confirmation_command(event.body)
-        session = await self._sessions.get_or_create(
-            event.room_id,
-            policy,
-        )
-        pending = pending_confirmation(session.agent.state)
-        if pending is not None:
-            self._require_confirmation_admin(event, policy)
-            if command is not None and command[1] == pending.reply_id:
-                await self._handle_confirmation(event, policy, *command)
-                return
-            await self._send_pending_confirmation_reminder(event, pending)
+        if await self._handle_global_confirmation(event, policy):
             return
-        if command is not None:
-            await self._handle_confirmation(event, policy, *command)
-            return
+        await self._run_user_turn(event, policy)
 
+    async def _run_user_turn(
+        self,
+        event: InboundEvent,
+        policy: RoomPolicy,
+    ) -> None:
         attachments = ()
         if event.media:
             if self._media is None:
@@ -137,37 +149,205 @@ class MatrixSessionRunner:
         )
         await self._run_and_project(event, policy, message)
 
-    async def _handle_confirmation(
+    async def _handle_global_confirmation(
         self,
         event: InboundEvent,
         policy: RoomPolicy,
-        confirmed: bool,
-        reply_id: str,
+    ) -> bool:
+        for expired in await self._confirmations.expire_due():
+            await self._sessions.reset(expired.source_room_id)
+            await self._send_confirmation_notice(
+                expired.source_room_id,
+                expired.confirmation_id,
+                "审批请求已过期，原房间会话已解除等待状态。",
+                sequence=3,
+            )
+
+        parsed = _global_confirmation_command(event.body)
+        if parsed is not None:
+            action, confirmation_id = parsed
+            self._require_confirmation_admin(event, policy)
+            try:
+                if action == "status":
+                    await self._send_confirmation_status(event)
+                    return True
+                if confirmation_id is None:
+                    confirmation_id = await self._single_pending_id(event)
+                    if confirmation_id is None:
+                        return True
+                if action == "reset":
+                    await self._cancel_confirmation(event, confirmation_id)
+                    return True
+                await self._resolve_global_confirmation(
+                    event,
+                    confirmation_id,
+                    confirmed=action == "confirm",
+                )
+            except (ConflictError, NotFoundError, ValueError) as error:
+                await self._send_confirmation_error(event, str(error))
+            return True
+
+        pending = await self._confirmations.pending_for_room(event.room_id)
+        if pending is not None:
+            await self._send_pending_confirmation_reminder(event, pending)
+            return True
+        return False
+
+    async def _send_confirmation_error(
+        self,
+        event: InboundEvent,
+        detail: str,
     ) -> None:
-        self._require_confirmation_admin(event, policy)
-        session = await self._sessions.get_or_create(
+        await self._matrix.send_text(
             event.room_id,
-            policy,
+            f"无法处理审批请求：{detail}",
+            txn_id=matrix_transaction_id(
+                operation_id_for(
+                    event.room_id,
+                    event.event_id,
+                    "confirmation-error",
+                ),
+                0,
+            ),
+            thread_id=event.thread_id,
         )
-        pending = pending_confirmation(session.agent.state)
-        if pending is None or pending.reply_id != reply_id:
-            raise ValueError("confirmation does not match a pending reply")
-        results = [
-            ConfirmResult(confirmed=confirmed, tool_call=tool_call)
-            for tool_call in pending.tool_calls
-        ]
+
+    async def _single_pending_id(
+        self,
+        event: InboundEvent,
+    ) -> str | None:
+        pending = await self._confirmations.pending()
+        if len(pending) == 1:
+            return pending[0].confirmation_id
+        if not pending:
+            text = "当前没有等待审批的请求。"
+        else:
+            lines = [
+                "当前有多个等待审批的请求，请使用明确的请求 ID：",
+                *(
+                    f"- {item.confirmation_id}: "
+                    f"{', '.join(call.name for call in item.tool_calls)}"
+                    for item in pending
+                ),
+            ]
+            text = "\n".join(lines)
+        await self._matrix.send_text(
+            event.room_id,
+            text,
+            txn_id=matrix_transaction_id(
+                operation_id_for(
+                    event.room_id,
+                    event.event_id,
+                    "confirmation-selection",
+                ),
+                0,
+            ),
+            thread_id=event.thread_id,
+        )
+        return None
+
+    async def _send_confirmation_status(
+        self,
+        event: InboundEvent,
+    ) -> None:
+        pending = await self._confirmations.pending()
+        text = (
+            "当前没有等待审批的请求。"
+            if not pending
+            else "\n".join(
+                [
+                    "等待审批：",
+                    *(
+                        f"- {item.confirmation_id} | "
+                        f"房间 {item.source_room_id} | "
+                        f"{', '.join(call.name for call in item.tool_calls)}"
+                        for item in pending
+                    ),
+                ],
+            )
+        )
+        await self._matrix.send_text(
+            event.room_id,
+            text,
+            txn_id=matrix_transaction_id(
+                operation_id_for(
+                    event.room_id,
+                    event.event_id,
+                    "confirmation-status",
+                ),
+                0,
+            ),
+            thread_id=event.thread_id,
+        )
+
+    async def _cancel_confirmation(
+        self,
+        event: InboundEvent,
+        confirmation_id: str,
+    ) -> None:
+        request = await self._confirmations.cancel(
+            confirmation_id,
+            admin_id=event.sender_id,
+        )
+        await self._sessions.reset(request.source_room_id)
+        await self._send_confirmation_notice(
+            request.source_room_id,
+            confirmation_id,
+            "管理员已取消该审批，原房间会话已重置。",
+            sequence=2,
+        )
+
+    async def _resolve_global_confirmation(
+        self,
+        event: InboundEvent,
+        confirmation_id: str,
+        *,
+        confirmed: bool,
+    ) -> None:
+        request = await self._confirmations.resolve(
+            confirmation_id,
+            admin_id=event.sender_id,
+            decision=confirmed,
+        )
         continuation = UserConfirmResultEvent(
-            reply_id=reply_id,
-            confirm_results=results,
+            reply_id=request.source_reply_id,
+            confirm_results=[
+                ConfirmResult(
+                    confirmed=confirmed,
+                    tool_call=tool_call,
+                )
+                for tool_call in request.tool_calls
+            ],
+        )
+        source_event = InboundEvent(
+            room_id=request.source_room_id,
+            event_id=event.event_id,
+            sender=event.sender_id,
+            body=event.body,
+            timestamp=event.timestamp,
+            is_direct=(
+                request.source_policy.kind is RoomKind.ADMIN_DM
+            ),
+            thread_id=None,
         )
         await self._run_and_project(
-            event,
-            policy,
+            source_event,
+            request.source_policy,
             continuation,
-            tool_event_id=pending.event_id,
+            tool_event_id=request.source_event_id,
         )
-        clear_pending_confirmation(session.agent.state)
-        await self._sessions.persist(event.room_id)
+        completed = await self._confirmations.complete(confirmation_id)
+        decision_text = (
+            "管理员已批准该操作。"
+            if completed.decision
+            else "管理员已拒绝该操作。"
+        )
+        await self._send_confirmation_notice(
+            request.source_room_id,
+            confirmation_id,
+            decision_text,
+            sequence=2,
+        )
 
     def _require_confirmation_admin(
         self,
@@ -185,20 +365,20 @@ class MatrixSessionRunner:
     async def _send_pending_confirmation_reminder(
         self,
         event: InboundEvent,
-        pending: PendingConfirmation,
+        pending: ConfirmationRequest,
     ) -> None:
         tools = ", ".join(call.name for call in pending.tool_calls)
+        confirmation_id = pending.confirmation_id
         prompt = (
-            f"A confirmation is still pending for: {tools}\n"
-            "Your message was not processed. "
-            "Resolve the pending request first:\n"
-            f"/confirm {pending.reply_id}\n"
-            f"/deny {pending.reply_id}"
+            f"仍有操作等待管理员审批：{tools}\n"
+            "这条消息尚未交给模型处理。请先在管理员私聊中处理：\n"
+            f"/confirm {confirmation_id}\n"
+            f"/deny {confirmation_id}"
         )
         reminder_operation = operation_id_for(
             event.room_id,
             event.event_id,
-            pending.reply_id,
+            confirmation_id,
         )
         await self._matrix.send_text(
             event.room_id,
@@ -225,21 +405,17 @@ class MatrixSessionRunner:
         sent_event_id: str | None = None
         last_sent_text = ""
         last_edit_at = 0.0
-        pending: PendingConfirmation | None = None
+        pending: RequireUserConfirmEvent | None = None
 
         def remember_confirmation(
             agent_event: object,
             state: AgentState,
         ) -> None:
             nonlocal pending
+            del state
             if not isinstance(agent_event, RequireUserConfirmEvent):
                 return
-            pending = PendingConfirmation(
-                reply_id=agent_event.reply_id,
-                event_id=event.event_id,
-                tool_calls=tuple(agent_event.tool_calls),
-            )
-            set_pending_confirmation(state, pending)
+            pending = agent_event
 
         async for agent_event in self._sessions.run_input(
             event,
@@ -296,34 +472,164 @@ class MatrixSessionRunner:
             sequence += 1
 
         if pending is not None:
-            tools = ", ".join(call.name for call in pending.tool_calls)
-            prompt = (
-                f"Confirmation required for: {tools}\n"
-                f"/confirm {pending.reply_id}\n"
-                f"/deny {pending.reply_id}"
+            await self._create_global_confirmation(
+                event,
+                policy,
+                pending,
             )
-            confirmation_operation = operation_id_for(
-                event.room_id,
-                event.event_id,
-                pending.reply_id,
-            )
+
+    async def _create_global_confirmation(
+        self,
+        event: InboundEvent,
+        policy: RoomPolicy,
+        pending: RequireUserConfirmEvent,
+    ) -> None:
+        now = self._now().astimezone(UTC)
+        confirmation_id = operation_id_for(
+            event.room_id,
+            event.event_id,
+            pending.reply_id,
+        )
+        request = await self._confirmations.create(
+            ConfirmationRequest(
+                confirmation_id=confirmation_id,
+                source_room_id=event.room_id,
+                source_event_id=event.event_id,
+                source_reply_id=pending.reply_id,
+                requester_id=event.sender_id,
+                tool_calls=tuple(pending.tool_calls),
+                source_policy=policy,
+                created_at=now,
+                expires_at=now + self._confirmation_ttl,
+            ),
+        )
+        approval_text = _approval_prompt(request)
+        if event.room_id == self._admin_room_id:
             await self._matrix.send_text(
-                event.room_id,
-                prompt,
-                txn_id=matrix_transaction_id(
-                    confirmation_operation,
-                    0,
-                ),
+                self._admin_room_id,
+                approval_text,
+                txn_id=matrix_transaction_id(confirmation_id, 0),
                 thread_id=event.thread_id,
             )
+            return
+        await self._send_confirmation_notice(
+            event.room_id,
+            confirmation_id,
+            "该操作需要管理员批准，已发送给管理员审批。",
+            sequence=0,
+        )
+        if self._confirmation_notifications is not None:
+            await self._confirmation_notifications.send_confirmation_request(
+                confirmation_id=confirmation_id,
+                text=approval_text,
+            )
+        else:
+            await self._matrix.send_text(
+                self._admin_room_id,
+                approval_text,
+                txn_id=matrix_transaction_id(confirmation_id, 1),
+                mentions=(self._admin_user_id,),
+            )
+
+    async def _send_confirmation_notice(
+        self,
+        room_id: str,
+        confirmation_id: str,
+        text: str,
+        *,
+        sequence: int,
+    ) -> None:
+        await self._matrix.send_text(
+            room_id,
+            f"{text}\n请求 ID：{confirmation_id}",
+            txn_id=matrix_transaction_id(confirmation_id, sequence),
+        )
 
 
-def _confirmation_command(body: str) -> tuple[bool, str] | None:
-    parts = body.strip().split()
-    if len(parts) != 2:
+def _global_confirmation_command(
+    body: str,
+) -> tuple[str, str | None] | None:
+    normalized = body.strip()
+    if normalized in {"确认", "同意", "确认保存"}:
+        return "confirm", None
+    if normalized in {"拒绝", "取消"}:
+        return "deny", None
+    parts = normalized.split()
+    if not parts:
         return None
-    if parts[0] == "/confirm":
-        return True, parts[1]
-    if parts[0] == "/deny":
-        return False, parts[1]
-    return None
+    commands = {
+        "/confirm": "confirm",
+        "/deny": "deny",
+        "/reset": "reset",
+        "/status": "status",
+    }
+    action = commands.get(parts[0].lower())
+    if action is None or len(parts) > 2:
+        return None
+    if action == "status" and len(parts) != 1:
+        return None
+    return action, parts[1] if len(parts) == 2 else None
+
+
+def _approval_prompt(request: ConfirmationRequest) -> str:
+    calls = "\n".join(
+        f"- {call.name}: {_summarize_arguments(call.input)}"
+        for call in request.tool_calls
+    )
+    return (
+        "需要管理员批准\n"
+        f"请求 ID：{request.confirmation_id}\n"
+        f"来源房间：{request.source_room_id}\n"
+        f"请求人：{request.requester_id}\n"
+        f"操作与参数摘要：\n{calls}\n"
+        f"批准：/confirm {request.confirmation_id}\n"
+        f"拒绝：/deny {request.confirmation_id}\n"
+        f"取消并重置：/reset {request.confirmation_id}"
+    )
+
+
+def _summarize_arguments(raw: object) -> str:
+    value: object = raw
+    if isinstance(raw, str):
+        try:
+            value = json.loads(raw)
+        except json.JSONDecodeError:
+            return "[unparseable arguments]"
+    redacted = _redact_secrets(value)
+    summary = json.dumps(
+        redacted,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return summary[:300]
+
+
+def _redact_secrets(value: object) -> object:
+    if isinstance(value, dict):
+        return {
+            str(key): (
+                "[REDACTED]"
+                if _looks_secret(str(key))
+                else _redact_secrets(item)
+            )
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_redact_secrets(item) for item in value]
+    return value
+
+
+def _looks_secret(key: str) -> bool:
+    normalized = key.lower().replace("-", "_")
+    return any(
+        marker in normalized
+        for marker in (
+            "password",
+            "secret",
+            "token",
+            "api_key",
+            "access_key",
+            "private_key",
+        )
+    )

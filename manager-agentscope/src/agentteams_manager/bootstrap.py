@@ -8,7 +8,7 @@ import logging
 import os
 import re
 from contextlib import nullcontext
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -36,10 +36,19 @@ from .config import (
     RuntimeDocument,
 )
 from .domain.ids import matrix_transaction_id
-from .domain.models import InboundEvent, OperationKind
+from .domain.models import (
+    InboundEvent,
+    OperationKind,
+    RoomKind,
+    RoomPolicy,
+)
 from .health import HealthServer, ReadinessState
 from .matrix.client import MatrixClient, MatrixClientConfig
-from .matrix.policy import ALL_MANAGER_TOOLS, RoomPolicyResolver
+from .matrix.policy import (
+    ALL_MANAGER_TOOLS,
+    CONFIRM_TOOLS,
+    RoomPolicyResolver,
+)
 from .matrix.router import EventRouter
 from .matrix.session_runner import MatrixSessionRunner
 from .observability.metrics import MetricsRegistry
@@ -53,6 +62,10 @@ from .runtime.skills import (
     CompositeToolProvider,
     SkillRegistry,
     SkillToolkitFactory,
+)
+from .state.confirmations import (
+    ConfirmationRepository,
+    ConfirmationService,
 )
 from .state.database import Database
 from .state.journal import S3Journal
@@ -395,6 +408,25 @@ def build_application(
     notifications = NotificationRepository(database)
     leases = LeaseRepository(database)
     session_repository = SessionRepository(database)
+    confirmations = ConfirmationService(
+        ConfirmationRepository(database),
+        now=clock.now,
+    )
+
+    async def migrate_legacy_confirmations() -> None:
+        await confirmations.migrate_legacy_sessions(
+            admin_room_id=config.manager_admin_room_id,
+            admin_user_id=config.admin_user_id,
+            admin_policy=RoomPolicy(
+                room_id=config.manager_admin_room_id,
+                kind=RoomKind.ADMIN_DM,
+                revision=await topology.revision(),
+                allowed_tools=ALL_MANAGER_TOOLS,
+                confirm_tools=CONFIRM_TOOLS,
+                allowed_senders=frozenset({config.admin_user_id}),
+            ),
+            ttl=timedelta(minutes=15),
+        )
 
     journal = S3Journal(MinioJournalStore(storage), prefix="")
     recovery = RecoveryCoordinator(
@@ -610,6 +642,9 @@ def build_application(
         sessions=sessions,
         matrix=matrix,
         admin_user_id=config.admin_user_id,
+        admin_room_id=config.manager_admin_room_id,
+        confirmations=confirmations,
+        confirmation_notifications=notification_service,
         history=matrix.history,
         media=MatrixMedia(matrix),
         metrics=metrics,
@@ -741,6 +776,7 @@ def build_application(
         health=health,
         sessions=sessions,
         readiness=readiness,
+        startup_hooks=(migrate_legacy_confirmations,),
         closeables=closeables,
     )
 

@@ -54,6 +54,10 @@ class FakeSessions:
 @pytest.mark.asyncio
 async def test_application_starts_in_dependency_order() -> None:
     log: list[str] = []
+
+    async def migrate() -> None:
+        log.append("migration")
+
     application = ManagerApplication(
         database=FakeDatabase(log),
         recovery=FakeRecovery(log),
@@ -62,6 +66,7 @@ async def test_application_starts_in_dependency_order() -> None:
         heartbeat=FakeService("heartbeat", log),
         health=FakeService("health", log),
         sessions=FakeSessions(log),
+        startup_hooks=(migrate,),
     )
 
     await application.start()
@@ -75,6 +80,7 @@ async def test_application_starts_in_dependency_order() -> None:
         "heartbeat",
     ]
     assert application.readiness.ready
+    assert log.index("recovery") < log.index("migration")
 
     await application.stop()
     assert log[-6:] == [

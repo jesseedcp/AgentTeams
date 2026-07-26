@@ -73,6 +73,13 @@ The tool set is constructed separately for every Matrix room:
 The model cannot recover a hidden tool through MCP, generated commands, or a
 different room. Authorization is checked again at tool invocation time.
 
+Risky operations from any authorized room are approved in the Admin DM. Use
+`/confirm <id>` or `/deny <id>`; when exactly one request is pending, `确认`,
+`确认保存`, `同意`, `拒绝`, and `取消` are also accepted. `/status` lists
+pending requests, while `/reset <id>` cancels one and resets the parked source
+room. These requests survive Manager restarts because they are stored in
+SQLite rather than inside one room's conversation state.
+
 ## Capabilities
 
 The 16 retained Manager skills cover Worker discovery/import and lifecycle,

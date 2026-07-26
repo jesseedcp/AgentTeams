@@ -189,6 +189,19 @@ class RoomSessionManager:
         async with session.lock:
             await self._save(room_id, session)
 
+    async def reset(self, room_id: str) -> None:
+        """Drop one parked continuation and its persisted room state."""
+        lock = await self._lock_for(room_id)
+        async with lock:
+            session = self._cache.pop(room_id, None)
+            if session is not None:
+                retire = getattr(self._factory, "retire", None)
+                if retire is not None:
+                    result = retire(session.agent)
+                    if inspect.isawaitable(result):
+                        await result
+            await self._sessions.delete(room_id)
+
     async def _save(self, room_id: str, session: RoomSession) -> None:
         await self._sessions.save(
             room_id=room_id,

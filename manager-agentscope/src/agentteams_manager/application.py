@@ -24,6 +24,7 @@ class ManagerApplication:
         health: Any,
         sessions: Any,
         readiness: ReadinessState | None = None,
+        startup_hooks: tuple[Any, ...] = (),
         closeables: tuple[Any, ...] = (),
     ) -> None:
         self._database = database
@@ -33,6 +34,7 @@ class ManagerApplication:
         self._heartbeat = heartbeat
         self._health = health
         self._sessions = sessions
+        self._startup_hooks = startup_hooks
         self._closeables = closeables
         self.readiness = (
             readiness
@@ -59,6 +61,13 @@ class ManagerApplication:
             await self._recovery.restore()
             self.readiness.recovery_ready = True
             self.start_log.append("recovery")
+
+            # A restored snapshot can predate the running schema.
+            await self._database.open()
+            for hook in self._startup_hooks:
+                result = hook()
+                if inspect.isawaitable(result):
+                    await result
 
             await self._config_watcher.start()
             self.readiness.config_ready = _service_ready(
