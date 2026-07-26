@@ -1,6 +1,6 @@
 """Initial SQLite schema for durable operations."""
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS operations (
@@ -68,6 +68,48 @@ CREATE TABLE IF NOT EXISTS tasks (
 );
 CREATE INDEX IF NOT EXISTS tasks_due_idx
   ON tasks(status, next_scheduled_at);
+
+CREATE TABLE IF NOT EXISTS project_task_dependencies (
+  project_id TEXT NOT NULL,
+  task_id TEXT NOT NULL REFERENCES tasks(task_id),
+  depends_on_task_id TEXT NOT NULL REFERENCES tasks(task_id),
+  created_at TEXT NOT NULL,
+  PRIMARY KEY(task_id, depends_on_task_id),
+  CHECK(task_id <> depends_on_task_id)
+);
+CREATE INDEX IF NOT EXISTS project_task_dependencies_project_idx
+  ON project_task_dependencies(project_id, task_id);
+
+CREATE TABLE IF NOT EXISTS project_task_transitions (
+  task_id TEXT NOT NULL REFERENCES tasks(task_id),
+  sequence INTEGER NOT NULL,
+  from_status TEXT,
+  to_status TEXT NOT NULL,
+  actor_id TEXT NOT NULL,
+  reason TEXT,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY(task_id, sequence)
+);
+
+CREATE TABLE IF NOT EXISTS project_participants (
+  project_id TEXT NOT NULL,
+  worker_name TEXT NOT NULL,
+  joined_at TEXT NOT NULL,
+  removed_at TEXT,
+  PRIMARY KEY(project_id, worker_name)
+);
+CREATE INDEX IF NOT EXISTS project_participants_active_idx
+  ON project_participants(project_id, removed_at);
+
+CREATE TABLE IF NOT EXISTS project_plan_revisions (
+  project_id TEXT NOT NULL,
+  revision INTEGER NOT NULL,
+  body TEXT NOT NULL,
+  change_kind TEXT NOT NULL,
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY(project_id, revision)
+);
 
 CREATE TABLE IF NOT EXISTS projects (
   project_id TEXT PRIMARY KEY,

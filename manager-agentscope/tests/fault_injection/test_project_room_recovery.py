@@ -8,7 +8,10 @@ from agentteams_manager.clients.minio import MinioClient
 from agentteams_manager.domain.errors import AmbiguousEffectError
 from agentteams_manager.state.database import Database
 from agentteams_manager.state.projects import ProjectRepository
-from agentteams_manager.state.tasks import TaskRepository
+from agentteams_manager.state.tasks import (
+    ProjectGraphRepository,
+    TaskRepository,
+)
 from agentteams_manager.state.topology import TopologyRepository
 from agentteams_manager.workflows.projects import ProjectService
 from agentteams_manager.workflows.resources import MutationContext
@@ -60,6 +63,7 @@ async def test_room_timeout_is_reconciled_by_project_marker(
         controller=controller,
         matrix=matrix,
         topology=TopologyRepository(database),
+        graph=ProjectGraphRepository(database),
         supervisor=supervisor,
         clock=clock,
         admin_user_id="@admin:example",

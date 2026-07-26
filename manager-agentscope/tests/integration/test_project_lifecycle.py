@@ -7,7 +7,10 @@ import pytest
 from agentteams_manager.clients.minio import MinioClient
 from agentteams_manager.state.database import Database
 from agentteams_manager.state.projects import ProjectRepository
-from agentteams_manager.state.tasks import TaskRepository
+from agentteams_manager.state.tasks import (
+    ProjectGraphRepository,
+    TaskRepository,
+)
 from agentteams_manager.state.topology import TopologyRepository
 from agentteams_manager.workflows.projects import ProjectService
 from agentteams_manager.workflows.resources import MutationContext
@@ -57,6 +60,7 @@ async def test_project_task_uses_worker_room_and_project_identity(
         controller=controller,
         matrix=matrix,
         topology=TopologyRepository(database),
+        graph=ProjectGraphRepository(database),
         supervisor=supervisor,
         clock=clock,
         admin_user_id="@admin:example",

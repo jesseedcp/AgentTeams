@@ -7,7 +7,10 @@ import pytest
 from agentteams_manager.clients.minio import MinioClient
 from agentteams_manager.state.database import Database
 from agentteams_manager.state.projects import ProjectRepository
-from agentteams_manager.state.tasks import TaskRepository
+from agentteams_manager.state.tasks import (
+    ProjectGraphRepository,
+    TaskRepository,
+)
 from agentteams_manager.state.topology import TopologyRepository
 from agentteams_manager.workflows.projects import ProjectService
 from agentteams_manager.workflows.resources import MutationContext
@@ -63,6 +66,7 @@ async def test_project_room_contains_admin_and_selected_workers(
         controller=controller,
         matrix=matrix,
         topology=TopologyRepository(database),
+        graph=ProjectGraphRepository(database),
         supervisor=supervisor,
         clock=clock,
         admin_user_id="@admin:example",
@@ -90,3 +94,8 @@ async def test_project_room_contains_admin_and_selected_workers(
     }
     assert order.index("minio.meta") < order.index("matrix.project_room")
     assert order.index("minio.spec") < order.index("matrix.project_room")
+    graph = ProjectGraphRepository(database)
+    assert await graph.participants(project.project_id) == ("alice", "bob")
+    revisions = await graph.plan_revisions(project.project_id)
+    assert len(revisions) == 1
+    assert revisions[0].body == "Phase 1: implementation"

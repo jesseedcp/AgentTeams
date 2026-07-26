@@ -78,6 +78,26 @@ class ProjectTopologyPort(Protocol):
     ) -> None: ...
 
 
+class ProjectGraphPort(Protocol):
+    async def add_participant(
+        self,
+        project_id: str,
+        worker_name: str,
+        *,
+        now: datetime,
+    ) -> None: ...
+
+    async def append_plan_revision(
+        self,
+        project_id: str,
+        *,
+        body: str,
+        change_kind: str,
+        created_by: str,
+        now: datetime,
+    ) -> object: ...
+
+
 class ProjectCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -113,6 +133,7 @@ class ProjectService:
         controller: TaskControllerPort,
         matrix: MatrixAdministrationPort | MatrixPort,
         topology: ProjectTopologyPort,
+        graph: ProjectGraphPort,
         supervisor: TaskSupervisorPort,
         clock: Clock,
         admin_user_id: str,
@@ -127,6 +148,7 @@ class ProjectService:
         self._controller = controller
         self._matrix = matrix
         self._topology = topology
+        self._graph = graph
         self._supervisor = supervisor
         self._clock = clock
         self._admin_user_id = admin_user_id
@@ -205,6 +227,19 @@ class ProjectService:
                     raise
                 project = raced
         self._verify_project_request(project, operation, request)
+        for participant in request.participants:
+            await self._graph.add_participant(
+                project_id,
+                participant,
+                now=project.created_at,
+            )
+        await self._graph.append_plan_revision(
+            project_id,
+            body=request.plan,
+            change_kind="initial",
+            created_by=self._admin_user_id,
+            now=project.created_at,
+        )
         if operation.status is OperationStatus.SUCCEEDED:
             if project.status != "active" or not project.room_id:
                 raise ConflictError(

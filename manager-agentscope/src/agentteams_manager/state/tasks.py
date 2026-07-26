@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from dataclasses import dataclass
 from datetime import UTC, datetime
+from enum import StrEnum
 
+from agentteams_manager.domain.errors import ConflictError, NotFoundError
 from agentteams_manager.domain.models import TaskRecord
 
 from .database import Database
@@ -207,3 +210,511 @@ class TaskRepository:
             return tuple(_task_from_row(row) for row in rows)
 
         return await self._database.read(read)
+
+
+class ProjectTaskState(StrEnum):
+    PENDING = "pending"
+    READY = "ready"
+    DISPATCHED = "dispatched"
+    IN_PROGRESS = "in_progress"
+    BLOCKED = "blocked"
+    REVISION_NEEDED = "revision_needed"
+    COMPLETED = "completed"
+    CANCELLED = "cancelled"
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectTaskTransition:
+    task_id: str
+    sequence: int
+    from_status: ProjectTaskState | None
+    to_status: ProjectTaskState
+    actor_id: str
+    reason: str | None
+    created_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectPlanRevision:
+    project_id: str
+    revision: int
+    body: str
+    change_kind: str
+    created_by: str
+    created_at: datetime
+
+
+class ProjectGraphRepository:
+    """Normalized project DAG, actor transitions, people, and plans."""
+
+    def __init__(self, database: Database) -> None:
+        self._database = database
+
+    async def set_dependencies(
+        self,
+        task_id: str,
+        dependencies: tuple[str, ...],
+    ) -> None:
+        normalized = tuple(dict.fromkeys(dependencies))
+
+        def write(connection: sqlite3.Connection) -> None:
+            task = connection.execute(
+                "SELECT project_id FROM tasks WHERE task_id=?",
+                (task_id,),
+            ).fetchone()
+            if task is None:
+                raise NotFoundError(f"task/{task_id} does not exist")
+            project_id = task["project_id"]
+            if not project_id:
+                raise ConflictError(
+                    f"task/{task_id} is not a project task",
+                )
+            connection.execute(
+                """
+                DELETE FROM project_task_dependencies
+                 WHERE task_id=?
+                """,
+                (task_id,),
+            )
+            now = datetime.now(UTC).isoformat()
+            for dependency_id in normalized:
+                dependency = connection.execute(
+                    """
+                    SELECT project_id FROM tasks WHERE task_id=?
+                    """,
+                    (dependency_id,),
+                ).fetchone()
+                if dependency is None:
+                    raise NotFoundError(
+                        f"task/{dependency_id} does not exist",
+                    )
+                if dependency["project_id"] != project_id:
+                    raise ConflictError(
+                        "project task dependencies must stay "
+                        "inside one project",
+                    )
+                if dependency_id == task_id or _path_exists(
+                    connection,
+                    start=dependency_id,
+                    target=task_id,
+                ):
+                    raise ConflictError(
+                        f"dependency cycle involving task/{task_id}",
+                    )
+                connection.execute(
+                    """
+                    INSERT INTO project_task_dependencies(
+                        project_id, task_id, depends_on_task_id, created_at
+                    ) VALUES (?, ?, ?, ?)
+                    """,
+                    (project_id, task_id, dependency_id, now),
+                )
+
+        await self._database.write(write)
+
+    async def dependencies(self, task_id: str) -> tuple[str, ...]:
+        def read(connection: sqlite3.Connection) -> tuple[str, ...]:
+            rows = connection.execute(
+                """
+                SELECT depends_on_task_id
+                  FROM project_task_dependencies
+                 WHERE task_id=?
+                 ORDER BY depends_on_task_id
+                """,
+                (task_id,),
+            ).fetchall()
+            return tuple(row["depends_on_task_id"] for row in rows)
+
+        return await self._database.read(read)
+
+    async def transition(
+        self,
+        task_id: str,
+        *,
+        expected: set[ProjectTaskState],
+        target: ProjectTaskState,
+        actor_id: str,
+        reason: str | None = None,
+    ) -> TaskRecord:
+        if not expected:
+            raise ValueError("expected project task states cannot be empty")
+
+        def write(connection: sqlite3.Connection) -> TaskRecord:
+            row = connection.execute(
+                "SELECT * FROM tasks WHERE task_id=?",
+                (task_id,),
+            ).fetchone()
+            if row is None:
+                raise NotFoundError(f"task/{task_id} does not exist")
+            current = ProjectTaskState(row["status"])
+            if current not in expected:
+                raise ConflictError(
+                    f"task/{task_id} cannot transition from "
+                    f"{current.value} to {target.value}",
+                )
+            if target not in _PROJECT_TRANSITIONS[current]:
+                raise ConflictError(
+                    f"project task transition {current.value} -> "
+                    f"{target.value} is not allowed",
+                )
+            now = datetime.now(UTC)
+            connection.execute(
+                """
+                UPDATE tasks SET status=?, updated_at=?
+                 WHERE task_id=?
+                """,
+                (target.value, now.isoformat(), task_id),
+            )
+            _record_transition(
+                connection,
+                task_id=task_id,
+                from_status=current,
+                to_status=target,
+                actor_id=actor_id,
+                reason=reason,
+                now=now,
+            )
+            updated = connection.execute(
+                "SELECT * FROM tasks WHERE task_id=?",
+                (task_id,),
+            ).fetchone()
+            return _task_from_row(updated)
+
+        return await self._database.write(write)
+
+    async def promote_ready(
+        self,
+        project_id: str,
+    ) -> tuple[TaskRecord, ...]:
+        def write(
+            connection: sqlite3.Connection,
+        ) -> tuple[TaskRecord, ...]:
+            rows = connection.execute(
+                """
+                SELECT task.* FROM tasks AS task
+                 WHERE task.project_id=?
+                   AND task.status='pending'
+                   AND NOT EXISTS (
+                       SELECT 1
+                         FROM project_task_dependencies AS edge
+                         JOIN tasks AS dependency
+                           ON dependency.task_id=edge.depends_on_task_id
+                        WHERE edge.task_id=task.task_id
+                          AND dependency.status <> 'completed'
+                   )
+                 ORDER BY task.created_at, task.task_id
+                """,
+                (project_id,),
+            ).fetchall()
+            promoted: list[TaskRecord] = []
+            for row in rows:
+                now = datetime.now(UTC)
+                cursor = connection.execute(
+                    """
+                    UPDATE tasks SET status='ready', updated_at=?
+                     WHERE task_id=? AND status='pending'
+                    """,
+                    (now.isoformat(), row["task_id"]),
+                )
+                if cursor.rowcount != 1:
+                    continue
+                _record_transition(
+                    connection,
+                    task_id=row["task_id"],
+                    from_status=ProjectTaskState.PENDING,
+                    to_status=ProjectTaskState.READY,
+                    actor_id="@manager:system",
+                    reason="all dependencies completed",
+                    now=now,
+                )
+                updated = connection.execute(
+                    "SELECT * FROM tasks WHERE task_id=?",
+                    (row["task_id"],),
+                ).fetchone()
+                promoted.append(_task_from_row(updated))
+            return tuple(promoted)
+
+        return await self._database.write(write)
+
+    async def transitions(
+        self,
+        task_id: str,
+    ) -> tuple[ProjectTaskTransition, ...]:
+        def read(
+            connection: sqlite3.Connection,
+        ) -> tuple[ProjectTaskTransition, ...]:
+            rows = connection.execute(
+                """
+                SELECT * FROM project_task_transitions
+                 WHERE task_id=? ORDER BY sequence
+                """,
+                (task_id,),
+            ).fetchall()
+            return tuple(
+                ProjectTaskTransition(
+                    task_id=row["task_id"],
+                    sequence=row["sequence"],
+                    from_status=(
+                        ProjectTaskState(row["from_status"])
+                        if row["from_status"]
+                        else None
+                    ),
+                    to_status=ProjectTaskState(row["to_status"]),
+                    actor_id=row["actor_id"],
+                    reason=row["reason"],
+                    created_at=datetime.fromisoformat(row["created_at"]),
+                )
+                for row in rows
+            )
+
+        return await self._database.read(read)
+
+    async def add_participant(
+        self,
+        project_id: str,
+        worker_name: str,
+        *,
+        now: datetime,
+    ) -> None:
+        def write(connection: sqlite3.Connection) -> None:
+            connection.execute(
+                """
+                INSERT INTO project_participants(
+                    project_id, worker_name, joined_at, removed_at
+                ) VALUES (?, ?, ?, NULL)
+                ON CONFLICT(project_id, worker_name) DO UPDATE SET
+                    joined_at=excluded.joined_at,
+                    removed_at=NULL
+                """,
+                (project_id, worker_name, now.isoformat()),
+            )
+
+        await self._database.write(write)
+
+    async def remove_participant(
+        self,
+        project_id: str,
+        worker_name: str,
+        *,
+        now: datetime,
+    ) -> bool:
+        def write(connection: sqlite3.Connection) -> bool:
+            cursor = connection.execute(
+                """
+                UPDATE project_participants SET removed_at=?
+                 WHERE project_id=? AND worker_name=?
+                   AND removed_at IS NULL
+                """,
+                (now.isoformat(), project_id, worker_name),
+            )
+            return cursor.rowcount == 1
+
+        return await self._database.write(write)
+
+    async def participants(self, project_id: str) -> tuple[str, ...]:
+        def read(connection: sqlite3.Connection) -> tuple[str, ...]:
+            rows = connection.execute(
+                """
+                SELECT worker_name FROM project_participants
+                 WHERE project_id=? AND removed_at IS NULL
+                 ORDER BY worker_name
+                """,
+                (project_id,),
+            ).fetchall()
+            return tuple(row["worker_name"] for row in rows)
+
+        return await self._database.read(read)
+
+    async def append_plan_revision(
+        self,
+        project_id: str,
+        *,
+        body: str,
+        change_kind: str,
+        created_by: str,
+        now: datetime,
+    ) -> ProjectPlanRevision:
+        def write(connection: sqlite3.Connection) -> ProjectPlanRevision:
+            latest = connection.execute(
+                """
+                SELECT * FROM project_plan_revisions
+                 WHERE project_id=? ORDER BY revision DESC LIMIT 1
+                """,
+                (project_id,),
+            ).fetchone()
+            if (
+                latest is not None
+                and latest["body"] == body
+                and latest["change_kind"] == change_kind
+                and latest["created_by"] == created_by
+            ):
+                return _plan_revision_from_row(latest)
+            row = connection.execute(
+                """
+                SELECT COALESCE(MAX(revision), 0) + 1 AS revision
+                  FROM project_plan_revisions WHERE project_id=?
+                """,
+                (project_id,),
+            ).fetchone()
+            revision = int(row["revision"])
+            connection.execute(
+                """
+                INSERT INTO project_plan_revisions(
+                    project_id, revision, body, change_kind,
+                    created_by, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    project_id,
+                    revision,
+                    body,
+                    change_kind,
+                    created_by,
+                    now.isoformat(),
+                ),
+            )
+            return ProjectPlanRevision(
+                project_id=project_id,
+                revision=revision,
+                body=body,
+                change_kind=change_kind,
+                created_by=created_by,
+                created_at=now,
+            )
+
+        return await self._database.write(write)
+
+    async def plan_revisions(
+        self,
+        project_id: str,
+    ) -> tuple[ProjectPlanRevision, ...]:
+        def read(
+            connection: sqlite3.Connection,
+        ) -> tuple[ProjectPlanRevision, ...]:
+            rows = connection.execute(
+                """
+                SELECT * FROM project_plan_revisions
+                 WHERE project_id=? ORDER BY revision
+                """,
+                (project_id,),
+            ).fetchall()
+            return tuple(_plan_revision_from_row(row) for row in rows)
+
+        return await self._database.read(read)
+
+
+_PROJECT_TRANSITIONS: dict[
+    ProjectTaskState,
+    frozenset[ProjectTaskState],
+] = {
+    ProjectTaskState.PENDING: frozenset(
+        {ProjectTaskState.READY, ProjectTaskState.CANCELLED},
+    ),
+    ProjectTaskState.READY: frozenset(
+        {ProjectTaskState.DISPATCHED, ProjectTaskState.CANCELLED},
+    ),
+    ProjectTaskState.DISPATCHED: frozenset(
+        {
+            ProjectTaskState.IN_PROGRESS,
+            ProjectTaskState.BLOCKED,
+            ProjectTaskState.REVISION_NEEDED,
+            ProjectTaskState.COMPLETED,
+            ProjectTaskState.CANCELLED,
+        },
+    ),
+    ProjectTaskState.IN_PROGRESS: frozenset(
+        {
+            ProjectTaskState.BLOCKED,
+            ProjectTaskState.REVISION_NEEDED,
+            ProjectTaskState.COMPLETED,
+            ProjectTaskState.CANCELLED,
+        },
+    ),
+    ProjectTaskState.BLOCKED: frozenset(
+        {
+            ProjectTaskState.READY,
+            ProjectTaskState.IN_PROGRESS,
+            ProjectTaskState.CANCELLED,
+        },
+    ),
+    ProjectTaskState.REVISION_NEEDED: frozenset(
+        {
+            ProjectTaskState.READY,
+            ProjectTaskState.DISPATCHED,
+            ProjectTaskState.CANCELLED,
+        },
+    ),
+    ProjectTaskState.COMPLETED: frozenset(),
+    ProjectTaskState.CANCELLED: frozenset(),
+}
+
+
+def _path_exists(
+    connection: sqlite3.Connection,
+    *,
+    start: str,
+    target: str,
+) -> bool:
+    row = connection.execute(
+        """
+        WITH RECURSIVE path(task_id) AS (
+            SELECT depends_on_task_id
+              FROM project_task_dependencies
+             WHERE task_id=?
+            UNION
+            SELECT edge.depends_on_task_id
+              FROM project_task_dependencies AS edge
+              JOIN path ON edge.task_id=path.task_id
+        )
+        SELECT 1 FROM path WHERE task_id=? LIMIT 1
+        """,
+        (start, target),
+    ).fetchone()
+    return row is not None
+
+
+def _record_transition(
+    connection: sqlite3.Connection,
+    *,
+    task_id: str,
+    from_status: ProjectTaskState | None,
+    to_status: ProjectTaskState,
+    actor_id: str,
+    reason: str | None,
+    now: datetime,
+) -> None:
+    row = connection.execute(
+        """
+        SELECT COALESCE(MAX(sequence), 0) + 1 AS sequence
+          FROM project_task_transitions WHERE task_id=?
+        """,
+        (task_id,),
+    ).fetchone()
+    connection.execute(
+        """
+        INSERT INTO project_task_transitions(
+            task_id, sequence, from_status, to_status,
+            actor_id, reason, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            task_id,
+            int(row["sequence"]),
+            from_status.value if from_status else None,
+            to_status.value,
+            actor_id,
+            reason,
+            now.isoformat(),
+        ),
+    )
+
+
+def _plan_revision_from_row(row: sqlite3.Row) -> ProjectPlanRevision:
+    return ProjectPlanRevision(
+        project_id=row["project_id"],
+        revision=row["revision"],
+        body=row["body"],
+        change_kind=row["change_kind"],
+        created_by=row["created_by"],
+        created_at=datetime.fromisoformat(row["created_at"]),
+    )

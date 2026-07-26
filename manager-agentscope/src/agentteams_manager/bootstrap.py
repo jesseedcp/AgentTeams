@@ -75,7 +75,7 @@ from .state.operations import OperationRepository
 from .state.projects import ProjectRepository
 from .state.recovery import RecoveryCoordinator
 from .state.sessions import SessionRepository
-from .state.tasks import TaskRepository
+from .state.tasks import ProjectGraphRepository, TaskRepository
 from .state.topology import TopologyRepository
 from .tools.configuration import ConfigurationToolkitFactory
 from .tools.integrations import IntegrationToolkitFactory
@@ -400,6 +400,7 @@ def build_application(
     database = Database(config.session_database)
     operations = OperationRepository(database)
     tasks = TaskRepository(database)
+    project_graph = ProjectGraphRepository(database)
     projects = ProjectRepository(database)
     topology = TopologyRepository(
         database,
@@ -533,6 +534,7 @@ def build_application(
         controller=agt,
         matrix=matrix,
         topology=topology,
+        graph=project_graph,
         supervisor=supervisor,
         clock=clock,
         admin_user_id=config.admin_user_id,
