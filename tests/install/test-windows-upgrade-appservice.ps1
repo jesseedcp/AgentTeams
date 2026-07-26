@@ -101,7 +101,6 @@ AGENTTEAMS_HOST_SHARE_DIR=$tempRoot
     $start.Environment["AGENTTEAMS_INSTALL_COPAW_WORKER_IMAGE"] = "agentteams/copaw-worker:test"
     $start.Environment["AGENTTEAMS_INSTALL_HERMES_WORKER_IMAGE"] = "agentteams/hermes-worker:test"
     $start.Environment["AGENTTEAMS_INSTALL_QWENPAW_WORKER_IMAGE"] = "agentteams/qwenpaw-worker:test"
-    $start.Environment["AGENTTEAMS_INSTALL_OPENHUMAN_WORKER_IMAGE"] = "agentteams/openhuman-worker:disabled"
     $null = $start.Environment.Remove("AGENTTEAMS_MATRIX_APPSERVICE_AS_TOKEN")
     $null = $start.Environment.Remove("AGENTTEAMS_MATRIX_APPSERVICE_HS_TOKEN")
 

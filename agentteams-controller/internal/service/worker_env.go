@@ -98,6 +98,10 @@ func (b *WorkerEnvBuilder) BuildManager(managerName string, prov *ManagerProvisi
 	}
 	if b.defaults.AdminPassword != "" {
 		env["AGENTTEAMS_HIGRESS_ADMIN_PASSWORD"] = b.defaults.AdminPassword
+		env["AGENTTEAMS_MANAGER_ADMIN_TOKEN"] = b.defaults.AdminPassword
+	}
+	if b.defaults.MatrixRegistrationToken != "" {
+		env["AGENTTEAMS_MATRIX_REGISTRATION_TOKEN"] = b.defaults.MatrixRegistrationToken
 	}
 	if b.defaults.HigressAdminURL != "" {
 		env["AGENTTEAMS_AI_GATEWAY_ADMIN_URL"] = b.defaults.HigressAdminURL

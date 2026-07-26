@@ -1,0 +1,18 @@
+{{- if and .Values.manager.enabled .Values.manager.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ printf "%s-manager-data" (include "agentteams.fullname" .) }}
+  namespace: {{ include "agentteams.namespace" . }}
+  labels:
+    {{- include "agentteams.component.labels" (dict "root" . "component" "manager") | nindent 4 }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.manager.persistence.size | quote }}
+  {{- if .Values.manager.persistence.storageClassName }}
+  storageClassName: {{ .Values.manager.persistence.storageClassName | quote }}
+  {{- end }}
+{{- end }}

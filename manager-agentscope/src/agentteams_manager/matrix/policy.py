@@ -71,6 +71,7 @@ ALL_MANAGER_TOOLS = frozenset(
         "list_matrix_rooms",
         "list_matrix_members",
         "lookup_matrix_user",
+        "register_matrix_user",
         "get_matrix_room_state",
         "upload_matrix_media",
         "download_matrix_media",
@@ -85,6 +86,25 @@ ALL_MANAGER_TOOLS = frozenset(
         "switch_worker_model",
         "update_manager_identity",
         "publish_service",
+        "list_external_contacts",
+        "approve_external_contact",
+        "block_external_contact",
+        "set_primary_external_contact",
+        "send_external_message",
+        "read_host_file",
+        "write_host_file",
+    },
+)
+ADMIN_ONLY_TOOLS = frozenset(
+    {
+        "register_matrix_user",
+        "list_external_contacts",
+        "approve_external_contact",
+        "block_external_contact",
+        "set_primary_external_contact",
+        "send_external_message",
+        "read_host_file",
+        "write_host_file",
     },
 )
 
@@ -452,7 +472,7 @@ def policy_for_human(
 ) -> RoomPolicy:
     """Map Controller Human tiers to tools and named resource scopes."""
     if human.permission_level == 1:
-        tools = ALL_MANAGER_TOOLS
+        tools = ALL_MANAGER_TOOLS - ADMIN_ONLY_TOOLS
         confirmations = CONFIRM_TOOLS
         scope_all = True
     elif human.permission_level == 2:

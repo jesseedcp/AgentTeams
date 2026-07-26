@@ -18,7 +18,6 @@ func TestResolveRuntime(t *testing.T) {
 		{"explicit_openclaw_preserved", RuntimeOpenClaw, RuntimeHermes, RuntimeOpenClaw},
 		{"explicit_hermes_preserved", RuntimeHermes, RuntimeCopaw, RuntimeHermes},
 		{"explicit_qwenpaw_preserved", RuntimeQwenPaw, RuntimeCopaw, RuntimeQwenPaw},
-		{"explicit_openhuman_preserved", RuntimeOpenHuman, RuntimeCopaw, RuntimeOpenHuman},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -40,7 +39,6 @@ func TestValidRuntime(t *testing.T) {
 		{RuntimeCopaw, true},
 		{RuntimeHermes, true},
 		{RuntimeQwenPaw, true},
-		{RuntimeOpenHuman, true},
 		{"unknown", false},
 	}
 	for _, tc := range cases {
@@ -64,7 +62,6 @@ func TestRuntimeSetsAreSeparated(t *testing.T) {
 		RuntimeCopaw,
 		RuntimeHermes,
 		RuntimeQwenPaw,
-		RuntimeOpenHuman,
 	} {
 		if !ValidRuntime(runtime) {
 			t.Fatalf("%s must remain valid for Worker", runtime)

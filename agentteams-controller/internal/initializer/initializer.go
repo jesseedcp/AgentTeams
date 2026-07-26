@@ -59,6 +59,7 @@ type Config struct {
 	AIStreamIdleTimeoutSeconds int
 	TuwunelURL                 string // internal Tuwunel URL, e.g. http://tuwunel:6167
 	CinnyURL                   string // internal Cinny URL (optional)
+	ManagerAdminURL            string // internal Manager Admin URL (optional)
 	GitHubToken                string
 	SkillsDir                  string
 }
@@ -321,6 +322,33 @@ func (i *Initializer) initGatewayRoutes(ctx context.Context) error {
 			}
 			if err := i.Gateway.EnsureRoute(ctx, "cinny", nil, "cinny."+svcSuffix, port, "/"); err != nil {
 				logger.Error(err, "failed to create Cinny route (non-fatal)")
+			}
+		}
+	}
+
+	if cfg.ManagerAdminURL != "" {
+		host, port, err := parseHostPort(cfg.ManagerAdminURL)
+		if err != nil {
+			logger.Error(err, "failed to parse Manager Admin URL (non-fatal)")
+		} else {
+			svcSuffix := "dns"
+			if cfg.IsEmbedded {
+				if err := i.Gateway.EnsureStaticServiceSource(ctx, "manager-admin", host, port); err != nil {
+					logger.Error(err, "failed to register Manager Admin static service source (non-fatal)")
+				}
+				svcSuffix = "static"
+			} else if err := i.Gateway.EnsureServiceSource(ctx, "manager-admin", host, port, "http"); err != nil {
+				logger.Error(err, "failed to register Manager Admin service source (non-fatal)")
+			}
+			if err := i.Gateway.EnsureRoute(
+				ctx,
+				"manager-admin",
+				nil,
+				"manager-admin."+svcSuffix,
+				port,
+				"/manager-admin",
+			); err != nil {
+				logger.Error(err, "failed to create Manager Admin route (non-fatal)")
 			}
 		}
 	}

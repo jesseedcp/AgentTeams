@@ -5,6 +5,14 @@ description: Use for verified task, Worker workspace, and shared-knowledge trans
 
 # File Sync Management
 
+Optional host-file access is a separate, disabled-by-default boundary:
+
+- `read_host_file` reads only paths matching the configured read allowlist.
+- `write_host_file` writes atomically and only inside the configured write
+  allowlist; every write is confirmation-gated.
+- The Kubernetes host-share mount must be explicitly enabled. Path traversal,
+  absolute paths, and files above the size limit are rejected.
+
 MinIO is authoritative. Local sync directories are only caches.
 
 Use `sync_files` with `direction="pull"` before reading Worker output. Use

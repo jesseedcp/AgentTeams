@@ -139,19 +139,24 @@ class MatrixSessionRunner:
             self._metrics.increment(
                 "agentteams_manager_model_turns_total",
             )
-        await self._expire_confirmations()
-        pending = await self._confirmations.pending()
-        await self._sessions.reset_due(
-            self._now(),
-            exclude_rooms=frozenset(
-                request.source_room_id for request in pending
-            ),
-        )
-        if await self._handle_session_command(event, policy):
-            return
-        if await self._handle_global_confirmation(event, policy):
-            return
-        await self._run_user_turn(event, policy)
+        await self._mark_read(event.room_id, event.event_id)
+        await self._set_typing(event.room_id, True)
+        try:
+            await self._expire_confirmations()
+            pending = await self._confirmations.pending()
+            await self._sessions.reset_due(
+                self._now(),
+                exclude_rooms=frozenset(
+                    request.source_room_id for request in pending
+                ),
+            )
+            if await self._handle_session_command(event, policy):
+                return
+            if await self._handle_global_confirmation(event, policy):
+                return
+            await self._run_user_turn(event, policy)
+        finally:
+            await self._set_typing(event.room_id, False)
 
     async def _run_user_turn(
         self,
@@ -519,12 +524,16 @@ class MatrixSessionRunner:
             ),
             thread_id=None,
         )
-        await self._run_and_project(
-            source_event,
-            request.source_policy,
-            continuation,
-            tool_event_id=request.source_event_id,
-        )
+        await self._set_typing(request.source_room_id, True)
+        try:
+            await self._run_and_project(
+                source_event,
+                request.source_policy,
+                continuation,
+                tool_event_id=request.source_event_id,
+            )
+        finally:
+            await self._set_typing(request.source_room_id, False)
         completed = await self._confirmations.complete(confirmation_id)
         decision_text = (
             "管理员已批准该操作。"
@@ -735,6 +744,24 @@ class MatrixSessionRunner:
             f"{text}\n请求 ID：{confirmation_id}",
             txn_id=matrix_transaction_id(confirmation_id, sequence),
         )
+
+    async def _set_typing(self, room_id: str, enabled: bool) -> None:
+        method = getattr(self._matrix, "set_typing", None)
+        if method is None:
+            return
+        try:
+            await method(room_id, typing=enabled)
+        except Exception:
+            return
+
+    async def _mark_read(self, room_id: str, event_id: str) -> None:
+        method = getattr(self._matrix, "mark_read", None)
+        if method is None:
+            return
+        try:
+            await method(room_id, event_id)
+        except Exception:
+            return
 
 
 def _global_confirmation_command(

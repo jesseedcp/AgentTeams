@@ -85,7 +85,7 @@ metadata:
   name: alice
 spec:
   model: claude-sonnet-4-6           # required: LLM model
-  runtime: copaw                     # openclaw | copaw | hermes | qwenpaw | openhuman
+  runtime: copaw                     # openclaw | copaw | hermes | qwenpaw
   skills: [github-operations]        # platform built-in skills
   mcpServers:                        # MCP servers callable via mcporter
     - name: github
@@ -102,7 +102,7 @@ spec:
   #   groupAllowExtra: ["@human:domain"]
 ```
 
-Each Worker maps to: a Docker container (or K8s Pod) + Matrix account + MinIO namespace + Gateway Consumer token. If `spec.image` is omitted, the controller selects the runtime-specific image from `AGENTTEAMS_WORKER_IMAGE`, `AGENTTEAMS_COPAW_WORKER_IMAGE`, `AGENTTEAMS_HERMES_WORKER_IMAGE`, `AGENTTEAMS_QWENPAW_WORKER_IMAGE`, or `AGENTTEAMS_OPENHUMAN_WORKER_IMAGE` (or the matching chart default).
+Each Worker maps to: a Docker container (or K8s Pod) + Matrix account + MinIO namespace + Gateway Consumer token. If `spec.image` is omitted, the controller selects the runtime-specific image from `AGENTTEAMS_WORKER_IMAGE`, `AGENTTEAMS_COPAW_WORKER_IMAGE`, `AGENTTEAMS_HERMES_WORKER_IMAGE`, or `AGENTTEAMS_QWENPAW_WORKER_IMAGE` (or the matching chart default).
 
 #### Team — collaboration unit
 

@@ -27,15 +27,16 @@ const defaultK8sNamespaceFile = "/var/run/secrets/kubernetes.io/serviceaccount/n
 
 // K8sConfig holds Kubernetes backend configuration.
 type K8sConfig struct {
-	Namespace            string
-	ManagerImage         string
-	WorkerImage          string
-	CopawWorkerImage     string
-	HermesWorkerImage    string
-	OpenHumanWorkerImage string
-	QwenPawWorkerImage   string
-	WorkerCPU            string
-	WorkerMemory         string
+	Namespace          string
+	ManagerImage       string
+	ManagerDataClaim   string
+	ManagerHostPath    string
+	WorkerImage        string
+	CopawWorkerImage   string
+	HermesWorkerImage  string
+	QwenPawWorkerImage string
+	WorkerCPU          string
+	WorkerMemory       string
 
 	// ControllerName identifies this controller instance. The agent
 	// PodTemplateSpec overlay (see LoadAgentPodTemplate) is looked up as the
@@ -264,8 +265,6 @@ func (k *K8sBackend) Create(ctx context.Context, req CreateRequest) (*WorkerResu
 			image = k.config.CopawWorkerImage
 		case req.Runtime == RuntimeHermes && k.config.HermesWorkerImage != "":
 			image = k.config.HermesWorkerImage
-		case req.Runtime == RuntimeOpenHuman && k.config.OpenHumanWorkerImage != "":
-			image = k.config.OpenHumanWorkerImage
 		case req.Runtime == RuntimeQwenPaw && k.config.QwenPawWorkerImage != "":
 			image = k.config.QwenPawWorkerImage
 		case k.config.WorkerImage != "":
@@ -342,6 +341,45 @@ func (k *K8sBackend) Create(ctx context.Context, req CreateRequest) (*WorkerResu
 		ReadOnly:  true,
 	}
 	extraVolumes, extraVolumeMounts := podWorkerDepsVolumes(req.WorkersDeps)
+	if req.Runtime == RuntimeAgentScope {
+		dataVolume := corev1.Volume{
+			Name: "manager-data",
+			VolumeSource: corev1.VolumeSource{
+				EmptyDir: &corev1.EmptyDirVolumeSource{},
+			},
+		}
+		if k.config.ManagerDataClaim != "" {
+			dataVolume.VolumeSource = corev1.VolumeSource{
+				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+					ClaimName: k.config.ManagerDataClaim,
+				},
+			}
+		}
+		extraVolumes = append(extraVolumes, dataVolume)
+		extraVolumeMounts = append(extraVolumeMounts, corev1.VolumeMount{
+			Name:      "manager-data",
+			MountPath: "/var/lib/agentteams-manager",
+		})
+		if k.config.ManagerHostPath != "" {
+			hostPathType := corev1.HostPathDirectory
+			extraVolumes = append(extraVolumes, corev1.Volume{
+				Name: "manager-host-share",
+				VolumeSource: corev1.VolumeSource{
+					HostPath: &corev1.HostPathVolumeSource{
+						Path: k.config.ManagerHostPath,
+						Type: &hostPathType,
+					},
+				},
+			})
+			extraVolumeMounts = append(
+				extraVolumeMounts,
+				corev1.VolumeMount{
+					Name:      "manager-host-share",
+					MountPath: "/host-share",
+				},
+			)
+		}
+	}
 
 	saName := req.ServiceAccountName
 	if saName == "" {
@@ -789,8 +827,7 @@ func defaultRuntime(runtime string) string {
 		RuntimeOpenClaw,
 		RuntimeCopaw,
 		RuntimeHermes,
-		RuntimeQwenPaw,
-		RuntimeOpenHuman:
+		RuntimeQwenPaw:
 		return runtime
 	default:
 		return RuntimeOpenClaw

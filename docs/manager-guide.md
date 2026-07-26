@@ -6,7 +6,7 @@ workflows own persistence, retries, reconciliation, authorization, and
 external side effects.
 
 There is one Manager runtime: `agentscope`. OpenClaw, CoPaw, Hermes, QwenPaw,
-and OpenHuman are Worker runtimes.
+and QwenPaw are Worker runtimes.
 
 ## Runtime boundaries
 
@@ -99,7 +99,6 @@ Supported Worker runtimes:
 | CoPaw compatibility runtime | `copaw` |
 | Hermes | `hermes` |
 | QwenPaw | `qwenpaw` |
-| OpenHuman | `openhuman` |
 
 ## Model and MCP management
 

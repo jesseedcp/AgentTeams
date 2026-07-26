@@ -49,8 +49,8 @@ matrix:
     hsToken: ""             # override the Matrix AppService hs_token (auto-generated if empty)
   tuwunel:
     image:
-      repository: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/tuwunel
-      tag: "20260216"
+      repository: ghcr.io/matrix-construct/tuwunel
+      tag: "v1.8.2"
       pullPolicy: IfNotPresent
     newUserDisplayNameSuffix: ""  # empty disables Tuwunel's default "💕" suffix
     replicaCount: 1
@@ -254,6 +254,17 @@ manager:
     limits:
       cpu: "2"
       memory: 4Gi
+  hostFiles:
+    enabled: false
+    hostPath: ""
+    readAllowlist: []
+    writeAllowlist: []
+  externalChannels: []
+  externalChannelSecretRefs: []
+  persistence:
+    enabled: true
+    size: 5Gi
+    storageClassName: ""
 
 # ── Cinny (Matrix IM UI, optional) ────────────────────────────────────────
 cinny:
@@ -300,9 +311,6 @@ worker:
       tag: ""                 # defaults to global.imageTag
     qwenpaw:
       repository: higress-registry.cn-hangzhou.cr.aliyuncs.com/agentteams/agentteams-qwenpaw-worker
-      tag: ""                 # defaults to global.imageTag
-    openhuman:
-      repository: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/agentteams-openhuman-worker
       tag: ""                 # defaults to global.imageTag
   defaultRuntime: "openclaw"
   resources:

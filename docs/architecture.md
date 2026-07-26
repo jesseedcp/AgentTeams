@@ -10,12 +10,12 @@ resource lifecycle and deployment.
 |---|---|---|
 | Controller | REST API and reconciliation for Manager, Worker, Team, Human, Matrix, storage, and gateway state | Go; `agentteams-controller` or embedded controller image |
 | Manager | Matrix conversation, policy-bound tools, durable workflows, recovery, scheduling, delegation | AgentScope 2.0.4.post1; `agentteams-manager` |
-| Workers | Execute delegated work; one replaceable runtime per Worker/Team member | OpenClaw, CoPaw, Hermes, QwenPaw, or OpenHuman images |
+| Workers | Execute delegated work; one replaceable runtime per Worker/Team member | OpenClaw, CoPaw, Hermes, or QwenPaw images |
 | Matrix/Cinny | Human and agent rooms, messages, threads, membership, media | Tuwunel/Synapse plus Cinny |
 | Higress | OpenAI-compatible model routes, MCP, consumers, service publishing | managed or existing gateway |
 | MinIO/S3/OSS | journals, snapshots, prompts, tasks, projects, files | managed MinIO or compatible object storage |
 
-OpenClaw, CoPaw, Hermes, QwenPaw, and OpenHuman are Worker runtimes. They are
+OpenClaw, CoPaw, Hermes, and QwenPaw are Worker runtimes. They are
 not Manager fallback runtimes.
 
 ## Control and data flow
@@ -126,7 +126,7 @@ is mounted into the Manager at `/var/lib/agentteams-manager`.
 The Helm chart installs Controller and infrastructure workloads, then creates
 the bootstrap Manager CR. Reconcilers create Manager and Worker Pods. The
 Manager CRD accepts only `runtime: agentscope`; Worker and Team member CRDs
-accept `openclaw`, `copaw`, `hermes`, `qwenpaw`, and `openhuman`.
+accept `openclaw`, `copaw`, `hermes`, and `qwenpaw`.
 
 ## Skills and verification
 

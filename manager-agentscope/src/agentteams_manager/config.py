@@ -77,6 +77,26 @@ class RuntimeDocument(BaseModel):
         return cls.model_validate(raw)
 
 
+class ExternalChannelDocument(BaseModel):
+    """Secret-reference-only configuration for one HTTP channel."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    provider: Literal[
+        "discord",
+        "telegram",
+        "slack",
+        "feishu",
+        "whatsapp",
+        "signal",
+    ]
+    outbound_url: str = Field(pattern=r"^https?://")
+    token_env: str = Field(pattern=r"^env:[A-Z][A-Z0-9_]{2,127}$")
+    webhook_secret_env: str = Field(
+        pattern=r"^env:[A-Z][A-Z0-9_]{2,127}$",
+    )
+
+
 class ManagerConfig(BaseModel):
     """Environment-owned process configuration.
 
@@ -91,6 +111,7 @@ class ManagerConfig(BaseModel):
     matrix_domain: str
     matrix_access_token: SecretStr
     matrix_password: SecretStr | None = None
+    matrix_registration_token: SecretStr | None = None
     controller_url: str
     controller_auth_token: SecretStr | None
     ai_gateway_url: str
@@ -116,6 +137,11 @@ class ManagerConfig(BaseModel):
     higress_admin_url: str | None = None
     higress_admin_user: str | None = None
     higress_admin_password: SecretStr | None = None
+    admin_api_token: SecretStr | None = None
+    external_channels: tuple[ExternalChannelDocument, ...] = ()
+    host_share_root: Path | None = None
+    host_read_allowlist: tuple[str, ...] = ()
+    host_write_allowlist: tuple[str, ...] = ()
 
     @classmethod
     def from_env(cls) -> ManagerConfig:
@@ -142,6 +168,15 @@ class ManagerConfig(BaseModel):
             matrix_password=(
                 SecretStr(env["AGENTTEAMS_MANAGER_MATRIX_PASSWORD"])
                 if env.get("AGENTTEAMS_MANAGER_MATRIX_PASSWORD")
+                else None
+            ),
+            matrix_registration_token=(
+                SecretStr(
+                    env["AGENTTEAMS_MATRIX_REGISTRATION_TOKEN"],
+                )
+                if env.get(
+                    "AGENTTEAMS_MATRIX_REGISTRATION_TOKEN",
+                )
                 else None
             ),
             controller_url=env["AGENTTEAMS_CONTROLLER_URL"].rstrip("/"),
@@ -213,5 +248,43 @@ class ManagerConfig(BaseModel):
                     or env.get("AGENTTEAMS_ADMIN_PASSWORD")
                 )
                 else None
+            ),
+            admin_api_token=(
+                SecretStr(
+                    env.get("AGENTTEAMS_MANAGER_ADMIN_TOKEN")
+                    or env["AGENTTEAMS_ADMIN_PASSWORD"],
+                )
+                if (
+                    env.get("AGENTTEAMS_MANAGER_ADMIN_TOKEN")
+                    or env.get("AGENTTEAMS_ADMIN_PASSWORD")
+                )
+                else None
+            ),
+            external_channels=tuple(
+                ExternalChannelDocument.model_validate(item)
+                for item in json.loads(
+                    env.get("AGENTTEAMS_EXTERNAL_CHANNELS", "[]"),
+                )
+            ),
+            host_share_root=(
+                Path(env["AGENTTEAMS_HOST_SHARE_ROOT"]).resolve()
+                if env.get("AGENTTEAMS_HOST_SHARE_ROOT")
+                else None
+            ),
+            host_read_allowlist=tuple(
+                item.strip()
+                for item in env.get(
+                    "AGENTTEAMS_HOST_READ_ALLOWLIST",
+                    "",
+                ).split(",")
+                if item.strip()
+            ),
+            host_write_allowlist=tuple(
+                item.strip()
+                for item in env.get(
+                    "AGENTTEAMS_HOST_WRITE_ALLOWLIST",
+                    "",
+                ).split(",")
+                if item.strip()
             ),
         )

@@ -53,7 +53,7 @@ AGENTTEAMS_LLM_API_KEY="sk-xxx" make install
 | **`agentteams-manager`** | 轻量 AgentScope 2.0 Manager，提供 typed 工具和 SQLite/MinIO 恢复。 |
 
 创建 Worker 后会出现独立容器。Worker 可选择 OpenClaw、CoPaw、Hermes、
-QwenPaw 或 OpenHuman，和 Manager 运行时相互独立。
+Hermes 或 QwenPaw，和 Manager 运行时相互独立。
 
 **声明式 CLI（无需在 IM 里打字）：** `agt` 在 **`agentteams-controller`** 与 **`agentteams-manager`** 内均可用。宿主机上快速示例：
 

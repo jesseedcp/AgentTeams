@@ -12,7 +12,9 @@ so optional MCP tools and room-specific restrictions remain truthful.
 <!-- BEGIN GENERATED AGENTSCOPE TOOLS -->
 ## Registered Manager tools
 
+- `approve_external_contact`
 - `ban_matrix_user`
+- `block_external_contact`
 - `complete_task`
 - `configure_mcp`
 - `create_channel`
@@ -44,6 +46,7 @@ so optional MCP tools and room-specific restrictions remain truthful.
 - `invite_matrix_user`
 - `kick_matrix_user`
 - `list_channels`
+- `list_external_contacts`
 - `list_humans`
 - `list_matrix_members`
 - `list_matrix_rooms`
@@ -54,7 +57,9 @@ so optional MCP tools and room-specific restrictions remain truthful.
 - `list_workers`
 - `lookup_matrix_user`
 - `publish_service`
+- `read_host_file`
 - `reassign_project_task`
+- `register_matrix_user`
 - `remove_mcp`
 - `report_project_blocked`
 - `request_project_revision`
@@ -62,7 +67,9 @@ so optional MCP tools and room-specific restrictions remain truthful.
 - `revise_project_plan`
 - `revise_project_plan_major`
 - `schedule_task`
+- `send_external_message`
 - `send_notification`
+- `set_primary_external_contact`
 - `sleep_worker`
 - `switch_model`
 - `switch_worker_model`
@@ -78,6 +85,7 @@ so optional MCP tools and room-specific restrictions remain truthful.
 - `update_worker`
 - `upload_matrix_media`
 - `wake_worker`
+- `write_host_file`
 
 <!-- END GENERATED AGENTSCOPE TOOLS -->
 

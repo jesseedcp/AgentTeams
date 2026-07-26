@@ -182,7 +182,7 @@ worker-package.zip
 }
 ```
 
-`worker.runtime`（`openclaw`、`copaw`、`hermes`、`qwenpaw` 或 `openhuman`）会被 `agt apply worker --zip` 读取，
+`worker.runtime`（`openclaw`、`copaw`、`hermes` 或 `qwenpaw`）会被 `agt apply worker --zip` 读取，
 显式传入的 `--runtime` 参数优先级更高。两者都没设置时由 controller 兜底（默认 `openclaw`）。
 
 ## 场景一：迁移独立运行的 OpenClaw
@@ -378,7 +378,7 @@ bash agentteams-import.sh -f <resource.yaml>   # 转发到 agentteams-apply.sh�
 | `--model <模型>` | LLM 模型 ID | `qwen3.5-plus` |
 | `--skills <s1,s2>` | 逗号分隔的内置技能 | — |
 | `--mcp-servers <m1,m2>` | 逗号分隔的 MCP Server | — |
-| `--runtime <运行时>` | Worker 运行时（`openclaw`\|`copaw`\|`hermes`\|`qwenpaw`\|`openhuman`） | `openclaw` |
+| `--runtime <运行时>` | Worker 运行时（`openclaw`\|`copaw`\|`hermes`\|`qwenpaw`） | `openclaw` |
 | `--yes` | 跳过交互确认（包装脚本可能在底层吞掉） | 关闭 |
 
 **YAML 模式**（`-f`）：转发给 `agentteams-apply.sh`；不支持 `--prune`/`--dry-run`。

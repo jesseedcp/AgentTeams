@@ -84,8 +84,6 @@ spec:
               value: {{ include "agentteams.worker.hermesImage" . | quote }}
             - name: AGENTTEAMS_QWENPAW_WORKER_IMAGE
               value: {{ include "agentteams.worker.qwenpawImage" . | quote }}
-            - name: AGENTTEAMS_OPENHUMAN_WORKER_IMAGE
-              value: {{ include "agentteams.worker.openhumanImage" . | quote }}
             - name: AGENTTEAMS_DEFAULT_WORKER_RUNTIME
               value: {{ .Values.worker.defaultRuntime | quote }}
             - name: TZ
@@ -160,10 +158,30 @@ spec:
               value: {{ include "agentteams.manager.image" . | quote }}
             - name: AGENTTEAMS_MANAGER_SPEC
               value: {{ include "agentteams.manager.spec" . | quote }}
+            {{- if .Values.manager.persistence.enabled }}
+            - name: AGENTTEAMS_MANAGER_DATA_CLAIM
+              value: {{ printf "%s-manager-data" (include "agentteams.fullname" .) | quote }}
+            {{- end }}
+            {{- if .Values.manager.hostFiles.enabled }}
+            - name: AGENTTEAMS_MANAGER_HOST_PATH
+              value: {{ required "manager.hostFiles.hostPath is required when hostFiles are enabled" .Values.manager.hostFiles.hostPath | quote }}
+            - name: AGENTTEAMS_MANAGER_HOST_READ_ALLOWLIST
+              value: {{ join "," .Values.manager.hostFiles.readAllowlist | quote }}
+            - name: AGENTTEAMS_MANAGER_HOST_WRITE_ALLOWLIST
+              value: {{ join "," .Values.manager.hostFiles.writeAllowlist | quote }}
+            {{- end }}
+            {{- if .Values.manager.externalChannels }}
+            - name: AGENTTEAMS_EXTERNAL_CHANNELS
+              value: {{ .Values.manager.externalChannels | toJson | quote }}
+            {{- end }}
             {{- /* Cinny URL (for Gateway route initialization) */}}
             {{- if .Values.cinny.enabled }}
             - name: AGENTTEAMS_CINNY_URL
               value: {{ printf "http://%s-cinny.%s.svc.cluster.local:%d" (include "agentteams.fullname" .) (include "agentteams.namespace" .) (.Values.cinny.service.port | int) | quote }}
+            {{- end }}
+            {{- if .Values.manager.enabled }}
+            - name: AGENTTEAMS_MANAGER_ADMIN_URL
+              value: {{ printf "http://%s-manager.%s.svc.cluster.local:18799" (include "agentteams.fullname" .) (include "agentteams.namespace" .) | quote }}
             {{- end }}
             {{- /* Credential persistence */}}
             - name: AGENTTEAMS_CREDS_DIR
@@ -193,6 +211,13 @@ spec:
               value: {{ $v | quote }}
             {{- end }}
             {{- end }}
+          {{- if .Values.manager.externalChannelSecretRefs }}
+          envFrom:
+            {{- range .Values.manager.externalChannelSecretRefs }}
+            - secretRef:
+                name: {{ . | quote }}
+            {{- end }}
+          {{- end }}
           resources:
             {{- toYaml .Values.controller.resources | nindent 12 }}
           volumeMounts:

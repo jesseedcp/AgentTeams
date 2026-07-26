@@ -1,7 +1,7 @@
 # AgentScope Manager Operations
 
 This runbook covers the production `agentscope` Manager. OpenClaw, CoPaw,
-Hermes, QwenPaw, and OpenHuman are Worker runtimes and have separate
+Hermes and QwenPaw are Worker runtimes and have separate
 operational state.
 
 ## Service checks
@@ -231,3 +231,32 @@ deletion, then recreates, proves readiness, and refreshes topology from that
 saved request. `get_worker` exposes observed container and service-port state;
 `get_team` exposes the effective `peerMentions` policy and coordination-room
 facts.
+
+## Admin console and external channels
+
+Cinny remains at `/`. The authenticated operations console is routed at
+`/manager-admin/`; its API accepts the Manager admin token as a Bearer token.
+Health, readiness, and metrics remain unauthenticated on their dedicated
+paths for Kubernetes probes and scraping.
+
+Optional Discord, Telegram, Slack, Feishu, WhatsApp, and Signal adapters are
+configured by `manager.externalChannels`. Each token and webhook HMAC secret
+is an `env:NAME` reference whose value is injected from one of
+`manager.externalChannelSecretRefs`. First contact creates a durable `pending`
+record and posts an approval request to the Matrix Admin DM. Pending, blocked,
+and unknown contacts never enter an AgentScope turn. Only an Admin DM can use
+the external-contact approval, primary-channel, block, and send tools.
+
+Host files are disabled by default. Enabling `manager.hostFiles` mounts only
+the exact configured Kubernetes node path at `/host-share`; read and write
+operations still require separate relative-path allowlists. Absolute paths,
+parent traversal, oversized files, and writes outside the write allowlist are
+rejected. Host writes are atomic and confirmation-gated.
+
+Manager SQLite and AgentScope session/E2EE state use the Manager PVC. Tuwunel
+and MinIO retain their own StatefulSet PVCs. MinIO journal snapshots are
+disaster recovery, not a substitute for the primary SQLite volume.
+
+Tuwunel is pinned to 1.8.2. Local account creation uses its registration
+token for ordinary names and its authenticated shared-secret endpoint when
+the AgentTeams AppService exclusive namespace rejects normal registration.

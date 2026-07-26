@@ -55,7 +55,7 @@ The default **embedded** install starts two main containers (see [architecture.m
 | **`agentteams-manager`** | Lightweight AgentScope 2.0 Manager with typed tools and SQLite/MinIO recovery. |
 
 Worker containers are created when you add Workers. OpenClaw, CoPaw, Hermes,
-QwenPaw, and OpenHuman runtimes are supported independently of the Manager.
+and QwenPaw runtimes are supported independently of the Manager.
 
 **Declarative CLI (no chat required):** The `agt` binary is available **inside** `agentteams-controller` and `agentteams-manager`. For quick checks and provisioning from the host:
 

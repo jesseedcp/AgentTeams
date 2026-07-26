@@ -5,7 +5,7 @@ AgentTeams Manager 是基于 **AgentScope 2.0.4.post1** 的长生命周期 Pytho
 权限检查和外部副作用。
 
 Manager 只有一个运行时：`agentscope`。OpenClaw、CoPaw、Hermes、QwenPaw
-和 OpenHuman 都是 Worker 运行时。
+都是 Worker 运行时。
 
 ## 状态边界
 
@@ -88,7 +88,6 @@ MCP 管理、服务发布和任务协调。
 | CoPaw 兼容运行时 | `copaw` |
 | Hermes | `hermes` |
 | QwenPaw | `qwenpaw` |
-| OpenHuman | `openhuman` |
 
 ## 模型与 MCP
 

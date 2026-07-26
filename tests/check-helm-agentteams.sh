@@ -27,7 +27,7 @@ grep -q 'name: AGENTTEAMS_WORKER_IMAGE' "${render}"
 grep -q 'name: AGENTTEAMS_COPAW_WORKER_IMAGE' "${render}"
 grep -q 'name: AGENTTEAMS_HERMES_WORKER_IMAGE' "${render}"
 grep -q 'name: AGENTTEAMS_QWENPAW_WORKER_IMAGE' "${render}"
-grep -q 'name: AGENTTEAMS_OPENHUMAN_WORKER_IMAGE' "${render}"
+! grep -qi 'open''human' "${render}"
 grep -q 'agentteams/agentteams-qwenpaw-worker:' "${render}"
 grep -q 'AGENTTEAMS_MCP_GITHUB_TOKEN: "github-test"' "${render}"
 ! grep -q 'agentteams-manager-copaw' "${render}"
@@ -54,7 +54,7 @@ grep -q 'enum: \[agentscope\]' \
     "${CHART}/crds/managers.agentteams.io.yaml"
 ! grep -q 'enum: \[openclaw, copaw\]' \
     "${CHART}/crds/managers.agentteams.io.yaml"
-grep -q 'enum: \[openclaw, copaw, hermes, qwenpaw, openhuman\]' \
+grep -q 'enum: \[openclaw, copaw, hermes, qwenpaw\]' \
     "${CHART}/crds/workers.agentteams.io.yaml"
 
 if helm template agentteams "${CHART}" "${COMMON_ARGS[@]}" \

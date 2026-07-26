@@ -1,0 +1,20 @@
+{{- if .Values.manager.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ printf "%s-manager" (include "agentteams.fullname" .) }}
+  namespace: {{ include "agentteams.namespace" . }}
+  labels:
+    {{- include "agentteams.component.labels" (dict "root" . "component" "manager") | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    agentteams.io/role: manager
+    agentteams.io/manager: default
+    agentteams.io/controller: {{ include "agentteams.controller.fullname" . | quote }}
+  ports:
+    - name: manager-http
+      port: 18799
+      targetPort: manager-health
+      protocol: TCP
+{{- end }}

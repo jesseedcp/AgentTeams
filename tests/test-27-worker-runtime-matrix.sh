@@ -1,5 +1,5 @@
 #!/bin/bash
-# test-27-worker-runtime-matrix.sh - Release gate for all five Worker runtimes
+# test-27-worker-runtime-matrix.sh - Release gate for all four Worker runtimes
 #
 # Each runtime is created, observed through the Controller, exercised through
 # its real Matrix adapter, given a canonical MinIO task, required to publish a
@@ -13,7 +13,7 @@ source "${SCRIPT_DIR}/lib/minio-client.sh"
 test_setup "27-worker-runtime-matrix"
 
 if ! require_llm_key; then
-    log_fail "Five-runtime release matrix requires AGENTTEAMS_LLM_API_KEY"
+    log_fail "Four-runtime release matrix requires AGENTTEAMS_LLM_API_KEY"
     test_teardown "27-worker-runtime-matrix"
     test_summary
     exit 1
@@ -27,7 +27,7 @@ minio_setup
 STORAGE_PREFIX="${STORAGE_PREFIX:-${TEST_STORAGE_PREFIX:-agentteams/agentteams-storage}}"
 WORKER_MODEL="${AGENTTEAMS_DEFAULT_MODEL:-qwen3.6-plus}"
 RUN_SUFFIX="$(printf '%06d' $$)"
-RUNTIMES=(openclaw copaw hermes qwenpaw openhuman)
+RUNTIMES=(openclaw copaw hermes qwenpaw)
 CREATED_WORKERS=()
 ACTIVE_TASK=""
 
@@ -50,7 +50,6 @@ _runtime_image_pattern() {
         copaw) echo 'copaw-worker' ;;
         hermes) echo 'hermes-worker' ;;
         qwenpaw) echo 'qwenpaw-worker' ;;
-        openhuman) echo 'openhuman-worker' ;;
     esac
 }
 
@@ -60,7 +59,6 @@ _task_suffix() {
         copaw) echo copawx ;;
         hermes) echo hermes ;;
         qwenpaw) echo qwenpw ;;
-        openhuman) echo ophumn ;;
     esac
 }
 

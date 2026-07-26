@@ -9,9 +9,9 @@ Record image-affecting changes to `manager/`, `worker/`, `copaw/`, `hermes/`, `o
 - **Single AgentScope Manager image**: Ship one Python 3.11 Manager process
   with AgentScope 2.0, Matrix E2EE, `agt`, the retained 16-skill catalog, and
   standard-library health/readiness/metrics on port 18799. OpenClaw, CoPaw,
-  Hermes, QwenPaw, and OpenHuman remain Worker runtimes.
+  Hermes and QwenPaw remain Worker runtimes.
 - **Role-specific runtimes**: Make `agentscope` the Manager-only runtime while
-  preserving OpenClaw, CoPaw, Hermes, QwenPaw, and OpenHuman as independent
+  preserving OpenClaw, CoPaw, Hermes, and QwenPaw as independent
   Worker choices with their existing images.
 - **AgentScope resource administration**: Expose policy-scoped typed tools for
   Worker, Team, Human, Matrix, channel, and Nacos operations, with durable
@@ -37,12 +37,29 @@ Record image-affecting changes to `manager/`, `worker/`, `copaw/`, `hermes/`, `o
   task, Worker-workspace, and shared-knowledge sync roots; join task upload and
   Worker mention in one durable operation; and recreate Workers from a saved
   desired-state copy.
-- **Five-runtime release parity**: Build and inject OpenClaw, CoPaw, Hermes,
-  QwenPaw, and OpenHuman Worker images consistently across Make, local kind,
+- **Authenticated Matrix operations UI**: Keep Cinny at `/`, serve a
+  token-protected Manager console under `/manager-admin/`, and expose health,
+  session, confirmation, project, Worker, Team, heartbeat, and runtime facts.
+- **Authenticated local account provisioning**: Pin Tuwunel 1.8.2 so the
+  Manager can use registration-token UIA for ordinary names and the
+  shared-secret administrative endpoint when the AppService correctly owns
+  an exclusive user namespace.
+- **Approved external channels**: Add signed Discord, Telegram, Slack, Feishu,
+  WhatsApp, and Signal adapters with durable first-contact approval, trusted
+  contact blocking, one primary contact, and Matrix Admin-DM escalation.
+- **PVC and host-file boundaries**: Persist Manager SQLite and AgentScope
+  state on a dedicated PVC; keep optional Kubernetes host files disabled by
+  default and enforce separate read/write path allowlists when enabled.
+- **Five-role release parity**: Build and inject OpenClaw, CoPaw, Hermes,
+  and QwenPaw Worker images consistently across Make, local kind,
   Helm, and both installers while keeping the Manager fixed to AgentScope.
 
 **Bug Fixes**
 
+- **PVC-first restart recovery**: Preserve an existing Manager SQLite database
+  across Pod restarts and replay only newer immutable journal events; use the
+  MinIO snapshot only when the local database is absent, matching the declared
+  primary-storage and disaster-recovery roles.
 - **Fork-safe integration CI**: Port the latest upstream PR security boundary:
   run untrusted contributions through `pull_request`, check out the reviewed
   merge ref, keep permissions read-only by default, and filter every

@@ -31,7 +31,7 @@ class LostCreateResultController:
         self.get_calls += 1
         return WorkerResource(
             name=name,
-            runtime="openhuman",
+            runtime="hermes",
             phase="Running",
             room_id="!alice:example",
         )

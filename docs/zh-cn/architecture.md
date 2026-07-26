@@ -9,12 +9,12 @@ Controller 继续作为资源生命周期和部署的权威系统。
 |---|---|---|
 | Controller | Manager、Worker、Team、Human、Matrix、存储和网关状态的 REST API 与协调 | Go；`agentteams-controller` 或嵌入式 Controller 镜像 |
 | Manager | Matrix 对话、房间权限工具、持久工作流、恢复、调度、委派 | AgentScope 2.0.4.post1；`agentteams-manager` |
-| Workers | 执行被委派的工作；每个 Worker/Team 成员使用一个可替换运行时 | OpenClaw、CoPaw、Hermes、QwenPaw 或 OpenHuman |
+| Workers | 执行被委派的工作；每个 Worker/Team 成员使用一个可替换运行时 | OpenClaw、CoPaw、Hermes 或 QwenPaw |
 | Matrix/Cinny | 人与 Agent 的房间、消息、线程、成员和媒体 | Tuwunel/Synapse 与 Cinny |
 | Higress | OpenAI 兼容模型路由、MCP、Consumer、服务发布 | 托管或已有网关 |
 | MinIO/S3/OSS | 日志、快照、prompt、任务、项目和文件 | 托管 MinIO 或兼容对象存储 |
 
-OpenClaw、CoPaw、Hermes、QwenPaw 和 OpenHuman 都是 Worker 运行时，
+OpenClaw、CoPaw、Hermes 和 QwenPaw 都是 Worker 运行时，
 不是 Manager 的回退运行时。
 
 ## 控制流与数据流
@@ -114,7 +114,7 @@ Cinny，并创建独立的轻量 `agentteams-manager` 与 Worker 容器。宿主
 Helm 安装 Controller 和基础设施工作负载，然后创建 bootstrap Manager CR。
 Reconciler 创建 Manager/Worker Pod。Manager CRD 只接受
 `runtime: agentscope`；Worker 和 Team 成员 CRD 接受 `openclaw`、`copaw`、
-`hermes`、`qwenpaw`、`openhuman`。
+`hermes`、`qwenpaw`。
 
 ## Skills 与验证
 

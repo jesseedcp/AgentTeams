@@ -193,6 +193,7 @@ func (a *App) Start(ctx context.Context) error {
 				AIStreamIdleTimeoutSeconds: a.cfg.AIStreamIdleTimeoutSeconds,
 				TuwunelURL:                 a.cfg.MatrixServerURL,
 				CinnyURL:                   a.cfg.CinnyURL,
+				ManagerAdminURL:            a.cfg.ManagerAdminURL,
 				GitHubToken:                a.cfg.GitHubToken,
 				SkillsDir:                  a.cfg.SkillsDir,
 				ControllerName:             a.cfg.ControllerName,

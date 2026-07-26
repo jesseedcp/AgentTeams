@@ -19,7 +19,7 @@ This subtree owns:
 - translation of Controller-generated Worker configuration into CoPaw files;
 - CoPaw Worker tests.
 
-OpenClaw, Hermes, QwenPaw, and OpenHuman Workers live in their respective
+OpenClaw, Hermes, and QwenPaw Workers live in their respective
 runtime paths. Manager tools and policy live under `manager-agentscope/`.
 
 ## Runtime data flow

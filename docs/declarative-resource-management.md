@@ -96,8 +96,8 @@ spec:
 |-------|------|----------|---------|-------------|
 | `metadata.name` | string | Yes | — | Worker name, globally unique |
 | `spec.model` | string | Yes | — | LLM model ID, e.g. `claude-sonnet-4-6`, `qwen3.5-plus` |
-| `spec.runtime` | string | No | `openclaw` | Worker runtime: `openclaw`, `copaw`, `hermes`, `qwenpaw`, or `openhuman` |
-| `spec.image` | string | No | — | Custom Docker image; if empty, the controller selects the runtime-specific image (`AGENTTEAMS_WORKER_IMAGE`, `AGENTTEAMS_COPAW_WORKER_IMAGE`, `AGENTTEAMS_HERMES_WORKER_IMAGE`, `AGENTTEAMS_QWENPAW_WORKER_IMAGE`, or `AGENTTEAMS_OPENHUMAN_WORKER_IMAGE`) |
+| `spec.runtime` | string | No | `openclaw` | Worker runtime: `openclaw`, `copaw`, `hermes`, or `qwenpaw` |
+| `spec.image` | string | No | — | Custom Docker image; if empty, the controller selects the runtime-specific image (`AGENTTEAMS_WORKER_IMAGE`, `AGENTTEAMS_COPAW_WORKER_IMAGE`, `AGENTTEAMS_HERMES_WORKER_IMAGE`, or `AGENTTEAMS_QWENPAW_WORKER_IMAGE`) |
 | `spec.identity` | string | No | — | Worker public identity (OpenClaw: generates IDENTITY.md; QwenPaw: merged into SOUL.md per controller) |
 | `spec.soul` | string | No | — | Worker personality and values (generates SOUL.md) |
 | `spec.agents` | string | No | — | Agent behavior rules, used to generate AGENTS.md |
@@ -278,7 +278,7 @@ spec:
 |-------|------|----------|-------------|
 | `workers[].name` | string | Yes | Worker name |
 | `workers[].model` | string | No | LLM model |
-| `workers[].runtime` | string | No | Worker runtime (`openclaw`, `copaw`, `hermes`, `qwenpaw`, or `openhuman`) |
+| `workers[].runtime` | string | No | Worker runtime (`openclaw`, `copaw`, `hermes`, or `qwenpaw`) |
 | `workers[].image` | string | No | Custom Docker image |
 | `workers[].identity` | string | No | Worker public identity (generates IDENTITY.md) |
 | `workers[].soul` | string | No | Worker personality and values (generates SOUL.md) |
@@ -666,7 +666,7 @@ Regardless of URI format, the extracted package follows a unified structure:
 }
 ```
 
-`worker.runtime` (`openclaw`, `copaw`, `hermes`, `qwenpaw`, or `openhuman`) is honored by `agt apply worker --zip`
+`worker.runtime` (`openclaw`, `copaw`, `hermes`, or `qwenpaw`) is honored by `agt apply worker --zip`
 and overridden by an explicit `--runtime` flag.
 
 ## Operations

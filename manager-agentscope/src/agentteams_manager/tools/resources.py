@@ -3,11 +3,18 @@
 from __future__ import annotations
 
 import inspect
+import os
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any, Literal, Protocol
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SecretStr,
+    model_validator,
+)
 
 from agentteams_manager.clients.agt import (
     HumanCreateRequest,
@@ -19,6 +26,7 @@ from agentteams_manager.domain.errors import PermissionDeniedError
 from agentteams_manager.domain.models import (
     HumanResource,
     MediaReference,
+    RoomKind,
     RoomPolicy,
     TeamResource,
     WorkerResource,
@@ -72,6 +80,7 @@ RESOURCE_TOOL_NAMES = frozenset(
         "list_matrix_rooms",
         "list_matrix_members",
         "lookup_matrix_user",
+        "register_matrix_user",
         "get_matrix_room_state",
         "upload_matrix_media",
         "download_matrix_media",
@@ -133,6 +142,12 @@ class _RoomInput(_Input):
 
 class _UserInput(_Input):
     user_id: str = Field(pattern=r"^@[^:\s]+:.+$")
+
+
+class _RegisterMatrixUserInput(_Input):
+    username: str = Field(pattern=r"^[a-z0-9._=-]{1,255}$")
+    password_env: str = Field(pattern=r"^[A-Z][A-Z0-9_]{1,127}$")
+    admin: bool = False
 
 
 class _RoomUserInput(_Input):
@@ -227,6 +242,14 @@ class ResourceMatrix(Protocol):
         self,
         user_id: str,
     ) -> dict[str, str | None]: ...
+
+    async def register_user(
+        self,
+        *,
+        username: str,
+        password: SecretStr,
+        admin: bool = False,
+    ) -> dict[str, str | bool]: ...
 
     async def create_private_room(
         self,
@@ -342,7 +365,7 @@ class ResourceToolkit:
         self._matrix = matrix
         self._matrix_workflows = matrix_workflows
         self._channels = channels
-        del manager_admin_room
+        self._manager_admin_room = manager_admin_room
         self._context_provider = (
             context_provider or _current_mutation_context
         )
@@ -557,6 +580,16 @@ class ResourceToolkit:
                 True,
             ),
             (
+                "register_matrix_user",
+                (
+                    "Register a local Matrix user from a password "
+                    "environment variable; Admin DM only."
+                ),
+                _RegisterMatrixUserInput,
+                self._register_matrix_user,
+                False,
+            ),
+            (
                 "get_matrix_room_state",
                 "Read current Matrix room state events.",
                 _RoomInput,
@@ -622,6 +655,13 @@ class ResourceToolkit:
                 read_only,
             ) in specs
             if name in self._policy.allowed_tools
+            and (
+                name != "register_matrix_user"
+                or (
+                    self._policy.kind is RoomKind.ADMIN_DM
+                    and self._policy.room_id == self._manager_admin_room
+                )
+            )
         )
 
     def _tool(
@@ -963,6 +1003,26 @@ class ResourceToolkit:
             resource_type="matrix_user",
             name=item.user_id,
             result=await self._matrix.lookup_user(item.user_id),
+        )
+
+    async def _register_matrix_user(self, request: BaseModel) -> object:
+        item = _RegisterMatrixUserInput.model_validate(request)
+        raw_password = os.environ.get(item.password_env)
+        if not raw_password:
+            raise RuntimeError(
+                f"password environment variable {item.password_env} "
+                "is not configured",
+            )
+        result = await self._matrix.register_user(
+            username=item.username,
+            password=SecretStr(raw_password),
+            admin=item.admin,
+        )
+        return ToolReceipt(
+            tool="register_matrix_user",
+            resource_type="matrix_user",
+            name=str(result["user_id"]),
+            result=dict(result),
         )
 
     async def _get_matrix_room_state(self, request: BaseModel) -> object:

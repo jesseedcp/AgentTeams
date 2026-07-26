@@ -35,7 +35,6 @@ make build-embedded
 make build-copaw-worker
 make build-hermes-worker
 make build-qwenpaw-worker
-make build-openhuman-worker
 
 # 使用指定版本标签构建
 make build VERSION=0.1.0

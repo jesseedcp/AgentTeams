@@ -1,7 +1,7 @@
 # AgentScope Manager 运维手册
 
 本手册只适用于生产 `agentscope` Manager。OpenClaw、CoPaw、Hermes、
-QwenPaw 和 OpenHuman 都是 Worker 运行时，拥有各自独立的运行状态。
+Hermes 和 QwenPaw 都是 Worker 运行时，拥有各自独立的运行状态。
 
 ## 服务检查
 
@@ -202,3 +202,29 @@ Worker 的 Matrix 提醒属于同一个持久化 `FILE_SYNC` 操作，使用稳�
 `reset_worker` 在删除前先持久化完整的 typed Worker 创建请求，然后严格按该
 副本重建、验证就绪并刷新拓扑。`get_worker` 会暴露实际容器与服务端口状态；
 `get_team` 会暴露生效的 `peerMentions` 策略和协作房间事实。
+
+## 管理控制台与外部渠道
+
+Cinny 继续占用根路径 `/`；经过认证的运维控制台位于
+`/manager-admin/`，其 API 使用 Manager 管理令牌作为 Bearer Token。
+Kubernetes 探针和监控使用的健康、就绪与 metrics 路径保持独立。
+
+Discord、Telegram、Slack、飞书、WhatsApp 和 Signal 均为可选适配器，通过
+`manager.externalChannels` 配置。Token 和 Webhook HMAC 密钥只能写成
+`env:NAME` 引用，真实值由 `manager.externalChannelSecretRefs` 指向的
+Kubernetes Secret 注入。首次联系人只会创建持久化 `pending` 记录，并在
+Matrix 管理员私聊发起审批；待审批、已屏蔽和未知联系人都不会进入 AgentScope
+回合。只有管理员私聊能够批准、屏蔽、设置主联系人或发送外部消息。
+
+主机文件功能默认关闭。显式开启 `manager.hostFiles` 后，只会把指定的
+Kubernetes 节点路径挂载到 `/host-share`，并仍受独立读/写相对路径白名单
+约束。绝对路径、父目录穿越、超限文件和白名单外写入全部被拒绝；写入采用
+原子替换并要求管理员确认。
+
+Manager SQLite、AgentScope 会话与 E2EE 状态保存在 Manager PVC；Tuwunel
+和 MinIO 使用各自 StatefulSet PVC。MinIO journal/快照只用于灾难恢复，不
+替代 SQLite 主持久卷。
+
+Tuwunel 固定为 1.8.2。普通本地账号使用注册令牌创建；如果账号名称属于
+AgentTeams AppService 的排他命名空间，Manager 会改用经过共享密钥认证的
+管理注册端点，不会降低 AppService 的排他保护。

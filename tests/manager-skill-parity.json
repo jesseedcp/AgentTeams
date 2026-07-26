@@ -15,7 +15,7 @@
     {
       "name": "channel-management",
       "skillFile": "manager/agent/skills/channel-management/SKILL.md",
-      "tools": ["list_channels", "create_channel", "update_channel", "delete_channel", "send_notification"],
+      "tools": ["list_channels", "create_channel", "update_channel", "delete_channel", "send_notification", "list_external_contacts", "approve_external_contact", "block_external_contact", "set_primary_external_contact", "send_external_message"],
       "evidence": [
         "manager-agentscope/tests/integration/test_matrix_resource_admin.py",
         "manager-agentscope/tests/contract/test_integration_skill_parity.py"
@@ -24,7 +24,7 @@
     {
       "name": "file-sync-management",
       "skillFile": "manager/agent/skills/file-sync-management/SKILL.md",
-      "tools": ["sync_files"],
+      "tools": ["sync_files", "read_host_file", "write_host_file"],
       "evidence": [
         "manager-agentscope/tests/integration/test_file_sync.py",
         "manager-agentscope/tests/contract/test_task_skill_parity.py"
@@ -51,7 +51,7 @@
     {
       "name": "matrix-server-management",
       "skillFile": "manager/agent/skills/matrix-server-management/SKILL.md",
-      "tools": ["list_matrix_rooms", "list_matrix_members", "lookup_matrix_user", "get_matrix_room_state", "upload_matrix_media", "download_matrix_media", "invite_matrix_user", "kick_matrix_user", "ban_matrix_user", "unban_matrix_user"],
+      "tools": ["list_matrix_rooms", "list_matrix_members", "lookup_matrix_user", "register_matrix_user", "get_matrix_room_state", "upload_matrix_media", "download_matrix_media", "invite_matrix_user", "kick_matrix_user", "ban_matrix_user", "unban_matrix_user"],
       "evidence": [
         "manager-agentscope/tests/integration/test_matrix_resource_admin.py",
         "manager-agentscope/tests/contract/test_resource_skill_parity.py"

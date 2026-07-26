@@ -14,13 +14,13 @@
 
 **Manager-Workers アーキテクチャ**により、AgentScope 2.0 Manager を通じて複数の Worker Agent を連携させ、複雑なタスクを完了できます。すべての会話は Matrix ルームで可視化され、いつでも介入できます。
 
-Manager ランタイムは AgentScope 2.0 に固定されています。Worker は OpenClaw、CoPaw、Hermes、QwenPaw、OpenHuman から選択できます。
+Manager ランタイムは AgentScope 2.0 に固定されています。Worker は OpenClaw、CoPaw、Hermes、QwenPaw から選択できます。
 
 ## 主な特徴
 
 - 🧬 **Manager-Workers アーキテクチャ**: 個々の Worker Claw を人間が監視する必要がなくなり、Agent が Agent を管理することを実現します。
 
-- 🤝 **マルチランタイム協調**: OpenClaw、CoPaw、Hermes、QwenPaw、OpenHuman の Worker が同じ IM ルーム内で共存し、AgentScope Manager がライフサイクルと協調関係を一元管理します。
+- 🤝 **マルチランタイム協調**: OpenClaw、CoPaw、Hermes、QwenPaw の Worker が同じ IM ルーム内で共存し、AgentScope Manager がライフサイクルと協調関係を一元管理します。
 
 - 📦 **MinIO 共有ファイルシステム**: Agent 間の情報共有のための共有ファイルシステムを導入し、マルチエージェント連携シナリオにおけるトークン消費を大幅に削減します。
 
@@ -30,7 +30,7 @@ Manager ランタイムは AgentScope 2.0 に固定されています。Worker �
 
 ## ニュース
 
-> 以下はアップストリームの履歴です。本プロジェクトの現在の Manager は AgentScope 2.0 のみで、OpenClaw、CoPaw、Hermes、QwenPaw、OpenHuman は Worker ランタイムです。
+> 以下はアップストリームの履歴です。本プロジェクトの現在の Manager は AgentScope 2.0 のみで、OpenClaw、CoPaw、Hermes、QwenPaw は Worker ランタイムです。
 
 - **2026-05-27**: [Release Notes](https://github.com/agentscope-ai/AgentTeams/releases/tag/v1.1.2) — AgentTeams v1.1.2：インストーラのデフォルト Worker ランタイムを QwenPaw に変更し keep-all アップグレードフローをサポート、Team に人間コーディネーターを追加し Team Leader の協調ツールを刷新、Nacos リモートスキル対応と `sts-agentteams` / `ai-registry` STS 認証、Worker の CR 名と Runtime 名の分離、コントローラーの reconcile メトリクスと正常終了を追加。
 - **2026-05-07**: [Release Notes](https://github.com/agentscope-ai/AgentTeams/releases/tag/v1.1.1) | [Changelog](changelog/v1.1.1.md) — AgentTeams v1.1.1：Worker/Manager/Team CRD と Team Leader 上の宣言的 MCP（破壊的変更）、CR の `spec.env` カスタム環境変数、Token Plan・Qwen Cloud international・`qwen3.6-plus` モデル、コントローラー RBAC の名前空間スコープ化、Worker パッケージの `SOUL.md` 任意化。
@@ -189,7 +189,7 @@ helm install agentteams higress.io/agentteams \
 | `credentials.defaultModel` | 任意 | デフォルトモデル、デフォルトは `gpt-5.4` |
 | `credentials.llmBaseUrl` | 任意 | OpenAI 互換のベース URL（例: `https://api.deepseek.com/v1`）。公式 OpenAI API を使用する場合は空のまま |
 | `manager.runtime` | 任意 | Manager ランタイム。`agentscope` 固定（AgentScope 2.0） |
-| `worker.defaultRuntime` | 任意 | Worker デフォルトランタイム: `openclaw`、`copaw`、`hermes`、`qwenpaw`、または `openhuman` |
+| `worker.defaultRuntime` | 任意 | Worker デフォルトランタイム: `openclaw`、`copaw`、`hermes`、または `qwenpaw` |
 
 <details>
 <summary>代替 Worker ランタイムの使用（AgentScope Manager + Hermes Workers）</summary>
@@ -315,7 +315,6 @@ AgentTeams は 5 つの Worker ランタイムをサポートし、**同じ IM �
 - **CoPaw**（Python）— Matrix と共有ストレージを統合した軽量な対話型 Worker
 - **QwenPaw**（Python）— 軽量ランタイム、ブラウザ自動化やクイックタスクに適している
 - **Hermes**（[hermes-agent](https://github.com/NousResearch/hermes-agent)）— ターミナルサンドボックス、自己改善スキル、永続メモリを備えた自律コーディング Agent
-- **OpenHuman**（Rust）— ネイティブ Matrix チャネルを使う低オーバーヘッド Worker
 
 各ランタイムは異なるタスクに優れています。推奨パターン：決定論的な Agent（OpenClaw/QwenPaw）をリーダーとしてタスク分解と割り当てを行い、Hermes Worker に自律的なコード実行を担当させる。すべてのランタイムは同じルーム内で Matrix `m.mentions` を介して通信し、完全に可視で、いつでも介入可能です。
 
@@ -337,7 +336,7 @@ agt update worker --runtime hermes
 └─────────────────────────┬────────────────────────────┘
                           │ creates and coordinates
 ┌─────────────────────────▼────────────────────────────┐
-│ OpenClaw │ CoPaw │ Hermes │ QwenPaw │ OpenHuman     │
+│ OpenClaw │ CoPaw │ Hermes │ QwenPaw                 │
 │                    Worker runtimes                    │
 └──────────────────────────────────────────────────────┘
 ```

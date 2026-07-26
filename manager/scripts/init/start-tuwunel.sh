@@ -10,6 +10,10 @@ export CONDUWUIT_ADDRESS="0.0.0.0"
 export CONDUWUIT_PORT=6167
 export CONDUWUIT_ALLOW_REGISTRATION=true
 export CONDUWUIT_REGISTRATION_TOKEN="${AGENTTEAMS_REGISTRATION_TOKEN}"
+# Tuwunel 1.8.2 implements the authenticated Synapse-compatible account
+# creation endpoint used by the Manager when the AppService's exclusive
+# namespace correctly blocks ordinary registration.
+export CONDUWUIT_REGISTRATION_SHARED_SECRET="${AGENTTEAMS_REGISTRATION_TOKEN}"
 export CONDUWUIT_ALLOW_LEGACY_MEDIA=true
 export CONDUWUIT_ALLOW_UNSTABLE_ROOM_VERSIONS=true
 export CONDUWUIT_DB_POOL_WORKERS_LIMIT=32

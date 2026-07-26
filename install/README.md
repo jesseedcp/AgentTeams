@@ -68,7 +68,7 @@ Interactive prompts will ask for:
 - Default Worker runtime
 
 The Manager runtime is fixed to `agentscope`. Workers independently support
-`openclaw`, `copaw`, `hermes`, `qwenpaw`, and `openhuman`.
+`openclaw`, `copaw`, `hermes`, and `qwenpaw`.
 
 ### Install Worker
 

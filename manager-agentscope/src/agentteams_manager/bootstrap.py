@@ -16,6 +16,7 @@ from urllib.parse import urlsplit
 from pydantic import SecretStr
 
 from .application import ManagerApplication
+from .admin.service import AdminSnapshotService
 from .clients.agt import AgtClient
 from .clients.git import GitClient
 from .clients.higress import HigressClient
@@ -30,6 +31,9 @@ from .clients.model_gateway import (
 )
 from .clients.nacos import NacosClient
 from .clients.process import ProcessRunner
+from .channels.http_providers import HttpChannelAdapter
+from .channels.matrix import MatrixChannelEscalation
+from .channels.service import ChannelService, ExternalContactRepository
 from .config import (
     ManagerConfig,
     PromptSources,
@@ -79,6 +83,8 @@ from .state.sessions import SessionRepository
 from .state.tasks import ProjectGraphRepository, TaskRepository
 from .state.topology import TopologyRepository
 from .tools.configuration import ConfigurationToolkitFactory
+from .tools.channels import ChannelToolkitFactory
+from .tools.host_files import HostFileAccess, HostFileToolkitFactory
 from .tools.integrations import IntegrationToolkitFactory
 from .tools.resources import ResourceToolkitFactory
 from .tools.storage import FileSyncService
@@ -438,6 +444,7 @@ def build_application(
         journal=journal,
         replay_event=operations.replay_event,
         temp_directory=config.workspace / "tmp",
+        prefer_local_database=True,
     )
 
     agt = AgtClient(ProcessRunner(allowed_executables=("agt",)))
@@ -453,6 +460,26 @@ def build_application(
     matrix = MatrixClient(
         MatrixClientConfig.from_manager_config(config),
         operations,
+    )
+    channel_service = ChannelService(
+        contacts=ExternalContactRepository(database),
+        adapters=tuple(
+            HttpChannelAdapter(
+                provider=document.provider,
+                outbound_url=document.outbound_url,
+                token=_environment_secret(
+                    document.token_env,
+                ).get_secret_value(),
+                webhook_secret=_environment_secret(
+                    document.webhook_secret_env,
+                ).get_secret_value(),
+            )
+            for document in config.external_channels
+        ),
+        escalation=MatrixChannelEscalation(
+            matrix=matrix,
+            admin_room_id=config.manager_admin_room_id,
+        ),
     )
     topology_resolver = TopologyResolver(
         controller=agt,
@@ -614,6 +641,18 @@ def build_application(
     tool_provider = CompositeToolProvider(
         resource_tools,
         task_tools,
+        ChannelToolkitFactory(
+            service=channel_service,
+            yolo=config.yolo,
+        ),
+        HostFileToolkitFactory(
+            access=HostFileAccess(
+                root=config.host_share_root,
+                read_allowlist=config.host_read_allowlist,
+                write_allowlist=config.host_write_allowlist,
+            ),
+            yolo=config.yolo,
+        ),
         ConfigurationToolkitFactory(
             service=integration_service,
             yolo=config.yolo,
@@ -767,10 +806,23 @@ def build_application(
         resumers[kind] = integration_service.resume_operation
 
     readiness = ReadinessState()
+    admin_service = AdminSnapshotService(
+        database=database,
+        readiness=readiness,
+        controller=agt,
+        runtime_registry=runtime_registry,
+    )
     health = HealthServer(
         readiness=readiness,
         metrics=metrics,
         port=config.health_port,
+        admin_token=config.admin_api_token,
+        admin_snapshot=admin_service.snapshot,
+        webhook_handler=(
+            channel_service.ingest
+            if channel_service.providers
+            else None
+        ),
     )
     closeables = tuple(
         dependency
@@ -780,6 +832,7 @@ def build_application(
             model_gateway,
             higress,
             mcp_registry,
+            channel_service,
         )
         if dependency is not None
     )

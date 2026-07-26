@@ -8,7 +8,7 @@ package, use the registry import workflow.
 Ask for or derive only from explicit administrator instructions:
 
 - `name`: lowercase resource identity
-- `runtime`: `openclaw`, `copaw`, `hermes`, `qwenpaw`, or `openhuman`
+- `runtime`: `openclaw`, `copaw`, `hermes`, or `qwenpaw`
 - `model`: non-empty model identifier
 - `identity` and `soul`: optional persona and operating instructions
 - `skills`: the complete desired skill-name array

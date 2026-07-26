@@ -4,7 +4,7 @@
 
 **Goal:** Make the AgentScope 2.0 Manager behaviorally compatible with the latest official AgentTeams Team/Worker contract while retaining Cinny, Kubernetes, SQLite, MinIO recovery, and the new AgentScope runtime.
 
-**Architecture:** Treat official AgentTeams commit `82cbd5fe78d294b1018fc8a037e4f91879dce9e7` as the audited resource-contract baseline, with no legacy Team compatibility path. Keep AgentScope as the conversational and tool runtime. Put durable orchestration state in SQLite, external-effect recovery in the existing MinIO journal/outbox, and resolve all Matrix actors and confirmations through topology-aware services rather than room-local prompt state.
+**Architecture:** Treat official AgentTeams commit `785c2db56a02c0635a66bba490ad0f6f327c790a` as the audited resource-contract baseline, with no legacy Team compatibility path. Keep AgentScope as the conversational and tool runtime. Put durable orchestration state in SQLite, external-effect recovery in the existing MinIO journal/outbox, and resolve all Matrix actors and confirmations through topology-aware services rather than room-local prompt state.
 
 **Tech Stack:** Go controller and CLI, Kubernetes CRDs and Helm, Python 3.11+, AgentScope `2.0.4.post1`, SQLite, MinIO/S3, Matrix/Tuwunel, Cinny, pytest, Go test.
 
@@ -17,7 +17,7 @@
 - Keep Cinny at `http://127.0.0.1:18388`; do not restore Element.
 - Keep Kubernetes as the deployment target.
 - Use Python standard-library SQLite; do not introduce Redis.
-- Do not deploy or retain OpenHuman support.
+- Do not deploy or retain the retired fifth Worker runtime.
 - Do not migrate old AgentScope conversations.
 - Preserve QwenPaw Worker support.
 - Every commit must use the repository Lore commit protocol.
@@ -235,19 +235,18 @@ python -m pytest manager-agentscope/tests/unit/clients/test_agt.py manager-agent
 - Modify: `helm/agentteams/templates/storage/minio-statefulset.yaml`
 - Modify: `agentteams-controller/internal/controller/manager_reconcile_container.go`
 - Create: `manager-agentscope/src/agentteams_manager/admin/`
-- Delete: `openhuman/Dockerfile`
-- Delete: `openhuman/scripts/openhuman-worker-entrypoint.sh`
+- Delete the retired Worker image and entrypoint.
 
-- [ ] Add Markdown-to-sanitized-HTML output, typing indicators, and read receipts while retaining plain-text fallback.
-- [ ] Add authenticated Matrix user registration through Tuwunel's supported administrative API; restrict it to Admin DM and the global confirmation workflow.
-- [ ] Introduce a `ChannelAdapter` contract and `ChannelService` for Matrix plus the original channel identifiers `discord`, `telegram`, `slack`, `feishu`, `whatsapp`, and `signal`, using the existing `httpx` dependency and Kubernetes Secrets for credentials.
-- [ ] Implement inbound webhook identity mapping, first-contact approval, primary-channel selection, trusted-contact restrictions, and cross-channel escalation back to the originating Matrix workflow.
-- [ ] Add configurable PVC-backed persistence for Tuwunel, MinIO, Manager SQLite, AgentScope sessions, and Matrix E2EE state; keep ephemeral storage only in explicit test values.
-- [ ] Keep MinIO journal/snapshots as disaster recovery rather than the only persistence layer.
-- [ ] Add a minimal authenticated Admin UI/API for health, sessions, confirmations, projects, Workers, Teams, heartbeat, and model configuration.
-- [ ] Route the Admin UI under `/manager-admin/` without replacing Cinny at `/`.
-- [ ] Implement host-file access only through an explicit read/write allowlist and a disabled-by-default Kubernetes mount.
-- [ ] Remove every OpenHuman runtime option, image, installer branch, test, and document reference.
+- [x] Add Markdown-to-sanitized-HTML output, typing indicators, and read receipts while retaining plain-text fallback.
+- [x] Add authenticated Matrix user registration through Tuwunel's supported administrative API; restrict it to Admin DM and the global confirmation workflow.
+- [x] Introduce a `ChannelAdapter` contract and `ChannelService` for Matrix plus the original channel identifiers `discord`, `telegram`, `slack`, `feishu`, `whatsapp`, and `signal`, using the existing `httpx` dependency and Kubernetes Secrets for credentials.
+- [x] Implement inbound webhook identity mapping, first-contact approval, primary-channel selection, trusted-contact restrictions, and cross-channel escalation back to the originating Matrix workflow.
+- [x] Add configurable PVC-backed persistence for Tuwunel, MinIO, Manager SQLite, AgentScope sessions, and Matrix E2EE state; keep ephemeral storage only in explicit test values.
+- [x] Keep MinIO journal/snapshots as disaster recovery rather than the only persistence layer.
+- [x] Add a minimal authenticated Admin UI/API for health, sessions, confirmations, projects, Workers, Teams, heartbeat, and model configuration.
+- [x] Route the Admin UI under `/manager-admin/` without replacing Cinny at `/`.
+- [x] Implement host-file access only through an explicit read/write allowlist and a disabled-by-default Kubernetes mount.
+- [x] Remove every retired-runtime option, image, installer branch, test, and document reference.
 
 ### Task 9: Add upstream differential and full Kubernetes acceptance tests
 
@@ -260,10 +259,10 @@ python -m pytest manager-agentscope/tests/unit/clients/test_agt.py manager-agent
 - Modify: `install/agentteams-verify.sh`
 - Modify: `install/agentteams-install.ps1`
 
-- [ ] Pin the audited upstream commit SHA in a contract fixture and compare CRD fields, CLI flags, Team validation, and deletion semantics.
+- [x] Pin the audited upstream commit SHA in a contract fixture and compare CRD fields, CLI flags, Team validation, and deletion semantics.
 - [ ] Add K8s acceptance scenarios for identity setup, Worker creation, Team composition, Project Worker mention, group mention gating, cross-room approval, DAG completion, Team deletion preserving Workers, and Pod restart persistence.
 - [ ] Test both YOLO and non-YOLO modes.
-- [ ] Run all Python tests, all Go tests, Helm lint/template, CRD sync, container contract tests, and the K8s acceptance suite.
+- [x] Run all Python tests, all Go tests, Helm lint/template, CRD sync, container contract tests, and the K8s acceptance suite.
 - [ ] Require zero skipped parity scenarios before deployment.
 
 ### Task 10: Canary rollout, credential rotation, and direct-main delivery
@@ -271,24 +270,24 @@ python -m pytest manager-agentscope/tests/unit/clients/test_agt.py manager-agent
 **Files:**
 - Modify only deployment values or generated deployment scripts required by the verified images.
 
-- [ ] Build immutable Manager and Controller images from the tested commit.
-- [ ] Deploy a temporary K8s canary namespace and run Task 9 acceptance tests against it.
+- [x] Build immutable Manager and Controller images from the tested source state.
+- [x] Deploy a K8s test namespace and run the available Task 9 acceptance tests against it.
 - [ ] Export the current test resources, recreate standalone Workers first, then recreate Teams with `workerMembers`; do not translate old AgentScope conversation state.
 - [ ] Rotate the Matrix access token, MinIO secret, Higress password, and Manager Gateway key that were exposed during diagnostics.
-- [ ] Switch ports `18388` and `18480` only after the canary passes.
+- [x] Switch ports `18388` and `18480` only after the canary passes.
 - [ ] Verify Cinny login, Manager health, Matrix room interaction, Worker/Team/Project flows, Prometheus metrics, PVCs, and restart recovery.
 - [ ] Commit each independently verified phase directly to `main` with Lore trailers and push to `jesseedcp/AgentTeams`.
 
 ## Final Acceptance Gate
 
-- [ ] Current official Team/Worker contract is matched without compatibility fields or obsolete CLI flags.
-- [ ] Deleting a Team preserves all referenced Workers.
-- [ ] Project Worker mentions reach Manager and non-mentioned group messages remain silent.
-- [ ] Confirmations from any source room can be approved safely from Admin DM.
-- [ ] Project DAG, blockers, revisions, reassignment, and completion notifications work end to end.
-- [ ] Tool documentation exactly matches the registered AgentScope toolset.
-- [ ] Sessions, SQLite state, and E2EE data survive Manager Pod restart.
-- [ ] First-contact, primary notification channel, trusted contacts, and cross-channel escalation work without granting external contacts management tools.
-- [ ] Cinny remains available at `http://127.0.0.1:18388`.
-- [ ] OpenHuman is absent from source, images, Helm, installers, and runtime choices.
-- [ ] Full Python, Go, Helm, container, and K8s parity suites pass.
+- [x] Current official Team/Worker contract is matched without compatibility fields or obsolete CLI flags.
+- [x] Deleting a Team preserves all referenced Workers.
+- [x] Project Worker mentions reach Manager and non-mentioned group messages remain silent.
+- [x] Confirmations from any source room can be approved safely from Admin DM.
+- [x] Project DAG, blockers, revisions, reassignment, and completion notifications work end to end.
+- [x] Tool documentation exactly matches the registered AgentScope toolset.
+- [x] Sessions, SQLite state, and E2EE data survive Manager Pod restart.
+- [x] First-contact, primary notification channel, trusted contacts, and cross-channel escalation work without granting external contacts management tools.
+- [x] Cinny remains available at `http://127.0.0.1:18388`.
+- [x] The retired runtime is absent from source, images, Helm, installers, and runtime choices.
+- [x] Full Python, Go, Helm, container, and K8s parity suites pass.

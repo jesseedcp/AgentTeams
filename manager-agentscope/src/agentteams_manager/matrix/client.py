@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
 import html
 import json
 from collections.abc import Awaitable, Callable
@@ -11,6 +13,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
 
+import httpx
 from nio import (
     AsyncClient,
     AsyncClientConfig,
@@ -23,6 +26,7 @@ from agentteams_manager.config import ManagerConfig
 from agentteams_manager.domain.models import InboundEvent, MediaReference
 
 from .crypto import CryptoStore, maintain_e2ee
+from .formatting import markdown_to_matrix_html
 from .media import MediaAdapter
 from .threads import RoomHistory, ThreadProjector
 
@@ -54,6 +58,7 @@ class MatrixClientConfig:
     crypto_store: Path
     media_dir: Path
     password: SecretStr | None = None
+    registration_token: SecretStr | None = None
     sync_timeout_ms: int = 30_000
     history_limit: int = 50
     encryption: bool = True
@@ -74,6 +79,7 @@ class MatrixClientConfig:
             crypto_store=config.workspace / "matrix-e2ee",
             media_dir=config.workspace / "media",
             password=config.matrix_password,
+            registration_token=config.matrix_registration_token,
         )
 
 
@@ -95,16 +101,115 @@ class MatrixClient:
         state: MatrixState,
         *,
         nio_client: AsyncClient | Any | None = None,
+        registration_http: Any | None = None,
         sleeper: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
         self.config = config
         self._state = state
         self._client = nio_client
+        self._registration_http = registration_http
         self._handler: InboundHandler | None = None
         self._sync_task: asyncio.Task[None] | None = None
         self._sleeper = sleeper
         self.ready = asyncio.Event()
         self.history = RoomHistory(limit=config.history_limit)
+
+    async def register_user(
+        self,
+        *,
+        username: str,
+        password: SecretStr,
+        admin: bool = False,
+    ) -> dict[str, str | bool]:
+        """Register through Matrix registration-token UIA with fallback."""
+        registration_token = self.config.registration_token
+        if registration_token is None:
+            raise RuntimeError(
+                "Matrix registration token is not configured",
+            )
+
+        async def register(http: Any) -> dict[str, str | bool]:
+            if not admin:
+                response = await http.post(
+                    "/_matrix/client/v3/register",
+                    json={
+                        "username": username,
+                        "password": password.get_secret_value(),
+                        "auth": {
+                            "type": "m.login.registration_token",
+                            "token": registration_token.get_secret_value(),
+                        },
+                    },
+                )
+                if getattr(response, "status_code", 200) in {200, 201}:
+                    user_id = response.json().get("user_id")
+                    if not isinstance(user_id, str) or not user_id:
+                        raise RuntimeError(
+                            "Matrix registration returned no user ID",
+                        )
+                    return {"user_id": user_id, "admin": False}
+                payload = response.json()
+                fallback = (
+                    getattr(response, "status_code", 0) in {404, 405}
+                    or payload.get("errcode") == "M_EXCLUSIVE"
+                )
+                if not fallback:
+                    response.raise_for_status()
+
+            # Synapse-compatible homeservers additionally support creating an
+            # admin account through their nonce/HMAC endpoint. Tuwunel does
+            # not expose this path, so ordinary users always use the standard
+            # Matrix registration-token flow above.
+            nonce_response = await http.get(
+                "/_synapse/admin/v1/register",
+            )
+            try:
+                nonce_response.raise_for_status()
+            except Exception as exc:
+                if admin:
+                    raise RuntimeError(
+                        "this homeserver cannot create admin accounts "
+                        "through the Manager",
+                    ) from exc
+                raise
+            nonce = nonce_response.json().get("nonce")
+            if not isinstance(nonce, str) or not nonce:
+                raise RuntimeError("Matrix registration nonce is invalid")
+            raw_password = password.get_secret_value()
+            admin_marker = "admin" if admin else "notadmin"
+            mac_payload = "\x00".join(
+                (nonce, username, raw_password, admin_marker),
+            ).encode()
+            mac = hmac.new(
+                registration_token.get_secret_value().encode(),
+                mac_payload,
+                hashlib.sha1,
+            ).hexdigest()
+            response = await http.post(
+                "/_synapse/admin/v1/register",
+                json={
+                    "nonce": nonce,
+                    "username": username,
+                    "password": raw_password,
+                    "admin": admin,
+                    "mac": mac,
+                },
+            )
+            response.raise_for_status()
+            user_id = response.json().get("user_id")
+            if not isinstance(user_id, str) or not user_id:
+                raise RuntimeError(
+                    "Matrix registration returned no user ID",
+                )
+            return {"user_id": user_id, "admin": admin}
+
+        if self._registration_http is not None:
+            return await register(self._registration_http)
+        async with httpx.AsyncClient(
+            base_url=self.config.homeserver,
+            timeout=30,
+        ) as http:
+            return await register(http)
 
     async def start(self, handler: InboundHandler) -> None:
         """Prepare encryption state and start the owned sync loop."""
@@ -454,6 +559,28 @@ class MatrixClient:
             txn_id=txn_id,
         )
 
+    async def set_typing(
+        self,
+        room_id: str,
+        *,
+        typing: bool,
+        timeout_ms: int = 30_000,
+    ) -> None:
+        response = await self._ensure_client().room_typing(
+            room_id,
+            typing,
+            timeout=timeout_ms,
+        )
+        _require_matrix_success(response, "set typing")
+
+    async def mark_read(self, room_id: str, event_id: str) -> None:
+        response = await self._ensure_client().room_read_markers(
+            room_id,
+            fully_read_event=event_id,
+            read_event=event_id,
+        )
+        _require_matrix_success(response, "mark event read")
+
     async def joined_rooms(self) -> tuple[str, ...]:
         response = await self._ensure_client().joined_rooms()
         _require_matrix_success(response, "list joined rooms")
@@ -620,6 +747,8 @@ class MatrixClient:
         content: dict[str, Any] = {
             "msgtype": "m.text",
             "body": text,
+            "format": "org.matrix.custom.html",
+            "formatted_body": markdown_to_matrix_html(text),
         }
         targets = list(dict.fromkeys(mentions))
         if targets:
@@ -633,9 +762,8 @@ class MatrixClient:
                     )
                     for user_id in targets
                 )
-                content["format"] = "org.matrix.custom.html"
                 content["formatted_body"] = (
-                    f"{pills} {html.escape(text)}"
+                    f"{pills} {content['formatted_body']}"
                 ).strip()
         if thread_id:
             content["m.relates_to"] = ThreadProjector.relation(thread_id)

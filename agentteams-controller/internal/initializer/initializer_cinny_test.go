@@ -16,6 +16,8 @@ type cinnyGatewayRecorder struct {
 	routePort         int
 	routePath         string
 	deletedRoutes     []string
+	serviceSources    []string
+	routes            []string
 }
 
 func (g *cinnyGatewayRecorder) EnsureConsumer(
@@ -54,6 +56,7 @@ func (g *cinnyGatewayRecorder) EnsureServiceSource(
 	g.serviceSourceName = name
 	g.serviceDomain = domain
 	g.servicePort = port
+	g.serviceSources = append(g.serviceSources, name+"|"+domain)
 	return nil
 }
 
@@ -78,7 +81,35 @@ func (g *cinnyGatewayRecorder) EnsureRoute(
 	g.routeService = serviceName
 	g.routePort = port
 	g.routePath = pathPrefix
+	g.routes = append(g.routes, name+"|"+serviceName+"|"+pathPrefix)
 	return nil
+}
+
+func TestInitGatewayRoutesRegistersManagerAdminUnderDedicatedPrefix(t *testing.T) {
+	recorder := &cinnyGatewayRecorder{}
+	init := &Initializer{
+		Gateway: recorder,
+		Config: Config{
+			GatewayProvider: "higress",
+			ManagerAdminURL: "http://agentteams-manager.agentteams.svc.cluster.local:18799",
+		},
+	}
+
+	if err := init.initGatewayRoutes(context.Background()); err != nil {
+		t.Fatalf("initGatewayRoutes: %v", err)
+	}
+
+	if len(recorder.serviceSources) != 1 ||
+		recorder.serviceSources[0] != "manager-admin|agentteams-manager.agentteams.svc.cluster.local" {
+		t.Fatalf("service sources = %#v", recorder.serviceSources)
+	}
+	if len(recorder.routes) != 1 ||
+		recorder.routes[0] != "manager-admin|manager-admin.dns|/manager-admin" {
+		t.Fatalf("routes = %#v", recorder.routes)
+	}
+	if recorder.routePort != 18799 {
+		t.Fatalf("route port = %d, want 18799", recorder.routePort)
+	}
 }
 
 func (g *cinnyGatewayRecorder) DeleteRoute(_ context.Context, name string) error {

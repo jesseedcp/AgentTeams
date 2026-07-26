@@ -607,7 +607,6 @@ AgentTeams supports five Worker runtimes:
 | CoPaw | Python | Lightweight conversational and browser workflows |
 | Hermes | Python | Autonomous coding, development tasks |
 | QwenPaw | Python | Python-native workflows and data science |
-| OpenHuman | Rust | Low-overhead native Matrix execution |
 
 ### At creation time
 
@@ -651,7 +650,7 @@ use either value: `AGENTTEAMS_MANAGER_RUNTIME` is fixed to `agentscope`.
 ## Can I connect my own agent implementation as a Worker
 
 Not by adding an arbitrary new `spec.runtime` value. The Worker CRD accepts
-`openclaw`, `copaw`, `hermes`, `qwenpaw`, and `openhuman`.
+`openclaw`, `copaw`, `hermes`, and `qwenpaw`.
 
 For most custom Worker needs, package your role prompt, skills, dependencies,
 and optional Dockerfile as a Worker package, or set a custom image while keeping

@@ -20,6 +20,24 @@
 {"user_id":"@alice:example.org"}
 ```
 
+`register_matrix_user` creates a local Tuwunel account from an environment
+secret reference and is available only in the Admin DM:
+
+```json
+{
+  "username": "alice",
+  "password_env": "NEW_MATRIX_USER_PASSWORD",
+  "admin": false
+}
+```
+
+The receipt returns only the Matrix user ID and admin flag.
+Tuwunel uses its configured Matrix registration token for ordinary accounts
+and the authenticated nonce/HMAC administrative endpoint for AppService-owned
+names or `"admin": true`. Homeservers without that administrative endpoint
+reject admin-account creation instead of falling back to an unauthenticated
+path.
+
 ## Membership
 
 Use `invite_matrix_user` or `unban_matrix_user`:

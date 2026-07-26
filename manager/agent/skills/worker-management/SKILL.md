@@ -30,8 +30,7 @@ For a registry search or `nacos://` package import, use the
 
 - Treat Worker names as stable resource identities. They use lowercase
   letters, digits, and hyphens and must start with a letter or digit.
-- Supported runtimes are `openclaw`, `copaw`, `hermes`, `qwenpaw`, and
-  `openhuman`.
+- Supported runtimes are `openclaw`, `copaw`, `hermes`, and `qwenpaw`.
 - Before `create_worker`, obtain an explicit name, runtime, model, role, and
   skill set. Do not silently invent business configuration.
 - Before `sleep_worker`, confirm the Worker has no active assignment or

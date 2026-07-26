@@ -581,7 +581,6 @@ AgentTeams 支持五种 Worker 运行时：
 | CoPaw | Python | 轻量对话及浏览器工作流 |
 | Hermes | Python | 自主编程，开发任务 |
 | QwenPaw | Python | Python 原生工作流、数据科学 |
-| OpenHuman | Rust | 低开销的原生 Matrix 执行 |
 
 ### 创建时指定
 
@@ -625,7 +624,7 @@ Manager 会通过 worker-management 技能触发容器重建。Worker 的 Matrix
 ## 如何接入自己实现的 agent 作为 Worker
 
 不能直接通过新增任意 `spec.runtime` 值来接入。Worker CRD 接受
-`openclaw`、`copaw`、`hermes`、`qwenpaw` 和 `openhuman`。
+`openclaw`、`copaw`、`hermes` 和 `qwenpaw`。
 
 大多数自定义 Worker 场景应通过 Worker package 或自定义镜像完成：把角色提示词、
 skills、依赖和可选 Dockerfile 打包，或在保留受支持 runtime 的前提下设置自定义

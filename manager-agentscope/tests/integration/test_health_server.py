@@ -1,5 +1,6 @@
 import httpx
 import pytest
+from pydantic import SecretStr
 
 from agentteams_manager.health import HealthServer, ReadinessState
 from agentteams_manager.observability.metrics import MetricsRegistry
@@ -58,5 +59,81 @@ async def test_health_server_rejects_non_get_requests() -> None:
         ) as client:
             response = await client.post("/healthz")
             assert response.status_code == 405
+    finally:
+        await server.stop()
+
+
+@pytest.mark.asyncio
+async def test_admin_console_requires_bearer_token_for_data() -> None:
+    async def snapshot(section: str) -> dict[str, object]:
+        return {"section": section, "items": [{"name": "default"}]}
+
+    server = HealthServer(
+        readiness=ReadinessState(),
+        metrics=MetricsRegistry(),
+        host="127.0.0.1",
+        port=0,
+        admin_token=SecretStr("admin-console-token"),
+        admin_snapshot=snapshot,
+    )
+    await server.start()
+    try:
+        async with httpx.AsyncClient(
+            base_url=f"http://127.0.0.1:{server.bound_port}",
+            trust_env=False,
+        ) as client:
+            page = await client.get("/manager-admin/")
+            assert page.status_code == 200
+            assert "AgentTeams Manager" in page.text
+            assert "admin-console-token" not in page.text
+
+            denied = await client.get(
+                "/manager-admin/api/projects",
+            )
+            assert denied.status_code == 401
+
+            response = await client.get(
+                "/manager-admin/api/projects",
+                headers={
+                    "Authorization": "Bearer admin-console-token",
+                },
+            )
+            assert response.status_code == 200
+            assert response.json()["section"] == "projects"
+    finally:
+        await server.stop()
+
+
+@pytest.mark.asyncio
+async def test_signed_channel_webhook_is_forwarded_to_handler() -> None:
+    calls: list[tuple[str, bytes]] = []
+
+    async def webhook(provider, headers, body):
+        assert headers["x-agentteams-signature"] == "signed"
+        calls.append((provider, body))
+        return {"status": "pending_approval"}
+
+    server = HealthServer(
+        readiness=ReadinessState(),
+        metrics=MetricsRegistry(),
+        host="127.0.0.1",
+        port=0,
+        webhook_handler=webhook,
+    )
+    await server.start()
+    try:
+        async with httpx.AsyncClient(
+            base_url=f"http://127.0.0.1:{server.bound_port}",
+            trust_env=False,
+        ) as client:
+            response = await client.post(
+                "/manager-admin/hooks/telegram",
+                content=b'{"message":"hello"}',
+                headers={"X-AgentTeams-Signature": "signed"},
+            )
+            assert response.status_code == 202
+            assert calls == [
+                ("telegram", b'{"message":"hello"}'),
+            ]
     finally:
         await server.stop()

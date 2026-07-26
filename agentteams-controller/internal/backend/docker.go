@@ -19,14 +19,13 @@ import (
 
 // DockerConfig holds Docker backend configuration.
 type DockerConfig struct {
-	SocketPath           string
-	ManagerImage         string // AgentScope Manager image (AGENTTEAMS_MANAGER_IMAGE)
-	WorkerImage          string // default worker image (AGENTTEAMS_WORKER_IMAGE)
-	CopawWorkerImage     string // default copaw worker image (AGENTTEAMS_COPAW_WORKER_IMAGE)
-	HermesWorkerImage    string // default hermes worker image (AGENTTEAMS_HERMES_WORKER_IMAGE)
-	OpenHumanWorkerImage string // default openhuman worker image (AGENTTEAMS_OPENHUMAN_WORKER_IMAGE)
-	QwenPawWorkerImage   string // default qwenpaw worker image (AGENTTEAMS_QWENPAW_WORKER_IMAGE)
-	DefaultNetwork       string // default Docker network (default "agentteams-net")
+	SocketPath         string
+	ManagerImage       string // AgentScope Manager image (AGENTTEAMS_MANAGER_IMAGE)
+	WorkerImage        string // default worker image (AGENTTEAMS_WORKER_IMAGE)
+	CopawWorkerImage   string // default copaw worker image (AGENTTEAMS_COPAW_WORKER_IMAGE)
+	HermesWorkerImage  string // default hermes worker image (AGENTTEAMS_HERMES_WORKER_IMAGE)
+	QwenPawWorkerImage string // default qwenpaw worker image (AGENTTEAMS_QWENPAW_WORKER_IMAGE)
+	DefaultNetwork     string // default Docker network (default "agentteams-net")
 }
 
 // DockerBackend manages worker containers via the Docker Engine API over a Unix socket.
@@ -115,8 +114,6 @@ func (d *DockerBackend) Create(ctx context.Context, req CreateRequest) (*WorkerR
 			image = d.config.CopawWorkerImage
 		case req.Runtime == RuntimeHermes && d.config.HermesWorkerImage != "":
 			image = d.config.HermesWorkerImage
-		case req.Runtime == RuntimeOpenHuman && d.config.OpenHumanWorkerImage != "":
-			image = d.config.OpenHumanWorkerImage
 		case req.Runtime == RuntimeQwenPaw && d.config.QwenPawWorkerImage != "":
 			image = d.config.QwenPawWorkerImage
 		default:

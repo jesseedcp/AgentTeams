@@ -33,7 +33,7 @@ function Assert-Absent {
 Assert-Contains $installer 'AGENTTEAMS_MANAGER_RUNTIME=agentscope' "PowerShell installer"
 Assert-Contains $installer 'http://127.0.0.1:18799/readyz' "PowerShell installer"
 Assert-Contains $installer 'QWENPAW_WORKER_IMAGE' "PowerShell installer"
-Assert-Contains $installer 'OPENHUMAN_WORKER_IMAGE' "PowerShell installer"
+Assert-Absent $installer ('OPEN' + 'HUMAN_WORKER_IMAGE') "PowerShell installer"
 Assert-Contains $installer 'AGENTTEAMS_CINNY_PUBLIC_URL' "PowerShell installer"
 Assert-Contains $verify 'http://127.0.0.1:18799/readyz' "verification script"
 
@@ -58,10 +58,10 @@ Assert-Contains $verify 'http://127.0.0.1:18799/readyz' "verification script"
 }
 
 Assert-Contains $makefile `
-    'build: build-manager build-worker build-copaw-worker build-hermes-worker build-openhuman-worker build-qwenpaw-worker build-agentteams-controller' `
+    'build: build-manager build-worker build-copaw-worker build-hermes-worker build-qwenpaw-worker build-agentteams-controller' `
     "Makefile"
 Assert-Contains $makefile `
-    'push: push-manager push-worker push-copaw-worker push-hermes-worker push-openhuman-worker push-qwenpaw-worker push-agentteams-controller push-embedded' `
+    'push: push-manager push-worker push-copaw-worker push-hermes-worker push-qwenpaw-worker push-agentteams-controller push-embedded' `
     "Makefile"
 
-Write-Output "PASS: PowerShell installer exposes one AgentScope Manager and five Worker runtimes"
+Write-Output "PASS: PowerShell installer exposes one AgentScope Manager and four Worker runtimes"

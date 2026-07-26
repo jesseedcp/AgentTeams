@@ -83,6 +83,16 @@ func TestLoadConfigAcceptsLegacyElementURLAsFallback(t *testing.T) {
 	}
 }
 
+func TestLoadConfigReadsManagerAdminURL(t *testing.T) {
+	t.Setenv("AGENTTEAMS_MANAGER_ADMIN_URL", "http://agentteams-manager:18799")
+
+	cfg := LoadConfig()
+
+	if cfg.ManagerAdminURL != "http://agentteams-manager:18799" {
+		t.Fatalf("ManagerAdminURL = %q", cfg.ManagerAdminURL)
+	}
+}
+
 func TestManagerAgentEnvWritesOnlyCanonicalCinnyURL(t *testing.T) {
 	cfg := Config{CinnyURL: "http://agentteams-cinny:8080"}
 
@@ -93,6 +103,30 @@ func TestManagerAgentEnvWritesOnlyCanonicalCinnyURL(t *testing.T) {
 	}
 	if _, ok := env["AGENTTEAMS_ELEMENT_WEB_URL"]; ok {
 		t.Fatal("ManagerAgentEnv emitted legacy Element URL")
+	}
+}
+
+func TestManagerAgentEnvForwardsOnlyReferencedExternalChannelSecrets(
+	t *testing.T,
+) {
+	t.Setenv("TELEGRAM_TOKEN", "bot-secret")
+	t.Setenv("TELEGRAM_WEBHOOK", "webhook-secret")
+	t.Setenv("UNRELATED_SECRET", "must-not-forward")
+	t.Setenv(
+		"AGENTTEAMS_EXTERNAL_CHANNELS",
+		`[{"provider":"telegram","outbound_url":"https://example.test",`+
+			`"token_env":"env:TELEGRAM_TOKEN",`+
+			`"webhook_secret_env":"env:TELEGRAM_WEBHOOK"}]`,
+	)
+
+	env := (&Config{}).ManagerAgentEnv()
+
+	if env["TELEGRAM_TOKEN"] != "bot-secret" ||
+		env["TELEGRAM_WEBHOOK"] != "webhook-secret" {
+		t.Fatalf("referenced secrets were not forwarded")
+	}
+	if _, exists := env["UNRELATED_SECRET"]; exists {
+		t.Fatal("unreferenced secret was forwarded")
 	}
 }
 
@@ -228,11 +262,10 @@ func TestBackendConfigsKeepManagerAndWorkerImagesSeparate(t *testing.T) {
 	t.Setenv("AGENTTEAMS_COPAW_WORKER_IMAGE", "copaw:v1")
 	t.Setenv("AGENTTEAMS_HERMES_WORKER_IMAGE", "hermes:v1")
 	t.Setenv("AGENTTEAMS_QWENPAW_WORKER_IMAGE", "qwenpaw:v1")
-	t.Setenv("AGENTTEAMS_OPENHUMAN_WORKER_IMAGE", "openhuman:v1")
 	cfg := LoadConfig()
 
 	for name, images := range map[string]struct {
-		manager, openclaw, copaw, hermes, qwenpaw, openhuman string
+		manager, openclaw, copaw, hermes, qwenpaw string
 	}{
 		"docker": {
 			cfg.DockerConfig().ManagerImage,
@@ -240,7 +273,6 @@ func TestBackendConfigsKeepManagerAndWorkerImagesSeparate(t *testing.T) {
 			cfg.DockerConfig().CopawWorkerImage,
 			cfg.DockerConfig().HermesWorkerImage,
 			cfg.DockerConfig().QwenPawWorkerImage,
-			cfg.DockerConfig().OpenHumanWorkerImage,
 		},
 		"kubernetes": {
 			cfg.K8sConfig().ManagerImage,
@@ -248,7 +280,6 @@ func TestBackendConfigsKeepManagerAndWorkerImagesSeparate(t *testing.T) {
 			cfg.K8sConfig().CopawWorkerImage,
 			cfg.K8sConfig().HermesWorkerImage,
 			cfg.K8sConfig().QwenPawWorkerImage,
-			cfg.K8sConfig().OpenHumanWorkerImage,
 		},
 		"sandbox": {
 			cfg.SandboxConfig().ManagerImage,
@@ -256,15 +287,13 @@ func TestBackendConfigsKeepManagerAndWorkerImagesSeparate(t *testing.T) {
 			cfg.SandboxConfig().CopawWorkerImage,
 			cfg.SandboxConfig().HermesWorkerImage,
 			cfg.SandboxConfig().QwenPawWorkerImage,
-			cfg.SandboxConfig().OpenHumanWorkerImage,
 		},
 	} {
 		if images.manager != "manager:v1" ||
 			images.openclaw != "openclaw:v1" ||
 			images.copaw != "copaw:v1" ||
 			images.hermes != "hermes:v1" ||
-			images.qwenpaw != "qwenpaw:v1" ||
-			images.openhuman != "openhuman:v1" {
+			images.qwenpaw != "qwenpaw:v1" {
 			t.Fatalf("%s backend images = %+v", name, images)
 		}
 	}

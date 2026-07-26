@@ -32,7 +32,6 @@ WorkerRuntime = Literal[
     "copaw",
     "hermes",
     "qwenpaw",
-    "openhuman",
 ]
 Port = Annotated[int, Field(ge=1, le=65535)]
 ResourceName = Annotated[

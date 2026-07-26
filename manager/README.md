@@ -7,7 +7,7 @@ image-owned prompt documents.
 
 The image does not run infrastructure. Higress, Matrix, MinIO, Cinny, and
 the Controller remain separate Controller-stack services. OpenClaw, CoPaw,
-Hermes, QwenPaw, and OpenHuman remain supported Worker runtimes; none is a
+Hermes and QwenPaw remain supported Worker runtimes; neither is a
 Manager runtime.
 
 ## Build

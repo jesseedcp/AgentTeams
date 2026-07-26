@@ -39,7 +39,6 @@ type SandboxConfig struct {
 	WorkerImage                  string
 	CopawWorkerImage             string
 	HermesWorkerImage            string
-	OpenHumanWorkerImage         string
 	QwenPawWorkerImage           string
 	WorkerCPU                    string
 	WorkerMemory                 string
@@ -153,8 +152,6 @@ func (s *SandboxBackend) Create(ctx context.Context, req CreateRequest) (*Worker
 			workerImage = s.config.CopawWorkerImage
 		case req.Runtime == RuntimeHermes && s.config.HermesWorkerImage != "":
 			workerImage = s.config.HermesWorkerImage
-		case req.Runtime == RuntimeOpenHuman && s.config.OpenHumanWorkerImage != "":
-			workerImage = s.config.OpenHumanWorkerImage
 		case req.Runtime == RuntimeQwenPaw && s.config.QwenPawWorkerImage != "":
 			workerImage = s.config.QwenPawWorkerImage
 		case s.config.WorkerImage != "":

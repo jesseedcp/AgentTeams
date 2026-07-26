@@ -14,9 +14,9 @@
 
 **AgentTeams 是一个开源的协作式多智能体运行平台。让多个 Agent 在一个受控、可审计的房间中协作，人类全程可见、随时可介入。采用 Manager-Workers 架构，由 AgentScope 2.0 Manager 统一调度多个 Workers，专注于企业内的人和 Agent、Agents 之间的协作场景。**
 
-Manager 运行时固定为 AgentScope 2.0；Worker 执行层可在 OpenClaw、CoPaw、Hermes、QwenPaw 和 OpenHuman 之间选择。
+Manager 运行时固定为 AgentScope 2.0；Worker 执行层可在 OpenClaw、CoPaw、Hermes 和 QwenPaw 之间选择。
 - 🧑‍💻 **设计了 Manger-Workers 架构**：不用真人去管理每个干活的 Worker Claw，实现由 Agent 管理 Agents。
-- 🤝 **多运行时协作**：OpenClaw、CoPaw、Hermes、QwenPaw 和 OpenHuman Worker 可在同一个 IM 房间中共存协作，AgentScope Manager 统一管理它们的生命周期和协作关系。
+- 🤝 **多运行时协作**：OpenClaw、CoPaw、Hermes 和 QwenPaw Worker 可在同一个 IM 房间中共存协作，AgentScope Manager 统一管理它们的生命周期和协作关系。
 - 📚 **引入 MinIO 共享文件系统**：用于 Agent 之间的信息共享，大幅降低多 Agent 协作带来的 Token 消耗。
 - ⛑️ **引入 Higress AI Gateway**：流量入口和各类凭证风险降低了，减少了用户对原生龙虾在安全上的顾虑。
 - 🎨 **使用 Cinny IM 客户端+Tuwunel IM 服务器（均基于 Matrix 实时通信协议）**：节省钉钉、飞书 IM 的接入和企业内的审批成本，方便用户快速体验在 IM 的交互环境中体验模型服务的"爽感"，同时支持以 OpenClaw 原生的方式接入 IM。
@@ -24,7 +24,7 @@ Manager 运行时固定为 AgentScope 2.0；Worker 执行层可在 OpenClaw、Co
 ![架构](https://img.alicdn.com/imgextra/i4/O1CN01c1VlDE1zYZ46EW3OA_!!6000000006726-49-tps-9895-8231.webp)
 
 ## 动态
-> 以下条目记录上游项目历史。本项目当前只使用 AgentScope 2.0 作为 Manager；OpenClaw、CoPaw、Hermes、QwenPaw 和 OpenHuman 均为 Worker 运行时。
+> 以下条目记录上游项目历史。本项目当前只使用 AgentScope 2.0 作为 Manager；OpenClaw、CoPaw、Hermes 和 QwenPaw 均为 Worker 运行时。
 
 - **2026-05-27:** [Release Notes](https://github.com/agentscope-ai/AgentTeams/releases/tag/v1.1.2) — AgentTeams v1.1.2：安装器默认改为 QwenPaw 运行时并支持 keep-all 升级；Team 支持人类协调员，Team Leader 协作工具刷新；控制器支持 Nacos 远程技能与 `sts-agentteams` / `ai-registry` STS 凭据；Worker 控制器资源名与运行时名称解耦；新增控制器 reconcile 指标与优雅退出。
 - **2026-05-07:** [Release Notes](https://github.com/agentscope-ai/AgentTeams/releases/tag/v1.1.1) | [Changelog](changelog/v1.1.1.md) — AgentTeams v1.1.1：Worker/Manager/Team CRD 上的声明式 MCP（破坏性变更）并扩展至 Team Leader；CR 支持自定义 `spec.env`；新增 Token Plan、Qwen 国际线路与 `qwen3.6-plus` 模型；Helm 控制器 RBAC 收敛到单命名空间；Worker 包可不含 `SOUL.md`。
@@ -104,7 +104,7 @@ Set-ExecutionPolicy Bypass -Scope Process -Force; $wc=New-Object Net.WebClient; 
 
 第九步：GitHub 集成、Skills 注册中心、数据持久化、Docker 卷、Manager 工作空间，按回车键即可，均采用默认配置，无须手动配置。
 
-第十步：选择默认 Worker 运行时，可选 OpenClaw、CoPaw、Hermes、QwenPaw 或 OpenHuman。Manager 始终使用 AgentScope 2.0，不需要选择。
+第十步：选择默认 Worker 运行时，可选 OpenClaw、CoPaw、Hermes 或 QwenPaw。Manager 始终使用 AgentScope 2.0，不需要选择。
 
 第十一步：等待安装。安装完成。登录密码是自动生成的。
 
@@ -213,7 +213,7 @@ helm install agentteams higress.io/agentteams \
 | `credentials.llmBaseUrl` | 可选 | OpenAI 兼容的 Base URL（例如 `https://api.deepseek.com/v1`）。使用官方 OpenAI API 时留空 |
 | `credentials.githubToken` | 可选 | 原生 GitHub MCP 引导使用的 GitHub PAT；保存在 Secret 中，只进入 Controller/Manager 链路 |
 | `manager.runtime` | 可选 | Manager 运行时；仅支持 `agentscope` |
-| `worker.defaultRuntime` | 可选 | Worker 默认运行时：`openclaw`（默认）、`copaw`、`hermes`、`qwenpaw` 或 `openhuman` |
+| `worker.defaultRuntime` | 可选 | Worker 默认运行时：`openclaw`（默认）、`copaw`、`hermes` 或 `qwenpaw` |
 
 <details>
 <summary>使用其他 Worker 运行时</summary>
@@ -232,7 +232,7 @@ helm install agentteams higress.io/agentteams \
 
 Manager 始终使用 `agentteams-manager` 镜像并运行 AgentScope
 2.0.4.post1。Worker 镜像会根据 OpenClaw、CoPaw、Hermes、QwenPaw 或
-OpenHuman 独立选择。
+各 Worker 运行时独立选择。
 
 </details>
 
@@ -269,6 +269,10 @@ kubectl port-forward -n agentteams-system svc/higress-gateway 18080:80
 
 然后在浏览器中打开 http://localhost:18080 登录 Cinny。命令退出后转发即停止，
 因此该方式不适合多人共享。
+
+登录 Cinny 后，Manager 运维控制台使用同一地址的
+`http://localhost:18080/manager-admin/`。控制台不会取代 Cinny，并要求输入
+管理员令牌后才会读取运行数据。
 
 公司内网或公网访问时，只需通过 HTTPS Ingress 或 LoadBalancer 暴露
 `svc/higress-gateway`。`gateway.publicURL` 会写入 Cinny 配置，作为 Matrix
@@ -414,7 +418,6 @@ AgentTeams 支持五种 Worker 运行时，可以**在同一个 IM 房间中共�
 - **CoPaw**（Python）— 轻量对话型 Worker，集成 Matrix 与共享存储
 - **QwenPaw**（Python）— 轻量级运行时，适合浏览器自动化和快速任务
 - **Hermes**（[hermes-agent](https://github.com/NousResearch/hermes-agent)）— 自主编程 Agent，具备终端沙箱、自我进化的 Skill 和持久化记忆
-- **OpenHuman**（Rust）— 使用原生 Matrix 通道、运行开销较低的 Worker
 
 每种运行时各有擅长。推荐模式：用确定性更高的 Agent（OpenClaw/QwenPaw）做 Leader 负责任务分解和调度，用 Hermes Worker 执行自主编程任务。所有运行时通过 Matrix `m.mentions` 在同一个房间内通信——完全可见、随时可干预。
 
@@ -436,7 +439,7 @@ agt update worker --runtime hermes
 └─────────────────────────┬────────────────────────────┘
                           │ 创建并协调
 ┌─────────────────────────▼────────────────────────────┐
-│ OpenClaw │ CoPaw │ Hermes │ QwenPaw │ OpenHuman     │
+│ OpenClaw │ CoPaw │ Hermes │ QwenPaw                 │
 │                     Worker 运行时                     │
 └──────────────────────────────────────────────────────┘
 ```

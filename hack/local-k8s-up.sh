@@ -76,7 +76,6 @@ WORKER_IMAGE="agentteams/worker-agent:local"
 COPAW_WORKER_IMAGE="agentteams/copaw-worker:local"
 HERMES_WORKER_IMAGE="agentteams/hermes-worker:local"
 QWENPAW_WORKER_IMAGE="agentteams/qwenpaw-worker:local"
-OPENHUMAN_WORKER_IMAGE="agentteams/openhuman-worker:local"
 HELM_IMAGE_OVERRIDES=""
 
 if [ "$SKIP_BUILD" = "0" ]; then
@@ -94,7 +93,7 @@ if [ "$SKIP_BUILD" = "0" ]; then
         --build-arg AGENTTEAMS_CONTROLLER_IMAGE="$CONTROLLER_IMAGE" \
         -f "${PROJECT_ROOT}/manager/Dockerfile" "${PROJECT_ROOT}"
 
-    # Worker images (openclaw + copaw + hermes + qwenpaw + openhuman)
+    # Worker images (openclaw + copaw + hermes + qwenpaw)
     log "Building worker image (openclaw)..."
     docker build -t "$WORKER_IMAGE" \
         --build-arg OPENCLAW_BASE_IMAGE=higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/openclaw-base:20260423-8359cbc \
@@ -125,11 +124,6 @@ if [ "$SKIP_BUILD" = "0" ]; then
         --build-context shared="${PROJECT_ROOT}/shared/lib" \
         -f "${PROJECT_ROOT}/qwenpaw/Dockerfile" "${PROJECT_ROOT}"
 
-    log "Building worker image (openhuman)..."
-    docker build -t "$OPENHUMAN_WORKER_IMAGE" \
-        --build-arg AGENTTEAMS_CONTROLLER_IMAGE="$CONTROLLER_IMAGE" \
-        -f "${PROJECT_ROOT}/openhuman/Dockerfile" "${PROJECT_ROOT}"
-
     log "Loading images into kind cluster..."
     kind load docker-image "$MANAGER_IMAGE" --name "$CLUSTER_NAME"
     kind load docker-image "$CONTROLLER_IMAGE" --name "$CLUSTER_NAME"
@@ -137,7 +131,6 @@ if [ "$SKIP_BUILD" = "0" ]; then
     kind load docker-image "$COPAW_WORKER_IMAGE" --name "$CLUSTER_NAME"
     kind load docker-image "$HERMES_WORKER_IMAGE" --name "$CLUSTER_NAME"
     kind load docker-image "$QWENPAW_WORKER_IMAGE" --name "$CLUSTER_NAME"
-    kind load docker-image "$OPENHUMAN_WORKER_IMAGE" --name "$CLUSTER_NAME"
 
     # Pre-load Docker Hub images that Kind nodes may not be able to pull directly
     # (e.g., behind GFW or with unreliable Docker Hub access)
@@ -145,7 +138,7 @@ if [ "$SKIP_BUILD" = "0" ]; then
     PRELOAD_IMAGES=(
         "higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/minio:20260216"
         "higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/mc:20260216"
-        "higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/tuwunel:20260216"
+        "ghcr.io/matrix-construct/tuwunel:v1.8.2"
         "ghcr.io/cinnyapp/cinny:v4.12.3"
         "higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/console:2.2.1"
         "higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/higress:2.2.1"
@@ -170,7 +163,6 @@ if [ "$SKIP_BUILD" = "0" ]; then
     HELM_IMAGE_OVERRIDES="${HELM_IMAGE_OVERRIDES} --set worker.defaultImage.copaw.repository=agentteams/copaw-worker --set worker.defaultImage.copaw.tag=local"
     HELM_IMAGE_OVERRIDES="${HELM_IMAGE_OVERRIDES} --set worker.defaultImage.hermes.repository=agentteams/hermes-worker --set worker.defaultImage.hermes.tag=local"
     HELM_IMAGE_OVERRIDES="${HELM_IMAGE_OVERRIDES} --set worker.defaultImage.qwenpaw.repository=agentteams/qwenpaw-worker --set worker.defaultImage.qwenpaw.tag=local"
-    HELM_IMAGE_OVERRIDES="${HELM_IMAGE_OVERRIDES} --set worker.defaultImage.openhuman.repository=agentteams/openhuman-worker --set worker.defaultImage.openhuman.tag=local"
 
     log "Local images built and loaded"
 else

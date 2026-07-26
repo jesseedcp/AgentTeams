@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from agentscope.message import ToolCallBlock
 from agentscope.state import AgentState
+from pydantic import SecretStr
 
 from agentteams_manager.clients.agt import WorkerCreateRequest
 from agentteams_manager.domain.models import (
@@ -103,12 +104,27 @@ class Resources:
 
 
 class Matrix:
+    def __init__(self) -> None:
+        self.registrations: list[tuple[str, str, bool]] = []
+
     async def joined_rooms(self) -> tuple[str, ...]:
         return ("!admin:example",)
 
     async def members(self, room_id: str) -> tuple[str, ...]:
         del room_id
         return ("@admin:example", "@manager:example")
+
+    async def register_user(
+        self,
+        *,
+        username: str,
+        password: SecretStr,
+        admin: bool = False,
+    ) -> dict[str, str | bool]:
+        self.registrations.append(
+            (username, password.get_secret_value(), admin),
+        )
+        return {"user_id": f"@{username}:example", "admin": admin}
 
 
 class Channels:
@@ -179,6 +195,53 @@ def _toolkit(
         context_provider=_context,
     )
     return toolkit, resources
+
+
+@pytest.mark.asyncio
+async def test_register_matrix_user_reads_password_from_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("NEW_MATRIX_USER_PASSWORD", "one-time-password")
+    matrix = Matrix()
+    toolkit = ResourceToolkit(
+        policy=_policy(),
+        resources=Resources(),
+        matrix=matrix,
+        matrix_workflows=MatrixWorkflows(),
+        channels=Channels(),
+        manager_admin_room="!admin:example",
+        context_provider=_context,
+    )
+    tool = next(
+        item
+        for item in toolkit.tools
+        if item.name == "register_matrix_user"
+    )
+
+    chunk = await tool.call(
+        username="alice",
+        password_env="NEW_MATRIX_USER_PASSWORD",
+        admin=False,
+    )
+
+    assert matrix.registrations == [
+        ("alice", "one-time-password", False),
+    ]
+    assert "one-time-password" not in chunk.content[0].text
+    assert "NEW_MATRIX_USER_PASSWORD" not in chunk.content[0].text
+
+
+def test_register_matrix_user_is_not_exposed_outside_admin_dm() -> None:
+    toolkit, _ = _toolkit(
+        policy=_policy(
+            kind=RoomKind.HUMAN_OR_CHANNEL_ROOM,
+            room_id="!human:example",
+        ),
+    )
+
+    assert "register_matrix_user" not in {
+        tool.name for tool in toolkit.tools
+    }
 
 
 def test_resource_tools_have_closed_input_schemas() -> None:

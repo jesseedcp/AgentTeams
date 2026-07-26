@@ -1,0 +1,16 @@
+{
+  "repository": "https://github.com/agentscope-ai/AgentTeams.git",
+  "commit": "785c2db56a02c0635a66bba490ad0f6f327c790a",
+  "team": {
+    "requiredSpecFields": ["workerMembers"],
+    "legacyEmbeddedFields": ["leader", "workers", "runtime"],
+    "roles": ["team_leader", "worker"],
+    "deletionPreservesWorkerCRs": true
+  },
+  "worker": {
+    "runtimes": ["openclaw", "copaw", "hermes", "qwenpaw"]
+  },
+  "manager": {
+    "runtime": "agentscope"
+  }
+}

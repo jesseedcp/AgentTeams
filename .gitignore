@@ -23,6 +23,7 @@ CLAUDE.md
 design/
 poc-verification/
 tests/output/
+.testtmp/
 
 # Python (copaw)
 __pycache__/

@@ -9,14 +9,16 @@
 #
 # Build args:
 #   HIGRESS_REGISTRY            - base image registry
-#   AGENTTEAMS_CONTROLLER_IMAGE     - pre-built controller image for COPY --from
+#   TUWUNEL_IMAGE               - Tuwunel image with shared-secret registration
+#   AGENTTEAMS_CONTROLLER_IMAGE - pre-built controller image for COPY --from
 # ============================================================
 
 ARG HIGRESS_REGISTRY=higress-registry.cn-hangzhou.cr.aliyuncs.com
+ARG TUWUNEL_IMAGE=ghcr.io/matrix-construct/tuwunel:v1.8.2
 ARG AGENTTEAMS_CONTROLLER_IMAGE=agentteams/agentteams-controller:latest
 
 # ============ Stage 1: Tuwunel Matrix Server ============
-FROM ${HIGRESS_REGISTRY}/higress/tuwunel:20260216 AS tuwunel
+FROM ${TUWUNEL_IMAGE} AS tuwunel
 
 # ============ Stage 2: MinIO Object Storage ============
 FROM ${HIGRESS_REGISTRY}/higress/minio:20260216 AS minio

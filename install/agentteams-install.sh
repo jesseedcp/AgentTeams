@@ -30,7 +30,6 @@
 #   AGENTTEAMS_INSTALL_COPAW_WORKER_IMAGE  Override copaw worker image (e.g., local build)
 #   AGENTTEAMS_INSTALL_HERMES_WORKER_IMAGE Override hermes worker image (e.g., local build)
 #   AGENTTEAMS_INSTALL_QWENPAW_WORKER_IMAGE Override qwenpaw worker image (e.g., local build)
-#   AGENTTEAMS_INSTALL_OPENHUMAN_WORKER_IMAGE Override openhuman worker image (e.g., local build)
 #   AGENTTEAMS_NACOS_REGISTRY_URI          Default Nacos registry URI for Worker market search/import
 #                                      (default: nacos://market.agentteams.io:80/public)
 #   AGENTTEAMS_NACOS_USERNAME              Default Nacos username for nacos:// package imports (optional)
@@ -555,8 +554,6 @@ msg() {
         "worker_runtime.hermes.en") text="Hermes" ;;
         "worker_runtime.qwenpaw.zh") text="QwenPaw" ;;
         "worker_runtime.qwenpaw.en") text="QwenPaw" ;;
-        "worker_runtime.openhuman.zh") text="OpenHuman" ;;
-        "worker_runtime.openhuman.en") text="OpenHuman" ;;
         "worker_runtime.choice.zh") text="请选择 [1/2/3/4/5]" ;;
         "worker_runtime.choice.en") text="Enter choice [1/2/3/4/5]" ;;
         "worker_runtime.selected.zh") text="默认 Worker 运行时: %s" ;;
@@ -958,7 +955,6 @@ WORKER_IMAGE="${AGENTTEAMS_INSTALL_WORKER_IMAGE:-}"
 COPAW_WORKER_IMAGE="${AGENTTEAMS_INSTALL_COPAW_WORKER_IMAGE:-}"
 HERMES_WORKER_IMAGE="${AGENTTEAMS_INSTALL_HERMES_WORKER_IMAGE:-}"
 QWENPAW_WORKER_IMAGE="${AGENTTEAMS_INSTALL_QWENPAW_WORKER_IMAGE:-}"
-OPENHUMAN_WORKER_IMAGE="${AGENTTEAMS_INSTALL_OPENHUMAN_WORKER_IMAGE:-}"
 
 resolve_image_tags() {
     MANAGER_IMAGE="${AGENTTEAMS_INSTALL_MANAGER_IMAGE:-${AGENTTEAMS_REGISTRY}/agentteams/agentteams-manager:${AGENTTEAMS_VERSION}}"
@@ -966,7 +962,6 @@ resolve_image_tags() {
     COPAW_WORKER_IMAGE="${AGENTTEAMS_INSTALL_COPAW_WORKER_IMAGE:-${AGENTTEAMS_REGISTRY}/agentteams/agentteams-copaw-worker:${AGENTTEAMS_VERSION}}"
     HERMES_WORKER_IMAGE="${AGENTTEAMS_INSTALL_HERMES_WORKER_IMAGE:-${AGENTTEAMS_REGISTRY}/agentteams/agentteams-hermes-worker:${AGENTTEAMS_VERSION}}"
     QWENPAW_WORKER_IMAGE="${AGENTTEAMS_INSTALL_QWENPAW_WORKER_IMAGE:-${AGENTTEAMS_REGISTRY}/agentteams/agentteams-qwenpaw-worker:${AGENTTEAMS_VERSION}}"
-    OPENHUMAN_WORKER_IMAGE="${AGENTTEAMS_INSTALL_OPENHUMAN_WORKER_IMAGE:-${AGENTTEAMS_REGISTRY}/agentteams/agentteams-openhuman-worker:${AGENTTEAMS_VERSION}}"
     EMBEDDED_IMAGE="${AGENTTEAMS_INSTALL_EMBEDDED_IMAGE:-${AGENTTEAMS_REGISTRY}/agentteams/agentteams-embedded:${AGENTTEAMS_VERSION}}"
 }
 
@@ -2288,7 +2283,6 @@ step_runtime() {
     echo "  2) $(msg worker_runtime.openclaw)"
     echo "  3) $(msg worker_runtime.hermes)"
     echo "  4) $(msg worker_runtime.qwenpaw)"
-    echo "  5) $(msg worker_runtime.openhuman)"
     echo ""
     if [ "${AGENTTEAMS_NON_INTERACTIVE}" = "1" ]; then
         AGENTTEAMS_DEFAULT_WORKER_RUNTIME="${AGENTTEAMS_DEFAULT_WORKER_RUNTIME:-copaw}"
@@ -2302,7 +2296,6 @@ step_runtime() {
                 2) AGENTTEAMS_DEFAULT_WORKER_RUNTIME="openclaw" ;;
                 3) AGENTTEAMS_DEFAULT_WORKER_RUNTIME="hermes" ;;
                 4) AGENTTEAMS_DEFAULT_WORKER_RUNTIME="qwenpaw" ;;
-                5) AGENTTEAMS_DEFAULT_WORKER_RUNTIME="openhuman" ;;
                 *) AGENTTEAMS_DEFAULT_WORKER_RUNTIME="copaw" ;;
             esac
         fi
@@ -2315,7 +2308,6 @@ step_runtime() {
             2) AGENTTEAMS_DEFAULT_WORKER_RUNTIME="openclaw" ;;
             3) AGENTTEAMS_DEFAULT_WORKER_RUNTIME="hermes" ;;
             4) AGENTTEAMS_DEFAULT_WORKER_RUNTIME="qwenpaw" ;;
-            5) AGENTTEAMS_DEFAULT_WORKER_RUNTIME="openhuman" ;;
             *) AGENTTEAMS_DEFAULT_WORKER_RUNTIME="copaw" ;;
         esac
     fi
@@ -2805,9 +2797,8 @@ AGENTTEAMS_WORKER_IMAGE=${WORKER_IMAGE}
 AGENTTEAMS_COPAW_WORKER_IMAGE=${COPAW_WORKER_IMAGE}
 AGENTTEAMS_HERMES_WORKER_IMAGE=${HERMES_WORKER_IMAGE}
 AGENTTEAMS_QWENPAW_WORKER_IMAGE=${QWENPAW_WORKER_IMAGE}
-AGENTTEAMS_OPENHUMAN_WORKER_IMAGE=${OPENHUMAN_WORKER_IMAGE}
 
-# Default Worker runtime (openclaw | copaw | hermes | qwenpaw | openhuman)
+# Default Worker runtime (openclaw | copaw | hermes | qwenpaw)
 AGENTTEAMS_DEFAULT_WORKER_RUNTIME=${AGENTTEAMS_DEFAULT_WORKER_RUNTIME:-copaw}
 
 # Matrix E2EE (0=disabled, 1=enabled; default: 0)
@@ -2925,7 +2916,6 @@ EOF
     _pull_image "${COPAW_WORKER_IMAGE}" "install.image.worker_exists" "install.image.pulling_worker"
     _pull_image "${HERMES_WORKER_IMAGE}" "install.image.worker_exists" "install.image.pulling_worker"
     _pull_image "${QWENPAW_WORKER_IMAGE}" "install.image.worker_exists" "install.image.pulling_worker"
-    _pull_image "${OPENHUMAN_WORKER_IMAGE}" "install.image.worker_exists" "install.image.pulling_worker"
 
     # --- Stop and remove existing containers ---
     if ${DOCKER_CMD} ps -a --format '{{.Names}}' | grep -q "^agentteams-controller$"; then
@@ -2993,7 +2983,6 @@ EOF
             -e "AGENTTEAMS_COPAW_WORKER_IMAGE=${COPAW_WORKER_IMAGE}"
             -e "AGENTTEAMS_HERMES_WORKER_IMAGE=${HERMES_WORKER_IMAGE}"
             -e "AGENTTEAMS_QWENPAW_WORKER_IMAGE=${QWENPAW_WORKER_IMAGE}"
-            -e "AGENTTEAMS_OPENHUMAN_WORKER_IMAGE=${OPENHUMAN_WORKER_IMAGE}"
             -e "AGENTTEAMS_MATRIX_DOMAIN=${_matrix_domain}"
             -e "AGENTTEAMS_CINNY_HOMESERVER_URL=http://127.0.0.1:${AGENTTEAMS_PORT_GATEWAY}"
             -e "AGENTTEAMS_CINNY_PUBLIC_URL=http://127.0.0.1:${AGENTTEAMS_PORT_CINNY}"

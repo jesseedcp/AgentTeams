@@ -687,28 +687,25 @@ func TestK8sCreateResolvesImageFromRuntime(t *testing.T) {
 		{"explicit_copaw", RuntimeCopaw, "", "agentteams/copaw-worker:latest", RuntimeCopaw},
 		{"explicit_hermes", RuntimeHermes, "", "agentteams/hermes-worker:latest", RuntimeHermes},
 		{"explicit_qwenpaw", RuntimeQwenPaw, "", "agentteams/qwenpaw-worker:latest", RuntimeQwenPaw},
-		{"explicit_openhuman", RuntimeOpenHuman, "", "agentteams/openhuman-worker:latest", RuntimeOpenHuman},
 		{"explicit_openclaw", RuntimeOpenClaw, "", "agentteams/worker-agent:latest", RuntimeOpenClaw},
 		{"empty_no_fallback", "", "", "agentteams/worker-agent:latest", RuntimeOpenClaw},
 		{"empty_with_copaw_fallback", "", RuntimeCopaw, "agentteams/copaw-worker:latest", RuntimeCopaw},
 		{"empty_with_hermes_fallback", "", RuntimeHermes, "agentteams/hermes-worker:latest", RuntimeHermes},
 		{"empty_with_qwenpaw_fallback", "", RuntimeQwenPaw, "agentteams/qwenpaw-worker:latest", RuntimeQwenPaw},
-		{"empty_with_openhuman_fallback", "", RuntimeOpenHuman, "agentteams/openhuman-worker:latest", RuntimeOpenHuman},
 		{"explicit_overrides_fallback", RuntimeOpenClaw, RuntimeHermes, "agentteams/worker-agent:latest", RuntimeOpenClaw},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			client := newFakeK8sCoreClient()
 			b := NewK8sBackendWithClient(client, K8sConfig{
-				Namespace:            "agentteams",
-				ManagerImage:         "agentteams/manager:latest",
-				WorkerImage:          "agentteams/worker-agent:latest",
-				CopawWorkerImage:     "agentteams/copaw-worker:latest",
-				HermesWorkerImage:    "agentteams/hermes-worker:latest",
-				QwenPawWorkerImage:   "agentteams/qwenpaw-worker:latest",
-				OpenHumanWorkerImage: "agentteams/openhuman-worker:latest",
-				WorkerCPU:            "1000m",
-				WorkerMemory:         "2Gi",
+				Namespace:          "agentteams",
+				ManagerImage:       "agentteams/manager:latest",
+				WorkerImage:        "agentteams/worker-agent:latest",
+				CopawWorkerImage:   "agentteams/copaw-worker:latest",
+				HermesWorkerImage:  "agentteams/hermes-worker:latest",
+				QwenPawWorkerImage: "agentteams/qwenpaw-worker:latest",
+				WorkerCPU:          "1000m",
+				WorkerMemory:       "2Gi",
 			}, "agentteams-worker-", nil)
 
 			if _, err := b.Create(context.Background(), CreateRequest{
@@ -736,12 +733,13 @@ func TestK8sCreateResolvesImageFromRuntime(t *testing.T) {
 func TestK8sCreateAgentScopeManagerHealthProbes(t *testing.T) {
 	client := newFakeK8sCoreClient()
 	b := NewK8sBackendWithClient(client, K8sConfig{
-		Namespace:      "agentteams",
-		ManagerImage:   "agentteams/manager:latest",
-		WorkerImage:    "agentteams/worker-agent:latest",
-		WorkerCPU:      "1000m",
-		WorkerMemory:   "2Gi",
-		ControllerName: testControllerName,
+		Namespace:        "agentteams",
+		ManagerImage:     "agentteams/manager:latest",
+		ManagerDataClaim: "agentteams-manager-data",
+		WorkerImage:      "agentteams/worker-agent:latest",
+		WorkerCPU:        "1000m",
+		WorkerMemory:     "2Gi",
+		ControllerName:   testControllerName,
 	}, "agentteams-worker-", nil)
 
 	if _, err := b.Create(context.Background(), CreateRequest{
@@ -783,6 +781,17 @@ func TestK8sCreateAgentScopeManagerHealthProbes(t *testing.T) {
 		got.Port.StrVal != "manager-health" {
 		t.Fatalf("Manager readiness probe = %+v", got)
 	}
+	if len(managerContainer.VolumeMounts) != 2 {
+		t.Fatalf("Manager volume mounts = %+v, want token and data", managerContainer.VolumeMounts)
+	}
+	dataMount := managerContainer.VolumeMounts[1]
+	if dataMount.Name != "manager-data" || dataMount.MountPath != "/var/lib/agentteams-manager" {
+		t.Fatalf("Manager data mount = %+v", dataMount)
+	}
+	if got := managerPod.Spec.Volumes[1].PersistentVolumeClaim; got == nil ||
+		got.ClaimName != "agentteams-manager-data" {
+		t.Fatalf("Manager data volume = %+v", managerPod.Spec.Volumes[1])
+	}
 
 	if _, err := b.Create(context.Background(), CreateRequest{
 		Name:    "worker",
@@ -803,6 +812,52 @@ func TestK8sCreateAgentScopeManagerHealthProbes(t *testing.T) {
 		workerContainer.LivenessProbe != nil ||
 		workerContainer.ReadinessProbe != nil {
 		t.Fatalf("Worker unexpectedly received Manager probes: %+v", workerContainer)
+	}
+}
+
+func TestK8sAgentScopeManagerHostShareIsExplicitOptIn(t *testing.T) {
+	client := newFakeK8sCoreClient()
+	b := NewK8sBackendWithClient(client, K8sConfig{
+		Namespace:       "agentteams",
+		ManagerImage:    "agentteams/manager:latest",
+		ManagerHostPath: "/srv/approved-share",
+	}, "agentteams-worker-", nil)
+
+	if _, err := b.Create(context.Background(), CreateRequest{
+		Name:    "manager-host",
+		Runtime: RuntimeAgentScope,
+	}); err != nil {
+		t.Fatalf("Create AgentScope Manager failed: %v", err)
+	}
+	pod, err := b.client.Pods("agentteams").Get(
+		context.Background(),
+		"agentteams-worker-manager-host",
+		metav1.GetOptions{},
+	)
+	if err != nil {
+		t.Fatalf("Get Manager pod failed: %v", err)
+	}
+	var foundVolume bool
+	for _, volume := range pod.Spec.Volumes {
+		if volume.Name == "manager-host-share" {
+			foundVolume = volume.HostPath != nil &&
+				volume.HostPath.Path == "/srv/approved-share"
+		}
+	}
+	if !foundVolume {
+		t.Fatalf("host share volume missing: %+v", pod.Spec.Volumes)
+	}
+	var foundMount bool
+	for _, mount := range pod.Spec.Containers[0].VolumeMounts {
+		if mount.Name == "manager-host-share" {
+			foundMount = mount.MountPath == "/host-share"
+		}
+	}
+	if !foundMount {
+		t.Fatalf(
+			"host share mount missing: %+v",
+			pod.Spec.Containers[0].VolumeMounts,
+		)
 	}
 }
 

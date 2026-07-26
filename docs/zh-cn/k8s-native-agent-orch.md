@@ -87,7 +87,7 @@ metadata:
   name: alice
 spec:
   model: claude-sonnet-4-6           # 必填：LLM 模型
-  runtime: copaw                     # openclaw | copaw | hermes | qwenpaw | openhuman
+  runtime: copaw                     # openclaw | copaw | hermes | qwenpaw
   skills: [github-operations]        # 平台内置技能
   mcpServers:                        # 通过 mcporter 调用的 MCP Server
     - name: github
@@ -104,7 +104,7 @@ spec:
   #   groupAllowExtra: ["@human:domain"]
 ```
 
-每个 Worker 对应：一个 Docker 容器（或 K8s Pod）+ 一个 Matrix 通信账号 + 一块 MinIO 命名空间 + 一个 Gateway Consumer Token。未指定 `spec.image` 时，Controller 会从 `AGENTTEAMS_WORKER_IMAGE`、`AGENTTEAMS_COPAW_WORKER_IMAGE`、`AGENTTEAMS_HERMES_WORKER_IMAGE`、`AGENTTEAMS_QWENPAW_WORKER_IMAGE` 或 `AGENTTEAMS_OPENHUMAN_WORKER_IMAGE`（或对应 Chart 默认值）中选择运行时镜像。
+每个 Worker 对应：一个 Docker 容器（或 K8s Pod）+ 一个 Matrix 通信账号 + 一块 MinIO 命名空间 + 一个 Gateway Consumer Token。未指定 `spec.image` 时，Controller 会从 `AGENTTEAMS_WORKER_IMAGE`、`AGENTTEAMS_COPAW_WORKER_IMAGE`、`AGENTTEAMS_HERMES_WORKER_IMAGE` 或 `AGENTTEAMS_QWENPAW_WORKER_IMAGE`（或对应 Chart 默认值）中选择运行时镜像。
 
 #### Team — 协作单元
 

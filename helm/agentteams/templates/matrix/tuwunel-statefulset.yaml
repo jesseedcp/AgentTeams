@@ -55,6 +55,11 @@ spec:
                 secretKeyRef:
                   name: {{ include "agentteams.secretName" . }}
                   key: AGENTTEAMS_REGISTRATION_TOKEN
+            - name: CONDUWUIT_REGISTRATION_SHARED_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "agentteams.secretName" . }}
+                  key: AGENTTEAMS_REGISTRATION_TOKEN
             # Increase default cache capacity to prevent RocksDB thrashing
             # (tuwunel#123); matches embedded's start-tuwunel.sh default.
             - name: CONDUWUIT_CACHE_CAPACITY_MODIFIER

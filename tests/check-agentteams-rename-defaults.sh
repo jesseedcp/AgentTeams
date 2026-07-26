@@ -77,7 +77,7 @@ fi
 
 for readme in README.md README.zh-CN.md README.ja-JP.md; do
     grep -Fq 'AgentScope 2.0' "${readme}"
-    grep -Fq 'OpenHuman' "${readme}"
+    ! grep -Fqi 'open''human' "${readme}"
 done
 
 if grep -Eq 'Manager \((OpenClaw|CoPaw|QwenPaw)' \

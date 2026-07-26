@@ -17,7 +17,6 @@ NacosRuntime = Literal[
     "copaw",
     "hermes",
     "qwenpaw",
-    "openhuman",
 ]
 
 

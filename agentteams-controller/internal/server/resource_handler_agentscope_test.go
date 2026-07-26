@@ -184,7 +184,6 @@ func TestCreateWorkerAcceptsEveryWorkerRuntime(t *testing.T) {
 		backend.RuntimeCopaw,
 		backend.RuntimeHermes,
 		backend.RuntimeQwenPaw,
-		backend.RuntimeOpenHuman,
 	} {
 		t.Run(workerRuntime, func(t *testing.T) {
 			scheme := newServerTestScheme(t)

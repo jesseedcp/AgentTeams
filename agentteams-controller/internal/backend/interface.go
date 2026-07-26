@@ -36,7 +36,6 @@ const (
 	RuntimeOpenClaw   = "openclaw"
 	RuntimeCopaw      = "copaw"
 	RuntimeHermes     = "hermes"
-	RuntimeOpenHuman  = "openhuman"
 	RuntimeQwenPaw    = "qwenpaw"
 )
 
@@ -61,7 +60,7 @@ func NormalizeAuthTokenExpirationSeconds(seconds int64) int64 {
 // ValidRuntime reports whether r is a recognized runtime value.
 // An empty string is valid — backends resolve it via ResolveRuntime.
 func ValidRuntime(r string) bool {
-	return r == "" || r == RuntimeOpenClaw || r == RuntimeCopaw || r == RuntimeHermes || r == RuntimeOpenHuman || r == RuntimeQwenPaw
+	return r == "" || r == RuntimeOpenClaw || r == RuntimeCopaw || r == RuntimeHermes || r == RuntimeQwenPaw
 }
 
 // ValidManagerRuntime reports whether r is a supported Manager runtime.

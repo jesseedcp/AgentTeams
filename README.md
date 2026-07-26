@@ -14,13 +14,13 @@
 
 Built on a **Manager-Workers architecture**, AgentTeams uses an **AgentScope 2.0 Manager** to centrally orchestrate multiple Workers, focusing on collaboration scenarios between humans and Agents, as well as among Agents within enterprise environments.
 
-The Manager runtime is fixed to AgentScope 2.0. Worker execution remains pluggable across OpenClaw, CoPaw, Hermes, QwenPaw, and OpenHuman.
+The Manager runtime is fixed to AgentScope 2.0. Worker execution remains pluggable across OpenClaw, CoPaw, Hermes, and QwenPaw.
 
 ## Key Features
 
 - 🧬 **Manager-Workers Architecture**: Eliminates the need for human oversight of individual Worker Claws by enabling Agents to manage other Agents.
 
-- 🤝 **Multi-Runtime Collaboration**: OpenClaw, CoPaw, Hermes, QwenPaw, and OpenHuman Workers coexist in the same IM room. Select the runtime that best fits each role while the AgentScope Manager keeps orchestration consistent.
+- 🤝 **Multi-Runtime Collaboration**: OpenClaw, CoPaw, Hermes, and QwenPaw Workers coexist in the same IM room. Select the runtime that best fits each role while the AgentScope Manager keeps orchestration consistent.
 
 - 📦 **MinIO Shared File System**: Introduces a shared file system for inter-Agent information exchange, significantly reducing token consumption in multi-Agent collaboration scenarios.
 
@@ -30,7 +30,7 @@ The Manager runtime is fixed to AgentScope 2.0. Worker execution remains pluggab
 
 ## News
 
-> Entries below describe upstream project history. In this project, the current Manager is AgentScope 2.0 only; OpenClaw, CoPaw, Hermes, QwenPaw, and OpenHuman are Worker runtimes.
+> Entries below describe upstream project history. In this project, the current Manager is AgentScope 2.0 only; OpenClaw, CoPaw, Hermes, and QwenPaw are Worker runtimes.
 
 - **2026-07-17**: [Release Notes](https://github.com/agentscope-ai/AgentTeams/releases/tag/v1.2.0-beta.1) — AgentTeams v1.2.0-beta.1 (prerelease): completes the public rename from the previous project name across images, Kubernetes APIs, Helm, Matrix, storage, and runtime contracts; adds the plugin platform, TeamHarness and WorkerFlow integrations, Matrix AppService and Human SSO, model-provider routing and LLM preflight, plus richer controller observability. Beta installation requires explicit opt-in, while the stable default remains v1.1.2.
 - **2026-05-27**: [Release Notes](https://github.com/agentscope-ai/AgentTeams/releases/tag/v1.1.2) — AgentTeams v1.1.2: QwenPaw-first installer with keep-all upgrade flow, Team human coordinators and refreshed Team Leader coordination tools, Nacos remote skills with `sts-agentteams` / `ai-registry` STS scope, Worker CR-name decoupled from runtime name, controller reconcile metrics and graceful shutdown.
@@ -197,7 +197,7 @@ helm install agentteams higress.io/agentteams \
 | `preflight.llm.activeDeadlineSeconds` | no | Kubernetes Job active deadline for the preflight hook. Defaults to `120` |
 | `preflight.llm.resources` | no | Optional Kubernetes resource requests/limits for the preflight hook container |
 | `manager.runtime` | no | Manager runtime; only `agentscope` is supported |
-| `worker.defaultRuntime` | no | Default Worker runtime: `openclaw` (default), `copaw`, `hermes`, `qwenpaw`, or `openhuman` |
+| `worker.defaultRuntime` | no | Default Worker runtime: `openclaw` (default), `copaw`, `hermes`, or `qwenpaw` |
 
 Helm installs run an LLM preflight hook by default. The hook sends a minimal OpenAI-compatible `/chat/completions` request using `credentials.llmApiKey`, `credentials.llmBaseUrl`, and `credentials.defaultModel`; invalid keys, unreachable base URLs, unsupported models, quota errors, and provider outages fail the install before the controller starts. To bypass this check for restricted or offline clusters:
 
@@ -227,7 +227,7 @@ helm install agentteams higress.io/agentteams \
 
 The Manager image is always `agentteams-manager` and runs AgentScope
 2.0.4.post1. Worker images are selected independently for OpenClaw, CoPaw,
-Hermes, QwenPaw, or OpenHuman.
+Hermes, or QwenPaw.
 
 </details>
 
@@ -396,7 +396,6 @@ AgentTeams supports five Worker runtimes that can **coexist in the same IM room*
 - **CoPaw** (Python) — Lightweight conversational Worker with Matrix and shared-storage integration
 - **QwenPaw** (Python) — Lightweight runtime, suited for browser automation and quick tasks
 - **Hermes** ([hermes-agent](https://github.com/NousResearch/hermes-agent)) — Autonomous coding agent with terminal sandbox, self-improving skills, and persistent memory
-- **OpenHuman** (Rust) — Native Matrix Worker optimized for low-overhead execution
 
 Each runtime excels at different tasks. A common pattern: use deterministic agents (OpenClaw/QwenPaw) as Leaders to decompose and assign work, and Hermes Workers for autonomous code execution. All runtimes communicate via Matrix `m.mentions` in the same room — fully visible, fully intervenable.
 
@@ -418,7 +417,7 @@ agt update worker --runtime hermes
 └─────────────────────────┬────────────────────────────┘
                           │ creates and coordinates
 ┌─────────────────────────▼────────────────────────────┐
-│ OpenClaw │ CoPaw │ Hermes │ QwenPaw │ OpenHuman     │
+│ OpenClaw │ CoPaw │ Hermes │ QwenPaw                 │
 │                    Worker runtimes                    │
 └──────────────────────────────────────────────────────┘
 ```

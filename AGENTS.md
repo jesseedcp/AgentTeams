@@ -6,7 +6,7 @@ AgentScope Manager and five independently selectable Worker runtimes.
 ## Runtime contract
 
 - Manager runtime: `agentscope` only, pinned to AgentScope `2.0.4.post1`.
-- Worker runtimes: `openclaw`, `copaw`, `hermes`, `qwenpaw`, `openhuman`.
+- Worker runtimes: `openclaw`, `copaw`, `hermes`, `qwenpaw`.
 - Controller is authoritative for Manager, Worker, Team, and Human resources.
 - Matrix is authoritative for conversations, rooms, membership, and media.
 - Higress is authoritative for model, MCP, consumer, and service routes.
@@ -26,7 +26,6 @@ worker/                  OpenClaw Worker image
 copaw/                   CoPaw Worker package/image
 hermes/                  Hermes Worker package/image
 qwenpaw/                 QwenPaw Worker image
-openhuman/               OpenHuman Worker image
 openclaw-base/           Shared OpenClaw Worker base
 helm/agentteams/         Kubernetes chart and mirrored CRDs
 install/                 Bash and PowerShell embedded installers

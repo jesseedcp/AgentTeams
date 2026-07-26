@@ -31,7 +31,6 @@
 #   AGENTTEAMS_INSTALL_COPAW_WORKER_IMAGE  Override copaw worker image (e.g., local build)
 #   AGENTTEAMS_INSTALL_HERMES_WORKER_IMAGE Override hermes worker image (e.g., local build)
 #   AGENTTEAMS_INSTALL_QWENPAW_WORKER_IMAGE Override qwenpaw worker image (e.g., local build)
-#   AGENTTEAMS_INSTALL_OPENHUMAN_WORKER_IMAGE Override openhuman worker image (e.g., local build)
 #   AGENTTEAMS_PORT_GATEWAY       Host port for Higress gateway (default: 18080)
 #   AGENTTEAMS_PORT_CONSOLE       Host port for Higress console (default: 18001)
 #   AGENTTEAMS_PORT_CINNY         Host port for Cinny direct access (default: 18088)
@@ -401,7 +400,6 @@ $script:Messages = @{
     "worker_runtime.copaw" = @{ zh = "CoPaw"; en = "CoPaw" }
     "worker_runtime.hermes" = @{ zh = "Hermes"; en = "Hermes" }
     "worker_runtime.qwenpaw" = @{ zh = "QwenPaw"; en = "QwenPaw" }
-    "worker_runtime.openhuman" = @{ zh = "OpenHuman"; en = "OpenHuman" }
     "worker_runtime.choice" = @{ zh = "请选择 [1/2/3/4/5]"; en = "Enter choice [1/2/3/4/5]" }
     "worker_runtime.selected" = @{ zh = "默认 Worker 运行时: {0}"; en = "Default Worker runtime: {0}" }
     "worker_runtime.title_short" = @{ zh = "默认 Worker 运行时"; en = "Default Worker Runtime" }
@@ -893,12 +891,11 @@ AGENTTEAMS_WORKER_IMAGE=$($Config.WORKER_IMAGE)
 AGENTTEAMS_COPAW_WORKER_IMAGE=$($Config.COPAW_WORKER_IMAGE)
 AGENTTEAMS_HERMES_WORKER_IMAGE=$($Config.HERMES_WORKER_IMAGE)
 AGENTTEAMS_QWENPAW_WORKER_IMAGE=$($Config.QWENPAW_WORKER_IMAGE)
-AGENTTEAMS_OPENHUMAN_WORKER_IMAGE=$($Config.OPENHUMAN_WORKER_IMAGE)
 
 # Manager runtime is fixed; Worker runtime remains independently configurable.
 AGENTTEAMS_MANAGER_RUNTIME=agentscope
 
-# Default Worker runtime (openclaw | copaw | hermes | qwenpaw | openhuman)
+# Default Worker runtime (openclaw | copaw | hermes | qwenpaw)
 AGENTTEAMS_DEFAULT_WORKER_RUNTIME=$($Config.DEFAULT_WORKER_RUNTIME)
 
 # Matrix E2EE (0=disabled, 1=enabled; default: 0)
@@ -2047,7 +2044,6 @@ function Step-Runtime {
     Write-Host "  2) $(Get-Msg 'worker_runtime.openclaw')"
     Write-Host "  3) $(Get-Msg 'worker_runtime.hermes')"
     Write-Host "  4) $(Get-Msg 'worker_runtime.qwenpaw')"
-    Write-Host "  5) $(Get-Msg 'worker_runtime.openhuman')"
     Write-Host ""
 
     if ($script:AGENTTEAMS_NON_INTERACTIVE) {
@@ -2061,7 +2057,6 @@ function Step-Runtime {
                 "2" { "openclaw" }
                 "3" { "hermes" }
                 "4" { "qwenpaw" }
-                "5" { "openhuman" }
                 default { "copaw" }
             }
         } else {
@@ -2077,7 +2072,6 @@ function Step-Runtime {
             "2" { "openclaw" }
             "3" { "hermes" }
             "4" { "qwenpaw" }
-            "5" { "openhuman" }
             default { "copaw" }
         }
     }
@@ -2237,12 +2231,6 @@ function Install-Manager {
         $env:AGENTTEAMS_INSTALL_QWENPAW_WORKER_IMAGE
     } else {
         "$($script:AGENTTEAMS_REGISTRY)/agentteams/agentteams-qwenpaw-worker:$($script:AGENTTEAMS_VERSION)"
-    }
-
-    $script:OPENHUMAN_WORKER_IMAGE = if ($env:AGENTTEAMS_INSTALL_OPENHUMAN_WORKER_IMAGE) {
-        $env:AGENTTEAMS_INSTALL_OPENHUMAN_WORKER_IMAGE
-    } else {
-        "$($script:AGENTTEAMS_REGISTRY)/agentteams/agentteams-openhuman-worker:$($script:AGENTTEAMS_VERSION)"
     }
 
     # Resolve the required infrastructure Controller image.
@@ -2434,7 +2422,6 @@ function Install-Manager {
     $config.COPAW_WORKER_IMAGE = $script:COPAW_WORKER_IMAGE
     $config.HERMES_WORKER_IMAGE = $script:HERMES_WORKER_IMAGE
     $config.QWENPAW_WORKER_IMAGE = $script:QWENPAW_WORKER_IMAGE
-    $config.OPENHUMAN_WORKER_IMAGE = $script:OPENHUMAN_WORKER_IMAGE
 
     # Write env file
     New-EnvFile -Config $config -Path $script:AGENTTEAMS_ENV_FILE
@@ -2498,8 +2485,7 @@ function Install-Manager {
         $script:WORKER_IMAGE,
         $script:COPAW_WORKER_IMAGE,
         $script:HERMES_WORKER_IMAGE,
-        $script:QWENPAW_WORKER_IMAGE,
-        $script:OPENHUMAN_WORKER_IMAGE
+        $script:QWENPAW_WORKER_IMAGE
     )) {
         if ($workerImg -match $LocalImagePattern) {
             if (Test-LocalImage $workerImg) {
@@ -2578,7 +2564,6 @@ function Install-Manager {
             "-e", "AGENTTEAMS_COPAW_WORKER_IMAGE=$($script:COPAW_WORKER_IMAGE)",
             "-e", "AGENTTEAMS_HERMES_WORKER_IMAGE=$($script:HERMES_WORKER_IMAGE)",
             "-e", "AGENTTEAMS_QWENPAW_WORKER_IMAGE=$($script:QWENPAW_WORKER_IMAGE)",
-            "-e", "AGENTTEAMS_OPENHUMAN_WORKER_IMAGE=$($script:OPENHUMAN_WORKER_IMAGE)",
             "-e", "AGENTTEAMS_MATRIX_DOMAIN=$matrixDomain",
             "-e", "AGENTTEAMS_CINNY_HOMESERVER_URL=http://127.0.0.1:$($config.PORT_GATEWAY)",
             "-e", "AGENTTEAMS_CINNY_PUBLIC_URL=http://127.0.0.1:$($config.PORT_CINNY)",

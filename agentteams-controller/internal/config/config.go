@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -103,15 +104,19 @@ type Config struct {
 	SandboxPrewarmSizeConfigured bool
 
 	// Manager deployment (Initializer creates the Manager CR if enabled)
-	ManagerEnabled          bool
-	ManagerModel            string
-	ManagerRuntime          string
-	ManagerImage            string
-	ManagerSpecResources    *v1beta1.AgentResourceRequirements
-	K8sManagerCPURequest    string
-	K8sManagerMemoryRequest string
-	K8sManagerCPU           string
-	K8sManagerMemory        string
+	ManagerEnabled            bool
+	ManagerModel              string
+	ManagerRuntime            string
+	ManagerImage              string
+	ManagerDataClaim          string
+	ManagerHostPath           string
+	ManagerHostReadAllowlist  string
+	ManagerHostWriteAllowlist string
+	ManagerSpecResources      *v1beta1.AgentResourceRequirements
+	K8sManagerCPURequest      string
+	K8sManagerMemoryRequest   string
+	K8sManagerCPU             string
+	K8sManagerMemory          string
 
 	// DefaultWorkerRuntime is applied by the Worker reconciler when a Worker
 	// CR has spec.runtime unset, before falling back to "openclaw". Sourced
@@ -178,7 +183,8 @@ type Config struct {
 	AIStreamIdleTimeoutSeconds int    // AGENTTEAMS_AI_STREAM_IDLE_TIMEOUT_SECONDS
 
 	// Cinny URL (for Gateway route initialization)
-	CinnyURL string
+	CinnyURL        string
+	ManagerAdminURL string
 
 	// Locale used to render the first-boot Manager onboarding prompt
 	// (welcome message). Sourced from the install-time AGENTTEAMS_LANGUAGE
@@ -205,21 +211,22 @@ type Config struct {
 // WorkerEnvDefaults holds environment variable defaults injected into worker and manager containers.
 // All values are resolved once at config load time from the controller's own environment.
 type WorkerEnvDefaults struct {
-	MatrixDomain         string
-	FSEndpoint           string
-	FSBucket             string
-	StoragePrefix        string
-	ControllerURL        string
-	AIGatewayURL         string
-	MatrixURL            string
-	AdminUser            string
-	AdminPassword        string
-	HigressAdminURL      string
-	MCPGitHubToken       string
-	Runtime              string // "docker" for embedded, "k8s" for incluster
-	DefaultWorkerRuntime string
-	YoloMode             bool // AGENTTEAMS_YOLO=1 — propagated to managers and workers
-	MatrixDebug          bool // AGENTTEAMS_MATRIX_DEBUG=1 — propagated to managers and workers,
+	MatrixDomain            string
+	FSEndpoint              string
+	FSBucket                string
+	StoragePrefix           string
+	ControllerURL           string
+	AIGatewayURL            string
+	MatrixURL               string
+	AdminUser               string
+	AdminPassword           string
+	MatrixRegistrationToken string
+	HigressAdminURL         string
+	MCPGitHubToken          string
+	Runtime                 string // "docker" for embedded, "k8s" for incluster
+	DefaultWorkerRuntime    string
+	YoloMode                bool // AGENTTEAMS_YOLO=1 — propagated to managers and workers
+	MatrixDebug             bool // AGENTTEAMS_MATRIX_DEBUG=1 — propagated to managers and workers,
 	// translated to OPENCLAW_MATRIX_DEBUG=1 by the container entrypoints to
 	// enable structured INFO-level traces in the openclaw matrix plugin.
 
@@ -347,15 +354,19 @@ func LoadConfig() *Config {
 		SandboxPrewarmSize:           envOrDefaultInt("AGENTTEAMS_SANDBOX_PREWARM_SIZE", backend.DefaultSandboxPrewarmSize),
 		SandboxPrewarmSizeConfigured: os.Getenv("AGENTTEAMS_SANDBOX_PREWARM_SIZE") != "",
 
-		ManagerEnabled:          envOrDefault("AGENTTEAMS_MANAGER_ENABLED", "true") == "true",
-		ManagerModel:            firstNonEmpty(os.Getenv("AGENTTEAMS_MANAGER_MODEL"), envOrDefault("AGENTTEAMS_DEFAULT_MODEL", "qwen3.6-plus")),
-		ManagerRuntime:          envOrDefault("AGENTTEAMS_MANAGER_RUNTIME", backend.RuntimeAgentScope),
-		ManagerImage:            envOrDefault("AGENTTEAMS_MANAGER_IMAGE", "agentteams/agentteams-manager:latest"),
-		DefaultWorkerRuntime:    os.Getenv("AGENTTEAMS_DEFAULT_WORKER_RUNTIME"),
-		K8sManagerCPURequest:    envOrDefault("AGENTTEAMS_K8S_MANAGER_CPU_REQUEST", "500m"),
-		K8sManagerMemoryRequest: envOrDefault("AGENTTEAMS_K8S_MANAGER_MEMORY_REQUEST", "1Gi"),
-		K8sManagerCPU:           envOrDefault("AGENTTEAMS_K8S_MANAGER_CPU", "2"),
-		K8sManagerMemory:        envOrDefault("AGENTTEAMS_K8S_MANAGER_MEMORY", "4Gi"),
+		ManagerEnabled:            envOrDefault("AGENTTEAMS_MANAGER_ENABLED", "true") == "true",
+		ManagerModel:              firstNonEmpty(os.Getenv("AGENTTEAMS_MANAGER_MODEL"), envOrDefault("AGENTTEAMS_DEFAULT_MODEL", "qwen3.6-plus")),
+		ManagerRuntime:            envOrDefault("AGENTTEAMS_MANAGER_RUNTIME", backend.RuntimeAgentScope),
+		ManagerImage:              envOrDefault("AGENTTEAMS_MANAGER_IMAGE", "agentteams/agentteams-manager:latest"),
+		ManagerDataClaim:          os.Getenv("AGENTTEAMS_MANAGER_DATA_CLAIM"),
+		ManagerHostPath:           os.Getenv("AGENTTEAMS_MANAGER_HOST_PATH"),
+		ManagerHostReadAllowlist:  os.Getenv("AGENTTEAMS_MANAGER_HOST_READ_ALLOWLIST"),
+		ManagerHostWriteAllowlist: os.Getenv("AGENTTEAMS_MANAGER_HOST_WRITE_ALLOWLIST"),
+		DefaultWorkerRuntime:      os.Getenv("AGENTTEAMS_DEFAULT_WORKER_RUNTIME"),
+		K8sManagerCPURequest:      envOrDefault("AGENTTEAMS_K8S_MANAGER_CPU_REQUEST", "500m"),
+		K8sManagerMemoryRequest:   envOrDefault("AGENTTEAMS_K8S_MANAGER_MEMORY_REQUEST", "1Gi"),
+		K8sManagerCPU:             envOrDefault("AGENTTEAMS_K8S_MANAGER_CPU", "2"),
+		K8sManagerMemory:          envOrDefault("AGENTTEAMS_K8S_MANAGER_MEMORY", "4Gi"),
 
 		ControllerURL:  os.Getenv("AGENTTEAMS_CONTROLLER_URL"),
 		ControllerName: os.Getenv("AGENTTEAMS_CONTROLLER_NAME"),
@@ -401,6 +412,7 @@ func LoadConfig() *Config {
 			os.Getenv("AGENTTEAMS_CINNY_URL"),
 			os.Getenv("AGENTTEAMS_ELEMENT_WEB_URL"),
 		),
+		ManagerAdminURL: os.Getenv("AGENTTEAMS_MANAGER_ADMIN_URL"),
 
 		UserLanguage: envOrDefault("AGENTTEAMS_LANGUAGE", "zh"),
 		UserTimezone: envOrDefault("TZ", "Asia/Shanghai"),
@@ -414,21 +426,22 @@ func LoadConfig() *Config {
 		CMSServiceName:    envOrDefault("AGENTTEAMS_CMS_SERVICE_NAME", "agentteams-manager"),
 
 		WorkerEnv: WorkerEnvDefaults{
-			MatrixDomain:         envOrDefault("AGENTTEAMS_MATRIX_DOMAIN", "matrix-local.agentteams.io:8080"),
-			FSEndpoint:           os.Getenv("AGENTTEAMS_FS_ENDPOINT"),
-			FSBucket:             envOrDefault("AGENTTEAMS_FS_BUCKET", "agentteams-storage"),
-			StoragePrefix:        envOrDefault("AGENTTEAMS_STORAGE_PREFIX", "agentteams/agentteams-storage"),
-			ControllerURL:        os.Getenv("AGENTTEAMS_CONTROLLER_URL"),
-			AIGatewayURL:         envOrDefault("AGENTTEAMS_AI_GATEWAY_URL", "http://aigw-local.agentteams.io:8080"),
-			MatrixURL:            envOrDefault("AGENTTEAMS_MATRIX_URL", "http://matrix-local.agentteams.io:8080"),
-			AdminUser:            os.Getenv("AGENTTEAMS_ADMIN_USER"),
-			AdminPassword:        os.Getenv("AGENTTEAMS_ADMIN_PASSWORD"),
-			HigressAdminURL:      envOrDefault("AGENTTEAMS_AI_GATEWAY_ADMIN_URL", "http://127.0.0.1:8001"),
-			MCPGitHubToken:       firstNonEmpty(os.Getenv("AGENTTEAMS_MCP_GITHUB_TOKEN"), os.Getenv("AGENTTEAMS_GITHUB_TOKEN")),
-			Runtime:              kubeMode,
-			DefaultWorkerRuntime: os.Getenv("AGENTTEAMS_DEFAULT_WORKER_RUNTIME"),
-			YoloMode:             envBool("AGENTTEAMS_YOLO"),
-			MatrixDebug:          envBool("AGENTTEAMS_MATRIX_DEBUG"),
+			MatrixDomain:            envOrDefault("AGENTTEAMS_MATRIX_DOMAIN", "matrix-local.agentteams.io:8080"),
+			FSEndpoint:              os.Getenv("AGENTTEAMS_FS_ENDPOINT"),
+			FSBucket:                envOrDefault("AGENTTEAMS_FS_BUCKET", "agentteams-storage"),
+			StoragePrefix:           envOrDefault("AGENTTEAMS_STORAGE_PREFIX", "agentteams/agentteams-storage"),
+			ControllerURL:           os.Getenv("AGENTTEAMS_CONTROLLER_URL"),
+			AIGatewayURL:            envOrDefault("AGENTTEAMS_AI_GATEWAY_URL", "http://aigw-local.agentteams.io:8080"),
+			MatrixURL:               envOrDefault("AGENTTEAMS_MATRIX_URL", "http://matrix-local.agentteams.io:8080"),
+			AdminUser:               os.Getenv("AGENTTEAMS_ADMIN_USER"),
+			AdminPassword:           os.Getenv("AGENTTEAMS_ADMIN_PASSWORD"),
+			MatrixRegistrationToken: envOrDefault("AGENTTEAMS_MATRIX_REGISTRATION_TOKEN", os.Getenv("AGENTTEAMS_REGISTRATION_TOKEN")),
+			HigressAdminURL:         envOrDefault("AGENTTEAMS_AI_GATEWAY_ADMIN_URL", "http://127.0.0.1:8001"),
+			MCPGitHubToken:          firstNonEmpty(os.Getenv("AGENTTEAMS_MCP_GITHUB_TOKEN"), os.Getenv("AGENTTEAMS_GITHUB_TOKEN")),
+			Runtime:                 kubeMode,
+			DefaultWorkerRuntime:    os.Getenv("AGENTTEAMS_DEFAULT_WORKER_RUNTIME"),
+			YoloMode:                envBool("AGENTTEAMS_YOLO"),
+			MatrixDebug:             envBool("AGENTTEAMS_MATRIX_DEBUG"),
 
 			// CMS observability (propagated from controller env to all workers/managers)
 			CMSTracesEnabled:  envBool("AGENTTEAMS_CMS_TRACES_ENABLED"),
@@ -535,14 +548,13 @@ func (c *Config) ManagerResources() *backend.ResourceRequirements {
 
 func (c *Config) DockerConfig() backend.DockerConfig {
 	return backend.DockerConfig{
-		SocketPath:           c.SocketPath,
-		ManagerImage:         c.ManagerImage,
-		WorkerImage:          envOrDefault("AGENTTEAMS_WORKER_IMAGE", "agentteams/agentteams-worker:latest"),
-		CopawWorkerImage:     envOrDefault("AGENTTEAMS_COPAW_WORKER_IMAGE", "agentteams/agentteams-copaw-worker:latest"),
-		HermesWorkerImage:    envOrDefault("AGENTTEAMS_HERMES_WORKER_IMAGE", "agentteams/agentteams-hermes-worker:latest"),
-		OpenHumanWorkerImage: envOrDefault("AGENTTEAMS_OPENHUMAN_WORKER_IMAGE", "agentteams/agentteams-openhuman-worker:latest"),
-		QwenPawWorkerImage:   envOrDefault("AGENTTEAMS_QWENPAW_WORKER_IMAGE", "agentteams/agentteams-qwenpaw-worker:latest"),
-		DefaultNetwork:       envOrDefault("AGENTTEAMS_DOCKER_NETWORK", "agentteams-net"),
+		SocketPath:         c.SocketPath,
+		ManagerImage:       c.ManagerImage,
+		WorkerImage:        envOrDefault("AGENTTEAMS_WORKER_IMAGE", "agentteams/agentteams-worker:latest"),
+		CopawWorkerImage:   envOrDefault("AGENTTEAMS_COPAW_WORKER_IMAGE", "agentteams/agentteams-copaw-worker:latest"),
+		HermesWorkerImage:  envOrDefault("AGENTTEAMS_HERMES_WORKER_IMAGE", "agentteams/agentteams-hermes-worker:latest"),
+		QwenPawWorkerImage: envOrDefault("AGENTTEAMS_QWENPAW_WORKER_IMAGE", "agentteams/agentteams-qwenpaw-worker:latest"),
+		DefaultNetwork:     envOrDefault("AGENTTEAMS_DOCKER_NETWORK", "agentteams-net"),
 	}
 }
 
@@ -579,17 +591,18 @@ func (c *Config) UsesExternalOSS() bool {
 
 func (c *Config) K8sConfig() backend.K8sConfig {
 	return backend.K8sConfig{
-		Namespace:            c.K8sNamespace,
-		ManagerImage:         c.ManagerImage,
-		WorkerImage:          envOrDefault("AGENTTEAMS_WORKER_IMAGE", "agentteams/agentteams-worker:latest"),
-		CopawWorkerImage:     envOrDefault("AGENTTEAMS_COPAW_WORKER_IMAGE", "agentteams/agentteams-copaw-worker:latest"),
-		HermesWorkerImage:    envOrDefault("AGENTTEAMS_HERMES_WORKER_IMAGE", "agentteams/agentteams-hermes-worker:latest"),
-		OpenHumanWorkerImage: envOrDefault("AGENTTEAMS_OPENHUMAN_WORKER_IMAGE", "agentteams/agentteams-openhuman-worker:latest"),
-		QwenPawWorkerImage:   envOrDefault("AGENTTEAMS_QWENPAW_WORKER_IMAGE", "agentteams/agentteams-qwenpaw-worker:latest"),
-		WorkerCPU:            c.K8sWorkerCPU,
-		WorkerMemory:         c.K8sWorkerMemory,
-		ControllerName:       c.ControllerName,
-		ResourcePrefix:       c.ResourcePrefix,
+		Namespace:          c.K8sNamespace,
+		ManagerImage:       c.ManagerImage,
+		ManagerDataClaim:   c.ManagerDataClaim,
+		ManagerHostPath:    c.ManagerHostPath,
+		WorkerImage:        envOrDefault("AGENTTEAMS_WORKER_IMAGE", "agentteams/agentteams-worker:latest"),
+		CopawWorkerImage:   envOrDefault("AGENTTEAMS_COPAW_WORKER_IMAGE", "agentteams/agentteams-copaw-worker:latest"),
+		HermesWorkerImage:  envOrDefault("AGENTTEAMS_HERMES_WORKER_IMAGE", "agentteams/agentteams-hermes-worker:latest"),
+		QwenPawWorkerImage: envOrDefault("AGENTTEAMS_QWENPAW_WORKER_IMAGE", "agentteams/agentteams-qwenpaw-worker:latest"),
+		WorkerCPU:          c.K8sWorkerCPU,
+		WorkerMemory:       c.K8sWorkerMemory,
+		ControllerName:     c.ControllerName,
+		ResourcePrefix:     c.ResourcePrefix,
 	}
 }
 
@@ -602,7 +615,6 @@ func (c *Config) SandboxConfig() backend.SandboxConfig {
 		WorkerImage:                  envOrDefault("AGENTTEAMS_WORKER_IMAGE", "agentteams/agentteams-worker:latest"),
 		CopawWorkerImage:             envOrDefault("AGENTTEAMS_COPAW_WORKER_IMAGE", "agentteams/agentteams-copaw-worker:latest"),
 		HermesWorkerImage:            envOrDefault("AGENTTEAMS_HERMES_WORKER_IMAGE", "agentteams/agentteams-hermes-worker:latest"),
-		OpenHumanWorkerImage:         envOrDefault("AGENTTEAMS_OPENHUMAN_WORKER_IMAGE", "agentteams/agentteams-openhuman-worker:latest"),
 		QwenPawWorkerImage:           envOrDefault("AGENTTEAMS_QWENPAW_WORKER_IMAGE", "agentteams/agentteams-qwenpaw-worker:latest"),
 		WorkerCPU:                    c.K8sWorkerCPU,
 		WorkerMemory:                 c.K8sWorkerMemory,
@@ -829,6 +841,26 @@ func (c *Config) ManagerAgentEnv() map[string]string {
 		env["AGENTTEAMS_AI_STREAM_IDLE_TIMEOUT_SECONDS"] = strconv.Itoa(c.AIStreamIdleTimeoutSeconds)
 	}
 	setIfNonEmpty("AGENTTEAMS_CINNY_URL", c.CinnyURL)
+	if c.ManagerHostPath != "" {
+		env["AGENTTEAMS_HOST_SHARE_ROOT"] = "/host-share"
+		setIfNonEmpty(
+			"AGENTTEAMS_HOST_READ_ALLOWLIST",
+			c.ManagerHostReadAllowlist,
+		)
+		setIfNonEmpty(
+			"AGENTTEAMS_HOST_WRITE_ALLOWLIST",
+			c.ManagerHostWriteAllowlist,
+		)
+	}
+	setIfNonEmpty(
+		"AGENTTEAMS_EXTERNAL_CHANNELS",
+		os.Getenv("AGENTTEAMS_EXTERNAL_CHANNELS"),
+	)
+	for _, name := range externalChannelSecretNames(
+		os.Getenv("AGENTTEAMS_EXTERNAL_CHANNELS"),
+	) {
+		setIfNonEmpty(name, os.Getenv(name))
+	}
 	if c.MatrixE2EE {
 		env["AGENTTEAMS_MATRIX_E2EE"] = "1"
 	}
@@ -847,6 +879,37 @@ func (c *Config) ManagerAgentEnv() map[string]string {
 	setIfNonEmpty("AGENTTEAMS_CMS_WORKSPACE", c.CMSWorkspace)
 	setIfNonEmpty("AGENTTEAMS_CMS_SERVICE_NAME", c.CMSServiceName)
 	return env
+}
+
+func externalChannelSecretNames(raw string) []string {
+	if raw == "" {
+		return nil
+	}
+	var documents []struct {
+		TokenEnv         string `json:"token_env"`
+		WebhookSecretEnv string `json:"webhook_secret_env"`
+	}
+	if err := json.Unmarshal([]byte(raw), &documents); err != nil {
+		return nil
+	}
+	names := make(map[string]struct{})
+	for _, document := range documents {
+		for _, reference := range []string{
+			document.TokenEnv,
+			document.WebhookSecretEnv,
+		} {
+			name := strings.TrimPrefix(reference, "env:")
+			if name != reference && name != "" {
+				names[name] = struct{}{}
+			}
+		}
+	}
+	result := make([]string, 0, len(names))
+	for name := range names {
+		result = append(result, name)
+	}
+	sort.Strings(result)
+	return result
 }
 
 func (c *Config) AgentConfig() agentconfig.Config {

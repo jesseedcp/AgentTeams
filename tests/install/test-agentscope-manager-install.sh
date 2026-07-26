@@ -28,7 +28,7 @@ assert_absent() {
 assert_contains "${INSTALLER}" 'AGENTTEAMS_MANAGER_RUNTIME=agentscope'
 assert_contains "${INSTALLER}" 'http://127.0.0.1:18799/readyz'
 assert_contains "${INSTALLER}" 'QWENPAW_WORKER_IMAGE'
-assert_contains "${INSTALLER}" 'OPENHUMAN_WORKER_IMAGE'
+assert_absent "${INSTALLER}" 'OPEN''HUMAN_WORKER_IMAGE'
 assert_contains "${INSTALLER}" 'AGENTTEAMS_CINNY_PUBLIC_URL'
 assert_contains "${VERIFY}" 'http://127.0.0.1:18799/readyz'
 
@@ -53,8 +53,8 @@ do
 done
 
 assert_contains "${MAKEFILE}" \
-    'build: build-manager build-worker build-copaw-worker build-hermes-worker build-openhuman-worker build-qwenpaw-worker build-agentteams-controller'
+    'build: build-manager build-worker build-copaw-worker build-hermes-worker build-qwenpaw-worker build-agentteams-controller'
 assert_contains "${MAKEFILE}" \
-    'push: push-manager push-worker push-copaw-worker push-hermes-worker push-openhuman-worker push-qwenpaw-worker push-agentteams-controller push-embedded'
+    'push: push-manager push-worker push-copaw-worker push-hermes-worker push-qwenpaw-worker push-agentteams-controller push-embedded'
 
-echo "PASS: Bash installer and Makefile expose one AgentScope Manager and five Worker runtimes"
+echo "PASS: Bash installer and Makefile expose one AgentScope Manager and four Worker runtimes"

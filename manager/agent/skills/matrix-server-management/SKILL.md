@@ -13,13 +13,17 @@ task workflows perform their own Matrix changes.
 | Intent | Tool |
 |---|---|
 | Joined rooms and membership | `list_matrix_rooms`, `list_matrix_members` |
-| User profile | `lookup_matrix_user` |
+| User profile and local account registration | `lookup_matrix_user`, `register_matrix_user` |
 | Room state | `get_matrix_room_state` |
 | Invite, kick, ban, unban | `invite_matrix_user`, `kick_matrix_user`, `ban_matrix_user`, `unban_matrix_user` |
 | Media | `upload_matrix_media`, `download_matrix_media` |
 
-Membership mutations and uploads require AgentScope confirmation. Read-only
+Account registration, membership mutations, and uploads require AgentScope confirmation. Read-only
 inspection and downloads do not.
+
+`register_matrix_user` is exposed only in the configured Admin DM. It reads
+the password from a named process environment variable, so neither the prompt,
+confirmation record, nor SQLite state contains the password.
 
 Human account provisioning belongs to `human-management`; private room creation
 and notification routing belong to `channel-management`. Do not create a second

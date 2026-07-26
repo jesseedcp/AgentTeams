@@ -1,6 +1,6 @@
 """Initial SQLite schema for durable operations."""
 
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS operations (
@@ -269,4 +269,21 @@ CREATE TABLE IF NOT EXISTS channel_relationships (
 );
 CREATE INDEX IF NOT EXISTS channel_relationships_room_idx
   ON channel_relationships(room_id);
+
+CREATE TABLE IF NOT EXISTS external_channel_contacts (
+  provider TEXT NOT NULL,
+  external_user_id TEXT NOT NULL,
+  display_name TEXT NOT NULL,
+  destination_id TEXT NOT NULL,
+  status TEXT NOT NULL,
+  is_primary INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  approved_at TEXT,
+  PRIMARY KEY(provider, external_user_id)
+);
+CREATE INDEX IF NOT EXISTS external_channel_contacts_status_idx
+  ON external_channel_contacts(status, updated_at);
+CREATE UNIQUE INDEX IF NOT EXISTS external_channel_contacts_primary_idx
+  ON external_channel_contacts(is_primary) WHERE is_primary = 1;
 """

@@ -116,6 +116,49 @@ async def test_corrupt_snapshot_stops_before_replay(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_restart_preserves_primary_local_database(tmp_path: Path) -> None:
+    store = MemoryObjectStore()
+    journal = S3Journal(store, prefix="agentteams")
+    snapshot_source = Database(tmp_path / "snapshot-source.db")
+    await snapshot_source.open()
+    await snapshot_source.write(
+        lambda connection: connection.execute(
+            "INSERT INTO key_values(key, value, updated_at) "
+            "VALUES ('origin', 'snapshot', '2026-07-23T00:00:00Z')",
+        ),
+    )
+    snapshot_path = tmp_path / "snapshot.db"
+    await snapshot_source.backup_to(snapshot_path)
+    await journal.upload_snapshot(snapshot_path, sequence=0)
+
+    local = Database(tmp_path / "manager.db")
+    await local.open()
+    await local.write(
+        lambda connection: connection.execute(
+            "INSERT INTO key_values(key, value, updated_at) "
+            "VALUES ('origin', 'pvc', '2026-07-26T00:00:00Z')",
+        ),
+    )
+    coordinator = RecoveryCoordinator(
+        database=local,
+        journal=journal,
+        replay_event=lambda event: None,
+        temp_directory=tmp_path / "restore",
+        prefer_local_database=True,
+    )
+
+    report = await coordinator.restore()
+
+    assert report.snapshot_sequence == 0
+    origin = await local.read(
+        lambda connection: connection.execute(
+            "SELECT value FROM key_values WHERE key='origin'",
+        ).fetchone()[0],
+    )
+    assert origin == "pvc"
+
+
+@pytest.mark.asyncio
 async def test_journal_replay_rebuilds_operation_created_after_snapshot(
     tmp_path: Path,
 ) -> None:

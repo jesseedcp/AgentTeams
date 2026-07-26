@@ -554,12 +554,6 @@ func TestSandboxBackend_Create_ImageResolution(t *testing.T) {
 			wantImage: "qwenpaw:v4",
 		},
 		{
-			name:      "openhuman runtime",
-			runtime:   RuntimeOpenHuman,
-			config:    SandboxConfig{WorkerImage: "default:latest", OpenHumanWorkerImage: "openhuman:v5"},
-			wantImage: "openhuman:v5",
-		},
-		{
 			name:      "default worker image",
 			config:    SandboxConfig{WorkerImage: "default/worker:latest"},
 			wantImage: "default/worker:latest",

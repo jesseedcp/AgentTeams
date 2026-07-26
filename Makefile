@@ -29,7 +29,6 @@ WORKER_IMAGE           ?= $(REGISTRY)/$(REPO)/agentteams-worker
 COPAW_WORKER_IMAGE     ?= $(REGISTRY)/$(REPO)/agentteams-copaw-worker
 HERMES_WORKER_IMAGE    ?= $(REGISTRY)/$(REPO)/agentteams-hermes-worker
 QWENPAW_WORKER_IMAGE   ?= $(REGISTRY)/$(REPO)/agentteams-qwenpaw-worker
-OPENHUMAN_WORKER_IMAGE ?= $(REGISTRY)/$(REPO)/agentteams-openhuman-worker
 OPENCLAW_BASE_IMAGE    ?= $(REGISTRY)/$(REPO)/openclaw-base
 CONTROLLER_IMAGE       ?= $(REGISTRY)/$(REPO)/agentteams-controller
 EMBEDDED_IMAGE         ?= $(REGISTRY)/$(REPO)/agentteams-embedded
@@ -39,7 +38,6 @@ WORKER_TAG           ?= $(WORKER_IMAGE):$(VERSION)
 COPAW_WORKER_TAG     ?= $(COPAW_WORKER_IMAGE):$(VERSION)
 HERMES_WORKER_TAG    ?= $(HERMES_WORKER_IMAGE):$(VERSION)
 QWENPAW_WORKER_TAG   ?= $(QWENPAW_WORKER_IMAGE):$(VERSION)
-OPENHUMAN_WORKER_TAG ?= $(OPENHUMAN_WORKER_IMAGE):$(VERSION)
 OPENCLAW_BASE_TAG    ?= $(OPENCLAW_BASE_IMAGE):$(VERSION)
 CONTROLLER_TAG       ?= $(CONTROLLER_IMAGE):$(VERSION)
 EMBEDDED_TAG         ?= $(EMBEDDED_IMAGE):$(VERSION)
@@ -50,7 +48,6 @@ LOCAL_WORKER           = agentteams/worker-agent:$(VERSION)
 LOCAL_COPAW_WORKER     = agentteams/copaw-worker:$(VERSION)
 LOCAL_HERMES_WORKER    = agentteams/hermes-worker:$(VERSION)
 LOCAL_QWENPAW_WORKER   = agentteams/qwenpaw-worker:$(VERSION)
-LOCAL_OPENHUMAN_WORKER = agentteams/openhuman-worker:$(VERSION)
 LOCAL_OPENCLAW_BASE    = agentteams/openclaw-base:$(VERSION)
 LOCAL_CONTROLLER       = agentteams/agentteams-controller:$(VERSION)
 LOCAL_CONTROLLER_BUILD_IMAGE ?= $(LOCAL_CONTROLLER)
@@ -101,11 +98,11 @@ LINES          ?= 50
 
 # ---------- Phony targets ----------
 
-.PHONY: all build build-openclaw-base build-agentteams-controller build-embedded build-manager build-worker build-copaw-worker build-hermes-worker build-openhuman-worker \
+.PHONY: all build build-openclaw-base build-agentteams-controller build-embedded build-manager build-worker build-copaw-worker build-hermes-worker \
         build-qwenpaw-worker \
-        tag push push-openclaw-base push-agentteams-controller push-embedded push-manager push-worker push-copaw-worker push-hermes-worker push-openhuman-worker \
+        tag push push-openclaw-base push-agentteams-controller push-embedded push-manager push-worker push-copaw-worker push-hermes-worker \
         push-qwenpaw-worker \
-        push-native push-native-manager push-native-worker push-native-copaw-worker push-native-hermes-worker push-native-openhuman-worker \
+        push-native push-native-manager push-native-worker push-native-copaw-worker push-native-hermes-worker \
         push-native-qwenpaw-worker \
         buildx-setup \
         test test-quick test-installed test-embedded \
@@ -121,7 +118,7 @@ all: build
 
 # ---------- Build ----------
 
-build: build-manager build-worker build-copaw-worker build-hermes-worker build-openhuman-worker build-qwenpaw-worker build-agentteams-controller ## Build one AgentScope Manager, five Worker runtimes, and the Controller
+build: build-manager build-worker build-copaw-worker build-hermes-worker build-qwenpaw-worker build-agentteams-controller ## Build one AgentScope Manager, four Worker runtimes, and the Controller
 
 build-openclaw-base: ## Build OpenClaw base image
 	@echo "==> Building OpenClaw base image: $(LOCAL_OPENCLAW_BASE) (registry: $(HIGRESS_REGISTRY))"
@@ -181,13 +178,6 @@ build-hermes-worker: ## Build Hermes Worker image
 		-t $(LOCAL_HERMES_WORKER) \
 		./hermes/
 
-build-openhuman-worker: build-agentteams-controller ## Build OpenHuman Worker image (Rust + native Matrix)
-	@echo "==> Building OpenHuman Worker image: $(LOCAL_OPENHUMAN_WORKER)"
-	docker build $(PLATFORM_FLAG) $(REGISTRY_ARG) $(DOCKER_BUILD_ARGS) \
-		--build-arg AGENTTEAMS_CONTROLLER_IMAGE=$(LOCAL_CONTROLLER_BUILD_IMAGE) \
-		-t $(LOCAL_OPENHUMAN_WORKER) \
-		-f openhuman/Dockerfile .
-
 build-qwenpaw-worker: ## Build QwenPaw Worker image
 	@echo "==> Building QwenPaw Worker image: $(LOCAL_QWENPAW_WORKER) (registry: $(HIGRESS_REGISTRY))"
 	OUT_DIR=dist/adapters/qwenpaw ruby plugins/teamharness/adapters/qwenpaw/scripts/build-qwenpaw-plugin.rb plugins/teamharness/plugin.yaml >/dev/null
@@ -204,14 +194,12 @@ tag: build ## Tag images for registry push
 	docker tag $(LOCAL_WORKER) $(WORKER_TAG)
 	docker tag $(LOCAL_COPAW_WORKER) $(COPAW_WORKER_TAG)
 	docker tag $(LOCAL_HERMES_WORKER) $(HERMES_WORKER_TAG)
-	docker tag $(LOCAL_OPENHUMAN_WORKER) $(OPENHUMAN_WORKER_TAG)
 	docker tag $(LOCAL_QWENPAW_WORKER) $(QWENPAW_WORKER_TAG)
 ifeq ($(PUSH_LATEST),yes)
 	docker tag $(LOCAL_MANAGER) $(MANAGER_IMAGE):latest
 	docker tag $(LOCAL_WORKER) $(WORKER_IMAGE):latest
 	docker tag $(LOCAL_COPAW_WORKER) $(COPAW_WORKER_IMAGE):latest
 	docker tag $(LOCAL_HERMES_WORKER) $(HERMES_WORKER_IMAGE):latest
-	docker tag $(LOCAL_OPENHUMAN_WORKER) $(OPENHUMAN_WORKER_IMAGE):latest
 	docker tag $(LOCAL_QWENPAW_WORKER) $(QWENPAW_WORKER_IMAGE):latest
 	docker tag $(LOCAL_CONTROLLER) $(CONTROLLER_IMAGE):latest
 	@echo "==> Images tagged as $(VERSION) and latest"
@@ -241,7 +229,7 @@ else
 	fi
 endif
 
-push: push-manager push-worker push-copaw-worker push-hermes-worker push-openhuman-worker push-qwenpaw-worker push-agentteams-controller push-embedded ## Build + push multi-arch images (amd64 + arm64)
+push: push-manager push-worker push-copaw-worker push-hermes-worker push-qwenpaw-worker push-agentteams-controller push-embedded ## Build + push multi-arch images (amd64 + arm64)
 
 push-openclaw-base: buildx-setup ## Build + push multi-arch OpenClaw base image
 	@echo "==> Building + pushing multi-arch OpenClaw base: $(OPENCLAW_BASE_TAG) [$(MULTIARCH_PLATFORMS)]"
@@ -434,33 +422,6 @@ else
 		./hermes/
 endif
 
-push-openhuman-worker: push-agentteams-controller buildx-setup ## Build + push multi-arch OpenHuman Worker image
-	@echo "==> Building + pushing multi-arch OpenHuman Worker: $(OPENHUMAN_WORKER_TAG) [$(MULTIARCH_PLATFORMS)]"
-ifeq ($(IS_PODMAN),1)
-	-podman manifest rm $(OPENHUMAN_WORKER_TAG) 2>/dev/null
-	$(foreach plat,$(subst $(comma), ,$(MULTIARCH_PLATFORMS)), \
-		echo "  -> Building OpenHuman Worker for $(plat)..." && \
-		podman build --platform $(plat) \
-			$(REGISTRY_ARG) $(DOCKER_BUILD_ARGS) \
-			--build-arg AGENTTEAMS_CONTROLLER_IMAGE=$(CONTROLLER_TAG) \
-			--manifest $(OPENHUMAN_WORKER_TAG) \
-			-f openhuman/Dockerfile . && ) true
-	podman manifest push --all $(OPENHUMAN_WORKER_TAG) docker://$(OPENHUMAN_WORKER_TAG)
-	$(if $(PUSH_LATEST), \
-		podman manifest push --all $(OPENHUMAN_WORKER_TAG) docker://$(OPENHUMAN_WORKER_IMAGE):latest && \
-		echo "  -> Also pushed :latest tag")
-else
-	docker buildx build \
-		--builder $(BUILDX_BUILDER) \
-		--platform $(MULTIARCH_PLATFORMS) \
-		$(REGISTRY_ARG) $(DOCKER_BUILD_ARGS) \
-		--build-arg AGENTTEAMS_CONTROLLER_IMAGE=$(CONTROLLER_TAG) \
-		-t $(OPENHUMAN_WORKER_TAG) \
-		$(if $(PUSH_LATEST),-t $(OPENHUMAN_WORKER_IMAGE):latest) \
-		--push \
-		-f openhuman/Dockerfile .
-endif
-
 push-qwenpaw-worker: buildx-setup ## Build + push multi-arch QwenPaw Worker image
 	@echo "==> Building + pushing multi-arch QwenPaw Worker: $(QWENPAW_WORKER_TAG) [$(MULTIARCH_PLATFORMS)]"
 	OUT_DIR=dist/adapters/qwenpaw ruby plugins/teamharness/adapters/qwenpaw/scripts/build-qwenpaw-plugin.rb plugins/teamharness/plugin.yaml >/dev/null
@@ -502,8 +463,6 @@ push-native: tag ## Push native-arch images (dev only, overwrites multi-arch!)
 	docker push $(COPAW_WORKER_TAG)
 	@echo "==> Pushing Hermes Worker: $(HERMES_WORKER_TAG)"
 	docker push $(HERMES_WORKER_TAG)
-	@echo "==> Pushing OpenHuman Worker: $(OPENHUMAN_WORKER_TAG)"
-	docker push $(OPENHUMAN_WORKER_TAG)
 	@echo "==> Pushing QwenPaw Worker: $(QWENPAW_WORKER_TAG)"
 	docker push $(QWENPAW_WORKER_TAG)
 ifeq ($(PUSH_LATEST),yes)
@@ -511,7 +470,6 @@ ifeq ($(PUSH_LATEST),yes)
 	docker push $(WORKER_IMAGE):latest
 	docker push $(COPAW_WORKER_IMAGE):latest
 	docker push $(HERMES_WORKER_IMAGE):latest
-	docker push $(OPENHUMAN_WORKER_IMAGE):latest
 	docker push $(QWENPAW_WORKER_IMAGE):latest
 endif
 
@@ -530,10 +488,6 @@ push-native-copaw-worker: build-copaw-worker ## Push native-arch CoPaw Worker on
 push-native-hermes-worker: build-hermes-worker ## Push native-arch Hermes Worker only (dev)
 	docker tag $(LOCAL_HERMES_WORKER) $(HERMES_WORKER_TAG)
 	docker push $(HERMES_WORKER_TAG)
-
-push-native-openhuman-worker: build-openhuman-worker ## Push native-arch OpenHuman Worker only (dev)
-	docker tag $(LOCAL_OPENHUMAN_WORKER) $(OPENHUMAN_WORKER_TAG)
-	docker push $(OPENHUMAN_WORKER_TAG)
 
 push-native-qwenpaw-worker: build-qwenpaw-worker ## Push native-arch QwenPaw Worker only (dev)
 	docker tag $(LOCAL_QWENPAW_WORKER) $(QWENPAW_WORKER_TAG)
@@ -597,7 +551,6 @@ endif
 		AGENTTEAMS_INSTALL_COPAW_WORKER_IMAGE=$(LOCAL_COPAW_WORKER) \
 		AGENTTEAMS_INSTALL_HERMES_WORKER_IMAGE=$(LOCAL_HERMES_WORKER) \
 		AGENTTEAMS_INSTALL_QWENPAW_WORKER_IMAGE=$(LOCAL_QWENPAW_WORKER) \
-		AGENTTEAMS_INSTALL_OPENHUMAN_WORKER_IMAGE=$(LOCAL_OPENHUMAN_WORKER) \
 		bash ./install/agentteams-install.sh manager
 
 install-interactive: ## Install Manager interactively (prompts for config)
@@ -611,7 +564,6 @@ endif
 		AGENTTEAMS_INSTALL_COPAW_WORKER_IMAGE=$(LOCAL_COPAW_WORKER) \
 		AGENTTEAMS_INSTALL_HERMES_WORKER_IMAGE=$(LOCAL_HERMES_WORKER) \
 		AGENTTEAMS_INSTALL_QWENPAW_WORKER_IMAGE=$(LOCAL_QWENPAW_WORKER) \
-		AGENTTEAMS_INSTALL_OPENHUMAN_WORKER_IMAGE=$(LOCAL_OPENHUMAN_WORKER) \
 		bash ./install/agentteams-install.sh manager
 
 uninstall: ## Stop and remove Manager + all Worker containers
@@ -648,7 +600,7 @@ uninstall: ## Stop and remove Manager + all Worker containers
 
 install-embedded: ## Install in embedded mode (dual-container: controller + agent)
 ifndef SKIP_BUILD
-	$(MAKE) build-embedded build-manager build-worker build-copaw-worker build-hermes-worker build-openhuman-worker build-qwenpaw-worker
+	$(MAKE) build-embedded build-manager build-worker build-copaw-worker build-hermes-worker build-qwenpaw-worker
 endif
 	@echo "==> Installing AgentTeams (embedded mode)..."
 	AGENTTEAMS_NON_INTERACTIVE=1 \
@@ -658,7 +610,6 @@ endif
 		AGENTTEAMS_INSTALL_COPAW_WORKER_IMAGE=$(LOCAL_COPAW_WORKER) \
 		AGENTTEAMS_INSTALL_HERMES_WORKER_IMAGE=$(LOCAL_HERMES_WORKER) \
 		AGENTTEAMS_INSTALL_QWENPAW_WORKER_IMAGE=$(LOCAL_QWENPAW_WORKER) \
-		AGENTTEAMS_INSTALL_OPENHUMAN_WORKER_IMAGE=$(LOCAL_OPENHUMAN_WORKER) \
 		AGENTTEAMS_MATRIX_E2EE=0 \
 		bash ./install/agentteams-install.sh
 

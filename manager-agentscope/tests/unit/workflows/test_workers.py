@@ -249,13 +249,12 @@ async def test_create_worker_waits_for_room_then_greets() -> None:
 
 
 @pytest.mark.asyncio
-async def test_all_five_worker_runtimes_are_accepted() -> None:
+async def test_all_four_worker_runtimes_are_accepted() -> None:
     accepted = {
         "openclaw",
         "copaw",
         "hermes",
         "qwenpaw",
-        "openhuman",
     }
     for index, runtime in enumerate(sorted(accepted)):
         controller = Controller()
@@ -331,7 +330,7 @@ async def test_resource_heartbeat_resumes_without_repeating_create() -> None:
     controller = Controller()
     controller.workers["alice"] = WorkerResource(
         name="alice",
-        runtime="openhuman",
+        runtime="hermes",
         model="qwen3.6-plus",
         phase="Running",
         room_id="!alice:example",
@@ -345,7 +344,7 @@ async def test_resource_heartbeat_resumes_without_repeating_create() -> None:
         status=OperationStatus.RECONCILING,
         request=WorkerCreateRequest(
             name="alice",
-            runtime="openhuman",
+            runtime="hermes",
             model="qwen3.6-plus",
         ).model_dump(mode="json"),
         created_at=now,
