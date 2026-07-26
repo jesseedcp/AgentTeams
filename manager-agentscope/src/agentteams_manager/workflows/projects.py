@@ -108,6 +108,16 @@ class ProjectGraphPort(Protocol):
         project_id: str,
     ) -> tuple[TaskRecord, ...]: ...
 
+    async def transition(
+        self,
+        task_id: str,
+        *,
+        expected: set[Any],
+        target: Any,
+        actor_id: str,
+        reason: str | None = None,
+    ) -> TaskRecord: ...
+
 
 class ProjectCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -523,32 +533,11 @@ class ProjectService:
         structured_result: dict[str, Any] | None = None,
     ) -> TaskReceipt:
         project = await self._require_project(project_id)
-        task_record = next(
-            (
-                item
-                for item in await self._tasks.list_by_project(project_id)
-                if item.task_id == task_id
-            ),
-            None,
+        await self._require_task_assignee(
+            project_id=project_id,
+            task_id=task_id,
+            sender_id=sender_id,
         )
-        if task_record is None:
-            raise NotFoundError(f"task/{task_id} does not exist")
-        assignee = await self._controller.get_worker(
-            task_record.assigned_to,
-        )
-        assignee_user_id = (
-            assignee.matrix_user_id
-            if assignee is not None and assignee.matrix_user_id
-            else (
-                _fallback_worker_user(assignee)
-                if assignee is not None
-                else None
-            )
-        )
-        if sender_id not in {self._admin_user_id, assignee_user_id}:
-            raise ConflictError(
-                f"sender {sender_id} is not task/{task_id} assignee",
-            )
         task = await self._task_service.record_completion(
             task_id=task_id,
             worker_event_id=worker_event_id,
@@ -642,6 +631,67 @@ class ProjectService:
             },
         )
         return task
+
+    async def report_blocked(
+        self,
+        *,
+        project_id: str,
+        task_id: str,
+        sender_id: str,
+        reason: str,
+    ) -> TaskRecord:
+        from agentteams_manager.state.tasks import ProjectTaskState
+
+        task = await self._require_task_assignee(
+            project_id=project_id,
+            task_id=task_id,
+            sender_id=sender_id,
+        )
+        return await self._graph.transition(
+            task.task_id,
+            expected={
+                ProjectTaskState.DISPATCHED,
+                ProjectTaskState.IN_PROGRESS,
+            },
+            target=ProjectTaskState.BLOCKED,
+            actor_id=sender_id,
+            reason=reason,
+        )
+
+    async def _require_task_assignee(
+        self,
+        *,
+        project_id: str,
+        task_id: str,
+        sender_id: str,
+    ) -> TaskRecord:
+        task_record = next(
+            (
+                item
+                for item in await self._tasks.list_by_project(project_id)
+                if item.task_id == task_id
+            ),
+            None,
+        )
+        if task_record is None:
+            raise NotFoundError(f"task/{task_id} does not exist")
+        assignee = await self._controller.get_worker(
+            task_record.assigned_to,
+        )
+        assignee_user_id = (
+            assignee.matrix_user_id
+            if assignee is not None and assignee.matrix_user_id
+            else (
+                _fallback_worker_user(assignee)
+                if assignee is not None
+                else None
+            )
+        )
+        if sender_id not in {self._admin_user_id, assignee_user_id}:
+            raise ConflictError(
+                f"sender {sender_id} is not task/{task_id} assignee",
+            )
+        return task_record
 
     async def close(
         self,

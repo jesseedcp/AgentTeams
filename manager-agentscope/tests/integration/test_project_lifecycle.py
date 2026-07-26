@@ -135,3 +135,13 @@ async def test_project_task_uses_worker_room_and_project_identity(
     released = await tasks.get(dependent.task_id)
     assert released is not None
     assert released.status == "dispatched"
+
+    await service.report_blocked(
+        project_id=project.project_id,
+        task_id=dependent.task_id,
+        sender_id="@worker-alice:example",
+        reason="release credentials are missing",
+    )
+    blocked = await tasks.get(dependent.task_id)
+    assert blocked is not None
+    assert blocked.status == "blocked"
