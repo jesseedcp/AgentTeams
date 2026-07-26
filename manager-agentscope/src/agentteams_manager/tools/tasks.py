@@ -54,6 +54,12 @@ TASK_TOOL_NAMES = frozenset(
         "list_projects",
         "get_project",
         "update_project",
+        "request_project_revision",
+        "reassign_project_task",
+        "report_project_blocked",
+        "revise_project_plan",
+        "revise_project_plan_major",
+        "update_project_participants",
         "delete_project",
         "sync_files",
         "inspect_git_request",
@@ -184,6 +190,52 @@ class UpdateProjectInput(_ProjectIdInput):
 
 class CloseProjectInput(_ProjectIdInput):
     force: bool = False
+
+
+class RequestProjectRevisionInput(_ProjectIdInput):
+    task_id: str = Field(pattern=r"^task-[A-Za-z0-9-]+$")
+    feedback: str = Field(min_length=1, max_length=20_000)
+    assigned_to: str | None = Field(
+        default=None,
+        pattern=r"^[a-z0-9][a-z0-9-]*$",
+    )
+    triggered_by_task_id: str | None = Field(
+        default=None,
+        pattern=r"^task-[A-Za-z0-9-]+$",
+    )
+
+
+class ReassignProjectTaskInput(_ProjectIdInput):
+    task_id: str = Field(pattern=r"^task-[A-Za-z0-9-]+$")
+    assigned_to: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")
+    reason: str = Field(min_length=1, max_length=20_000)
+
+
+class ReportProjectBlockedInput(_ProjectIdInput):
+    task_id: str = Field(pattern=r"^task-[A-Za-z0-9-]+$")
+    reason: str = Field(min_length=1, max_length=20_000)
+
+
+class ReviseProjectPlanInput(_ProjectIdInput):
+    plan: str = Field(min_length=1, max_length=100_000)
+    reason: str = Field(min_length=1, max_length=20_000)
+
+
+class UpdateProjectParticipantsInput(_ProjectIdInput):
+    add: tuple[str, ...] = ()
+    remove: tuple[str, ...] = ()
+    reason: str = Field(min_length=1, max_length=20_000)
+
+    @model_validator(mode="after")
+    def validate_changes(self) -> UpdateProjectParticipantsInput:
+        if not self.add and not self.remove:
+            raise ValueError("add or remove must contain a worker")
+        overlap = set(self.add) & set(self.remove)
+        if overlap:
+            raise ValueError(
+                "the same worker cannot be added and removed",
+            )
+        return self
 
 
 class SyncFilesInput(_TaskIdInput):
@@ -522,6 +574,48 @@ class TaskToolkit:
                 False,
             ),
             (
+                "request_project_revision",
+                "Create a linked revision task and hold downstream work.",
+                RequestProjectRevisionInput,
+                self._request_project_revision,
+                False,
+            ),
+            (
+                "reassign_project_task",
+                "Revoke one task assignment and dispatch it to another participant.",
+                ReassignProjectTaskInput,
+                self._reassign_project_task,
+                False,
+            ),
+            (
+                "report_project_blocked",
+                "Report an assigned project task blocker with actor validation.",
+                ReportProjectBlockedInput,
+                self._report_project_blocked,
+                False,
+            ),
+            (
+                "revise_project_plan",
+                "Apply and version one minor project plan change.",
+                ReviseProjectPlanInput,
+                self._revise_project_plan,
+                False,
+            ),
+            (
+                "revise_project_plan_major",
+                "Apply a confirmed major project plan change.",
+                ReviseProjectPlanInput,
+                self._revise_project_plan_major,
+                False,
+            ),
+            (
+                "update_project_participants",
+                "Add or remove project participants after administrator confirmation.",
+                UpdateProjectParticipantsInput,
+                self._update_project_participants,
+                False,
+            ),
+            (
                 "delete_project",
                 "Close one project after confirmation.",
                 CloseProjectInput,
@@ -808,6 +902,87 @@ class TaskToolkit:
         return await self._project_service.close(
             project_id=item.project_id,
             force=item.force,
+            context=await self._context(),
+        )
+
+    async def _request_project_revision(
+        self,
+        request: BaseModel,
+    ) -> object:
+        item = RequestProjectRevisionInput.model_validate(request)
+        await self._require_visible_project(item.project_id)
+        return await self._project_service.request_revision(
+            project_id=item.project_id,
+            task_id=item.task_id,
+            feedback=item.feedback,
+            assigned_to=item.assigned_to,
+            triggered_by_task_id=item.triggered_by_task_id,
+            context=await self._context(),
+        )
+
+    async def _reassign_project_task(
+        self,
+        request: BaseModel,
+    ) -> object:
+        item = ReassignProjectTaskInput.model_validate(request)
+        await self._require_visible_project(item.project_id)
+        return await self._project_service.reassign_task(
+            project_id=item.project_id,
+            task_id=item.task_id,
+            assigned_to=item.assigned_to,
+            reason=item.reason,
+            context=await self._context(),
+        )
+
+    async def _report_project_blocked(
+        self,
+        request: BaseModel,
+    ) -> object:
+        item = ReportProjectBlockedInput.model_validate(request)
+        await self._require_visible_project(item.project_id)
+        return await self._project_service.report_blocked(
+            project_id=item.project_id,
+            task_id=item.task_id,
+            sender_id=_policy_sender(self._policy),
+            reason=item.reason,
+        )
+
+    async def _revise_project_plan(self, request: BaseModel) -> object:
+        item = ReviseProjectPlanInput.model_validate(request)
+        await self._require_visible_project(item.project_id)
+        return await self._project_service.revise_plan(
+            project_id=item.project_id,
+            plan=item.plan,
+            change_kind="minor",
+            reason=item.reason,
+            context=await self._context(),
+        )
+
+    async def _revise_project_plan_major(
+        self,
+        request: BaseModel,
+    ) -> object:
+        item = ReviseProjectPlanInput.model_validate(request)
+        await self._require_visible_project(item.project_id)
+        return await self._project_service.revise_plan(
+            project_id=item.project_id,
+            plan=item.plan,
+            change_kind="major",
+            reason=item.reason,
+            context=await self._context(),
+        )
+
+    async def _update_project_participants(
+        self,
+        request: BaseModel,
+    ) -> object:
+        item = UpdateProjectParticipantsInput.model_validate(request)
+        await self._require_visible_project(item.project_id)
+        return await self._project_service.update_participants(
+            project_id=item.project_id,
+            add=item.add,
+            remove=item.remove,
+            reason=item.reason,
             context=await self._context(),
         )
 

@@ -60,6 +60,16 @@ class ProjectMatrix:
         self.order.append("matrix.invite")
         self.rooms[room_id]["members"].add(user_id)
 
+    async def kick_user(
+        self,
+        room_id: str,
+        user_id: str,
+        *,
+        reason: str,
+    ) -> None:
+        self.order.append("matrix.kick")
+        self.rooms[room_id]["members"].discard(user_id)
+
     async def send_text(
         self,
         room_id: str,

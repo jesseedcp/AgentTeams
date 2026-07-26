@@ -382,6 +382,96 @@ class ProjectGraphRepository:
 
         return await self._database.write(write)
 
+    async def reassign(
+        self,
+        task_id: str,
+        *,
+        assigned_to: str,
+        room_id: str,
+        matrix_user_id: str,
+        actor_id: str,
+        reason: str,
+        operation_id: str,
+    ) -> TaskRecord:
+        """Atomically revoke the old assignment and prepare a new dispatch."""
+
+        def write(connection: sqlite3.Connection) -> TaskRecord:
+            row = connection.execute(
+                "SELECT * FROM tasks WHERE task_id=?",
+                (task_id,),
+            ).fetchone()
+            if row is None:
+                raise NotFoundError(f"task/{task_id} does not exist")
+            current = ProjectTaskState(row["status"])
+            allowed = {
+                ProjectTaskState.PENDING,
+                ProjectTaskState.READY,
+                ProjectTaskState.DISPATCHED,
+                ProjectTaskState.IN_PROGRESS,
+                ProjectTaskState.BLOCKED,
+                ProjectTaskState.REVISION_NEEDED,
+            }
+            if current not in allowed:
+                raise ConflictError(
+                    f"task/{task_id} cannot be reassigned from "
+                    f"{current.value}",
+                )
+            target = (
+                ProjectTaskState.PENDING
+                if current is ProjectTaskState.PENDING
+                else ProjectTaskState.READY
+            )
+            metadata = json.loads(row["metadata_json"])
+            metadata.update(
+                {
+                    "matrix_user_id": matrix_user_id,
+                    "reassigned_by": actor_id,
+                    "reassignment_reason": reason,
+                    "reassignment_operation_id": operation_id,
+                },
+            )
+            metadata.pop("assignment_event_id", None)
+            metadata.pop("assignment_txn_id", None)
+            now = datetime.now(UTC)
+            connection.execute(
+                """
+                UPDATE tasks
+                   SET assigned_to=?, room_id=?, status=?,
+                       metadata_json=?, updated_at=?
+                 WHERE task_id=?
+                """,
+                (
+                    assigned_to,
+                    room_id,
+                    target.value,
+                    json.dumps(
+                        metadata,
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                        sort_keys=True,
+                    ),
+                    now.isoformat(),
+                    task_id,
+                ),
+            )
+            if target is not current:
+                _record_transition(
+                    connection,
+                    task_id=task_id,
+                    from_status=current,
+                    to_status=target,
+                    actor_id=actor_id,
+                    reason=reason,
+                    now=now,
+                )
+            updated = connection.execute(
+                "SELECT * FROM tasks WHERE task_id=?",
+                (task_id,),
+            ).fetchone()
+            return _task_from_row(updated)
+
+        return await self._database.write(write)
+
     async def promote_ready(
         self,
         project_id: str,
@@ -525,6 +615,108 @@ class ProjectGraphRepository:
 
         return await self._database.read(read)
 
+    async def update_participants(
+        self,
+        project_id: str,
+        *,
+        add: tuple[str, ...],
+        remove: tuple[str, ...],
+        worker_users: dict[str, str],
+        now: datetime,
+    ) -> tuple[str, ...]:
+        """Update participant rows and project metadata in one transaction."""
+
+        def write(connection: sqlite3.Connection) -> tuple[str, ...]:
+            project = connection.execute(
+                "SELECT metadata_json FROM projects WHERE project_id=?",
+                (project_id,),
+            ).fetchone()
+            if project is None:
+                raise NotFoundError(f"project/{project_id} does not exist")
+            if remove:
+                placeholders = ",".join("?" for _ in remove)
+                active = connection.execute(
+                    f"""
+                    SELECT task_id, assigned_to FROM tasks
+                     WHERE project_id=?
+                       AND assigned_to IN ({placeholders})
+                       AND status NOT IN ('completed', 'failed', 'cancelled')
+                     ORDER BY task_id
+                    """,
+                    (project_id, *remove),
+                ).fetchall()
+                if active:
+                    assignments = ", ".join(
+                        f"{row['task_id']}->{row['assigned_to']}"
+                        for row in active
+                    )
+                    raise ConflictError(
+                        "cannot remove participant with active task: "
+                        + assignments,
+                    )
+            timestamp = now.isoformat()
+            for worker_name in add:
+                connection.execute(
+                    """
+                    INSERT INTO project_participants(
+                        project_id, worker_name, joined_at, removed_at
+                    ) VALUES (?, ?, ?, NULL)
+                    ON CONFLICT(project_id, worker_name) DO UPDATE SET
+                        joined_at=excluded.joined_at,
+                        removed_at=NULL
+                    """,
+                    (project_id, worker_name, timestamp),
+                )
+            for worker_name in remove:
+                connection.execute(
+                    """
+                    UPDATE project_participants SET removed_at=?
+                     WHERE project_id=? AND worker_name=?
+                       AND removed_at IS NULL
+                    """,
+                    (timestamp, project_id, worker_name),
+                )
+            rows = connection.execute(
+                """
+                SELECT worker_name FROM project_participants
+                 WHERE project_id=? AND removed_at IS NULL
+                 ORDER BY worker_name
+                """,
+                (project_id,),
+            ).fetchall()
+            participants = tuple(row["worker_name"] for row in rows)
+            if not participants:
+                raise ConflictError(
+                    "project must retain at least one participant",
+                )
+            metadata = json.loads(project["metadata_json"])
+            metadata["participants"] = list(participants)
+            metadata["worker_users"] = {
+                name: worker_users[name]
+                for name in participants
+                if name in worker_users
+            }
+            connection.execute(
+                """
+                UPDATE projects
+                   SET metadata_json=?, updated_at=?
+                 WHERE project_id=?
+                """,
+                (
+                    json.dumps(
+                        metadata,
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                        sort_keys=True,
+                    ),
+                    timestamp,
+                    project_id,
+                ),
+            )
+            return participants
+
+        return await self._database.write(write)
+
     async def append_plan_revision(
         self,
         project_id: str,
@@ -584,6 +776,101 @@ class ProjectGraphRepository:
 
         return await self._database.write(write)
 
+    async def revise_plan(
+        self,
+        project_id: str,
+        *,
+        body: str,
+        change_kind: str,
+        reason: str,
+        created_by: str,
+        now: datetime,
+    ) -> ProjectPlanRevision:
+        """Version a plan and make it current in one SQLite transaction."""
+
+        def write(connection: sqlite3.Connection) -> ProjectPlanRevision:
+            project = connection.execute(
+                "SELECT metadata_json FROM projects WHERE project_id=?",
+                (project_id,),
+            ).fetchone()
+            if project is None:
+                raise NotFoundError(f"project/{project_id} does not exist")
+            metadata = json.loads(project["metadata_json"])
+            latest = connection.execute(
+                """
+                SELECT * FROM project_plan_revisions
+                 WHERE project_id=? ORDER BY revision DESC LIMIT 1
+                """,
+                (project_id,),
+            ).fetchone()
+            if (
+                latest is not None
+                and latest["body"] == body
+                and latest["change_kind"] == change_kind
+                and latest["created_by"] == created_by
+                and metadata.get("plan_change_reason") == reason
+            ):
+                return _plan_revision_from_row(latest)
+            row = connection.execute(
+                """
+                SELECT COALESCE(MAX(revision), 0) + 1 AS revision
+                  FROM project_plan_revisions WHERE project_id=?
+                """,
+                (project_id,),
+            ).fetchone()
+            revision = int(row["revision"])
+            connection.execute(
+                """
+                INSERT INTO project_plan_revisions(
+                    project_id, revision, body, change_kind,
+                    created_by, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    project_id,
+                    revision,
+                    body,
+                    change_kind,
+                    created_by,
+                    now.isoformat(),
+                ),
+            )
+            metadata.update(
+                {
+                    "plan": body,
+                    "plan_revision": revision,
+                    "plan_change_kind": change_kind,
+                    "plan_change_reason": reason,
+                },
+            )
+            connection.execute(
+                """
+                UPDATE projects
+                   SET metadata_json=?, updated_at=?
+                 WHERE project_id=?
+                """,
+                (
+                    json.dumps(
+                        metadata,
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                        sort_keys=True,
+                    ),
+                    now.isoformat(),
+                    project_id,
+                ),
+            )
+            return ProjectPlanRevision(
+                project_id=project_id,
+                revision=revision,
+                body=body,
+                change_kind=change_kind,
+                created_by=created_by,
+                created_at=now,
+            )
+
+        return await self._database.write(write)
+
     async def plan_revisions(
         self,
         project_id: str,
@@ -615,6 +902,7 @@ _PROJECT_TRANSITIONS: dict[
     ),
     ProjectTaskState.DISPATCHED: frozenset(
         {
+            ProjectTaskState.READY,
             ProjectTaskState.IN_PROGRESS,
             ProjectTaskState.BLOCKED,
             ProjectTaskState.REVISION_NEEDED,
@@ -624,6 +912,7 @@ _PROJECT_TRANSITIONS: dict[
     ),
     ProjectTaskState.IN_PROGRESS: frozenset(
         {
+            ProjectTaskState.READY,
             ProjectTaskState.BLOCKED,
             ProjectTaskState.REVISION_NEEDED,
             ProjectTaskState.COMPLETED,
@@ -641,6 +930,7 @@ _PROJECT_TRANSITIONS: dict[
         {
             ProjectTaskState.READY,
             ProjectTaskState.DISPATCHED,
+            ProjectTaskState.COMPLETED,
             ProjectTaskState.CANCELLED,
         },
     ),

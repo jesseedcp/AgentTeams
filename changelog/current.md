@@ -24,6 +24,10 @@ Record image-affecting changes to `manager/`, `worker/`, `copaw/`, `hermes/`, `o
   language, communication style, and behavior guidelines through a typed
   AgentScope tool, persist them in `Manager.spec.identity`, and hot-reload only
   the identity section of `SOUL.md`.
+- **Transactional project changes**: Preserve original work through linked
+  revision tasks, atomically reassign live tasks, synchronize confirmed
+  participant changes with Matrix, version minor and major plans in SQLite,
+  and close completed projects with idempotent project/Admin notifications.
 - **Five-runtime release parity**: Build and inject OpenClaw, CoPaw, Hermes,
   QwenPaw, and OpenHuman Worker images consistently across Make, local kind,
   Helm, and both installers while keeping the Manager fixed to AgentScope.

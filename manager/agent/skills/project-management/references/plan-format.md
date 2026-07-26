@@ -35,4 +35,7 @@ task IDs after creation. A Worker result belongs in `result.md` and should
 state `SUCCESS`, `SUCCESS_WITH_NOTES`, `REVISION_NEEDED`, or `BLOCKED`.
 
 Use `get_project` to inspect the structured record. Use `update_project` for
-task lifecycle changes; never hand-edit the rendered task status list.
+ordinary task lifecycle changes, `revise_project_plan` for minor plan changes,
+and `revise_project_plan_major` for confirmed major changes. Every accepted
+plan body becomes an ordered SQLite revision before `plan.md` is exported.
+Never hand-edit the rendered task status list.

@@ -30,6 +30,20 @@ class TaskController:
                 room_id="!alice:example",
                 matrix_user_id="@worker-alice:example",
             ),
+            "bob": WorkerResource(
+                name="bob",
+                runtime="qwenpaw",
+                phase="Running",
+                room_id="!bob:example",
+                matrix_user_id="@worker-bob:example",
+            ),
+            "charlie": WorkerResource(
+                name="charlie",
+                runtime="qwenpaw",
+                phase="Running",
+                room_id="!charlie:example",
+                matrix_user_id="@worker-charlie:example",
+            ),
         }
         self.teams: dict[str, TeamResource] = {}
 

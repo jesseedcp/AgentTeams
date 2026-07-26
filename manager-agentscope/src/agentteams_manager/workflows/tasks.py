@@ -147,6 +147,7 @@ class TaskCreateRequest(BaseModel):
     project_room_id: str | None = None
     requester_room_id: str = Field(min_length=1)
     defer_dispatch: bool = False
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class RecurringTaskCreateRequest(TaskCreateRequest):
@@ -254,6 +255,7 @@ class TaskService:
         project_id: str | None = None,
         project_room_id: str | None = None,
         defer_dispatch: bool = False,
+        metadata: dict[str, Any] | None = None,
     ) -> TaskReceipt:
         request = TaskCreateRequest(
             title=title,
@@ -264,6 +266,7 @@ class TaskService:
             project_room_id=project_room_id,
             requester_room_id=context.room_id,
             defer_dispatch=defer_dispatch,
+            metadata=metadata or {},
         )
         operation = await self._supervisor.begin(
             operation_id=context.operation_id,
@@ -407,6 +410,7 @@ class TaskService:
                 project_id=request.project_id,
                 delegated_to_team=request.delegated_to_team,
                 metadata={
+                    **request.metadata,
                     "operation_id": operation.operation_id,
                     "matrix_user_id": matrix_user_id,
                     "project_room_id": request.project_room_id,
@@ -595,6 +599,11 @@ class TaskService:
             raise ConflictError(
                 f"task {task_id} is not ready for dispatch",
             )
+        await self._replace_task_metadata(
+            operation,
+            _task_metadata(task, status="ready"),
+            operation_name="prepare_ready_task_dispatch",
+        )
         matrix_user_id = str(task.metadata["matrix_user_id"])
         await self._supervisor.before_effect(
             operation_id,
@@ -1397,6 +1406,7 @@ class TaskService:
             "delegated_to_team": request.delegated_to_team,
             "operation_id": operation.operation_id,
             "defer_dispatch": request.defer_dispatch,
+            "metadata": request.metadata,
         }
         actual = {
             "title": task.title,
@@ -1407,6 +1417,10 @@ class TaskService:
             "defer_dispatch": bool(
                 task.metadata.get("defer_dispatch", False),
             ),
+            "metadata": {
+                key: task.metadata.get(key)
+                for key in request.metadata
+            },
         }
         if actual != expected:
             raise ConflictError(

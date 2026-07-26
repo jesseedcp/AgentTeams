@@ -97,6 +97,27 @@ class ProjectGraphPort(Protocol):
         now: datetime,
     ) -> object: ...
 
+    async def update_participants(
+        self,
+        project_id: str,
+        *,
+        add: tuple[str, ...],
+        remove: tuple[str, ...],
+        worker_users: dict[str, str],
+        now: datetime,
+    ) -> tuple[str, ...]: ...
+
+    async def revise_plan(
+        self,
+        project_id: str,
+        *,
+        body: str,
+        change_kind: str,
+        reason: str,
+        created_by: str,
+        now: datetime,
+    ) -> object: ...
+
     async def set_dependencies(
         self,
         task_id: str,
@@ -116,6 +137,18 @@ class ProjectGraphPort(Protocol):
         target: Any,
         actor_id: str,
         reason: str | None = None,
+    ) -> TaskRecord: ...
+
+    async def reassign(
+        self,
+        task_id: str,
+        *,
+        assigned_to: str,
+        room_id: str,
+        matrix_user_id: str,
+        actor_id: str,
+        reason: str,
+        operation_id: str,
     ) -> TaskRecord: ...
 
 
@@ -403,6 +436,7 @@ class ProjectService:
         context: MutationContext,
         delegated_to_team: str | None = None,
         dependencies: tuple[str, ...] = (),
+        metadata: dict[str, Any] | None = None,
     ) -> TaskReceipt:
         project = await self._require_project(project_id)
         if project.status != "active":
@@ -423,6 +457,7 @@ class ProjectService:
             project_room_id=project.room_id,
             context=context,
             defer_dispatch=True,
+            metadata=metadata,
         )
         await self._graph.set_dependencies(task.task_id, dependencies)
         for ready in await self._graph.promote_ready(project_id):
@@ -523,6 +558,529 @@ class ProjectService:
         )
         return task
 
+    async def request_revision(
+        self,
+        *,
+        project_id: str,
+        task_id: str,
+        feedback: str,
+        assigned_to: str | None,
+        triggered_by_task_id: str | None,
+        context: MutationContext,
+    ) -> TaskReceipt:
+        """Create a linked rework task without erasing the original task."""
+
+        from agentteams_manager.state.tasks import ProjectTaskState
+
+        if not feedback.strip():
+            raise ValueError("revision feedback must not be empty")
+        project = await self._require_project(project_id)
+        operation = await self._supervisor.begin(
+            operation_id=context.operation_id,
+            kind=OperationKind.UPDATE_PROJECT,
+            target_key=f"project/{project_id}/revision/{task_id}",
+            request={
+                "action": "request_revision",
+                "project_id": project_id,
+                "task_id": task_id,
+                "feedback": feedback.strip(),
+                "assigned_to": assigned_to,
+                "triggered_by_task_id": triggered_by_task_id,
+                "source_room_id": context.room_id,
+                "source_event_id": context.event_id,
+                "source_tool_call_id": context.tool_call_id,
+            },
+        )
+        original = next(
+            (
+                task
+                for task in await self._tasks.list_by_project(project_id)
+                if task.task_id == task_id
+            ),
+            None,
+        )
+        if original is None:
+            raise NotFoundError(f"task/{task_id} does not exist")
+        if operation.status is OperationStatus.SUCCEEDED:
+            revision = next(
+                (
+                    item
+                    for item in await self._tasks.list_by_project(project_id)
+                    if item.metadata.get("revision_request_operation_id")
+                    == operation.operation_id
+                ),
+                None,
+            )
+            if revision is None:
+                raise RecoveryError(
+                    "succeeded revision request has no linked task",
+                )
+            return _task_receipt_from_record(
+                operation.operation_id,
+                revision,
+            )
+        revision_assignee = assigned_to or original.assigned_to
+        participants = tuple(project.metadata.get("participants", ()))
+        if revision_assignee not in participants:
+            raise ConflictError(
+                f"worker/{revision_assignee} is not a project participant",
+            )
+        if original.status != ProjectTaskState.REVISION_NEEDED:
+            await self._graph.transition(
+                task_id,
+                expected={
+                    ProjectTaskState.DISPATCHED,
+                    ProjectTaskState.IN_PROGRESS,
+                    ProjectTaskState.BLOCKED,
+                },
+                target=ProjectTaskState.REVISION_NEEDED,
+                actor_id=self._admin_user_id,
+                reason=feedback,
+            )
+        receipt = await self.add_task(
+            project_id=project_id,
+            title=f"Revision: {original.title}",
+            specification=(
+                f"Revise task {task_id} using this feedback:\n\n"
+                f"{feedback.strip()}"
+            ),
+            assigned_to=revision_assignee,
+            context=MutationContext(
+                room_id=context.room_id,
+                event_id=context.event_id,
+                tool_call_id=f"{context.tool_call_id}:revision-task",
+            ),
+            metadata={
+                "is_revision_for": task_id,
+                "triggered_by_task_id": triggered_by_task_id,
+                "revision_feedback": feedback.strip(),
+                "revision_request_operation_id": operation.operation_id,
+            },
+        )
+        await self._supervisor.effect_succeeded(
+            operation.operation_id,
+            ExternalEffect.STORAGE,
+            {
+                "project_id": project_id,
+                "task_id": task_id,
+                "revision_task_id": receipt.task_id,
+            },
+        )
+        return receipt
+
+    async def reassign_task(
+        self,
+        *,
+        project_id: str,
+        task_id: str,
+        assigned_to: str,
+        reason: str,
+        context: MutationContext,
+    ) -> TaskReceipt:
+        """Move one live project task and revoke the previous assignee."""
+
+        if not reason.strip():
+            raise ValueError("reassignment reason must not be empty")
+        project = await self._require_project(project_id)
+        participants = tuple(project.metadata.get("participants", ()))
+        if assigned_to not in participants:
+            raise ConflictError(
+                f"worker/{assigned_to} is not a project participant",
+            )
+        task = next(
+            (
+                item
+                for item in await self._tasks.list_by_project(project_id)
+                if item.task_id == task_id
+            ),
+            None,
+        )
+        if task is None:
+            raise NotFoundError(f"task/{task_id} does not exist")
+        worker = await self._controller.get_worker(assigned_to)
+        if worker is None:
+            raise NotFoundError(f"worker/{assigned_to} does not exist")
+        room_id = worker.room_id
+        matrix_user_id = worker.matrix_user_id or _fallback_worker_user(worker)
+        if not room_id:
+            raise ConflictError(
+                f"worker/{assigned_to} has no assignment room",
+            )
+        operation = await self._supervisor.begin(
+            operation_id=context.operation_id,
+            kind=OperationKind.UPDATE_PROJECT,
+            target_key=f"project/{project_id}/task/{task_id}/assignee",
+            request={
+                "action": "reassign_task",
+                "project_id": project_id,
+                "task_id": task_id,
+                "assigned_to": assigned_to,
+                "previous_assigned_to": task.assigned_to,
+                "reason": reason.strip(),
+                "source_room_id": context.room_id,
+                "source_event_id": context.event_id,
+                "source_tool_call_id": context.tool_call_id,
+            },
+        )
+        if operation.status is OperationStatus.SUCCEEDED:
+            current = next(
+                (
+                    item
+                    for item in await self._tasks.list_by_project(project_id)
+                    if item.task_id == task_id
+                ),
+                None,
+            )
+            if current is None:
+                raise RecoveryError(
+                    "succeeded reassignment has no durable task",
+                )
+            return _task_receipt_from_record(
+                operation.operation_id,
+                current,
+            )
+        if (
+            task.assigned_to == assigned_to
+            and task.metadata.get("reassignment_operation_id")
+            == operation.operation_id
+            and task.status in {"ready", "dispatched"}
+        ):
+            changed = task
+        else:
+            changed = await self._graph.reassign(
+                task_id,
+                assigned_to=assigned_to,
+                room_id=room_id,
+                matrix_user_id=matrix_user_id,
+                actor_id=self._admin_user_id,
+                reason=reason.strip(),
+                operation_id=operation.operation_id,
+            )
+        if changed.status == "pending":
+            promoted = await self._graph.promote_ready(project_id)
+            changed = next(
+                (item for item in promoted if item.task_id == task_id),
+                changed,
+            )
+        if changed.status != "ready":
+            raise ConflictError(
+                f"task/{task_id} cannot be dispatched after reassignment",
+            )
+        receipt = await self._task_service.dispatch_ready(
+            task_id=task_id,
+            context=MutationContext(
+                room_id=project.room_id,
+                event_id=context.event_id,
+                tool_call_id=f"{context.tool_call_id}:reassign",
+            ),
+        )
+        operation_id = operation.operation_id
+        task_statuses = {
+            **dict(project.metadata.get("task_statuses", {})),
+            task_id: receipt.status,
+        }
+        assignments = {
+            **dict(project.metadata.get("task_assignments", {})),
+            task_id: assigned_to,
+        }
+        updated = await self._projects.update(
+            project_id,
+            expected={"active"},
+            status="active",
+            metadata={
+                **project.metadata,
+                "task_statuses": task_statuses,
+                "task_assignments": assignments,
+            },
+        )
+        project = updated or await self._require_project(project_id)
+        await self._replace_project_metadata(
+            operation,
+            _project_metadata(project),
+            operation_name="reassign_project_task",
+        )
+        await self._replace_project_plan(
+            operation,
+            project,
+            operation_name="reassign_project_task_plan",
+        )
+        txn_id = matrix_transaction_id(operation_id, 0)
+        await self._supervisor.before_effect(
+            operation_id,
+            ExternalEffect.MATRIX,
+            {
+                "operation": "announce_project_task_reassignment",
+                "project_id": project_id,
+                "task_id": task_id,
+                "room_id": project.room_id,
+                "txn_id": txn_id,
+            },
+        )
+        event_id = await self._matrix.send_text(
+            project.room_id,
+            f"[Project Task Reassigned] {task_id}: "
+            f"{operation.request.get('previous_assigned_to')} -> "
+            f"{assigned_to}. {reason.strip()}",
+            txn_id=txn_id,
+            mentions=(matrix_user_id,),
+        )
+        await self._supervisor.effect_succeeded(
+            operation_id,
+            ExternalEffect.MATRIX,
+            {
+                "project_id": project_id,
+                "task_id": task_id,
+                "event_id": event_id,
+            },
+        )
+        return receipt
+
+    async def update_participants(
+        self,
+        *,
+        project_id: str,
+        add: tuple[str, ...],
+        remove: tuple[str, ...],
+        reason: str,
+        context: MutationContext,
+        _recovering: bool = False,
+        _recovery_worker_users: dict[str, str] | None = None,
+    ) -> ProjectReceipt:
+        """Synchronize durable participants with Matrix membership."""
+
+        additions = tuple(dict.fromkeys(add))
+        removals = tuple(dict.fromkeys(remove))
+        if not reason.strip():
+            raise ValueError("participant change reason must not be empty")
+        overlap = set(additions) & set(removals)
+        if overlap:
+            raise ValueError(
+                "participants cannot be added and removed together: "
+                + ", ".join(sorted(overlap)),
+            )
+        if not additions and not removals:
+            raise ValueError("participant change must add or remove a worker")
+        project = await self._require_project(project_id)
+        if project.status != "active":
+            raise ConflictError(f"project {project_id} is not active")
+        current = tuple(project.metadata.get("participants", ()))
+        worker_users = dict(project.metadata.get("worker_users", {}))
+        worker_users.update(_recovery_worker_users or {})
+        for worker_name in additions:
+            worker = await self._controller.get_worker(worker_name)
+            if worker is None:
+                raise NotFoundError(f"worker/{worker_name} does not exist")
+            worker_users[worker_name] = (
+                worker.matrix_user_id or _fallback_worker_user(worker)
+            )
+        operation = await self._supervisor.begin(
+            operation_id=context.operation_id,
+            kind=OperationKind.UPDATE_PROJECT,
+            target_key=f"project/{project_id}/participants",
+            request={
+                "action": "update_participants",
+                "project_id": project_id,
+                "add": list(additions),
+                "remove": list(removals),
+                "reason": reason.strip(),
+                "worker_users": worker_users,
+                "source_room_id": context.room_id,
+                "source_event_id": context.event_id,
+                "source_tool_call_id": context.tool_call_id,
+            },
+        )
+        if operation.status is OperationStatus.SUCCEEDED:
+            current_project = await self._require_project(project_id)
+            return _project_receipt(
+                operation.operation_id,
+                current_project,
+            )
+        unknown_removals = tuple(
+            name for name in removals if name not in current
+        )
+        if unknown_removals and not _recovering:
+            raise ConflictError(
+                "project participants do not include: "
+                + ", ".join(unknown_removals),
+            )
+        changed_names = await self._graph.update_participants(
+            project_id,
+            add=additions,
+            remove=removals,
+            worker_users=worker_users,
+            now=self._clock.now().astimezone(UTC),
+        )
+        project = await self._require_project(project_id)
+        await self._graph.append_plan_revision(
+            project_id,
+            body=str(project.metadata.get("plan", "")),
+            change_kind="major_participants",
+            created_by=self._admin_user_id,
+            now=self._clock.now().astimezone(UTC),
+        )
+        members = set(await self._matrix.members(project.room_id))
+        for worker_name in additions:
+            user_id = worker_users[worker_name]
+            if user_id not in members:
+                await self._supervisor.before_effect(
+                    operation.operation_id,
+                    ExternalEffect.MATRIX,
+                    {
+                        "operation": "invite_project_participant",
+                        "project_id": project_id,
+                        "room_id": project.room_id,
+                        "user_id": user_id,
+                    },
+                )
+                await self._matrix.invite_user(project.room_id, user_id)
+                await self._supervisor.effect_acknowledged(
+                    operation.operation_id,
+                    ExternalEffect.MATRIX,
+                    {
+                        "project_id": project_id,
+                        "room_id": project.room_id,
+                        "user_id": user_id,
+                    },
+                )
+        for worker_name in removals:
+            user_id = worker_users.get(worker_name)
+            if user_id and user_id in members:
+                await self._supervisor.before_effect(
+                    operation.operation_id,
+                    ExternalEffect.MATRIX,
+                    {
+                        "operation": "kick_project_participant",
+                        "project_id": project_id,
+                        "room_id": project.room_id,
+                        "user_id": user_id,
+                    },
+                )
+                await self._matrix.kick_user(
+                    project.room_id,
+                    user_id,
+                    reason=reason.strip(),
+                )
+                await self._supervisor.effect_acknowledged(
+                    operation.operation_id,
+                    ExternalEffect.MATRIX,
+                    {
+                        "project_id": project_id,
+                        "room_id": project.room_id,
+                        "user_id": user_id,
+                    },
+                )
+        await self._replace_project_metadata(
+            operation,
+            _project_metadata(project),
+            operation_name="update_project_participants",
+        )
+        await self._replace_project_plan(
+            operation,
+            project,
+            operation_name="update_project_participants_plan",
+        )
+        txn_id = matrix_transaction_id(operation.operation_id, 0)
+        event_id = await self._matrix.send_text(
+            project.room_id,
+            "[Project Participants Changed] "
+            f"added={list(additions)}, removed={list(removals)}. "
+            f"{reason.strip()}",
+            txn_id=txn_id,
+            mentions=tuple(
+                worker_users[name]
+                for name in additions
+                if name in worker_users
+            ),
+        )
+        await self._supervisor.effect_succeeded(
+            operation.operation_id,
+            ExternalEffect.MATRIX,
+            {
+                "project_id": project_id,
+                "participants": list(changed_names),
+                "event_id": event_id,
+            },
+        )
+        return _project_receipt(operation.operation_id, project)
+
+    async def revise_plan(
+        self,
+        *,
+        project_id: str,
+        plan: str,
+        change_kind: str,
+        reason: str,
+        context: MutationContext,
+    ) -> ProjectReceipt:
+        """Persist a minor or confirmed-major plan revision."""
+
+        if change_kind not in {"minor", "major"}:
+            raise ValueError("plan change kind must be minor or major")
+        if not plan.strip() or not reason.strip():
+            raise ValueError("plan and revision reason must not be empty")
+        project = await self._require_project(project_id)
+        if project.status != "active":
+            raise ConflictError(f"project {project_id} is not active")
+        operation = await self._supervisor.begin(
+            operation_id=context.operation_id,
+            kind=OperationKind.UPDATE_PROJECT,
+            target_key=f"project/{project_id}/plan",
+            request={
+                "action": "revise_plan",
+                "project_id": project_id,
+                "plan": plan.strip(),
+                "change_kind": change_kind,
+                "reason": reason.strip(),
+                "source_room_id": context.room_id,
+                "source_event_id": context.event_id,
+                "source_tool_call_id": context.tool_call_id,
+            },
+        )
+        if operation.status is OperationStatus.SUCCEEDED:
+            current_project = await self._require_project(project_id)
+            return _project_receipt(
+                operation.operation_id,
+                current_project,
+            )
+        revision = await self._graph.revise_plan(
+            project_id,
+            body=plan.strip(),
+            change_kind=change_kind,
+            reason=reason.strip(),
+            created_by=self._admin_user_id,
+            now=self._clock.now().astimezone(UTC),
+        )
+        project = await self._require_project(project_id)
+        await self._replace_project_metadata(
+            operation,
+            _project_metadata(project),
+            operation_name="revise_project_plan_metadata",
+        )
+        await self._replace_project_plan(
+            operation,
+            project,
+            operation_name="revise_project_plan",
+        )
+        txn_id = matrix_transaction_id(operation.operation_id, 0)
+        event_id = await self._matrix.send_text(
+            project.room_id,
+            f"[Project Plan Revised] revision={revision.revision}, "
+            f"kind={change_kind}. {reason.strip()}",
+            txn_id=txn_id,
+            mentions=(self._admin_user_id,),
+        )
+        await self._supervisor.effect_succeeded(
+            operation.operation_id,
+            ExternalEffect.MATRIX,
+            {
+                "project_id": project_id,
+                "plan_revision": revision.revision,
+                "change_kind": change_kind,
+                "event_id": event_id,
+            },
+        )
+        return _project_receipt(operation.operation_id, project)
+
     async def complete_task(
         self,
         *,
@@ -544,6 +1102,29 @@ class ProjectService:
             structured_result=structured_result,
             actor_id=sender_id,
         )
+        completed_record = next(
+            (
+                item
+                for item in await self._tasks.list_by_project(project_id)
+                if item.task_id == task_id
+            ),
+            None,
+        )
+        revision_target = (
+            completed_record.metadata.get("is_revision_for")
+            if completed_record is not None
+            else None
+        )
+        if revision_target:
+            from agentteams_manager.state.tasks import ProjectTaskState
+
+            await self._graph.transition(
+                str(revision_target),
+                expected={ProjectTaskState.REVISION_NEEDED},
+                target=ProjectTaskState.COMPLETED,
+                actor_id=sender_id,
+                reason=f"revision task {task_id} completed",
+            )
         for ready in await self._graph.promote_ready(project_id):
             await self._task_service.dispatch_ready(
                 task_id=ready.task_id,
@@ -630,6 +1211,21 @@ class ProjectService:
                 "event_id": event_id,
             },
         )
+        remaining = tuple(
+            item
+            for item in await self._tasks.list_by_project(project_id)
+            if item.status not in {"completed", "failed", "cancelled"}
+        )
+        if not remaining:
+            await self.close(
+                project_id=project_id,
+                force=False,
+                context=MutationContext(
+                    room_id=project.room_id,
+                    event_id=worker_event_id,
+                    tool_call_id=f"auto-close:{task_id}",
+                ),
+            )
         return task
 
     async def report_blocked(
@@ -765,30 +1361,46 @@ class ProjectService:
             project,
             operation_name="close_project_plan",
         )
-        txn_id = matrix_transaction_id(operation.operation_id, 0)
-        await self._supervisor.before_effect(
-            operation.operation_id,
-            ExternalEffect.MATRIX,
-            {
-                "operation": "announce_project_completion",
-                "room_id": project.room_id,
-                "txn_id": txn_id,
-            },
+        requester_room_id = str(
+            project.metadata.get("requester_room_id") or "",
         )
-        try:
-            event_id = await self._matrix.send_text(
-                project.room_id,
-                f"[Project Completed] {project.project_id}: {project.name}.",
-                txn_id=txn_id,
-                mentions=(self._admin_user_id,),
+        completion_rooms = tuple(
+            dict.fromkeys(
+                room_id
+                for room_id in (project.room_id, requester_room_id)
+                if room_id
+            ),
+        )
+        event_ids: dict[str, str] = {}
+        for sequence, room_id in enumerate(completion_rooms):
+            txn_id = matrix_transaction_id(
+                operation.operation_id,
+                sequence,
             )
-        except Exception as exc:
-            await self._record_external_failure(
+            await self._supervisor.before_effect(
                 operation.operation_id,
                 ExternalEffect.MATRIX,
-                exc,
+                {
+                    "operation": "announce_project_completion",
+                    "room_id": room_id,
+                    "txn_id": txn_id,
+                },
             )
-            raise
+            try:
+                event_ids[room_id] = await self._matrix.send_text(
+                    room_id,
+                    f"[Project Completed] {project.project_id}: "
+                    f"{project.name}.",
+                    txn_id=txn_id,
+                    mentions=(self._admin_user_id,),
+                )
+            except Exception as exc:
+                await self._record_external_failure(
+                    operation.operation_id,
+                    ExternalEffect.MATRIX,
+                    exc,
+                )
+                raise
         await self._supervisor.effect_succeeded(
             operation.operation_id,
             ExternalEffect.MATRIX,
@@ -796,7 +1408,7 @@ class ProjectService:
                 "project_id": project_id,
                 "status": "completed",
                 "metadata_etag": receipt.etag,
-                "event_id": event_id,
+                "event_ids": event_ids,
             },
         )
         return _project_receipt(operation.operation_id, project)
@@ -865,12 +1477,18 @@ class ProjectService:
                 f"[Project Task Assigned] {task.task_id}: "
                 f"{task.title} to {task.assigned_to}."
             )
-        else:
+        elif action == "complete_task":
             summary = str(
                 task.metadata.get("completion_summary") or "Completed.",
             )
             text = (
                 f"[Project Task Completed] {task.task_id}: {summary}"
+            )
+        else:
+            text = (
+                f"[Project Task Reassigned] {task.task_id}: "
+                f"assigned to {task.assigned_to}. "
+                f"{request.get('reason', '')}"
             )
         await self._supervisor.before_effect(
             operation.operation_id,
@@ -916,6 +1534,64 @@ class ProjectService:
         if operation.kind is OperationKind.CREATE_PROJECT:
             return await self.resume_create(operation)
         if operation.kind is OperationKind.UPDATE_PROJECT:
+            action = str(operation.request.get("action") or "")
+            if action in {
+                "request_revision",
+                "reassign_task",
+                "update_participants",
+                "revise_plan",
+            }:
+                context = _context_from_operation(operation)
+                if action == "request_revision":
+                    return await self.request_revision(
+                        project_id=str(operation.request["project_id"]),
+                        task_id=str(operation.request["task_id"]),
+                        feedback=str(operation.request["feedback"]),
+                        assigned_to=(
+                            str(operation.request["assigned_to"])
+                            if operation.request.get("assigned_to")
+                            else None
+                        ),
+                        triggered_by_task_id=(
+                            str(operation.request["triggered_by_task_id"])
+                            if operation.request.get("triggered_by_task_id")
+                            else None
+                        ),
+                        context=context,
+                    )
+                if action == "reassign_task":
+                    return await self.reassign_task(
+                        project_id=str(operation.request["project_id"]),
+                        task_id=str(operation.request["task_id"]),
+                        assigned_to=str(operation.request["assigned_to"]),
+                        reason=str(operation.request["reason"]),
+                        context=context,
+                    )
+                if action == "update_participants":
+                    return await self.update_participants(
+                        project_id=str(operation.request["project_id"]),
+                        add=tuple(operation.request.get("add", ())),
+                        remove=tuple(operation.request.get("remove", ())),
+                        reason=str(operation.request["reason"]),
+                        context=context,
+                        _recovering=True,
+                        _recovery_worker_users={
+                            str(name): str(user_id)
+                            for name, user_id in dict(
+                                operation.request.get(
+                                    "worker_users",
+                                    {},
+                                ),
+                            ).items()
+                        },
+                    )
+                return await self.revise_plan(
+                    project_id=str(operation.request["project_id"]),
+                    plan=str(operation.request["plan"]),
+                    change_kind=str(operation.request["change_kind"]),
+                    reason=str(operation.request["reason"]),
+                    context=context,
+                )
             return await self._resume_project_task_index(operation)
         if operation.kind is OperationKind.CLOSE_PROJECT:
             return await self._resume_close(operation)
@@ -1240,6 +1916,55 @@ def _project_receipt(
         participants=tuple(project.metadata.get("participants", ())),
         task_ids=tuple(project.metadata.get("task_ids", ())),
     )
+
+
+def _task_receipt_from_record(
+    operation_id: str,
+    task: TaskRecord,
+) -> TaskReceipt:
+    return TaskReceipt(
+        operation_id=operation_id,
+        task_id=task.task_id,
+        status=task.status,
+        assigned_to=task.assigned_to,
+        room_id=task.room_id,
+        assignment_event_id=(
+            str(task.metadata["assignment_event_id"])
+            if task.metadata.get("assignment_event_id")
+            else None
+        ),
+        summary=(
+            str(task.metadata["completion_summary"])
+            if task.metadata.get("completion_summary")
+            else None
+        ),
+        last_executed_at=task.last_executed_at,
+        next_scheduled_at=task.next_scheduled_at,
+    )
+
+
+def _context_from_operation(
+    operation: OperationRecord,
+) -> MutationContext:
+    room_id = str(operation.request.get("source_room_id") or "")
+    event_id = str(operation.request.get("source_event_id") or "")
+    tool_call_id = str(
+        operation.request.get("source_tool_call_id") or "",
+    )
+    if not room_id or not event_id or not tool_call_id:
+        raise RecoveryError(
+            f"operation {operation.operation_id} lacks source context",
+        )
+    context = MutationContext(
+        room_id=room_id,
+        event_id=event_id,
+        tool_call_id=tool_call_id,
+    )
+    if context.operation_id != operation.operation_id:
+        raise RecoveryError(
+            f"operation {operation.operation_id} source context changed",
+        )
+    return context
 
 
 def _fallback_worker_user(worker: WorkerResource) -> str:

@@ -113,6 +113,33 @@ def test_task_tools_have_closed_schemas_and_policy_filtering() -> None:
         assert tool.input_schema["additionalProperties"] is False
 
 
+def test_project_change_tools_are_registered_with_closed_schemas() -> None:
+    expected = {
+        "request_project_revision",
+        "reassign_project_task",
+        "report_project_blocked",
+        "revise_project_plan",
+        "revise_project_plan_major",
+        "update_project_participants",
+    }
+    toolkit = TaskToolkit(
+        policy=_policy(allowed_tools=frozenset(expected)),
+        tasks=Tasks(),
+        projects=Projects(),
+        task_service=Tasks(),
+        project_service=Projects(),
+        file_sync=FileSync(),
+        git=Git(),
+        context_provider=_context,
+    )
+
+    assert {tool.name for tool in toolkit.tools} == expected
+    assert expected <= TASK_TOOL_NAMES
+    for tool in toolkit.tools:
+        assert tool.input_schema["type"] == "object"
+        assert tool.input_schema["additionalProperties"] is False
+
+
 @pytest.mark.asyncio
 async def test_completion_uses_bound_matrix_event_not_model_input() -> None:
     service = Tasks()

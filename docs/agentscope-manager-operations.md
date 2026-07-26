@@ -159,4 +159,25 @@ When a revision does not activate:
 3. verify access to the configured MinIO runtime-document key;
 4. inspect Manager logs for validation errors;
 5. correct desired state through `agt` or the typed Manager tool rather than
-   editing files inside the container.
+editing files inside the container.
+
+## Project changes
+
+SQLite is authoritative for project tasks, dependencies, participants,
+transitions, and plan revisions. `plan.md` is a readable export, not a second
+state store.
+
+- `request_project_revision` creates a linked rework task and holds dependent
+  work until it completes.
+- `reassign_project_task` atomically changes the assignee, Worker Room, Matrix
+  identity, and transition record before redispatch.
+- `report_project_blocked` accepts reports only from the durable assignee or
+  administrator.
+- `revise_project_plan` versions a minor plan change immediately.
+- `revise_project_plan_major` requires global Admin-DM confirmation.
+- `update_project_participants` also requires global confirmation and keeps
+  SQLite membership and Matrix membership aligned. Reassign active tasks
+  before removing their assignee.
+
+Completing the final task closes the project and emits idempotent completion
+messages to the project room and original administrator room.

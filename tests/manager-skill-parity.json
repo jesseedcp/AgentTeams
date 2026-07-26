@@ -89,9 +89,22 @@
     {
       "name": "project-management",
       "skillFile": "manager/agent/skills/project-management/SKILL.md",
-      "tools": ["create_project", "list_projects", "get_project", "update_project", "delete_project"],
+      "tools": [
+        "create_project",
+        "list_projects",
+        "get_project",
+        "update_project",
+        "request_project_revision",
+        "reassign_project_task",
+        "report_project_blocked",
+        "revise_project_plan",
+        "revise_project_plan_major",
+        "update_project_participants",
+        "delete_project"
+      ],
       "evidence": [
         "manager-agentscope/tests/integration/test_project_lifecycle.py",
+        "manager-agentscope/tests/integration/test_project_changes.py",
         "manager-agentscope/tests/contract/test_task_skill_parity.py"
       ]
     },

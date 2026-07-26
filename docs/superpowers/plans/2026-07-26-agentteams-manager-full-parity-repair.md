@@ -4,7 +4,7 @@
 
 **Goal:** Make the AgentScope 2.0 Manager behaviorally compatible with the latest official AgentTeams Team/Worker contract while retaining Cinny, Kubernetes, SQLite, MinIO recovery, and the new AgentScope runtime.
 
-**Architecture:** Treat official AgentTeams commit `37c31b77d4e88ca87a1270c61a1e6f659e8023e1` as the resource-contract baseline, with no legacy Team compatibility path. Keep AgentScope as the conversational and tool runtime. Put durable orchestration state in SQLite, external-effect recovery in the existing MinIO journal/outbox, and resolve all Matrix actors and confirmations through topology-aware services rather than room-local prompt state.
+**Architecture:** Treat official AgentTeams commit `82cbd5fe78d294b1018fc8a037e4f91879dce9e7` as the audited resource-contract baseline, with no legacy Team compatibility path. Keep AgentScope as the conversational and tool runtime. Put durable orchestration state in SQLite, external-effect recovery in the existing MinIO journal/outbox, and resolve all Matrix actors and confirmations through topology-aware services rather than room-local prompt state.
 
 **Tech Stack:** Go controller and CLI, Kubernetes CRDs and Helm, Python 3.11+, AgentScope `2.0.4.post1`, SQLite, MinIO/S3, Matrix/Tuwunel, Cinny, pytest, Go test.
 
@@ -164,13 +164,13 @@ python -m pytest manager-agentscope/tests/unit/clients/test_agt.py manager-agent
 - Project actions: `add_task`, `update_task`, `report_progress`, `report_blocked`, `request_revision`, `complete_task`, `reassign_task`, `add_participant`, `remove_participant`, `revise_plan`, `close_project`.
 - Dependencies form an acyclic directed graph.
 
-- [ ] Add failing tests for cycle rejection, automatic ready-task dispatch, blocked tasks, revision tasks, reassignment, participant changes, major plan confirmation, and project completion.
-- [ ] Store tasks, dependencies, participants, plan revisions, and state transitions as normalized SQLite records.
-- [ ] Validate sender identity against the task assignee before accepting Worker completion or blocker reports.
-- [ ] Dispatch every newly ready task exactly once through the existing outbox/effect boundary.
-- [ ] Make minor plan changes immediate and major changes use the global confirmation service.
-- [ ] On completion, update the plan artifact, announce in Project Room, and send an idempotent Admin DM milestone notification.
-- [ ] Recover safely when the process stops after state transition but before Matrix delivery.
+- [x] Add failing tests for cycle rejection, automatic ready-task dispatch, blocked tasks, revision tasks, reassignment, participant changes, major plan confirmation, and project completion.
+- [x] Store tasks, dependencies, participants, plan revisions, and state transitions as normalized SQLite records.
+- [x] Validate sender identity against the task assignee before accepting Worker completion or blocker reports.
+- [x] Dispatch every newly ready task exactly once through the existing outbox/effect boundary.
+- [x] Make minor plan changes immediate and major changes use the global confirmation service.
+- [x] On completion, update the plan artifact, announce in Project Room, and send an idempotent Admin DM milestone notification.
+- [x] Recover safely when the process stops after state transition but before Matrix delivery.
 
 ### Task 6: Make prompt, tool, history, session, skill, and memory state truthful
 

@@ -231,6 +231,19 @@ async def test_admin_can_manage_only_bound_project_in_project_room() -> None:
     assert policy.project_id == "project-20260723-120000-abc123"
     assert "update_project" in policy.allowed_tools
     assert "delete_project" in policy.confirm_tools
+    assert {
+        "request_project_revision",
+        "reassign_project_task",
+        "report_project_blocked",
+        "revise_project_plan",
+        "revise_project_plan_major",
+        "update_project_participants",
+    } <= policy.allowed_tools
+    assert {
+        "revise_project_plan_major",
+        "update_project_participants",
+    } <= policy.confirm_tools
+    assert "revise_project_plan" not in policy.confirm_tools
 
 
 @pytest.mark.asyncio
@@ -271,9 +284,10 @@ async def test_project_worker_mention_wakes_with_reporting_tools_only() -> None:
         {
             "list_tasks",
             "get_task",
-            "complete_task",
-            "get_project",
-            "sync_files",
+                "complete_task",
+                "get_project",
+                "report_project_blocked",
+                "sync_files",
         },
     )
     assert "create_worker" not in policy.allowed_tools

@@ -143,3 +143,21 @@ revision 未生效时：
 3. 验证 Manager 能否读取配置的 MinIO 运行时文档 key；
 4. 检查 Manager 日志中的配置校验错误；
 5. 通过 `agt` 或 typed Manager 工具修正期望状态，不要进入容器直接改文件。
+
+## 项目运行中变更
+
+项目任务、依赖、参与者、状态迁移和计划版本都以 SQLite 为权威。
+`plan.md` 只是方便阅读的导出文件，不是第二套状态来源。
+
+- `request_project_revision` 保留原任务并创建关联返修任务；返修完成前不会放行
+  下游任务。
+- `reassign_project_task` 在重新派发前一次性更新负责人、Worker Room、Matrix
+  身份和迁移历史；旧负责人随即失去完成权限。
+- `report_project_blocked` 只接受持久化负责人或管理员提交的阻塞报告。
+- `revise_project_plan` 立即记录小型计划修改的新版本。
+- `revise_project_plan_major` 必须在管理员私聊完成全局确认。
+- `update_project_participants` 同样必须全局确认，并保持 SQLite 成员与 Matrix
+  房间成员一致。移除仍承担未结束任务的 Worker 前，必须先重新分配任务。
+
+最后一个任务完成后，项目会自动关闭，并用幂等消息同时通知项目房间和最初的
+管理员房间。

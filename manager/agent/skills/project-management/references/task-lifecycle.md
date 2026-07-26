@@ -20,10 +20,24 @@ unaddressed room chatter.
 2. Call `update_project` with `action="complete_task"` and the task ID.
 3. The workflow pulls and verifies Worker artifacts, records task completion,
    updates the project index, and announces progress exactly once.
-4. On `REVISION_NEEDED`, add a revision task before any dependent task.
+4. On `REVISION_NEEDED`, call `request_project_revision`. It keeps the
+   original task, creates a linked revision task with the feedback and
+   optional replacement assignee, and prevents dependent dispatch until the
+   revision completes.
+
+Use `report_project_blocked` for a genuine blocker. The workflow verifies the
+Matrix sender against the durable assignee; do not repeat a Worker's untrusted
+free-form status as if it were accepted project state.
+
+Use `reassign_project_task` for one task at a time. The workflow atomically
+changes the assignee, assignment room, Matrix identity, and transition history
+before sending the new assignment. The old assignee can no longer complete
+the task.
 
 ## Close
 
-Call `delete_project` after every task is terminal. `force=true` is reserved
-for an explicitly confirmed administrative close and records the nonterminal
-tasks it bypassed.
+The workflow automatically closes a project after its last task becomes
+terminal and notifies both the project room and the original administrator
+room. Use `delete_project` for an early administrative close. `force=true` is
+reserved for an explicitly confirmed close and records the nonterminal tasks
+it bypassed.
