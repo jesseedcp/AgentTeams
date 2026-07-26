@@ -82,6 +82,7 @@ async def test_same_room_is_serial_but_rooms_are_parallel() -> None:
 @pytest.mark.asyncio
 async def test_duplicate_is_rejected_before_model_invocation() -> None:
     handled: list[str] = []
+    resolved: list[str] = []
 
     class Claims:
         async def claim_matrix_event(
@@ -94,7 +95,12 @@ async def test_duplicate_is_rejected_before_model_invocation() -> None:
 
     class Resolver:
         async def resolve(self, event: InboundEvent) -> RoomPolicy:
-            raise AssertionError(f"must not resolve {event.event_id}")
+            resolved.append(event.event_id)
+            return RoomPolicy(
+                room_id=event.room_id,
+                kind=RoomKind.ADMIN_DM,
+                revision=1,
+            )
 
     async def handler(
         event: InboundEvent,
@@ -114,4 +120,48 @@ async def test_duplicate_is_rejected_before_model_invocation() -> None:
     await router.stop()
 
     assert not accepted
+    assert resolved == ["$same"]
     assert handled == []
+
+
+@pytest.mark.asyncio
+async def test_silent_event_is_filtered_before_durable_claim() -> None:
+    claimed: list[str] = []
+
+    class Claims:
+        async def claim_matrix_event(
+            self,
+            room_id: str,
+            event_id: str,
+        ) -> bool:
+            del room_id
+            claimed.append(event_id)
+            return True
+
+    class Resolver:
+        async def resolve(self, event: InboundEvent) -> RoomPolicy:
+            return RoomPolicy(
+                room_id=event.room_id,
+                kind=RoomKind.PROJECT_ROOM,
+                revision=1,
+                silent=True,
+            )
+
+    async def handler(
+        event: InboundEvent,
+        policy: RoomPolicy,
+    ) -> None:
+        raise AssertionError(f"must not handle {event.event_id}: {policy}")
+
+    router = EventRouter(
+        claims=Claims(),
+        resolver=Resolver(),
+        handler=handler,
+    )
+    await router.start()
+
+    accepted = await router.submit(_event("!project:local", "$silent"))
+    await router.stop()
+
+    assert not accepted
+    assert claimed == []

@@ -8,7 +8,7 @@ import hmac
 import json
 import re
 import secrets
-from collections.abc import Awaitable, Callable, Collection
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any, Protocol
@@ -59,7 +59,7 @@ from agentteams_manager.matrix.policy import (
     policy_for_human,
     team_member_names,
 )
-from agentteams_manager.state.topology import TopologyRepository
+from agentteams_manager.state.topology import ActorKind, TopologyRepository
 
 
 class ReconcileDisposition(StrEnum):
@@ -2138,7 +2138,6 @@ class TopologyResolver:
         manager_user_id: str,
         admin_user_id: str,
         admin_room_id: str,
-        trusted_contacts: Collection[str] = (),
     ) -> None:
         self._controller = controller
         self._matrix = matrix
@@ -2146,7 +2145,6 @@ class TopologyResolver:
         self._manager_user_id = manager_user_id
         self._admin_user_id = admin_user_id
         self._admin_room_id = admin_room_id
-        self._trusted_contacts = frozenset(trusted_contacts)
         self._refresh_lock = asyncio.Lock()
 
     async def refresh(self) -> TopologySnapshot:
@@ -2302,7 +2300,11 @@ class TopologyResolver:
                     room_id=room_id,
                     revision=revision,
                 )
-            elif sender_id in self._trusted_contacts:
+            elif (
+                (actor := await self._topology.actor_for_sender(sender_id))
+                is not None
+                and actor.kind is ActorKind.TRUSTED_CONTACT
+            ):
                 tools = TRUSTED_TOOLS
             else:
                 return _deny_policy(room_id, revision, silent=True)

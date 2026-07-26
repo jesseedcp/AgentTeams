@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from typing import Protocol
 
 from agentteams_manager.domain.models import InboundEvent, RoomPolicy
@@ -27,6 +28,12 @@ class PolicyResolver(Protocol):
 EventHandler = Callable[[InboundEvent, RoomPolicy], Awaitable[None]]
 
 
+@dataclass(frozen=True, slots=True)
+class RoutedEvent:
+    event: InboundEvent
+    policy: RoomPolicy
+
+
 class EventRouter:
     """Claim once, serialize per room, and process rooms concurrently."""
 
@@ -42,7 +49,7 @@ class EventRouter:
         self._resolver = resolver
         self._handler = handler
         self._idle_timeout = idle_timeout_seconds
-        self._queues: dict[str, asyncio.Queue[InboundEvent]] = {}
+        self._queues: dict[str, asyncio.Queue[RoutedEvent]] = {}
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._guard = asyncio.Lock()
         self._running = False
@@ -64,6 +71,9 @@ class EventRouter:
     async def submit(self, event: InboundEvent) -> bool:
         if not self._running:
             raise RuntimeError("Matrix event router is not running")
+        policy = await self._resolver.resolve(event)
+        if policy.silent:
+            return False
         if not await self._claims.claim_matrix_event(
             event.room_id,
             event.event_id,
@@ -79,19 +89,19 @@ class EventRouter:
                     self._drain(event.room_id, queue),
                     name=f"matrix-room:{event.room_id}",
                 )
-            await queue.put(event)
+            await queue.put(RoutedEvent(event=event, policy=policy))
         await asyncio.sleep(0)
         return True
 
     async def _drain(
         self,
         room_id: str,
-        queue: asyncio.Queue[InboundEvent],
+        queue: asyncio.Queue[RoutedEvent],
     ) -> None:
         try:
             while self._running:
                 try:
-                    event = await asyncio.wait_for(
+                    routed = await asyncio.wait_for(
                         queue.get(),
                         timeout=self._idle_timeout,
                     )
@@ -103,17 +113,15 @@ class EventRouter:
                             return
                     continue
                 try:
-                    policy = await self._resolver.resolve(event)
-                    if not policy.silent:
-                        await self._handler(event, policy)
+                    await self._handler(routed.event, routed.policy)
                 except asyncio.CancelledError:
                     raise
                 except Exception:
                     logger.exception(
                         "Matrix event processing failed",
                         extra={
-                            "room_id": event.room_id,
-                            "event_id": event.event_id,
+                            "room_id": routed.event.room_id,
+                            "event_id": routed.event.event_id,
                         },
                     )
                 finally:

@@ -196,6 +196,66 @@ async def test_two_member_room_is_normalized_as_direct(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "source",
+    [
+        {
+            "type": "m.room.redaction",
+            "content": {"body": "redacted"},
+        },
+        {
+            "type": "m.room.message",
+            "content": {
+                "body": "* edited",
+                "m.relates_to": {
+                    "rel_type": "m.replace",
+                    "event_id": "$original",
+                },
+            },
+        },
+        {
+            "type": "m.room.message",
+            "content": {
+                "body": "ack",
+                "io.agentteams.acknowledgement": True,
+            },
+        },
+    ],
+)
+async def test_non_actionable_timeline_events_are_not_dispatched(
+    tmp_path: Path,
+    source: dict[str, object],
+) -> None:
+    state = FakeState()
+    nio = FakeNio()
+    event = SimpleNamespace(
+        event_id="$ignored",
+        sender="@worker:local",
+        body=source["content"]["body"],
+        server_timestamp=1_700_000_000_000,
+        source=source,
+    )
+    nio.next_sync = nio.response(
+        joined={
+            "!room:local": SimpleNamespace(
+                timeline=SimpleNamespace(events=[event]),
+            ),
+        },
+    )
+    received: list[object] = []
+
+    async def handler(inbound: object) -> None:
+        received.append(inbound)
+
+    client = MatrixClient(_config(tmp_path), state, nio_client=nio)
+    client.bind_handler(handler)
+
+    await client.sync_once()
+
+    assert received == []
+
+
+@pytest.mark.asyncio
 async def test_unknown_token_refresh_is_bounded(tmp_path: Path) -> None:
     state = FakeState()
     nio = FakeNio()

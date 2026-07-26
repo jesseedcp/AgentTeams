@@ -1,6 +1,6 @@
 """Initial SQLite schema for durable operations."""
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS operations (
@@ -132,6 +132,17 @@ CREATE TABLE IF NOT EXISTS human_access (
 );
 CREATE INDEX IF NOT EXISTS human_access_matrix_idx
   ON human_access(matrix_user_id);
+
+CREATE TABLE IF NOT EXISTS topology_actors (
+  matrix_user_id TEXT PRIMARY KEY,
+  actor_kind TEXT NOT NULL,
+  resource_name TEXT,
+  team_name TEXT,
+  payload_json TEXT NOT NULL,
+  refreshed_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS topology_actors_resource_idx
+  ON topology_actors(resource_name, team_name);
 
 CREATE TABLE IF NOT EXISTS channel_relationships (
   relationship_kind TEXT NOT NULL,

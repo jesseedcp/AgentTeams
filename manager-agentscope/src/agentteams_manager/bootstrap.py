@@ -388,7 +388,10 @@ def build_application(
     operations = OperationRepository(database)
     tasks = TaskRepository(database)
     projects = ProjectRepository(database)
-    topology = TopologyRepository(database)
+    topology = TopologyRepository(
+        database,
+        admin_user_id=config.admin_user_id,
+    )
     notifications = NotificationRepository(database)
     leases = LeaseRepository(database)
     session_repository = SessionRepository(database)
@@ -614,6 +617,7 @@ def build_application(
     policy = RoomPolicyResolver(
         topology=topology,
         admin_user_id=config.admin_user_id,
+        manager_user_id=config.manager_user_id,
         revision=topology.revision,
     )
     router = EventRouter(

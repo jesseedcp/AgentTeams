@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Collection
+from collections.abc import Awaitable, Callable
 from typing import Protocol
 
 from agentteams_manager.domain.models import (
@@ -11,7 +11,11 @@ from agentteams_manager.domain.models import (
     RoomKind,
     RoomPolicy,
 )
-from agentteams_manager.state.topology import TopologyBinding
+from agentteams_manager.state.topology import (
+    Actor,
+    ActorKind,
+    TopologyBinding,
+)
 
 ALL_MANAGER_TOOLS = frozenset(
     {
@@ -107,6 +111,15 @@ PROJECT_TOOLS = frozenset(
         "sync_files",
     },
 )
+PROJECT_PARTICIPANT_TOOLS = frozenset(
+    {
+        "list_tasks",
+        "get_task",
+        "complete_task",
+        "get_project",
+        "sync_files",
+    },
+)
 HUMAN_TOOLS = frozenset({"list_workers", "list_tasks", "sync_files"})
 TEAM_SCOPED_HUMAN_TOOLS = frozenset(
     {
@@ -184,6 +197,11 @@ class TopologyReader(Protocol):
         matrix_user_id: str,
     ) -> HumanResource | None: ...
 
+    async def actor_for_sender(
+        self,
+        matrix_user_id: str,
+    ) -> Actor | None: ...
+
 
 RevisionProvider = Callable[[], int | Awaitable[int]]
 
@@ -196,16 +214,28 @@ class RoomPolicyResolver:
         *,
         topology: TopologyReader,
         admin_user_id: str,
-        trusted_contacts: Collection[str] = (),
+        manager_user_id: str = "@manager:local",
         revision: int | RevisionProvider = 1,
     ) -> None:
         self._topology = topology
         self._admin_user_id = admin_user_id
-        self._trusted_contacts = frozenset(trusted_contacts)
+        self._manager_user_id = manager_user_id
         self._revision = revision
 
     async def resolve(self, event: InboundEvent) -> RoomPolicy:
         revision = await self._current_revision()
+        if not self._is_actionable(event):
+            return self._unknown(
+                event,
+                revision,
+                force_silent=True,
+            )
+        if event.sender_id == self._manager_user_id:
+            return self._unknown(
+                event,
+                revision,
+                force_silent=True,
+            )
         if event.is_direct and event.sender_id == self._admin_user_id:
             return RoomPolicy(
                 room_id=event.room_id,
@@ -217,36 +247,46 @@ class RoomPolicyResolver:
             )
 
         binding = await self._topology.room_binding(event.room_id)
+        actor = await self._topology.actor_for_sender(event.sender_id)
         human = await self._topology.human_for_sender(event.sender_id)
         if binding is not None:
-            return self._resolve_bound_room(
+            policy = self._resolve_bound_room(
                 event=event,
                 binding=binding,
+                actor=actor,
                 human=human,
                 revision=revision,
             )
+            if not self.should_wake(event, binding, actor):
+                return policy.model_copy(update={"silent": True})
+            return policy
 
         if human is not None and self._human_can_access(human, event.room_id):
-            return policy_for_human(
+            policy = policy_for_human(
                 human,
                 room_id=event.room_id,
                 revision=revision,
             )
-        if event.sender_id in self._trusted_contacts:
-            return RoomPolicy(
+        elif actor is not None and actor.kind is ActorKind.TRUSTED_CONTACT:
+            policy = RoomPolicy(
                 room_id=event.room_id,
                 kind=RoomKind.HUMAN_OR_CHANNEL_ROOM,
                 revision=revision,
                 allowed_tools=TRUSTED_TOOLS,
                 allowed_senders=frozenset({event.sender_id}),
             )
-        return self._unknown(event, revision)
+        else:
+            return self._unknown(event, revision)
+        if not self.should_wake(event, binding, actor):
+            return policy.model_copy(update={"silent": True})
+        return policy
 
     def _resolve_bound_room(
         self,
         *,
         event: InboundEvent,
         binding: TopologyBinding,
+        actor: Actor | None,
         human: HumanResource | None,
         revision: int,
     ) -> RoomPolicy:
@@ -258,12 +298,29 @@ class RoomPolicyResolver:
                 silent=True,
             )
 
-        known_actor = event.sender_id in {
-            self._admin_user_id,
-            binding.matrix_user_id,
-        }
+        project_participant = (
+            binding.room_kind is RoomKind.PROJECT_ROOM
+            and actor is not None
+            and actor.resource_name
+            in _scope_names(binding.payload.get("participants"))
+            and actor.kind
+            in {
+                ActorKind.WORKER,
+                ActorKind.TEAM_LEADER,
+                ActorKind.TEAM_WORKER,
+            }
+        )
+        known_actor = (
+            event.sender_id == self._admin_user_id
+            or event.sender_id == binding.matrix_user_id
+            or project_participant
+        )
         if known_actor:
-            tools = _tools_for_kind(binding.room_kind)
+            tools = (
+                PROJECT_PARTICIPANT_TOOLS
+                if project_participant
+                else _tools_for_kind(binding.room_kind)
+            )
         elif human is not None and self._human_can_access(
             human,
             event.room_id,
@@ -273,7 +330,7 @@ class RoomPolicyResolver:
                 room_id=event.room_id,
                 revision=revision,
             )
-        elif event.sender_id in self._trusted_contacts:
+        elif actor is not None and actor.kind is ActorKind.TRUSTED_CONTACT:
             tools = TRUSTED_TOOLS
         else:
             return self._unknown(event, revision, force_silent=True)
@@ -303,6 +360,34 @@ class RoomPolicyResolver:
                 if binding.room_kind is RoomKind.PROJECT_ROOM
                 else None
             ),
+        )
+
+    def should_wake(
+        self,
+        event: InboundEvent,
+        binding: TopologyBinding | None,
+        actor: Actor | None,
+    ) -> bool:
+        del actor
+        if event.sender_id == self._manager_user_id:
+            return False
+        if binding is not None and binding.room_kind is RoomKind.TEAM_ROOM:
+            return False
+        if binding is not None and binding.room_kind in {
+            RoomKind.LEADER_ROOM,
+            RoomKind.PROJECT_ROOM,
+        }:
+            return self._manager_user_id in event.mentions
+        if event.is_direct:
+            return True
+        return self._manager_user_id in event.mentions
+
+    @staticmethod
+    def _is_actionable(event: InboundEvent) -> bool:
+        return (
+            event.event_type != "m.room.redaction"
+            and event.relation_type != "m.replace"
+            and not event.is_bot_acknowledgement
         )
 
     @staticmethod

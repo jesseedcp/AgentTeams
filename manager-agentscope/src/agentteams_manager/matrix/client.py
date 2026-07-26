@@ -322,12 +322,31 @@ class MatrixClient:
             return None
         source = getattr(event, "source", {}) or {}
         content = source.get("content", {}) if isinstance(source, dict) else {}
+        event_type = (
+            source.get("type", "m.room.message")
+            if isinstance(source, dict)
+            else "m.room.message"
+        )
+        relates_to = content.get("m.relates_to", {})
+        relation_type = (
+            relates_to.get("rel_type")
+            if isinstance(relates_to, dict)
+            else None
+        )
+        is_bot_acknowledgement = (
+            content.get("io.agentteams.acknowledgement") is True
+        )
+        if (
+            event_type == "m.room.redaction"
+            or relation_type == "m.replace"
+            or is_bot_acknowledgement
+        ):
+            return None
         body = getattr(event, "body", None) or content.get("body")
         if not isinstance(body, str):
             return None
         milliseconds = getattr(event, "server_timestamp", 0) or 0
         timestamp = datetime.fromtimestamp(milliseconds / 1000, tz=UTC)
-        relates_to = content.get("m.relates_to", {})
         thread_id = None
         if isinstance(relates_to, dict):
             if relates_to.get("rel_type") == "m.thread":
@@ -351,6 +370,9 @@ class MatrixClient:
             thread_id=thread_id,
             mentions=mentions,
             media=media,
+            event_type=event_type,
+            relation_type=relation_type,
+            is_bot_acknowledgement=is_bot_acknowledgement,
         )
 
     def _is_direct_room(self, room_id: str, sender: str) -> bool:

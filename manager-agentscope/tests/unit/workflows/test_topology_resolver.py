@@ -295,3 +295,41 @@ async def test_unknown_admin_room_sender_is_read_only(
     assert policy.kind is RoomKind.ADMIN_DM
     assert "list_workers" in policy.allowed_tools
     assert "create_worker" not in policy.allowed_tools
+
+
+@pytest.mark.asyncio
+async def test_persisted_trusted_contact_gets_restricted_tools(
+    tmp_path: Path,
+) -> None:
+    workers, teams, humans = facts()
+    repository = await make_repository(tmp_path)
+    await repository.set_trusted_channel(
+        "@manager:example",
+        "@external:example",
+        "!solo:example",
+    )
+    resolver = TopologyResolver(
+        controller=FakeController(
+            workers=workers,
+            teams=teams,
+            humans=humans,
+        ),
+        matrix=FakeMatrix(
+            joined=("!solo:example", "!leader:example"),
+            members=valid_members(),
+        ),
+        topology=repository,
+        manager_user_id="@manager:example",
+        admin_user_id="@admin:example",
+        admin_room_id="!admin:example",
+    )
+    await resolver.refresh()
+
+    policy = await resolver.policy_for(
+        "!solo:example",
+        "@external:example",
+    )
+
+    assert policy.allowed_tools == frozenset(
+        {"list_workers", "list_tasks"},
+    )

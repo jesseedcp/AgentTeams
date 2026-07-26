@@ -11,6 +11,7 @@ from agentteams_manager.domain.models import (
     RoomKind,
 )
 from agentteams_manager.matrix.policy import RoomPolicyResolver
+from agentteams_manager.state.topology import Actor, ActorKind
 
 
 def _event(
@@ -18,6 +19,7 @@ def _event(
     room_id: str,
     sender_id: str,
     is_direct: bool,
+    mentions: tuple[str, ...] = (),
 ) -> InboundEvent:
     return InboundEvent(
         room_id=room_id,
@@ -26,6 +28,7 @@ def _event(
         body="hello",
         timestamp=datetime.now(UTC),
         is_direct=is_direct,
+        mentions=mentions,
     )
 
 
@@ -34,9 +37,11 @@ class FakeTopology:
         self,
         bindings: dict[str, object] | None = None,
         humans: dict[str, HumanResource] | None = None,
+        actors: dict[str, Actor] | None = None,
     ) -> None:
         self.bindings = bindings or {}
         self.humans = humans or {}
+        self.actors = actors or {}
 
     async def room_binding(self, room_id: str) -> object | None:
         return self.bindings.get(room_id)
@@ -46,6 +51,12 @@ class FakeTopology:
         matrix_user_id: str,
     ) -> HumanResource | None:
         return self.humans.get(matrix_user_id)
+
+    async def actor_for_sender(
+        self,
+        matrix_user_id: str,
+    ) -> Actor | None:
+        return self.actors.get(matrix_user_id)
 
 
 @pytest.mark.asyncio
@@ -183,6 +194,7 @@ async def test_scoped_human_cannot_gain_resource_admin_tools() -> None:
             room_id="!worker:local",
             sender_id="@reviewer:local",
             is_direct=False,
+            mentions=("@manager:local",),
         ),
     )
 
@@ -211,6 +223,7 @@ async def test_admin_can_manage_only_bound_project_in_project_room() -> None:
             room_id="!project:local",
             sender_id="@admin:local",
             is_direct=False,
+            mentions=("@manager:local",),
         ),
     )
 
@@ -218,3 +231,141 @@ async def test_admin_can_manage_only_bound_project_in_project_room() -> None:
     assert policy.project_id == "project-20260723-120000-abc123"
     assert "update_project" in policy.allowed_tools
     assert "delete_project" in policy.confirm_tools
+
+
+@pytest.mark.asyncio
+async def test_project_worker_mention_wakes_with_reporting_tools_only() -> None:
+    binding = SimpleNamespace(
+        room_kind=RoomKind.PROJECT_ROOM,
+        room_id="!project:local",
+        resource_name="project-20260723-120000-abc123",
+        matrix_user_id=None,
+        payload={"participants": ["alpha-dev"]},
+    )
+    actor = Actor(
+        matrix_user_id="@alpha-dev:local",
+        kind=ActorKind.TEAM_WORKER,
+        resource_name="alpha-dev",
+        team_name="alpha",
+    )
+    resolver = RoomPolicyResolver(
+        topology=FakeTopology(
+            {"!project:local": binding},
+            actors={"@alpha-dev:local": actor},
+        ),
+        admin_user_id="@admin:local",
+        manager_user_id="@manager:local",
+    )
+
+    policy = await resolver.resolve(
+        _event(
+            room_id="!project:local",
+            sender_id="@alpha-dev:local",
+            is_direct=False,
+            mentions=("@manager:local",),
+        ),
+    )
+
+    assert not policy.silent
+    assert policy.allowed_tools == frozenset(
+        {
+            "list_tasks",
+            "get_task",
+            "complete_task",
+            "get_project",
+            "sync_files",
+        },
+    )
+    assert "create_worker" not in policy.allowed_tools
+    assert "update_project" not in policy.allowed_tools
+
+
+@pytest.mark.asyncio
+async def test_project_worker_without_manager_mention_stays_silent() -> None:
+    binding = SimpleNamespace(
+        room_kind=RoomKind.PROJECT_ROOM,
+        room_id="!project:local",
+        resource_name="project-20260723-120000-abc123",
+        matrix_user_id=None,
+        payload={"participants": ["alpha-dev"]},
+    )
+    actor = Actor(
+        matrix_user_id="@alpha-dev:local",
+        kind=ActorKind.TEAM_WORKER,
+        resource_name="alpha-dev",
+        team_name="alpha",
+    )
+    resolver = RoomPolicyResolver(
+        topology=FakeTopology(
+            {"!project:local": binding},
+            actors={"@alpha-dev:local": actor},
+        ),
+        admin_user_id="@admin:local",
+        manager_user_id="@manager:local",
+    )
+
+    policy = await resolver.resolve(
+        _event(
+            room_id="!project:local",
+            sender_id="@alpha-dev:local",
+            is_direct=False,
+        ),
+    )
+
+    assert policy.silent
+
+
+@pytest.mark.asyncio
+async def test_manager_self_event_is_always_silent() -> None:
+    resolver = RoomPolicyResolver(
+        topology=FakeTopology(),
+        admin_user_id="@admin:local",
+        manager_user_id="@manager:local",
+    )
+
+    policy = await resolver.resolve(
+        _event(
+            room_id="!admin:local",
+            sender_id="@manager:local",
+            is_direct=True,
+        ),
+    )
+
+    assert policy.silent
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("event_type", "relation_type", "is_bot_acknowledgement"),
+    [
+        ("m.room.redaction", None, False),
+        ("m.room.message", "m.replace", False),
+        ("m.room.message", None, True),
+    ],
+)
+async def test_non_actionable_matrix_events_never_wake_manager(
+    event_type: str,
+    relation_type: str | None,
+    is_bot_acknowledgement: bool,
+) -> None:
+    resolver = RoomPolicyResolver(
+        topology=FakeTopology(),
+        admin_user_id="@admin:local",
+        manager_user_id="@manager:local",
+    )
+
+    policy = await resolver.resolve(
+        _event(
+            room_id="!admin:local",
+            sender_id="@admin:local",
+            is_direct=True,
+        ).model_copy(
+            update={
+                "event_type": event_type,
+                "relation_type": relation_type,
+                "is_bot_acknowledgement": is_bot_acknowledgement,
+            },
+        ),
+    )
+
+    assert policy.silent

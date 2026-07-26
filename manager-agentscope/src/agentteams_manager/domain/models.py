@@ -204,6 +204,9 @@ class InboundEvent(FrozenStrictModel):
     thread_id: str | None = None
     mentions: tuple[str, ...] = ()
     media: tuple[MediaReference, ...] = ()
+    event_type: str = "m.room.message"
+    relation_type: str | None = None
+    is_bot_acknowledgement: bool = False
 
     @property
     def sender_id(self) -> str:

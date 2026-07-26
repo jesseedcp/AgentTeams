@@ -6,6 +6,7 @@ import json
 import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from enum import StrEnum
 
 from agentteams_manager.domain.errors import ConflictError
 from agentteams_manager.domain.models import (
@@ -28,6 +29,24 @@ class TopologyBinding:
     refreshed_at: datetime
 
 
+class ActorKind(StrEnum):
+    ADMIN = "admin"
+    WORKER = "worker"
+    TEAM_LEADER = "team_leader"
+    TEAM_WORKER = "team_worker"
+    HUMAN = "human"
+    TRUSTED_CONTACT = "trusted_contact"
+
+
+@dataclass(frozen=True, slots=True)
+class Actor:
+    matrix_user_id: str
+    kind: ActorKind
+    resource_name: str | None = None
+    team_name: str | None = None
+    payload: dict[str, object] | None = None
+
+
 def _binding_from_row(row: sqlite3.Row) -> TopologyBinding:
     return TopologyBinding(
         resource_type=row["resource_type"],
@@ -41,12 +60,21 @@ def _binding_from_row(row: sqlite3.Row) -> TopologyBinding:
 
 
 class TopologyRepository:
-    def __init__(self, database: Database) -> None:
+    def __init__(
+        self,
+        database: Database,
+        *,
+        admin_user_id: str | None = None,
+    ) -> None:
         self._database = database
+        self._admin_user_id = admin_user_id
 
     async def replace_snapshot(self, snapshot: TopologySnapshot) -> None:
         rows: list[tuple[str, str, str, str, str | None, str, str]] = []
         human_rows: list[tuple[str, str, int, str, str, str]] = []
+        actor_rows: list[
+            tuple[str, str, str | None, str | None, str, str]
+        ] = []
         kinds_by_room: dict[str, RoomKind] = {}
         teams_by_leader = {team.leader: team for team in snapshot.teams}
         team_worker_names = {
@@ -86,7 +114,32 @@ class TopologyRepository:
             )
 
         workers_by_name = {worker.name: worker for worker in snapshot.workers}
+        teams_by_worker = {
+            worker_name: team
+            for team in snapshot.teams
+            for worker_name in team.workers
+        }
         for worker in snapshot.workers:
+            team = teams_by_leader.get(worker.name)
+            actor_kind = ActorKind.WORKER
+            actor_team_name: str | None = None
+            if team is not None:
+                actor_kind = ActorKind.TEAM_LEADER
+                actor_team_name = team.name
+            elif worker.name in teams_by_worker:
+                actor_kind = ActorKind.TEAM_WORKER
+                actor_team_name = teams_by_worker[worker.name].name
+            if worker.matrix_user_id:
+                actor_rows.append(
+                    (
+                        worker.matrix_user_id,
+                        actor_kind.value,
+                        worker.name,
+                        actor_team_name,
+                        worker.model_dump_json(),
+                        snapshot.refreshed_at.isoformat(),
+                    ),
+                )
             if worker.name in teams_by_leader or worker.name in team_worker_names:
                 continue
             add(
@@ -140,6 +193,11 @@ class TopologyRepository:
                 "WHERE resource_type IN ('worker', 'team')",
             )
             connection.execute("DELETE FROM human_access")
+            connection.execute(
+                "DELETE FROM topology_actors "
+                "WHERE actor_kind IN "
+                "('worker', 'team_leader', 'team_worker')",
+            )
             connection.executemany(
                 """
                 INSERT INTO topology(
@@ -158,6 +216,21 @@ class TopologyRepository:
                 """,
                 human_rows,
             )
+            connection.executemany(
+                """
+                INSERT INTO topology_actors(
+                    matrix_user_id, actor_kind, resource_name, team_name,
+                    payload_json, refreshed_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(matrix_user_id) DO UPDATE SET
+                    actor_kind=excluded.actor_kind,
+                    resource_name=excluded.resource_name,
+                    team_name=excluded.team_name,
+                    payload_json=excluded.payload_json,
+                    refreshed_at=excluded.refreshed_at
+                """,
+                actor_rows,
+            )
             connection.execute(
                 """
                 INSERT INTO key_values(key, value, updated_at)
@@ -173,6 +246,67 @@ class TopologyRepository:
             )
 
         await self._database.write(write)
+
+    async def actor_for_sender(
+        self,
+        matrix_user_id: str,
+    ) -> Actor | None:
+        if self._admin_user_id and matrix_user_id == self._admin_user_id:
+            return Actor(
+                matrix_user_id=matrix_user_id,
+                kind=ActorKind.ADMIN,
+            )
+
+        def read(connection: sqlite3.Connection) -> Actor | None:
+            row = connection.execute(
+                """
+                SELECT actor_kind, resource_name, team_name, payload_json
+                  FROM topology_actors
+                 WHERE matrix_user_id=?
+                """,
+                (matrix_user_id,),
+            ).fetchone()
+            if row is not None:
+                return Actor(
+                    matrix_user_id=matrix_user_id,
+                    kind=ActorKind(row["actor_kind"]),
+                    resource_name=row["resource_name"],
+                    team_name=row["team_name"],
+                    payload=json.loads(row["payload_json"]),
+                )
+
+            human = connection.execute(
+                """
+                SELECT name, payload_json FROM human_access
+                 WHERE matrix_user_id=?
+                """,
+                (matrix_user_id,),
+            ).fetchone()
+            if human is not None:
+                return Actor(
+                    matrix_user_id=matrix_user_id,
+                    kind=ActorKind.HUMAN,
+                    resource_name=human["name"],
+                    payload=json.loads(human["payload_json"]),
+                )
+
+            trusted = connection.execute(
+                """
+                SELECT 1 FROM channel_relationships
+                 WHERE relationship_kind='trusted'
+                   AND (owner_user_id=? OR peer_user_id=?)
+                 LIMIT 1
+                """,
+                (matrix_user_id, matrix_user_id),
+            ).fetchone()
+            if trusted is not None:
+                return Actor(
+                    matrix_user_id=matrix_user_id,
+                    kind=ActorKind.TRUSTED_CONTACT,
+                )
+            return None
+
+        return await self._database.read(read)
 
     async def revision(self) -> int:
         def read(connection: sqlite3.Connection) -> int:
