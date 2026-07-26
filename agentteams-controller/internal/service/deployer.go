@@ -187,7 +187,7 @@ type DeployerConfig struct {
 	AgentConfig     *agentconfig.Generator
 	OSS             oss.StorageClient
 	Packages        *executor.PackageResolver
-	Legacy          *LegacyCompat
+	ManagerConfig   *ManagerConfigStore
 	AgentFSDir      string // embedded: /root/agentteams-fs/agents
 	WorkerAgentDir  string // source for builtin agent files
 	ManagerAgentDir string // source for Manager prompts and retained skills
@@ -206,7 +206,7 @@ type Deployer struct {
 	agentConfig       *agentconfig.Generator
 	oss               oss.StorageClient
 	packages          *executor.PackageResolver
-	legacy            *LegacyCompat
+	managerConfig     *ManagerConfigStore
 	agentFSDir        string
 	workerAgentDir    string
 	managerAgentDir   string
@@ -224,7 +224,7 @@ func NewDeployer(cfg DeployerConfig) *Deployer {
 		agentConfig:       cfg.AgentConfig,
 		oss:               cfg.OSS,
 		packages:          cfg.Packages,
-		legacy:            cfg.Legacy,
+		managerConfig:     cfg.ManagerConfig,
 		agentFSDir:        cfg.AgentFSDir,
 		workerAgentDir:    cfg.WorkerAgentDir,
 		managerAgentDir:   managerAgentDir,
