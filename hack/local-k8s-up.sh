@@ -193,7 +193,6 @@ log "Installing AgentTeams via Helm..."
 helm upgrade --install agentteams "$CHART_DIR" \
     --namespace "$NAMESPACE" --create-namespace \
     -f "${CHART_DIR}/values-kind.yaml" \
-    --set gateway.publicURL="http://localhost:18080" \
     --set credentials.llmApiKey="$LLM_API_KEY" \
     ${HELM_SET_OVERRIDES} \
     ${HELM_IMAGE_OVERRIDES} \
@@ -249,7 +248,7 @@ else
 fi
 echo ""
 log "Access Cinny:"
-log "  Then open: http://localhost:18080"
+log "  Then open: http://127.0.0.1:18388"
 echo ""
 log "View Controller logs:"
 log "  kubectl logs -f deployment/agentteams-controller -n ${NAMESPACE}"

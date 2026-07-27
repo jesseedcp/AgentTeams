@@ -48,6 +48,15 @@ def test_k8s_manager_has_cinny_route_service_and_persistent_state() -> None:
         assert b"AgentTeams Manager" in page.read()
     with urlopen(f"{GATEWAY_URL}/", timeout=10) as page:
         assert page.status == 200
+    with urlopen(f"{GATEWAY_URL}/config.json", timeout=10) as page:
+        cinny_config = json.load(page)
+    assert cinny_config["homeserverList"] == [GATEWAY_URL]
+    with urlopen(
+        f"{GATEWAY_URL}/.well-known/matrix/client",
+        timeout=10,
+    ) as page:
+        matrix_client = json.load(page)
+    assert matrix_client["m.homeserver"]["base_url"] == GATEWAY_URL
 
 
 def test_manager_sqlite_survives_live_pod_restart_when_enabled() -> None:

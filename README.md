@@ -149,7 +149,7 @@ helm install agentteams higress.io/agentteams \
   --render-subchart-notes \
   --set credentials.llmApiKey=<your-api-key> \
   --set credentials.adminPassword=<your-admin-password> \
-  --set gateway.publicURL=http://localhost:18080
+  --set gateway.publicURL=http://127.0.0.1:18388
 ```
 
 For non-OpenAI providers that expose an OpenAI-compatible API, also set `llmBaseUrl`:
@@ -162,7 +162,7 @@ helm install agentteams higress.io/agentteams \
   --set credentials.llmBaseUrl=https://your-provider.example.com/v1 \
   --set credentials.defaultModel=your-model-name \
   --set credentials.adminPassword=<your-admin-password> \
-  --set gateway.publicURL=http://localhost:18080
+  --set gateway.publicURL=http://127.0.0.1:18388
 ```
 
 <details>
@@ -176,7 +176,7 @@ helm install agentteams higress.io/agentteams \
   --set credentials.llmProvider=qwen \
   --set credentials.defaultModel=qwen3.5-plus \
   --set credentials.adminPassword=<your-admin-password> \
-  --set gateway.publicURL=http://localhost:18080
+  --set gateway.publicURL=http://127.0.0.1:18388
 ```
 
 </details>
@@ -184,7 +184,7 @@ helm install agentteams higress.io/agentteams \
 | Value | Required | Description |
 |---|---|---|
 | `credentials.llmApiKey` | yes | API key for your LLM provider |
-| `gateway.publicURL` | yes | Public URL where users will reach Cinny (e.g. `http://localhost:18080` for port-forward, or `https://agentteams.example.com` for an Ingress) |
+| `gateway.publicURL` | yes | Public URL where users will reach Cinny (e.g. `http://127.0.0.1:18388` for port-forward, or `https://agentteams.example.com` for an Ingress) |
 | `credentials.adminPassword` | recommended | Matrix admin password; auto-generated if left empty (you'll have to read it back from the Secret) |
 | `credentials.llmProvider` | no | LLM provider name, defaults to `openai-compat` |
 | `credentials.defaultModel` | no | Default model, defaults to `gpt-5.4` |
@@ -206,7 +206,7 @@ helm install agentteams higress.io/agentteams \
   -n agentteams-system --create-namespace \
   --set credentials.llmApiKey=<your-api-key> \
   --set credentials.adminPassword=<your-admin-password> \
-  --set gateway.publicURL=http://localhost:18080 \
+  --set gateway.publicURL=http://127.0.0.1:18388 \
   --set preflight.llm.enabled=false
 ```
 
@@ -222,7 +222,7 @@ helm install agentteams higress.io/agentteams \
   --set credentials.llmBaseUrl=https://your-provider.example.com/v1 \
   --set credentials.defaultModel=your-model-name \
   --set credentials.adminPassword=<your-admin-password> \
-  --set gateway.publicURL=http://localhost:18080
+  --set gateway.publicURL=http://127.0.0.1:18388
 ```
 
 The Manager image is always `agentteams-manager` and runs AgentScope
@@ -249,7 +249,7 @@ helm install agentteams higress.io/agentteams \
   --set global.imageRegistry=higress-registry.us-west-1.cr.aliyuncs.com/higress \
   --set credentials.llmApiKey=<your-api-key> \
   --set credentials.adminPassword=<your-admin-password> \
-  --set gateway.publicURL=http://localhost:18080
+  --set gateway.publicURL=http://127.0.0.1:18388
 ```
 
 For all configurable values (gateway/storage providers, image tags, resources, persistence, etc.) see [`helm/agentteams/values.yaml`](helm/agentteams/values.yaml).
@@ -259,10 +259,10 @@ For all configurable values (gateway/storage providers, image tags, resources, p
 For a temporary local admin session, forward the Higress Gateway:
 
 ```bash
-kubectl port-forward -n agentteams-system svc/higress-gateway 18080:80
+kubectl port-forward -n agentteams-system svc/higress-gateway 18388:80
 ```
 
-Then open http://localhost:18080 and log in to Cinny. The port-forward
+Then open http://127.0.0.1:18388 and log in to Cinny. The port-forward
 ends when the command exits and is not suitable for shared access.
 
 For company or Internet access, expose only `svc/higress-gateway` through an

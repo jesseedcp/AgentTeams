@@ -4,11 +4,14 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CHART="${ROOT_DIR}/helm/agentteams"
-COMMON_ARGS=(
+CREDENTIAL_ARGS=(
     --set credentials.registrationToken=test
     --set credentials.adminPassword=test
     --set credentials.llmApiKey=test
     --set credentials.githubToken=github-test
+)
+COMMON_ARGS=(
+    "${CREDENTIAL_ARGS[@]}"
     --set gateway.publicURL=http://localhost:18080
 )
 
@@ -63,10 +66,16 @@ if helm template agentteams "${CHART}" "${COMMON_ARGS[@]}" \
     exit 1
 fi
 
-helm template agentteams "${CHART}" "${COMMON_ARGS[@]}" \
-    -f "${CHART}/values-kind.yaml" > "${kind_render}"
+helm template agentteams "${CHART}" "${CREDENTIAL_ARGS[@]}" \
+    -f "${CHART}/values-kind.yaml" \
+    > "${kind_render}"
 grep -q 'type: NodePort' "${kind_render}"
 grep -q 'nodePort: 30080' "${kind_render}"
+grep -Fq '"homeserverList": ["http://127.0.0.1:18388"]' \
+    "${kind_render}"
+grep -Fq \
+    '{"m.homeserver":{"base_url":"http://127.0.0.1:18388"}}' \
+    "${kind_render}"
 grep -Fq -- '-f "${CHART_DIR}/values-kind.yaml"' \
     "${ROOT_DIR}/hack/local-k8s-up.sh"
 for image in console higress pilot gateway proxyv2; do

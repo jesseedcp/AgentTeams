@@ -1,5 +1,8 @@
 # Local Kind overrides used by hack/local-k8s-up.sh.
 # hack/kind-config.yaml maps node port 30080 to host port 18388.
+gateway:
+  publicURL: http://127.0.0.1:18388
+
 higress:
   higress-core:
     gateway:

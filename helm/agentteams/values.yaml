@@ -79,7 +79,7 @@ matrix:
 gateway:
   provider: higress           # higress | ai-gateway
   mode: managed               # managed | existing
-  publicURL: ""               # required browser/public URL, e.g. http://localhost:18080
+  publicURL: ""               # required browser/public URL, e.g. http://127.0.0.1:18388
   higress:
     enabled: true             # controls Higress subchart deployment
   # Required when provider=ai-gateway:

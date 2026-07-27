@@ -148,7 +148,7 @@ helm install agentteams higress.io/agentteams \
   --render-subchart-notes \
   --set credentials.llmApiKey=<your-api-key> \
   --set credentials.adminPassword=<your-admin-password> \
-  --set gateway.publicURL=http://localhost:18080
+  --set gateway.publicURL=http://127.0.0.1:18388
 ```
 
 OpenAI 互換 API を提供する他のプロバイダーを使用する場合は、`llmBaseUrl` も設定してください：
@@ -161,7 +161,7 @@ helm install agentteams higress.io/agentteams \
   --set credentials.llmBaseUrl=https://your-provider.example.com/v1 \
   --set credentials.defaultModel=your-model-name \
   --set credentials.adminPassword=<your-admin-password> \
-  --set gateway.publicURL=http://localhost:18080
+  --set gateway.publicURL=http://127.0.0.1:18388
 ```
 
 <details>
@@ -175,7 +175,7 @@ helm install agentteams higress.io/agentteams \
   --set credentials.llmProvider=qwen \
   --set credentials.defaultModel=qwen3.5-plus \
   --set credentials.adminPassword=<your-admin-password> \
-  --set gateway.publicURL=http://localhost:18080
+  --set gateway.publicURL=http://127.0.0.1:18388
 ```
 
 </details>
@@ -183,7 +183,7 @@ helm install agentteams higress.io/agentteams \
 | 値 | 必須 | 説明 |
 |---|---|---|
 | `credentials.llmApiKey` | 必須 | LLM プロバイダーの API キー |
-| `gateway.publicURL` | 必須 | ユーザーが Cinny にアクセスする公開 URL（port-forward 環境では `http://localhost:18080`、本番では `https://agentteams.example.com` 等） |
+| `gateway.publicURL` | 必須 | ユーザーが Cinny にアクセスする公開 URL（port-forward 環境では `http://127.0.0.1:18388`、本番では `https://agentteams.example.com` 等） |
 | `credentials.adminPassword` | 推奨 | Matrix 管理者パスワード。空のままだと自動生成（後で Secret から読み出す必要あり） |
 | `credentials.llmProvider` | 任意 | LLM プロバイダー名、デフォルトは `openai-compat` |
 | `credentials.defaultModel` | 任意 | デフォルトモデル、デフォルトは `gpt-5.4` |
@@ -203,7 +203,7 @@ helm install agentteams higress.io/agentteams \
   --set credentials.llmBaseUrl=https://your-provider.example.com/v1 \
   --set credentials.defaultModel=your-model-name \
   --set credentials.adminPassword=<your-admin-password> \
-  --set gateway.publicURL=http://localhost:18080
+  --set gateway.publicURL=http://127.0.0.1:18388
 ```
 
 Manager は常に `agentteams-manager`（AgentScope 2.0）です。Worker イメージは選択したランタイムに応じて自動的に選ばれます。
@@ -228,7 +228,7 @@ helm install agentteams higress.io/agentteams \
   --set global.imageRegistry=higress-registry.us-west-1.cr.aliyuncs.com/higress \
   --set credentials.llmApiKey=<your-api-key> \
   --set credentials.adminPassword=<your-admin-password> \
-  --set gateway.publicURL=http://localhost:18080
+  --set gateway.publicURL=http://127.0.0.1:18388
 ```
 
 設定可能な全パラメータ（ゲートウェイ／ストレージの provider、イメージタグ、リソース、永続化など）は [`helm/agentteams/values.yaml`](helm/agentteams/values.yaml) を参照してください。
@@ -236,10 +236,10 @@ helm install agentteams higress.io/agentteams \
 **アクセス**
 
 ```bash
-kubectl port-forward -n agentteams-system svc/higress-gateway 18080:80
+kubectl port-forward -n agentteams-system svc/higress-gateway 18388:80
 ```
 
-ブラウザで http://localhost:18080 を開き Cinny にログインしてください。本番クラスタでは Ingress / LoadBalancer / DNS を `svc/higress-gateway` に向け、それに合わせて `gateway.publicURL` を設定してください。
+ブラウザで http://127.0.0.1:18388 を開き Cinny にログインしてください。本番クラスタでは Ingress / LoadBalancer / DNS を `svc/higress-gateway` に向け、それに合わせて `gateway.publicURL` を設定してください。
 
 **アップグレード**
 

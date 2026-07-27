@@ -171,7 +171,7 @@ helm install agentteams higress.io/agentteams \
   --render-subchart-notes \
   --set credentials.llmApiKey=<你的-API-Key> \
   --set credentials.adminPassword=<你的-管理员密码> \
-  --set gateway.publicURL=http://localhost:18080
+  --set gateway.publicURL=http://127.0.0.1:18388
 ```
 
 如果使用非 OpenAI 但兼容 OpenAI API 的服务商，还需设置 `llmBaseUrl`：
@@ -184,7 +184,7 @@ helm install agentteams higress.io/agentteams \
   --set credentials.llmBaseUrl=https://your-provider.example.com/v1 \
   --set credentials.defaultModel=your-model-name \
   --set credentials.adminPassword=<你的-管理员密码> \
-  --set gateway.publicURL=http://localhost:18080
+  --set gateway.publicURL=http://127.0.0.1:18388
 ```
 
 <details>
@@ -198,7 +198,7 @@ helm install agentteams higress.io/agentteams \
   --set credentials.llmProvider=qwen \
   --set credentials.defaultModel=qwen3.5-plus \
   --set credentials.adminPassword=<你的-管理员密码> \
-  --set gateway.publicURL=http://localhost:18080
+  --set gateway.publicURL=http://127.0.0.1:18388
 ```
 
 </details>
@@ -206,7 +206,7 @@ helm install agentteams higress.io/agentteams \
 | 参数 | 是否必填 | 说明 |
 |---|---|---|
 | `credentials.llmApiKey` | 必填 | LLM 服务商 API Key |
-| `gateway.publicURL` | 必填 | 用户访问 Cinny 的对外地址（端口转发场景填 `http://localhost:18080`，正式环境填 `https://agentteams.example.com` 等） |
+| `gateway.publicURL` | 必填 | 用户访问 Cinny 的对外地址（端口转发场景填 `http://127.0.0.1:18388`，正式环境填 `https://agentteams.example.com` 等） |
 | `credentials.adminPassword` | 推荐 | Matrix 管理员密码；留空时会自动生成（之后需要从 Secret 中读取） |
 | `credentials.llmProvider` | 可选 | LLM 服务商名，默认 `openai-compat` |
 | `credentials.defaultModel` | 可选 | 默认模型，默认 `gpt-5.4` |
@@ -227,7 +227,7 @@ helm install agentteams higress.io/agentteams \
   --set credentials.llmBaseUrl=https://your-provider.example.com/v1 \
   --set credentials.defaultModel=your-model-name \
   --set credentials.adminPassword=<your-admin-password> \
-  --set gateway.publicURL=http://localhost:18080
+  --set gateway.publicURL=http://127.0.0.1:18388
 ```
 
 Manager 始终使用 `agentteams-manager` 镜像并运行 AgentScope
@@ -254,7 +254,7 @@ helm install agentteams higress.io/agentteams \
   --set global.imageRegistry=higress-registry.us-west-1.cr.aliyuncs.com/higress \
   --set credentials.llmApiKey=<你的-API-Key> \
   --set credentials.adminPassword=<你的-管理员密码> \
-  --set gateway.publicURL=http://localhost:18080
+  --set gateway.publicURL=http://127.0.0.1:18388
 ```
 
 完整可配置项（网关/存储 provider、镜像 tag、资源、持久化等）请参考 [`helm/agentteams/values.yaml`](helm/agentteams/values.yaml)。
@@ -264,14 +264,14 @@ helm install agentteams higress.io/agentteams \
 临时从本机管理集群时，可以转发 Higress Gateway：
 
 ```bash
-kubectl port-forward -n agentteams-system svc/higress-gateway 18080:80
+kubectl port-forward -n agentteams-system svc/higress-gateway 18388:80
 ```
 
-然后在浏览器中打开 http://localhost:18080 登录 Cinny。命令退出后转发即停止，
+然后在浏览器中打开 http://127.0.0.1:18388 登录 Cinny。命令退出后转发即停止，
 因此该方式不适合多人共享。
 
 登录 Cinny 后，Manager 运维控制台使用同一地址的
-`http://localhost:18080/manager-admin/`。控制台不会取代 Cinny，并要求输入
+`http://127.0.0.1:18388/manager-admin/`。控制台不会取代 Cinny，并要求输入
 管理员令牌后才会读取运行数据。
 
 公司内网或公网访问时，只需通过 HTTPS Ingress 或 LoadBalancer 暴露
