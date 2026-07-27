@@ -1,7 +1,7 @@
 # kind cluster configuration for local AgentTeams development.
 #
 # Port mappings expose services on the host:
-#   - 18080: Higress Gateway (AI Gateway / Matrix proxy / Cinny)
+#   - 18388: Higress Gateway (AI Gateway / Matrix proxy / Cinny)
 #
 # Usage:
 #   kind create cluster --name agentteams --config hack/kind-config.yaml
@@ -10,7 +10,7 @@ apiVersion: kind.x-k8s.io/v1alpha4
 nodes:
   - role: control-plane
     extraPortMappings:
-      # Higress Gateway (NodePort 30080 -> host 18080)
+      # Higress Gateway (NodePort 30080 -> stable host port 18388)
       - containerPort: 30080
-        hostPort: 18080
+        hostPort: 18388
         protocol: TCP

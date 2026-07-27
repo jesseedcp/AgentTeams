@@ -16,6 +16,10 @@ NAMESPACE = os.environ.get(
     "AGENTTEAMS_E2E_NAMESPACE",
     "agentteams-k8s-b35deb9",
 )
+GATEWAY_URL = os.environ.get(
+    "AGENTTEAMS_E2E_GATEWAY_URL",
+    "http://127.0.0.1:18388",
+).rstrip("/")
 
 
 def test_k8s_manager_has_cinny_route_service_and_persistent_state() -> None:
@@ -39,10 +43,10 @@ def test_k8s_manager_has_cinny_route_service_and_persistent_state() -> None:
     paths = ingress["spec"]["rules"][0]["http"]["paths"]
     assert any(item["path"] == "/manager-admin" for item in paths)
 
-    with urlopen("http://127.0.0.1:18480/manager-admin/", timeout=10) as page:
+    with urlopen(f"{GATEWAY_URL}/manager-admin/", timeout=10) as page:
         assert page.status == 200
         assert b"AgentTeams Manager" in page.read()
-    with urlopen("http://127.0.0.1:18480/", timeout=10) as page:
+    with urlopen(f"{GATEWAY_URL}/", timeout=10) as page:
         assert page.status == 200
 
 
@@ -188,9 +192,13 @@ def _assert_static_k8s_contract() -> None:
     pvc = (
         ROOT / "helm" / "agentteams" / "templates" / "manager-pvc.yaml"
     ).read_text(encoding="utf-8")
+    kind_config = (ROOT / "hack" / "kind-config.yaml").read_text(
+        encoding="utf-8",
+    )
     assert "persistence:\n    enabled: true" in values
     assert "AGENTTEAMS_MANAGER_DATA_CLAIM" in deployment
     assert "kind: PersistentVolumeClaim" in pvc
+    assert "hostPort: 18388" in kind_config
 
 
 def _live_namespace() -> bool:
