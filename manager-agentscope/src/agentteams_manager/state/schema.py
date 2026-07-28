@@ -1,6 +1,6 @@
 """Initial SQLite schema for durable operations."""
 
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 
 SESSION_SETTINGS_MIGRATION_COLUMNS = {
     "thinking_effort": "TEXT",
@@ -301,4 +301,13 @@ CREATE INDEX IF NOT EXISTS external_channel_contacts_status_idx
   ON external_channel_contacts(status, updated_at);
 CREATE UNIQUE INDEX IF NOT EXISTS external_channel_contacts_primary_idx
   ON external_channel_contacts(is_primary) WHERE is_primary = 1;
+
+CREATE TABLE IF NOT EXISTS external_channel_events (
+  provider TEXT NOT NULL,
+  message_id TEXT NOT NULL,
+  processed_at TEXT NOT NULL,
+  PRIMARY KEY(provider, message_id)
+);
+CREATE INDEX IF NOT EXISTS external_channel_events_processed_idx
+  ON external_channel_events(processed_at);
 """

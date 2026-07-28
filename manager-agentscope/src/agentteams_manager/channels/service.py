@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Literal
@@ -11,7 +12,10 @@ from agentteams_manager.state.database import Database
 from .base import (
     ChannelAdapter,
     ChannelContact,
+    ChannelMessage,
     ChannelReceipt,
+    ChannelWebhookRequest,
+    ChannelWebhookResponse,
     Provider,
 )
 from .matrix import MatrixChannelEscalation
@@ -196,6 +200,28 @@ class ExternalContactRepository:
 
         return await self._database.write(write)
 
+    async def claim_event(
+        self,
+        *,
+        provider: Provider,
+        message_id: str,
+        now: datetime,
+    ) -> bool:
+        """Atomically claim a provider event before dispatching it."""
+
+        def write(connection):
+            cursor = connection.execute(
+                """
+                INSERT OR IGNORE INTO external_channel_events(
+                  provider, message_id, processed_at
+                ) VALUES (?, ?, ?)
+                """,
+                (provider, message_id, now.isoformat()),
+            )
+            return cursor.rowcount == 1
+
+        return await self._database.write(write)
+
 
 class ChannelService:
     """Keep external identities outside privileged AgentScope turns."""
@@ -208,7 +234,7 @@ class ChannelService:
         escalation: MatrixChannelEscalation,
     ) -> None:
         self._contacts = contacts
-        self._adapters = {
+        self._adapters: dict[str, ChannelAdapter] = {
             adapter.provider: adapter for adapter in adapters
         }
         self._escalation = escalation
@@ -226,7 +252,61 @@ class ChannelService:
         adapter = self._adapters.get(provider)
         if adapter is None:
             raise KeyError(f"channel provider {provider!r} is disabled")
-        message = adapter.verify_and_parse(headers, body)
+        result = adapter.handle_webhook(
+            ChannelWebhookRequest(
+                method="POST",
+                headers=headers,
+                query={},
+                body=body,
+            ),
+        )
+        if result.message is None:
+            raise ValueError("webhook did not contain a message")
+        return await self._ingest_message(result.message)
+
+    async def handle_webhook(
+        self,
+        provider: str,
+        request: ChannelWebhookRequest,
+    ) -> ChannelWebhookResponse:
+        """Verify, deduplicate, dispatch, then return the native acknowledgement."""
+        adapter = self._adapters.get(provider)
+        if adapter is None:
+            raise KeyError(f"channel provider {provider!r} is disabled")
+        parsed = adapter.handle_webhook(request)
+        message = parsed.message
+        if message is None:
+            return parsed
+        claimed = await self._contacts.claim_event(
+            provider=message.provider,
+            message_id=message.message_id,
+            now=datetime.now(UTC),
+        )
+        receipt = (
+            await self._ingest_message(message)
+            if claimed
+            else ChannelReceipt(
+                provider=message.provider,
+                external_user_id=message.external_user_id,
+                status="duplicate",
+            )
+        )
+        if parsed.body or parsed.status_code == 204:
+            return parsed
+        return ChannelWebhookResponse(
+            status_code=200,
+            body=json.dumps(
+                receipt.model_dump(mode="json"),
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode(),
+            content_type="application/json",
+        )
+
+    async def _ingest_message(
+        self,
+        message: ChannelMessage,
+    ) -> ChannelReceipt:
         contact, created = await self._contacts.record_first_contact(
             provider=message.provider,
             external_user_id=message.external_user_id,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass, field
 from typing import Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict
@@ -14,6 +15,7 @@ Provider = Literal[
     "feishu",
     "whatsapp",
     "signal",
+    "dingtalk",
 ]
 PROVIDERS: tuple[Provider, ...] = (
     "discord",
@@ -22,6 +24,7 @@ PROVIDERS: tuple[Provider, ...] = (
     "feishu",
     "whatsapp",
     "signal",
+    "dingtalk",
 )
 
 
@@ -50,17 +53,42 @@ class ChannelContact(_Frozen):
 class ChannelReceipt(_Frozen):
     provider: Provider
     external_user_id: str
-    status: Literal["pending_approval", "accepted", "blocked"]
+    status: Literal[
+        "pending_approval",
+        "accepted",
+        "blocked",
+        "duplicate",
+    ]
+
+
+@dataclass(frozen=True, slots=True)
+class ChannelWebhookRequest:
+    """Raw HTTP request data needed by provider-native verification."""
+
+    method: str
+    headers: Mapping[str, str]
+    query: Mapping[str, str]
+    body: bytes
+
+
+@dataclass(frozen=True, slots=True)
+class ChannelWebhookResponse:
+    """Provider-specific HTTP acknowledgement and optional message."""
+
+    status_code: int = 200
+    body: bytes = b""
+    content_type: str = "application/json"
+    message: ChannelMessage | None = None
+    response_headers: Mapping[str, str] = field(default_factory=dict)
 
 
 class ChannelAdapter(Protocol):
     provider: Provider
 
-    def verify_and_parse(
+    def handle_webhook(
         self,
-        headers: Mapping[str, str],
-        body: bytes,
-    ) -> ChannelMessage: ...
+        request: ChannelWebhookRequest,
+    ) -> ChannelWebhookResponse: ...
 
     async def send(self, destination_id: str, text: str) -> str: ...
 

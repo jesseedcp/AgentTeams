@@ -34,9 +34,13 @@ channel relationship does not delete the Matrix room.
 - Level-3 Human: read-only within declared Workers.
 - Trusted contact: general read-only help; never secrets or management.
 - Unknown group sender: silently ignore.
-- Discord, Telegram, Slack, Feishu, WhatsApp, and Signal webhooks require
-  HMAC verification. New contacts remain pending and cannot call any Manager
-  tool until an Admin approves them.
+- Native channels use their provider protocol: Telegram secret-token, Slack
+  request signing, WhatsApp Graph verification, Feishu token/signature and
+  encryption, DingTalk callback signing, and Discord Ed25519. Signal and
+  legacy integrations must be explicitly configured as `relay`.
+- New contacts remain pending and cannot call any Manager tool until an Admin
+  approves them. Retried provider event IDs are acknowledged without starting
+  a second Agent turn.
 - External credentials are environment references backed by Kubernetes
   Secrets. Never place tokens in SQLite, skill documents, or tool output.
 - Team Leader and Worker permissions come from the room topology, not names in
@@ -44,3 +48,4 @@ channel relationship does not delete the Matrix room.
 
 Read `references/identity-and-contacts.md` for sender classification and
 `references/primary-channel.md` for relationship schemas and fallback order.
+Read `references/configuration.md` before adding or migrating a webhook.

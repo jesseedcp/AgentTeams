@@ -2,7 +2,11 @@ from pathlib import Path
 
 import pytest
 
-from agentteams_manager.config import ManagerConfig, RuntimeDocument
+from agentteams_manager.config import (
+    ExternalChannelDocument,
+    ManagerConfig,
+    RuntimeDocument,
+)
 
 
 def test_manager_config_reads_secret_values_without_exposing_them(
@@ -49,3 +53,68 @@ def test_runtime_document_rejects_unsupported_schema(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="schema_version 1"):
         RuntimeDocument.load(path)
+
+
+def test_native_channel_config_contains_only_environment_references() -> None:
+    document = ExternalChannelDocument.model_validate(
+        {
+            "schema_version": 2,
+            "provider": "slack",
+            "mode": "native",
+            "outbound_url": "https://slack.test/chat.postMessage",
+            "secret_envs": {
+                "token": "env:SLACK_BOT_TOKEN",
+                "signing_secret": "env:SLACK_SIGNING_SECRET",
+            },
+            "options": {"team_id": "T01"},
+        },
+    )
+
+    assert document.mode == "native"
+    assert document.secret_envs["signing_secret"] == (
+        "env:SLACK_SIGNING_SECRET"
+    )
+    assert "secret-value" not in repr(document)
+
+
+def test_legacy_channel_config_migrates_to_explicit_relay_mode() -> None:
+    with pytest.warns(DeprecationWarning, match="relay"):
+        document = ExternalChannelDocument.model_validate(
+            {
+                "provider": "telegram",
+                "outbound_url": "https://relay.test/send",
+                "token_env": "env:TELEGRAM_TOKEN",
+                "webhook_secret_env": "env:TELEGRAM_WEBHOOK_SECRET",
+            },
+        )
+
+    assert document.schema_version == 2
+    assert document.mode == "relay"
+    assert document.secret_envs == {
+        "token": "env:TELEGRAM_TOKEN",
+        "webhook_secret": "env:TELEGRAM_WEBHOOK_SECRET",
+    }
+
+
+def test_native_channel_config_rejects_missing_or_inline_secrets() -> None:
+    with pytest.raises(ValueError, match="signing_secret"):
+        ExternalChannelDocument.model_validate(
+            {
+                "provider": "slack",
+                "outbound_url": "https://slack.test/chat.postMessage",
+                "secret_envs": {"token": "env:SLACK_BOT_TOKEN"},
+            },
+        )
+
+    with pytest.raises(ValueError, match="options must not contain"):
+        ExternalChannelDocument.model_validate(
+            {
+                "provider": "slack",
+                "outbound_url": "https://slack.test/chat.postMessage",
+                "secret_envs": {
+                    "token": "env:SLACK_BOT_TOKEN",
+                    "signing_secret": "env:SLACK_SIGNING_SECRET",
+                },
+                "options": {"api_token": "inline-secret"},
+            },
+        )

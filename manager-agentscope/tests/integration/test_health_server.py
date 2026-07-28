@@ -108,10 +108,15 @@ async def test_admin_console_requires_bearer_token_for_data() -> None:
 async def test_signed_channel_webhook_is_forwarded_to_handler() -> None:
     calls: list[tuple[str, bytes]] = []
 
-    async def webhook(provider, headers, body):
-        assert headers["x-agentteams-signature"] == "signed"
-        calls.append((provider, body))
-        return {"status": "pending_approval"}
+    async def webhook(provider, request):
+        assert request.headers["x-agentteams-signature"] == "signed"
+        calls.append((provider, request.body))
+        from agentteams_manager.channels.base import ChannelWebhookResponse
+
+        return ChannelWebhookResponse(
+            status_code=202,
+            body=b'{"status":"pending_approval"}',
+        )
 
     server = HealthServer(
         readiness=ReadinessState(),

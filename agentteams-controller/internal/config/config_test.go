@@ -130,6 +130,31 @@ func TestManagerAgentEnvForwardsOnlyReferencedExternalChannelSecrets(
 	}
 }
 
+func TestManagerAgentEnvForwardsVersionedChannelSecretReferences(
+	t *testing.T,
+) {
+	t.Setenv("SLACK_BOT_TOKEN", "bot-secret")
+	t.Setenv("SLACK_SIGNING_SECRET", "signing-secret")
+	t.Setenv("UNRELATED_SECRET", "must-not-forward")
+	t.Setenv(
+		"AGENTTEAMS_EXTERNAL_CHANNELS",
+		`[{"schema_version":2,"provider":"slack","mode":"native",`+
+			`"outbound_url":"https://slack.test/chat.postMessage",`+
+			`"secret_envs":{"token":"env:SLACK_BOT_TOKEN",`+
+			`"signing_secret":"env:SLACK_SIGNING_SECRET"}}]`,
+	)
+
+	env := (&Config{}).ManagerAgentEnv()
+
+	if env["SLACK_BOT_TOKEN"] != "bot-secret" ||
+		env["SLACK_SIGNING_SECRET"] != "signing-secret" {
+		t.Fatalf("versioned referenced secrets were not forwarded: %#v", env)
+	}
+	if _, exists := env["UNRELATED_SECRET"]; exists {
+		t.Fatal("unreferenced secret was forwarded")
+	}
+}
+
 func TestLoadConfigAppliesManagerSpec(t *testing.T) {
 	t.Setenv("AGENTTEAMS_MANAGER_SPEC", `{
 		"model":"qwen-max",

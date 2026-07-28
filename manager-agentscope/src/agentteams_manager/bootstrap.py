@@ -17,7 +17,7 @@ from pydantic import SecretStr
 
 from .admin.service import AdminSnapshotService
 from .application import ManagerApplication
-from .channels.http_providers import HttpChannelAdapter
+from .channels.http_providers import build_channel_adapter
 from .channels.matrix import MatrixChannelEscalation
 from .channels.service import ChannelService, ExternalContactRepository
 from .clients.agt import AgtClient
@@ -465,15 +465,17 @@ def build_application(
     channel_service = ChannelService(
         contacts=ExternalContactRepository(database),
         adapters=tuple(
-            HttpChannelAdapter(
+            build_channel_adapter(
                 provider=document.provider,
+                mode=document.mode,
                 outbound_url=document.outbound_url,
-                token=_environment_secret(
-                    document.token_env,
-                ).get_secret_value(),
-                webhook_secret=_environment_secret(
-                    document.webhook_secret_env,
-                ).get_secret_value(),
+                secrets={
+                    name: _environment_secret(
+                        reference,
+                    ).get_secret_value()
+                    for name, reference in document.secret_envs.items()
+                },
+                options=document.options,
             )
             for document in config.external_channels
         ),
@@ -827,7 +829,7 @@ def build_application(
         admin_token=config.admin_api_token,
         admin_snapshot=admin_service.snapshot,
         webhook_handler=(
-            channel_service.ingest
+            channel_service.handle_webhook
             if channel_service.providers
             else None
         ),

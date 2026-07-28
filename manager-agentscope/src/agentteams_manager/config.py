@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import warnings
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import (
     BaseModel,
@@ -78,10 +80,11 @@ class RuntimeDocument(BaseModel):
 
 
 class ExternalChannelDocument(BaseModel):
-    """Secret-reference-only configuration for one HTTP channel."""
+    """Versioned, secret-reference-only HTTP channel configuration."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
+    schema_version: Literal[2] = 2
     provider: Literal[
         "discord",
         "telegram",
@@ -89,12 +92,106 @@ class ExternalChannelDocument(BaseModel):
         "feishu",
         "whatsapp",
         "signal",
+        "dingtalk",
     ]
+    mode: Literal["native", "relay"] = "native"
     outbound_url: str = Field(pattern=r"^https?://")
-    token_env: str = Field(pattern=r"^env:[A-Z][A-Z0-9_]{2,127}$")
-    webhook_secret_env: str = Field(
-        pattern=r"^env:[A-Z][A-Z0-9_]{2,127}$",
-    )
+    secret_envs: dict[str, str] = Field(default_factory=dict)
+    options: dict[str, str] = Field(default_factory=dict)
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_legacy_relay(
+        cls,
+        value: Any,
+    ) -> Any:
+        if not isinstance(value, dict):
+            return value
+        if (
+            "token_env" not in value
+            and "webhook_secret_env" not in value
+        ):
+            return value
+        migrated = dict(value)
+        secrets = dict(migrated.pop("secret_envs", {}))
+        token_env = migrated.pop("token_env", None)
+        webhook_secret_env = migrated.pop(
+            "webhook_secret_env",
+            None,
+        )
+        if token_env is not None:
+            secrets.setdefault("token", token_env)
+        if webhook_secret_env is not None:
+            secrets.setdefault("webhook_secret", webhook_secret_env)
+        migrated["secret_envs"] = secrets
+        migrated["schema_version"] = 2
+        migrated["mode"] = "relay"
+        provider = str(migrated.get("provider", "unknown"))
+        warnings.warn(
+            f"legacy {provider} channel configuration migrated to relay "
+            "mode; move credentials to secret_envs for native mode",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return migrated
+
+    @model_validator(mode="after")
+    def validate_environment_references(
+        self,
+    ) -> ExternalChannelDocument:
+        pattern = re.compile(r"^env:[A-Z][A-Z0-9_]{2,127}$")
+        for name, reference in self.secret_envs.items():
+            if not re.fullmatch(r"[a-z][a-z0-9_]{0,63}", name):
+                raise ValueError(
+                    f"invalid channel secret name {name!r}",
+                )
+            if not pattern.fullmatch(reference):
+                raise ValueError(
+                    f"channel secret {name!r} must be an env reference",
+                )
+        if self.provider == "signal" and self.mode != "relay":
+            raise ValueError("Signal supports relay mode only")
+        required = (
+            {"token", "webhook_secret"}
+            if self.mode == "relay"
+            else {
+                "telegram": {"token", "webhook_secret"},
+                "slack": {"token", "signing_secret"},
+                "whatsapp": {
+                    "token",
+                    "app_secret",
+                    "verify_token",
+                },
+                "feishu": {"token", "verification_token"},
+                "dingtalk": {"token", "webhook_secret"},
+                "discord": {"token", "public_key"},
+                "signal": {"token", "webhook_secret"},
+            }[self.provider]
+        )
+        missing = sorted(required - self.secret_envs.keys())
+        if missing:
+            raise ValueError(
+                "channel secret_envs is missing required references: "
+                + ", ".join(missing),
+            )
+        sensitive_markers = (
+            "credential",
+            "password",
+            "private",
+            "secret",
+            "token",
+        )
+        unsafe_options = sorted(
+            name
+            for name in self.options
+            if any(marker in name.casefold() for marker in sensitive_markers)
+        )
+        if unsafe_options:
+            raise ValueError(
+                "channel options must not contain credentials: "
+                + ", ".join(unsafe_options),
+            )
+        return self
 
 
 class ManagerConfig(BaseModel):

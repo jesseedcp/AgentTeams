@@ -886,8 +886,9 @@ func externalChannelSecretNames(raw string) []string {
 		return nil
 	}
 	var documents []struct {
-		TokenEnv         string `json:"token_env"`
-		WebhookSecretEnv string `json:"webhook_secret_env"`
+		TokenEnv         string            `json:"token_env"`
+		WebhookSecretEnv string            `json:"webhook_secret_env"`
+		SecretEnvs       map[string]string `json:"secret_envs"`
 	}
 	if err := json.Unmarshal([]byte(raw), &documents); err != nil {
 		return nil
@@ -898,6 +899,12 @@ func externalChannelSecretNames(raw string) []string {
 			document.TokenEnv,
 			document.WebhookSecretEnv,
 		} {
+			name := strings.TrimPrefix(reference, "env:")
+			if name != reference && name != "" {
+				names[name] = struct{}{}
+			}
+		}
+		for _, reference := range document.SecretEnvs {
 			name := strings.TrimPrefix(reference, "env:")
 			if name != reference && name != "" {
 				names[name] = struct{}{}

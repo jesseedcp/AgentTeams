@@ -5,18 +5,23 @@ from __future__ import annotations
 import asyncio
 import hmac
 import json
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import asdict, dataclass
+from urllib.parse import parse_qsl, urlsplit
 
 from pydantic import SecretStr
 
 from agentteams_manager.admin.ui import ADMIN_HTML
+from agentteams_manager.channels.base import (
+    ChannelWebhookRequest,
+    ChannelWebhookResponse,
+)
 from agentteams_manager.observability.metrics import MetricsRegistry
 
 AdminSnapshot = Callable[[str], Awaitable[dict[str, object]]]
 WebhookHandler = Callable[
-    [str, dict[str, str], bytes],
-    Awaitable[object],
+    [str, ChannelWebhookRequest],
+    Awaitable[ChannelWebhookResponse],
 ]
 
 
@@ -99,17 +104,26 @@ class HealthServer:
                 await self._respond(writer, 400, b"bad request\n")
                 return
             method, raw_path, _ = parts
-            path = raw_path.split("?", 1)[0]
+            parsed_path = urlsplit(raw_path)
+            path = parsed_path.path
+            query = dict(
+                parse_qsl(
+                    parsed_path.query,
+                    keep_blank_values=True,
+                ),
+            )
             headers = _headers(request)
             if (
-                method == "POST"
+                method in {"GET", "POST"}
                 and path.startswith("/manager-admin/hooks/")
             ):
                 await self._channel_webhook(
                     reader,
                     writer,
+                    method,
                     path,
                     headers,
+                    query,
                 )
             elif method != "GET":
                 await self._respond(writer, 405, b"method not allowed\n")
@@ -157,8 +171,10 @@ class HealthServer:
         self,
         reader: asyncio.StreamReader,
         writer: asyncio.StreamWriter,
+        method: str,
         path: str,
         headers: dict[str, str],
+        query: dict[str, str],
     ) -> None:
         if self._webhook_handler is None:
             await self._respond(writer, 404, b"not found\n")
@@ -168,32 +184,55 @@ class HealthServer:
         except ValueError:
             await self._respond(writer, 400, b"bad content length\n")
             return
-        if length < 1 or length > 1024 * 1024:
+        if length < 0 or length > 1024 * 1024:
             await self._respond(writer, 413, b"payload too large\n")
+            return
+        content_type = headers.get("content-type", "")
+        media_type = content_type.partition(";")[0].strip().casefold()
+        if (
+            method == "POST"
+            and length
+            and media_type
+            and media_type != "application/json"
+        ):
+            await self._respond(
+                writer,
+                415,
+                b"webhook body must be JSON\n",
+            )
             return
         provider = path.removeprefix("/manager-admin/hooks/")
         try:
-            body = await asyncio.wait_for(
-                reader.readexactly(length),
-                timeout=3,
+            body = (
+                await asyncio.wait_for(
+                    reader.readexactly(length),
+                    timeout=3,
+                )
+                if length
+                else b""
             )
             result = await self._webhook_handler(
                 provider,
-                headers,
-                body,
+                ChannelWebhookRequest(
+                    method=method,
+                    headers=headers,
+                    query=query,
+                    body=body,
+                ),
             )
         except PermissionError:
-            await self._respond(writer, 403, b"forbidden\n")
+            await self._respond(writer, 401, b"unauthorized\n")
             return
-        except (KeyError, ValueError):
+        except (KeyError, TypeError, ValueError):
             await self._respond(writer, 400, b"invalid webhook\n")
             return
-        payload = (
-            result.model_dump(mode="json")
-            if hasattr(result, "model_dump")
-            else result
+        await self._respond(
+            writer,
+            result.status_code,
+            result.body,
+            content_type=result.content_type,
+            headers=result.response_headers,
         )
-        await self._json(writer, 202, payload)
 
     async def _admin_api(
         self,
@@ -235,7 +274,7 @@ class HealthServer:
         self,
         writer: asyncio.StreamWriter,
         status: int,
-        payload: dict[str, object],
+        payload: Mapping[str, object],
     ) -> None:
         await self._respond(
             writer,
@@ -255,9 +294,11 @@ class HealthServer:
         body: bytes,
         *,
         content_type: str = "text/plain; charset=utf-8",
+        headers: Mapping[str, str] | None = None,
     ) -> None:
         reasons = {
             200: "OK",
+            204: "No Content",
             202: "Accepted",
             400: "Bad Request",
             401: "Unauthorized",
@@ -265,12 +306,18 @@ class HealthServer:
             404: "Not Found",
             405: "Method Not Allowed",
             413: "Content Too Large",
+            415: "Unsupported Media Type",
             503: "Service Unavailable",
         }
+        extra_headers = "".join(
+            f"{name}: {value}\r\n"
+            for name, value in (headers or {}).items()
+        )
         header = (
-            f"HTTP/1.1 {status} {reasons[status]}\r\n"
+            f"HTTP/1.1 {status} {reasons.get(status, 'Unknown')}\r\n"
             f"Content-Type: {content_type}\r\n"
             f"Content-Length: {len(body)}\r\n"
+            f"{extra_headers}"
             "Connection: close\r\n"
             "\r\n"
         ).encode("ascii")
