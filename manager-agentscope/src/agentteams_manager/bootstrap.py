@@ -22,6 +22,7 @@ from .channels.http_providers import build_channel_adapter
 from .channels.matrix import MatrixChannelEscalation
 from .channels.service import ChannelService, ExternalContactRepository
 from .clients.agt import AgtClient
+from .clients.coding_cli import CodingCLIClient
 from .clients.git import GitClient
 from .clients.higress import HigressClient
 from .clients.minio import (
@@ -84,6 +85,7 @@ from .state.sessions import SessionRepository
 from .state.tasks import ProjectGraphRepository, TaskRepository
 from .state.topology import TopologyRepository
 from .tools.channels import ChannelToolkitFactory
+from .tools.coding_cli import CodingCLIToolkitFactory
 from .tools.configuration import ConfigurationToolkitFactory
 from .tools.gateway import GatewayToolkitFactory
 from .tools.host_files import HostFileAccess, HostFileToolkitFactory
@@ -91,6 +93,7 @@ from .tools.integrations import IntegrationToolkitFactory
 from .tools.resources import ResourceToolkitFactory
 from .tools.storage import FileSyncService
 from .tools.tasks import TaskToolkitFactory
+from .workflows.coding_cli import CodingCLIDelegationService
 from .workflows.gateway import GatewayService
 from .workflows.git_delegation import (
     GitDelegationService,
@@ -589,6 +592,25 @@ def build_application(
         cache_root=config.workspace,
         events=operations,
     )
+    coding_cli_client = CodingCLIClient(
+        trusted_directory=config.coding_cli_trusted_directory,
+        allowed_providers=config.coding_cli_providers,
+        workspace_root=config.workspace / "shared" / "tasks",
+        timeout_seconds=config.coding_cli_timeout_seconds,
+        max_output_bytes=config.coding_cli_max_output_bytes,
+    )
+    coding_cli_service = CodingCLIDelegationService(
+        enabled=config.coding_cli_enabled,
+        admin_room_id=config.manager_admin_room_id,
+        storage=storage,
+        leases=lease_service,
+        cli=coding_cli_client,
+        tasks=tasks,
+        matrix=matrix,
+        supervisor=supervisor,
+        cache_root=config.workspace,
+        events=operations,
+    )
 
     initial_runtime = _initial_runtime(config)
     runtime_registry = RuntimeRegistry(initial_runtime)
@@ -677,6 +699,10 @@ def build_application(
             secret_resolver=_environment_secret,
             yolo=config.yolo,
         ),
+        CodingCLIToolkitFactory(
+            service=coding_cli_service,
+            yolo=config.yolo,
+        ),
     )
     asset_root = Path(
         os.environ.get(
@@ -753,6 +779,7 @@ def build_application(
             projects=project_service,
             git=git_service,
             files=file_sync,
+            coding=coding_cli_service,
         ),
         leases=lease_service,
         task_scheduler=TaskHeartbeat(
@@ -820,6 +847,9 @@ def build_application(
     ):
         resumers[kind] = project_service.resume_operation
     resumers[OperationKind.GIT_DELEGATION] = git_service.resume_operation
+    resumers[OperationKind.CODING_CLI_DELEGATION] = (
+        coding_cli_service.resume_operation
+    )
     for kind in (
         OperationKind.CONFIGURE_MCP,
         OperationKind.SWITCH_MODEL,
@@ -837,6 +867,7 @@ def build_application(
         readiness=readiness,
         controller=agt,
         runtime_registry=runtime_registry,
+        coding_cli=coding_cli_service,
     )
     admin_commands = AdminCommandFacade(
         resources=resource_service,
@@ -856,6 +887,9 @@ def build_application(
             if channel_service.providers
             else None
         ),
+        capability_snapshot=lambda: {
+            "coding_cli": coding_cli_service.status(),
+        },
     )
     closeables = tuple(
         dependency

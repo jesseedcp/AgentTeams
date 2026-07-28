@@ -1,9 +1,8 @@
 import httpx
 import pytest
-from pydantic import SecretStr
-
 from agentteams_manager.health import HealthServer, ReadinessState
 from agentteams_manager.observability.metrics import MetricsRegistry
+from pydantic import SecretStr
 
 
 @pytest.mark.asyncio
@@ -59,6 +58,43 @@ async def test_health_server_rejects_non_get_requests() -> None:
         ) as client:
             response = await client.post("/healthz")
             assert response.status_code == 405
+    finally:
+        await server.stop()
+
+
+@pytest.mark.asyncio
+async def test_health_reports_optional_capability_configuration_separately(
+) -> None:
+    server = HealthServer(
+        readiness=ReadinessState(),
+        metrics=MetricsRegistry(),
+        host="127.0.0.1",
+        port=0,
+        capability_snapshot=lambda: {
+            "coding_cli": {
+                "enabled": True,
+                "providers": {
+                    "claude": {
+                        "configured": True,
+                        "available": False,
+                    },
+                },
+            },
+        },
+    )
+    await server.start()
+    try:
+        async with httpx.AsyncClient(
+            base_url=f"http://127.0.0.1:{server.bound_port}",
+            trust_env=False,
+        ) as client:
+            payload = (await client.get("/healthz")).json()
+            coding = payload["capabilities"]["coding_cli"]
+            assert coding["enabled"] is True
+            assert coding["providers"]["claude"] == {
+                "configured": True,
+                "available": False,
+            }
     finally:
         await server.stop()
 

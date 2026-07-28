@@ -1,6 +1,11 @@
 """Policy-bound AgentScope management tools."""
 
 from .base import ManagerTool, ManagerToolkit
+from .coding_cli import (
+    CODING_CLI_TOOL_NAMES,
+    CodingCLIToolkit,
+    CodingCLIToolkitFactory,
+)
 from .configuration import (
     CONFIGURATION_TOOL_NAMES,
     ConfigurationToolkit,
@@ -49,6 +54,7 @@ from .tasks import (
 )
 
 __all__ = [
+    "CODING_CLI_TOOL_NAMES",
     "CONFIGURATION_TOOL_NAMES",
     "GATEWAY_TOOL_NAMES",
     "INTEGRATION_TOOL_NAMES",
@@ -58,6 +64,8 @@ __all__ = [
     "CancelTaskInput",
     "ChannelResolver",
     "CloseProjectInput",
+    "CodingCLIToolkit",
+    "CodingCLIToolkitFactory",
     "CompleteTaskInput",
     "ConfigurationToolkit",
     "ConfigurationToolkitFactory",

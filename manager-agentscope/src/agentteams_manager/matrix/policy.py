@@ -63,6 +63,8 @@ ALL_MANAGER_TOOLS = frozenset(
         "inspect_git_request",
         "git_delegate",
         "git_delegate_high_risk",
+        "coding_cli_status",
+        "delegate_coding_cli",
         "list_channels",
         "create_channel",
         "update_channel",
@@ -109,6 +111,8 @@ ADMIN_ONLY_TOOLS = frozenset(
         "send_external_message",
         "read_host_file",
         "write_host_file",
+        "coding_cli_status",
+        "delegate_coding_cli",
     },
 )
 
@@ -213,6 +217,7 @@ CONFIRM_TOOLS = frozenset(
         "upload_matrix_media",
         "git_delegate_high_risk",
         "revise_project_plan_major",
+        "delegate_coding_cli",
     },
 )
 READ_ONLY_RESOURCE_TOOLS = frozenset(

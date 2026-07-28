@@ -97,6 +97,7 @@ class OperationKind(StrEnum):
     UPDATE_PROJECT = "update_project"
     CLOSE_PROJECT = "close_project"
     GIT_DELEGATION = "git_delegation"
+    CODING_CLI_DELEGATION = "coding_cli_delegation"
     FILE_SYNC = "file_sync"
     CONFIGURE_MCP = "configure_mcp"
     CONFIGURE_GATEWAY = "configure_gateway"

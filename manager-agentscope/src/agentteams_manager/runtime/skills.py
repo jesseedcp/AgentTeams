@@ -15,6 +15,7 @@ REQUIRED_MANAGER_SKILLS = frozenset(
     {
         "agentteams-find-worker",
         "channel-management",
+        "coding-cli-management",
         "file-sync-management",
         "git-delegation-management",
         "human-management",

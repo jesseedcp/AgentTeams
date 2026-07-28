@@ -73,3 +73,4 @@ Worker 镜像自带的基础技能由各 runtime 模板维护，不需要在 `sp
 | --- | --- |
 | `github-operations` | GitHub 仓库、Issue、PR 等操作 |
 | `git-delegation` | 受控的 Git 任务委派 |
+| `coding-cli` | 为 Manager 的受限 Coding CLI 准备提示词并复核结果 |

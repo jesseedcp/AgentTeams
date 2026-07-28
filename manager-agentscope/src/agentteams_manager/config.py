@@ -7,7 +7,7 @@ import os
 import re
 import warnings
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from pydantic import (
     BaseModel,
@@ -16,6 +16,8 @@ from pydantic import (
     SecretStr,
     model_validator,
 )
+
+CodingCLIProviderName = Literal["claude", "gemini", "qodercli"]
 
 
 class MCPServerDocument(BaseModel):
@@ -239,6 +241,29 @@ class ManagerConfig(BaseModel):
     host_share_root: Path | None = None
     host_read_allowlist: tuple[str, ...] = ()
     host_write_allowlist: tuple[str, ...] = ()
+    coding_cli_enabled: bool = False
+    coding_cli_providers: tuple[CodingCLIProviderName, ...] = ()
+    coding_cli_trusted_directory: Path = Path(
+        "/opt/agentteams/coding-cli/bin",
+    )
+    coding_cli_timeout_seconds: int = Field(default=600, gt=0, le=3_600)
+    coding_cli_max_output_bytes: int = Field(
+        default=64 * 1024,
+        ge=1_024,
+        le=1024 * 1024,
+    )
+
+    @model_validator(mode="after")
+    def validate_coding_cli(self) -> ManagerConfig:
+        if len(self.coding_cli_providers) != len(
+            set(self.coding_cli_providers),
+        ):
+            raise ValueError("coding CLI providers must be unique")
+        if self.coding_cli_enabled and not self.coding_cli_providers:
+            raise ValueError(
+                "enabled coding CLI delegation requires a provider",
+            )
+        return self
 
     @classmethod
     def from_env(cls) -> ManagerConfig:
@@ -383,5 +408,36 @@ class ManagerConfig(BaseModel):
                     "",
                 ).split(",")
                 if item.strip()
+            ),
+            coding_cli_enabled=env.get(
+                "AGENTTEAMS_CODING_CLI_ENABLED",
+                "",
+            ).casefold()
+            in {"1", "true", "yes"},
+            coding_cli_providers=tuple(
+                cast(CodingCLIProviderName, item.strip().casefold())
+                for item in env.get(
+                    "AGENTTEAMS_CODING_CLI_PROVIDERS",
+                    "",
+                ).split(",")
+                if item.strip()
+            ),
+            coding_cli_trusted_directory=Path(
+                env.get(
+                    "AGENTTEAMS_CODING_CLI_TRUSTED_DIRECTORY",
+                    "/opt/agentteams/coding-cli/bin",
+                ),
+            ).resolve(),
+            coding_cli_timeout_seconds=int(
+                env.get(
+                    "AGENTTEAMS_CODING_CLI_TIMEOUT_SECONDS",
+                    "600",
+                ),
+            ),
+            coding_cli_max_output_bytes=int(
+                env.get(
+                    "AGENTTEAMS_CODING_CLI_MAX_OUTPUT_BYTES",
+                    str(64 * 1024),
+                ),
             ),
         )

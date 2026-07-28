@@ -15,6 +15,7 @@ so optional MCP tools and room-specific restrictions remain truthful.
 - `approve_external_contact`
 - `ban_matrix_user`
 - `block_external_contact`
+- `coding_cli_status`
 - `complete_task`
 - `configure_mcp`
 - `create_channel`
@@ -23,6 +24,7 @@ so optional MCP tools and room-specific restrictions remain truthful.
 - `create_task`
 - `create_team`
 - `create_worker`
+- `delegate_coding_cli`
 - `delegate_task`
 - `delegate_team_task`
 - `delete_channel`
@@ -111,17 +113,19 @@ allowed:
 3. `file-sync-management`
 4. `git-delegation-management`
 5. `human-management`
-6. `matrix-server-management`
-7. `mcp-server-management`
-8. `mcporter`
-9. `model-switch`
-10. `project-management`
-11. `service-publishing`
-12. `task-coordination`
-13. `task-management`
-14. `team-management`
-15. `worker-management`
-16. `worker-model-switch`
+6. `higress-gateway-management`
+7. `coding-cli-management`
+8. `matrix-server-management`
+9. `mcp-server-management`
+10. `mcporter`
+11. `model-switch`
+12. `project-management`
+13. `service-publishing`
+14. `task-coordination`
+15. `task-management`
+16. `team-management`
+17. `worker-management`
+18. `worker-model-switch`
 
 The `mcporter` name is retained for capability compatibility. Its execution
 path is native AgentScope Toolkit discovery and calls.

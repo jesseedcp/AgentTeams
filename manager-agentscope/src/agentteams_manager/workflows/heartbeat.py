@@ -88,18 +88,23 @@ class TaskRecovery:
         projects: OperationResumer,
         git: OperationResumer,
         files: OperationResumer | None = None,
+        coding: OperationResumer | None = None,
     ) -> None:
         self._operations = operations
         self._tasks = tasks
         self._projects = projects
         self._git = git
         self._files = files
+        self._coding = coding
 
     async def reconcile_pending_tasks(self) -> TaskRecoveryReport:
         owned = (
             self._TASK_KINDS
             | self._PROJECT_KINDS
-            | {OperationKind.GIT_DELEGATION}
+            | {
+                OperationKind.GIT_DELEGATION,
+                OperationKind.CODING_CLI_DELEGATION,
+            }
         )
         operations = tuple(
             operation
@@ -116,6 +121,11 @@ class TaskRecovery:
                     needs_attention.append(operation.operation_id)
                     continue
                 resumer = self._files
+            elif operation.kind is OperationKind.CODING_CLI_DELEGATION:
+                if self._coding is None:
+                    needs_attention.append(operation.operation_id)
+                    continue
+                resumer = self._coding
             elif operation.kind in self._TASK_KINDS:
                 resumer = self._tasks
             elif operation.kind in self._PROJECT_KINDS:

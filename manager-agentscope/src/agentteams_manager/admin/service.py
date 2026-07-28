@@ -20,11 +20,13 @@ class AdminSnapshotService:
         readiness: ReadinessState,
         controller: Any,
         runtime_registry: Any,
+        coding_cli: Any | None = None,
     ) -> None:
         self._database = database
         self._readiness = readiness
         self._controller = controller
         self._runtime_registry = runtime_registry
+        self._coding_cli = coding_cli
 
     async def snapshot(self, section: str) -> dict[str, object]:
         if section == "overview":
@@ -64,6 +66,14 @@ class AdminSnapshotService:
                         "model": document.model,
                         "skills": list(document.skills),
                         "mcp_servers": len(document.mcp_servers),
+                        "coding_cli": (
+                            self._coding_cli.status()
+                            if self._coding_cli is not None
+                            else {
+                                "enabled": False,
+                                "providers": {},
+                            }
+                        ),
                     },
                 ],
             }

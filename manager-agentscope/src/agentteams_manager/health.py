@@ -31,6 +31,7 @@ WebhookHandler = Callable[
     [str, ChannelWebhookRequest],
     Awaitable[ChannelWebhookResponse],
 ]
+CapabilitySnapshot = Callable[[], Mapping[str, object]]
 
 
 @dataclass(slots=True)
@@ -61,6 +62,7 @@ class HealthServer:
         admin_snapshot: AdminSnapshot | None = None,
         admin_command: AdminCommandHandler | None = None,
         webhook_handler: WebhookHandler | None = None,
+        capability_snapshot: CapabilitySnapshot | None = None,
     ) -> None:
         self.readiness = readiness
         self._metrics = metrics
@@ -70,6 +72,7 @@ class HealthServer:
         self._admin_snapshot = admin_snapshot
         self._admin_command = admin_command
         self._webhook_handler = webhook_handler
+        self._capability_snapshot = capability_snapshot
         self._server: asyncio.Server | None = None
 
     @property
@@ -146,10 +149,15 @@ class HealthServer:
             elif method != "GET":
                 await self._respond(writer, 405, b"method not allowed\n")
             elif path == "/healthz":
+                payload: dict[str, object] = {"status": "ok"}
+                if self._capability_snapshot is not None:
+                    payload["capabilities"] = dict(
+                        self._capability_snapshot(),
+                    )
                 await self._json(
                     writer,
                     200,
-                    {"status": "ok"},
+                    payload,
                 )
             elif path == "/readyz":
                 await self._json(

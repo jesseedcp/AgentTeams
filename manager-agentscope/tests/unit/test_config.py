@@ -1,7 +1,6 @@
 from pathlib import Path
 
 import pytest
-
 from agentteams_manager.config import (
     ExternalChannelDocument,
     ManagerConfig,
@@ -42,6 +41,76 @@ def test_manager_config_reads_secret_values_without_exposing_them(
     assert "matrix-secret" not in repr(config)
     assert "gateway-secret" not in repr(config)
     assert "minio-secret" not in repr(config)
+
+
+def test_manager_config_reads_explicit_coding_cli_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    values = {
+        "AGENTTEAMS_MANAGER_NAME": "default",
+        "AGENTTEAMS_MANAGER_MATRIX_USER_ID": "@manager:matrix.local",
+        "AGENTTEAMS_MANAGER_MATRIX_TOKEN": "matrix-secret",
+        "AGENTTEAMS_MANAGER_ADMIN_ROOM_ID": "!manager:matrix.local",
+        "AGENTTEAMS_MANAGER_GATEWAY_KEY": "gateway-secret",
+        "AGENTTEAMS_MANAGER_RUNTIME_DOCUMENT_KEY":
+            "manager/agentscope-manager.json",
+        "AGENTTEAMS_MANAGER_WORKSPACE": str(tmp_path),
+        "AGENTTEAMS_MATRIX_URL": "http://matrix:6167",
+        "AGENTTEAMS_MATRIX_DOMAIN": "matrix.local",
+        "AGENTTEAMS_CONTROLLER_URL": "http://controller:8080",
+        "AGENTTEAMS_AI_GATEWAY_URL": "http://higress:8080",
+        "AGENTTEAMS_FS_ENDPOINT": "http://minio:9000",
+        "AGENTTEAMS_FS_BUCKET": "agentteams",
+        "AGENTTEAMS_FS_ACCESS_KEY": "default",
+        "AGENTTEAMS_FS_SECRET_KEY": "minio-secret",
+        "AGENTTEAMS_DEFAULT_MODEL": "qwen3.6-plus",
+        "AGENTTEAMS_CODING_CLI_ENABLED": "true",
+        "AGENTTEAMS_CODING_CLI_PROVIDERS": "claude,qodercli",
+        "AGENTTEAMS_CODING_CLI_TRUSTED_DIRECTORY": str(
+            tmp_path / "cli",
+        ),
+        "AGENTTEAMS_CODING_CLI_TIMEOUT_SECONDS": "120",
+        "AGENTTEAMS_CODING_CLI_MAX_OUTPUT_BYTES": "8192",
+    }
+    for key, value in values.items():
+        monkeypatch.setenv(key, value)
+
+    config = ManagerConfig.from_env()
+
+    assert config.coding_cli_enabled is True
+    assert config.coding_cli_providers == ("claude", "qodercli")
+    assert config.coding_cli_trusted_directory == (tmp_path / "cli")
+    assert config.coding_cli_timeout_seconds == 120
+    assert config.coding_cli_max_output_bytes == 8192
+
+
+def test_enabled_coding_cli_requires_at_least_one_provider() -> None:
+    with pytest.raises(ValueError, match="requires a provider"):
+        ManagerConfig.model_validate(
+            {
+                "manager_name": "default",
+                "manager_user_id": "@manager:example",
+                "matrix_url": "http://matrix",
+                "matrix_domain": "example",
+                "matrix_access_token": "token",
+                "controller_url": "http://controller",
+                "controller_auth_token": None,
+                "ai_gateway_url": "http://gateway",
+                "gateway_key": "key",
+                "fs_endpoint": "http://minio",
+                "fs_bucket": "bucket",
+                "fs_access_key": "manager",
+                "fs_secret_key": "secret",
+                "storage_prefix": "agentteams",
+                "default_model": "model",
+                "workspace": ".",
+                "runtime_document_path": "runtime.json",
+                "runtime_document_key": "manager/runtime.json",
+                "session_database": "manager.db",
+                "coding_cli_enabled": True,
+            },
+        )
 
 
 def test_runtime_document_rejects_unsupported_schema(tmp_path: Path) -> None:

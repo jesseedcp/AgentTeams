@@ -22,6 +22,15 @@
       ]
     },
     {
+      "name": "coding-cli-management",
+      "skillFile": "manager/agent/skills/coding-cli-management/SKILL.md",
+      "tools": ["coding_cli_status", "delegate_coding_cli"],
+      "evidence": [
+        "manager-agentscope/tests/integration/test_coding_cli_delegation.py",
+        "manager-agentscope/tests/unit/workflows/test_coding_cli.py"
+      ]
+    },
+    {
       "name": "file-sync-management",
       "skillFile": "manager/agent/skills/file-sync-management/SKILL.md",
       "tools": ["sync_files", "read_host_file", "write_host_file"],

@@ -4,7 +4,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-
 from agentteams_manager.clients.minio import MinioClient
 from agentteams_manager.domain.errors import (
     AmbiguousEffectError,
@@ -16,15 +15,18 @@ from agentteams_manager.domain.models import (
     OperationStatus,
     TopologySnapshot,
 )
+from agentteams_manager.state.database import Database
+from agentteams_manager.state.tasks import TaskRepository
 from agentteams_manager.workflows.heartbeat import (
     Heartbeat,
     TaskRecovery,
 )
-from agentteams_manager.workflows.resources import ResourceRecoveryReport
-from agentteams_manager.workflows.resources import MutationContext
+from agentteams_manager.workflows.resources import (
+    MutationContext,
+    ResourceRecoveryReport,
+)
 from agentteams_manager.workflows.tasks import TaskService
-from agentteams_manager.state.database import Database
-from agentteams_manager.state.tasks import TaskRepository
+
 from tests.fixtures.fake_s3 import FakeS3
 from tests.fixtures.task_workflow import (
     FixedClock,
@@ -79,28 +81,41 @@ async def test_task_recovery_routes_each_owned_operation_kind() -> None:
     task_id = "1" * 32
     project_id = "2" * 32
     git_id = "3" * 32
+    coding_id = "5" * 32
     ignored_id = "4" * 32
+    coding = Resumer()
     recovery = TaskRecovery(
         operations=Operations(
             (
                 _operation(task_id, OperationKind.DELEGATE_TASK),
                 _operation(project_id, OperationKind.CREATE_PROJECT),
                 _operation(git_id, OperationKind.GIT_DELEGATION),
+                _operation(
+                    coding_id,
+                    OperationKind.CODING_CLI_DELEGATION,
+                ),
                 _operation(ignored_id, OperationKind.CREATE_WORKER),
             ),
         ),
         tasks=tasks,
         projects=projects,
         git=git,
+        coding=coding,
     )
 
     report = await recovery.reconcile_pending_tasks()
 
-    assert report.inspected == 3
-    assert report.reconciled == (task_id, project_id, git_id)
+    assert report.inspected == 4
+    assert report.reconciled == (
+        task_id,
+        project_id,
+        git_id,
+        coding_id,
+    )
     assert tasks.calls == [task_id]
     assert projects.calls == [project_id]
     assert git.calls == [git_id]
+    assert coding.calls == [coding_id]
 
 
 @pytest.mark.asyncio

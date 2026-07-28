@@ -47,7 +47,7 @@ def test_skill_parity_manifest_is_complete_and_pinned() -> None:
     assert manifest["schemaVersion"] == 1
     assert manifest["managerRuntime"] == "agentscope"
     assert manifest["agentScopeVersion"] == "2.0.4.post1"
-    assert len(skills) == 17
+    assert len(skills) == 18
     assert {item["name"] for item in skills} == EXPECTED_MANAGER_SKILLS
     assert {
         path.name
