@@ -61,7 +61,7 @@ def test_cli_rejects_legacy_embedded_team_runtime_shape() -> None:
     assert "TestUpdateTeamRejectsLegacyEmbeddedRuntimeFlags" in update_test
 
 
-def test_runtime_sets_exclude_retired_worker_runtime() -> None:
+def test_upstream_and_local_runtime_sets_are_distinguished() -> None:
     contract = json.loads(FIXTURE.read_text(encoding="utf-8"))
     backend = (
         ROOT
@@ -70,10 +70,40 @@ def test_runtime_sets_exclude_retired_worker_runtime() -> None:
         / "backend"
         / "interface.go"
     ).read_text(encoding="utf-8")
-    for runtime in contract["worker"]["runtimes"]:
+    assert contract["manager"]["upstreamRuntimes"] == [
+        "openclaw",
+        "copaw",
+        "hermes",
+    ]
+    assert contract["manager"]["localRuntime"] == "agentscope"
+    assert contract["manager"]["replacement"] == "intentional"
+    assert contract["worker"]["upstreamDistributions"] == [
+        "openclaw",
+        "copaw",
+        "hermes",
+        "qwenpaw",
+        "openhuman",
+    ]
+    assert contract["worker"]["intentionallyRemoved"] == ["openhuman"]
+    for runtime in contract["worker"]["localRuntimes"]:
         assert f'= "{runtime}"' in backend
-    retired = "open" + "human"
-    assert retired not in backend.casefold()
+    for runtime in contract["worker"]["intentionallyRemoved"]:
+        assert runtime not in backend.casefold()
+
+
+def test_intentional_replacements_are_explicit() -> None:
+    contract = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    differences = contract["intentionalDifferences"]
+    assert set(differences) == {
+        "managerRuntime",
+        "webClient",
+        "stateStore",
+        "removedWorker",
+    }
+    assert "AgentScope 2.0" in differences["managerRuntime"]
+    assert "Cinny" in differences["webClient"]
+    assert "SQLite" in differences["stateStore"]
+    assert "OpenHuman" in differences["removedWorker"]
 
 
 def _team_spec_schema(crd: str) -> str:

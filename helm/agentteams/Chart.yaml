@@ -12,13 +12,13 @@ keywords:
   - collaboration
   - llm
 
-home: https://github.com/agentscope-ai/AgentTeams
+home: https://github.com/jesseedcp/AgentTeams
 sources:
-  - https://github.com/agentscope-ai/AgentTeams
+  - https://github.com/jesseedcp/AgentTeams
 
 maintainers:
   - name: AgentTeams Team
-    url: https://github.com/agentscope-ai/AgentTeams
+    url: https://github.com/jesseedcp/AgentTeams
 
 dependencies:
   - name: higress

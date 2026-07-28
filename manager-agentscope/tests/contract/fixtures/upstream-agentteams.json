@@ -8,9 +8,27 @@
     "deletionPreservesWorkerCRs": true
   },
   "worker": {
-    "runtimes": ["openclaw", "copaw", "hermes", "qwenpaw"]
+    "upstreamRuntimeEnum": ["openclaw", "copaw", "hermes", "qwenpaw"],
+    "upstreamDistributions": [
+      "openclaw",
+      "copaw",
+      "hermes",
+      "qwenpaw",
+      "openhuman"
+    ],
+    "localRuntimes": ["openclaw", "copaw", "hermes", "qwenpaw"],
+    "intentionallyRemoved": ["openhuman"]
   },
   "manager": {
-    "runtime": "agentscope"
+    "upstreamRuntimes": ["openclaw", "copaw", "hermes"],
+    "upstreamInstallerChoices": ["copaw", "openclaw"],
+    "localRuntime": "agentscope",
+    "replacement": "intentional"
+  },
+  "intentionalDifferences": {
+    "managerRuntime": "AgentScope 2.0 replaces the upstream Manager runtimes",
+    "webClient": "Cinny replaces Element",
+    "stateStore": "SQLite replaces runtime-specific state files",
+    "removedWorker": "OpenHuman is intentionally not distributed"
   }
 }

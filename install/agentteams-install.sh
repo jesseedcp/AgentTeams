@@ -24,7 +24,9 @@
 #   AGENTTEAMS_DATA_DIR           Docker volume name for persistent data (default: agentteams-data)
 #   AGENTTEAMS_WORKSPACE_DIR      Host directory for manager workspace (default: ~/agentteams-manager)
 #   AGENTTEAMS_VERSION            Image tag            (default: latest)
-#   AGENTTEAMS_REGISTRY           Image registry       (default: auto-detected by timezone)
+#   AGENTTEAMS_REGISTRY           Application image registry (default: ghcr.io)
+#   AGENTTEAMS_IMAGE_REPOSITORY   Application image namespace (default: jesseedcp)
+#   AGENTTEAMS_RELEASE_REPOSITORY GitHub release repository (default: jesseedcp/AgentTeams)
 #   AGENTTEAMS_INSTALL_MANAGER_IMAGE       Override manager image (e.g., local build)
 #   AGENTTEAMS_INSTALL_WORKER_IMAGE        Override worker image  (e.g., local build)
 #   AGENTTEAMS_INSTALL_COPAW_WORKER_IMAGE  Override copaw worker image (e.g., local build)
@@ -50,7 +52,9 @@
 set -e
 
 AGENTTEAMS_VERSION="${AGENTTEAMS_VERSION:-}"
-AGENTTEAMS_KNOWN_STABLE_VERSION="v1.1.2"   # fallback if GitHub API is unreachable
+AGENTTEAMS_KNOWN_STABLE_VERSION="latest"   # fallback if the Fork has no release yet
+AGENTTEAMS_RELEASE_REPOSITORY="${AGENTTEAMS_RELEASE_REPOSITORY:-jesseedcp/AgentTeams}"
+AGENTTEAMS_IMAGE_REPOSITORY="${AGENTTEAMS_IMAGE_REPOSITORY:-jesseedcp}"
 
 AGENTTEAMS_NON_INTERACTIVE="${AGENTTEAMS_NON_INTERACTIVE:-0}"
 AGENTTEAMS_MOUNT_SOCKET="${AGENTTEAMS_MOUNT_SOCKET:-1}"
@@ -947,7 +951,8 @@ detect_registry() {
     esac
 }
 
-AGENTTEAMS_REGISTRY="${AGENTTEAMS_REGISTRY:-$(detect_registry)}"
+AGENTTEAMS_REGISTRY="${AGENTTEAMS_REGISTRY:-ghcr.io}"
+AGENTTEAMS_HIGRESS_REGISTRY="${AGENTTEAMS_HIGRESS_REGISTRY:-$(detect_registry)}"
 # Image variables are resolved after version selection in step_version().
 # These placeholders allow early code paths to reference them without errors.
 MANAGER_IMAGE="${AGENTTEAMS_INSTALL_MANAGER_IMAGE:-}"
@@ -957,12 +962,13 @@ HERMES_WORKER_IMAGE="${AGENTTEAMS_INSTALL_HERMES_WORKER_IMAGE:-}"
 QWENPAW_WORKER_IMAGE="${AGENTTEAMS_INSTALL_QWENPAW_WORKER_IMAGE:-}"
 
 resolve_image_tags() {
-    MANAGER_IMAGE="${AGENTTEAMS_INSTALL_MANAGER_IMAGE:-${AGENTTEAMS_REGISTRY}/agentteams/agentteams-manager:${AGENTTEAMS_VERSION}}"
-    WORKER_IMAGE="${AGENTTEAMS_INSTALL_WORKER_IMAGE:-${AGENTTEAMS_REGISTRY}/agentteams/agentteams-worker:${AGENTTEAMS_VERSION}}"
-    COPAW_WORKER_IMAGE="${AGENTTEAMS_INSTALL_COPAW_WORKER_IMAGE:-${AGENTTEAMS_REGISTRY}/agentteams/agentteams-copaw-worker:${AGENTTEAMS_VERSION}}"
-    HERMES_WORKER_IMAGE="${AGENTTEAMS_INSTALL_HERMES_WORKER_IMAGE:-${AGENTTEAMS_REGISTRY}/agentteams/agentteams-hermes-worker:${AGENTTEAMS_VERSION}}"
-    QWENPAW_WORKER_IMAGE="${AGENTTEAMS_INSTALL_QWENPAW_WORKER_IMAGE:-${AGENTTEAMS_REGISTRY}/agentteams/agentteams-qwenpaw-worker:${AGENTTEAMS_VERSION}}"
-    EMBEDDED_IMAGE="${AGENTTEAMS_INSTALL_EMBEDDED_IMAGE:-${AGENTTEAMS_REGISTRY}/agentteams/agentteams-embedded:${AGENTTEAMS_VERSION}}"
+    local _image_prefix="${AGENTTEAMS_REGISTRY}/${AGENTTEAMS_IMAGE_REPOSITORY}"
+    MANAGER_IMAGE="${AGENTTEAMS_INSTALL_MANAGER_IMAGE:-${_image_prefix}/agentteams-manager:${AGENTTEAMS_VERSION}}"
+    WORKER_IMAGE="${AGENTTEAMS_INSTALL_WORKER_IMAGE:-${_image_prefix}/agentteams-worker:${AGENTTEAMS_VERSION}}"
+    COPAW_WORKER_IMAGE="${AGENTTEAMS_INSTALL_COPAW_WORKER_IMAGE:-${_image_prefix}/agentteams-copaw-worker:${AGENTTEAMS_VERSION}}"
+    HERMES_WORKER_IMAGE="${AGENTTEAMS_INSTALL_HERMES_WORKER_IMAGE:-${_image_prefix}/agentteams-hermes-worker:${AGENTTEAMS_VERSION}}"
+    QWENPAW_WORKER_IMAGE="${AGENTTEAMS_INSTALL_QWENPAW_WORKER_IMAGE:-${_image_prefix}/agentteams-qwenpaw-worker:${AGENTTEAMS_VERSION}}"
+    EMBEDDED_IMAGE="${AGENTTEAMS_INSTALL_EMBEDDED_IMAGE:-${_image_prefix}/agentteams-embedded:${AGENTTEAMS_VERSION}}"
 }
 
 # Resolve the infrastructure Controller image. The Manager is always a separate
@@ -975,8 +981,9 @@ resolve_embedded_image() {
         return 0
     fi
 
-    local _versioned="${AGENTTEAMS_REGISTRY}/agentteams/agentteams-embedded:${AGENTTEAMS_VERSION}"
-    local _latest="${AGENTTEAMS_REGISTRY}/agentteams/agentteams-embedded:latest"
+    local _image_prefix="${AGENTTEAMS_REGISTRY}/${AGENTTEAMS_IMAGE_REPOSITORY}"
+    local _versioned="${_image_prefix}/agentteams-embedded:${AGENTTEAMS_VERSION}"
+    local _latest="${_image_prefix}/agentteams-embedded:latest"
 
     # Skip probe when AGENTTEAMS_VERSION is "latest" — no point trying the same tag twice.
     if [ "${AGENTTEAMS_VERSION}" = "latest" ]; then
@@ -1579,7 +1586,7 @@ step_version() {
     local _fetched
     _fetched=$(curl -sf --max-time 5 \
         -H "Accept: application/vnd.github+json" \
-        "https://api.github.com/repos/agentscope-ai/AgentTeams/releases/latest" \
+        "https://api.github.com/repos/${AGENTTEAMS_RELEASE_REPOSITORY}/releases/latest" \
         2>/dev/null | grep '"tag_name"' | head -1 | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')
     if [ -n "${_fetched}" ]; then
         AGENTTEAMS_KNOWN_STABLE_VERSION="${_fetched}"
@@ -2819,7 +2826,7 @@ AGENTTEAMS_PODMAN_AUTOSTART=${AGENTTEAMS_PODMAN_AUTOSTART:-0}
 JVM_ARGS=${JVM_ARGS:-}
 
 # Higress WASM plugin image registry (auto-selected by timezone)
-HIGRESS_ADMIN_WASM_PLUGIN_IMAGE_REGISTRY=${AGENTTEAMS_REGISTRY}
+HIGRESS_ADMIN_WASM_PLUGIN_IMAGE_REGISTRY=${AGENTTEAMS_HIGRESS_REGISTRY}
 
 # Data persistence
 AGENTTEAMS_DATA_DIR=${AGENTTEAMS_DATA_DIR:-agentteams-data}

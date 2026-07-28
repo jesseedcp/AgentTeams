@@ -236,22 +236,19 @@ Manager 始终使用 `agentteams-manager` 镜像并运行 AgentScope
 
 </details>
 
-**多地域镜像仓库**
+**应用镜像**
 
-默认 `global.imageRegistry` 指向中国区域（`higress-registry.cn-hangzhou.cr.aliyuncs.com/higress`）。如果在中国大陆以外部署，可切换至就近区域以加速镜像拉取：
-
-| 区域 | Registry |
-|---|---|
-| 中国（默认） | `higress-registry.cn-hangzhou.cr.aliyuncs.com/higress` |
-| 北美 | `higress-registry.us-west-1.cr.aliyuncs.com/higress` |
-| 东南亚 | `higress-registry.ap-southeast-7.cr.aliyuncs.com/higress` |
+本 Fork 的 Manager、Controller 和 Worker 镜像默认来自
+`ghcr.io/jesseedcp`。Higress、MinIO 等基础设施镜像继续使用各自的上游仓库。
+使用私有镜像代理时，请覆盖各组件的 `image.repository`，避免一个全局仓库
+参数把应用悄悄切回官方 AgentTeams 构建。
 
 ```bash
-# 示例：使用北美镜像仓库部署
-helm install agentteams higress.io/agentteams \
+# 示例：使用私有仓库中的 Manager 镜像
+helm install agentteams ./helm/agentteams \
   -n agentteams-system --create-namespace \
   --render-subchart-notes \
-  --set global.imageRegistry=higress-registry.us-west-1.cr.aliyuncs.com/higress \
+  --set manager.image.repository=registry.example.com/agentteams-manager \
   --set credentials.llmApiKey=<你的-API-Key> \
   --set credentials.adminPassword=<你的-管理员密码> \
   --set gateway.publicURL=http://127.0.0.1:18388
@@ -412,7 +409,7 @@ Alice：前端校验也更新了。
 
 ## 多运行时协作
 
-AgentTeams 支持五种 Worker 运行时，可以**在同一个 IM 房间中共存协作**：
+AgentTeams 提供四种 Worker 运行时，可以**在同一个 IM 房间中共存协作**：
 
 - **OpenClaw**（Node.js）— 通用 Agent 运行时，拥有丰富的 Skills 生态，擅长任务编排和工具调用
 - **CoPaw**（Python）— 轻量对话型 Worker，集成 Matrix 与共享存储
@@ -511,7 +508,7 @@ make replay TASK="创建一个名为 alice 的前端开发 Worker"
 make uninstall
 
 # 推送多架构镜像
-make push VERSION=0.1.0 REGISTRY=ghcr.io REPO=agentscope-ai/AgentTeams
+make push VERSION=0.1.0 REGISTRY=ghcr.io REPO=jesseedcp
 
 make help  # 查看所有可用目标
 ```

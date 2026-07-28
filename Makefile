@@ -21,8 +21,8 @@
 # ---------- Configuration ----------
 
 VERSION        ?= latest
-REGISTRY       ?= higress-registry.cn-hangzhou.cr.aliyuncs.com
-REPO           ?= agentteams
+REGISTRY       ?= ghcr.io
+REPO           ?= jesseedcp
 
 MANAGER_IMAGE          ?= $(REGISTRY)/$(REPO)/agentteams-manager
 WORKER_IMAGE           ?= $(REGISTRY)/$(REPO)/agentteams-worker
@@ -765,8 +765,8 @@ help: ## Show this help
 	@echo ""
 	@echo "Variables:"
 	@echo "  VERSION              Image tag             (default: latest)"
-	@echo "  REGISTRY             Container registry    (default: higress-registry.cn-hangzhou.cr.aliyuncs.com)"
-	@echo "  REPO                 Repository namespace  (default: agentteams)"
+	@echo "  REGISTRY             Container registry    (default: ghcr.io)"
+	@echo "  REPO                 Repository namespace  (default: jesseedcp)"
 	@echo "  HIGRESS_REGISTRY     Base image registry   (default: cn-hangzhou, see below)"
 	@echo "  SKIP_BUILD           Skip build in 'install' (set to 1 to skip)"
 	@echo "  SKIP_INSTALL         Skip install in 'test' (set to 1 to test existing)"

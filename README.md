@@ -231,22 +231,20 @@ Hermes, or QwenPaw.
 
 </details>
 
-**Multi-Region Image Registry**
+**Application images**
 
-The default `global.imageRegistry` points to the China region (`higress-registry.cn-hangzhou.cr.aliyuncs.com/higress`). If you are deploying outside China, override it for faster image pulls:
-
-| Region | Registry |
-|---|---|
-| China (default) | `higress-registry.cn-hangzhou.cr.aliyuncs.com/higress` |
-| North America | `higress-registry.us-west-1.cr.aliyuncs.com/higress` |
-| Southeast Asia | `higress-registry.ap-southeast-7.cr.aliyuncs.com/higress` |
+This Fork publishes Manager, Controller, and Worker images under
+`ghcr.io/jesseedcp`. Infrastructure images such as Higress and MinIO keep
+their own upstream registries. To use a private mirror, override each
+component's `image.repository`; this prevents a mirror setting from silently
+switching the application back to the upstream AgentTeams build.
 
 ```bash
-# Example: deploy from the North America registry
-helm install agentteams higress.io/agentteams \
+# Example: deploy a mirrored Manager image
+helm install agentteams ./helm/agentteams \
   -n agentteams-system --create-namespace \
   --render-subchart-notes \
-  --set global.imageRegistry=higress-registry.us-west-1.cr.aliyuncs.com/higress \
+  --set manager.image.repository=registry.example.com/agentteams-manager \
   --set credentials.llmApiKey=<your-api-key> \
   --set credentials.adminPassword=<your-admin-password> \
   --set gateway.publicURL=http://127.0.0.1:18388
@@ -390,7 +388,7 @@ No hidden agent-to-agent calls. Everything is visible and intervenable.
 
 ## Multi-Runtime Collaboration
 
-AgentTeams supports five Worker runtimes that can **coexist in the same IM room**, collaborating on tasks together:
+AgentTeams distributes four Worker runtimes that can **coexist in the same IM room**, collaborating on tasks together:
 
 - **OpenClaw** (Node.js) — General-purpose agent with rich skills ecosystem, ideal for task orchestration and tool calling
 - **CoPaw** (Python) — Lightweight conversational Worker with Matrix and shared-storage integration

@@ -210,22 +210,19 @@ Manager は常に `agentteams-manager`（AgentScope 2.0）です。Worker イメ
 
 </details>
 
-**マルチリージョンイメージレジストリ**
+**アプリケーションイメージ**
 
-デフォルトの `global.imageRegistry` は中国リージョン（`higress-registry.cn-hangzhou.cr.aliyuncs.com/higress`）を指しています。中国大陸以外にデプロイする場合は、近いリージョンに切り替えてイメージプルを高速化できます：
-
-| リージョン | レジストリ |
-|---|---|
-| 中国（デフォルト） | `higress-registry.cn-hangzhou.cr.aliyuncs.com/higress` |
-| 北米 | `higress-registry.us-west-1.cr.aliyuncs.com/higress` |
-| 東南アジア | `higress-registry.ap-southeast-7.cr.aliyuncs.com/higress` |
+この Fork の Manager、Controller、Worker イメージは
+`ghcr.io/jesseedcp` から取得します。Higress や MinIO などの基盤イメージは
+それぞれの上流レジストリを引き続き使用します。プライベートミラーを使う
+場合は、対象コンポーネントの `image.repository` を個別に上書きします。
 
 ```bash
-# 例: 北米リージョンのレジストリを使用してデプロイ
-helm install agentteams higress.io/agentteams \
+# 例: ミラーされた Manager イメージを使用
+helm install agentteams ./helm/agentteams \
   -n agentteams-system --create-namespace \
   --render-subchart-notes \
-  --set global.imageRegistry=higress-registry.us-west-1.cr.aliyuncs.com/higress \
+  --set manager.image.repository=registry.example.com/agentteams-manager \
   --set credentials.llmApiKey=<your-api-key> \
   --set credentials.adminPassword=<your-admin-password> \
   --set gateway.publicURL=http://127.0.0.1:18388

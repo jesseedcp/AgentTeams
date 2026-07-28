@@ -5,7 +5,6 @@ on:
     paths:
       - 'helm/**'
       - 'hack/local-k8s-up.sh'
-      - 'openhuman/scripts/openhuman-worker-entrypoint.sh'
       - 'tests/check-agentteams-rename-defaults.sh'
       - 'tests/check-cinny-replacement.sh'
       - 'tests/check-helm-agentteams.sh'
@@ -14,7 +13,6 @@ on:
     paths:
       - 'helm/**'
       - 'hack/local-k8s-up.sh'
-      - 'openhuman/scripts/openhuman-worker-entrypoint.sh'
       - 'tests/check-agentteams-rename-defaults.sh'
       - 'tests/check-cinny-replacement.sh'
       - 'tests/check-helm-agentteams.sh'

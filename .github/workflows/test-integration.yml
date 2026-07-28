@@ -16,7 +16,6 @@ on:
       - 'copaw/**'
       - 'hermes/**'
       - 'qwenpaw/**'
-      - 'openhuman/**'
       - 'plugins/**'
       - 'Makefile'
       - '.github/workflows/test-integration.yml'
@@ -37,7 +36,6 @@ on:
       - 'copaw/**'
       - 'hermes/**'
       - 'qwenpaw/**'
-      - 'openhuman/**'
       - 'plugins/**'
       - 'Makefile'
   workflow_dispatch:
@@ -60,7 +58,6 @@ on:
           - copaw
           - hermes
           - qwenpaw
-          - openhuman
         default: 'both'
       model:
         description: 'LLM model to use'
@@ -239,7 +236,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [embedded, manager, worker, copaw-worker, hermes-worker, qwenpaw-worker, openhuman-worker]
+        target: [embedded, manager, worker, copaw-worker, hermes-worker, qwenpaw-worker]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -633,23 +630,20 @@ jobs:
       - name: Pull published images
         run: |
           VERSION=${{ steps.version.outputs.version }}
-          # Use the us-west mirror — the cn-hangzhou registry is unreachable
-          # from GitHub-hosted runners (frequently times out on `docker pull`).
-          # Published images are auto-mirrored from cn-hangzhou to us-west-1.
-          REGISTRY=higress-registry.us-west-1.cr.aliyuncs.com/agentteams
+          # Release baselines must exercise this Fork's published artifacts,
+          # not the upstream AgentTeams image namespace.
+          REGISTRY=ghcr.io/jesseedcp
           docker pull ${REGISTRY}/agentteams-manager:${VERSION}
           docker pull ${REGISTRY}/agentteams-worker:${VERSION}
           docker pull ${REGISTRY}/agentteams-copaw-worker:${VERSION}
           docker pull ${REGISTRY}/agentteams-hermes-worker:${VERSION}
           docker pull ${REGISTRY}/agentteams-qwenpaw-worker:${VERSION}
-          docker pull ${REGISTRY}/agentteams-openhuman-worker:${VERSION}
           docker pull ${REGISTRY}/agentteams-controller:${VERSION}
           docker tag ${REGISTRY}/agentteams-manager:${VERSION} agentteams/manager:${VERSION}
           docker tag ${REGISTRY}/agentteams-worker:${VERSION} agentteams/worker-agent:${VERSION}
           docker tag ${REGISTRY}/agentteams-copaw-worker:${VERSION} agentteams/copaw-worker:${VERSION}
           docker tag ${REGISTRY}/agentteams-hermes-worker:${VERSION} agentteams/hermes-worker:${VERSION}
           docker tag ${REGISTRY}/agentteams-qwenpaw-worker:${VERSION} agentteams/qwenpaw-worker:${VERSION}
-          docker tag ${REGISTRY}/agentteams-openhuman-worker:${VERSION} agentteams/openhuman-worker:${VERSION}
           docker tag ${REGISTRY}/agentteams-controller:${VERSION} agentteams/agentteams-controller:${VERSION}
 
       - name: Install AgentTeams
@@ -668,7 +662,6 @@ jobs:
           AGENTTEAMS_INSTALL_COPAW_WORKER_IMAGE=agentteams/copaw-worker:${VERSION} \
           AGENTTEAMS_INSTALL_HERMES_WORKER_IMAGE=agentteams/hermes-worker:${VERSION} \
           AGENTTEAMS_INSTALL_QWENPAW_WORKER_IMAGE=agentteams/qwenpaw-worker:${VERSION} \
-          AGENTTEAMS_INSTALL_OPENHUMAN_WORKER_IMAGE=agentteams/openhuman-worker:${VERSION} \
           AGENTTEAMS_INSTALL_CONTROLLER_IMAGE=agentteams/agentteams-controller:${VERSION} \
           bash ./install/agentteams-install.sh manager
 

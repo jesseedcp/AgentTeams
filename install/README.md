@@ -161,7 +161,10 @@ $env:AGENTTEAMS_LLM_API_KEY = "your-api-key"
 | `AGENTTEAMS_DATA_DIR` | Data directory | Docker volume |
 | `AGENTTEAMS_WORKSPACE_DIR` | Manager workspace | `~/agentteams-manager` |
 | `AGENTTEAMS_VERSION` | Image tag | `latest` |
-| `AGENTTEAMS_REGISTRY` | Image registry | *(auto-detected by timezone)* |
+| `AGENTTEAMS_REGISTRY` | Application image registry | `ghcr.io` |
+| `AGENTTEAMS_IMAGE_REPOSITORY` | Application image namespace | `jesseedcp` |
+| `AGENTTEAMS_RELEASE_REPOSITORY` | GitHub repository queried for releases | `jesseedcp/AgentTeams` |
+| `AGENTTEAMS_HIGRESS_REGISTRY` | Higress infrastructure image registry | *(auto-detected by timezone)* |
 
 ## Platform Notes
 

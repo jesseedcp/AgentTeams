@@ -7,7 +7,7 @@
 
 global:
   namespace: ""  # defaults to .Release.Namespace
-  imageRegistry: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress
+  imageRegistry: ghcr.io/jesseedcp
   imageTag: ""
 
 imagePullSecrets: []
@@ -188,7 +188,7 @@ credentialProvider:
 controller:
   replicaCount: 1               # increase for HA with leader election
   image:
-    repository: higress-registry.cn-hangzhou.cr.aliyuncs.com/agentteams/agentteams-controller
+    repository: ghcr.io/jesseedcp/agentteams-controller
     tag: ""                   # defaults to global.imageTag
     pullPolicy: IfNotPresent
   service:
@@ -245,7 +245,7 @@ manager:
   model: ""                     # LLM model; defaults to credentials.defaultModel
   runtime: "agentscope"         # AgentScope 2.x; Worker runtimes are configured separately
   image:
-    repository: higress-registry.cn-hangzhou.cr.aliyuncs.com/agentteams/agentteams-manager
+    repository: ghcr.io/jesseedcp/agentteams-manager
     tag: ""                     # defaults to global.imageTag
   resources:
     requests:
@@ -301,16 +301,16 @@ cms:
 worker:
   defaultImage:
     openclaw:
-      repository: higress-registry.cn-hangzhou.cr.aliyuncs.com/agentteams/agentteams-worker
+      repository: ghcr.io/jesseedcp/agentteams-worker
       tag: ""                 # defaults to global.imageTag
     copaw:
-      repository: higress-registry.cn-hangzhou.cr.aliyuncs.com/agentteams/agentteams-copaw-worker
+      repository: ghcr.io/jesseedcp/agentteams-copaw-worker
       tag: ""                 # defaults to global.imageTag
     hermes:
-      repository: higress-registry.cn-hangzhou.cr.aliyuncs.com/agentteams/agentteams-hermes-worker
+      repository: ghcr.io/jesseedcp/agentteams-hermes-worker
       tag: ""                 # defaults to global.imageTag
     qwenpaw:
-      repository: higress-registry.cn-hangzhou.cr.aliyuncs.com/agentteams/agentteams-qwenpaw-worker
+      repository: ghcr.io/jesseedcp/agentteams-qwenpaw-worker
       tag: ""                 # defaults to global.imageTag
   defaultRuntime: "openclaw"
   resources:

@@ -8,7 +8,7 @@ on:
         required: false
         type: string
       targets:
-        description: 'Space-separated list of push targets (default: all). Options: openclaw-base agentteams-controller embedded manager worker copaw-worker hermes-worker qwenpaw-worker openhuman-worker'
+        description: 'Space-separated list of push targets (default: all). Options: openclaw-base agentteams-controller embedded manager worker copaw-worker hermes-worker qwenpaw-worker'
         required: false
         type: string
         default: 'all'
@@ -18,14 +18,15 @@ on:
       - 'v[0-9]+.[0-9]+.[0-9]+-*'
 
 env:
-  REGISTRY: higress-registry.cn-hangzhou.cr.aliyuncs.com
-  REPO: agentteams
+  REGISTRY: ghcr.io
+  REPO: jesseedcp
 
 jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      packages: write
 
     steps:
       - name: Free Up GitHub Actions Ubuntu Runner Disk Space 🔧
@@ -52,8 +53,8 @@ jobs:
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
-          username: ${{ secrets.REGISTRY_USERNAME }}
-          password: ${{ secrets.REGISTRY_PASSWORD }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Extract metadata
         id: meta
@@ -62,7 +63,7 @@ jobs:
           echo "sha_short=${SHA_SHORT}" >> $GITHUB_OUTPUT
           if [[ "${{ github.ref }}" == refs/tags/* ]]; then
             echo "version=${{ github.ref_name }}" >> $GITHUB_OUTPUT
-            echo "targets=openclaw-base agentteams-controller embedded manager worker copaw-worker hermes-worker qwenpaw-worker openhuman-worker" >> $GITHUB_OUTPUT
+            echo "targets=openclaw-base agentteams-controller embedded manager worker copaw-worker hermes-worker qwenpaw-worker" >> $GITHUB_OUTPUT
           else
             # workflow_dispatch: use inputs
             VERSION="${{ inputs.version }}"
@@ -118,8 +119,7 @@ jobs:
           contains(steps.meta.outputs.targets, 'worker') ||
           contains(steps.meta.outputs.targets, 'copaw-worker') ||
           contains(steps.meta.outputs.targets, 'hermes-worker') ||
-          contains(steps.meta.outputs.targets, 'qwenpaw-worker') ||
-          contains(steps.meta.outputs.targets, 'openhuman-worker')
+          contains(steps.meta.outputs.targets, 'qwenpaw-worker')
         run: |
           TARGETS="${{ steps.meta.outputs.targets }}"
           MAKE_TARGETS=""
@@ -130,7 +130,6 @@ jobs:
           if wants copaw-worker; then MAKE_TARGETS="${MAKE_TARGETS} push-copaw-worker"; fi
           if wants hermes-worker; then MAKE_TARGETS="${MAKE_TARGETS} push-hermes-worker"; fi
           if wants qwenpaw-worker; then MAKE_TARGETS="${MAKE_TARGETS} push-qwenpaw-worker"; fi
-          if wants openhuman-worker; then MAKE_TARGETS="${MAKE_TARGETS} push-openhuman-worker"; fi
           make ${MAKE_TARGETS} \
             VERSION=${{ steps.meta.outputs.version }} \
             OPENCLAW_BASE_VERSION=${{ steps.meta.outputs.version }} \
@@ -149,7 +148,6 @@ jobs:
           COPAW_WORKER_IMAGE: ${{ env.REGISTRY }}/${{ env.REPO }}/agentteams-copaw-worker
           HERMES_WORKER_IMAGE: ${{ env.REGISTRY }}/${{ env.REPO }}/agentteams-hermes-worker
           QWENPAW_WORKER_IMAGE: ${{ env.REGISTRY }}/${{ env.REPO }}/agentteams-qwenpaw-worker
-          OPENHUMAN_WORKER_IMAGE: ${{ env.REGISTRY }}/${{ env.REPO }}/agentteams-openhuman-worker
           CONTROLLER_IMAGE: ${{ env.REGISTRY }}/${{ env.REPO }}/agentteams-controller
           EMBEDDED_IMAGE: ${{ env.REGISTRY }}/${{ env.REPO }}/agentteams-embedded
         run: |
@@ -163,7 +161,6 @@ jobs:
           echo "- CoPaw Worker: \`${COPAW_WORKER_IMAGE}:${VERSION}\`" >> $GITHUB_STEP_SUMMARY
           echo "- Hermes Worker: \`${HERMES_WORKER_IMAGE}:${VERSION}\`" >> $GITHUB_STEP_SUMMARY
           echo "- QwenPaw Worker: \`${QWENPAW_WORKER_IMAGE}:${VERSION}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- OpenHuman Worker: \`${OPENHUMAN_WORKER_IMAGE}:${VERSION}\`" >> $GITHUB_STEP_SUMMARY
           echo "- Controller: \`${CONTROLLER_IMAGE}:${VERSION}\`" >> $GITHUB_STEP_SUMMARY
           echo "- Embedded: \`${EMBEDDED_IMAGE}:${VERSION}\`" >> $GITHUB_STEP_SUMMARY
           echo "- Base: \`${OPENCLAW_BASE_IMAGE}:latest\` (pre-built, not rebuilt here)" >> $GITHUB_STEP_SUMMARY

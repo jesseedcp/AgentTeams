@@ -13,14 +13,15 @@ on:
         type: string
 
 env:
-  REGISTRY: higress-registry.cn-hangzhou.cr.aliyuncs.com
-  REPO: agentteams
+  REGISTRY: ghcr.io
+  REPO: jesseedcp
 
 jobs:
   release:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      packages: write
       pull-requests: write
 
     steps:

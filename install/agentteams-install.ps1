@@ -25,7 +25,9 @@
 #   AGENTTEAMS_DATA_DIR           Docker volume name for persistent data (default: agentteams-data)
 #   AGENTTEAMS_WORKSPACE_DIR      Host directory for manager workspace (default: ~/agentteams-manager)
 #   AGENTTEAMS_VERSION            Image tag          (default: latest)
-#   AGENTTEAMS_REGISTRY           Image registry     (default: auto-detected by timezone)
+#   AGENTTEAMS_REGISTRY           Application image registry (default: ghcr.io)
+#   AGENTTEAMS_IMAGE_REPOSITORY   Application image namespace (default: jesseedcp)
+#   AGENTTEAMS_RELEASE_REPOSITORY GitHub release repository (default: jesseedcp/AgentTeams)
 #   AGENTTEAMS_INSTALL_MANAGER_IMAGE       Override manager image (e.g., local build)
 #   AGENTTEAMS_INSTALL_WORKER_IMAGE        Override worker image  (e.g., local build)
 #   AGENTTEAMS_INSTALL_COPAW_WORKER_IMAGE  Override copaw worker image (e.g., local build)
@@ -61,7 +63,9 @@ param(
 # Configuration
 # ============================================================
 
-$script:AGENTTEAMS_VERSION = if ($env:AGENTTEAMS_VERSION) { $env:AGENTTEAMS_VERSION } else { "latest" }
+$script:AGENTTEAMS_VERSION = if ($env:AGENTTEAMS_VERSION) { $env:AGENTTEAMS_VERSION } else { "" }
+$script:AGENTTEAMS_RELEASE_REPOSITORY = if ($env:AGENTTEAMS_RELEASE_REPOSITORY) { $env:AGENTTEAMS_RELEASE_REPOSITORY } else { "jesseedcp/AgentTeams" }
+$script:AGENTTEAMS_IMAGE_REPOSITORY = if ($env:AGENTTEAMS_IMAGE_REPOSITORY) { $env:AGENTTEAMS_IMAGE_REPOSITORY } else { "jesseedcp" }
 $script:AGENTTEAMS_NON_INTERACTIVE = if ($env:AGENTTEAMS_NON_INTERACTIVE -eq "1" -or $NonInteractive) { $true } else { $false }
 $script:AGENTTEAMS_MOUNT_SOCKET = if ($env:AGENTTEAMS_MOUNT_SOCKET -eq "0") { $false } else { $true }
 $script:AGENTTEAMS_ENV_FILE = if ($EnvFile) { $EnvFile } elseif ($env:AGENTTEAMS_ENV_FILE) { $env:AGENTTEAMS_ENV_FILE } else { "$env:USERPROFILE\agentteams-manager.env" }
@@ -171,10 +175,18 @@ function Get-AgentTeamsTimeZone {
 }
 
 function Get-Registry {
-    param([string]$Timezone)
-
     if ($env:AGENTTEAMS_REGISTRY) {
         return $env:AGENTTEAMS_REGISTRY
+    }
+
+    return "ghcr.io"
+}
+
+function Get-HigressRegistry {
+    param([string]$Timezone)
+
+    if ($env:AGENTTEAMS_HIGRESS_REGISTRY) {
+        return $env:AGENTTEAMS_HIGRESS_REGISTRY
     }
 
     # Americas
@@ -189,6 +201,31 @@ function Get-Registry {
 
     # Default: China
     return "higress-registry.cn-hangzhou.cr.aliyuncs.com"
+}
+
+function Resolve-AgentTeamsVersion {
+    if ($script:AGENTTEAMS_VERSION) {
+        return
+    }
+    if ($script:AGENTTEAMS_RELEASE_REPOSITORY -notmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$') {
+        throw "Invalid AGENTTEAMS_RELEASE_REPOSITORY: $($script:AGENTTEAMS_RELEASE_REPOSITORY)"
+    }
+    $uri = "https://api.github.com/repos/$($script:AGENTTEAMS_RELEASE_REPOSITORY)/releases/latest"
+    try {
+        $release = Invoke-RestMethod `
+            -Uri $uri `
+            -Headers @{ Accept = "application/vnd.github+json"; "User-Agent" = "AgentTeams-Installer" } `
+            -TimeoutSec 5 `
+            -ErrorAction Stop
+        if ($release.tag_name) {
+            $script:AGENTTEAMS_VERSION = [string]$release.tag_name
+            return
+        }
+    } catch {
+        # A new Fork may not have a release yet. In that case the documented
+        # latest tag/source-build path remains the explicit fallback.
+    }
+    $script:AGENTTEAMS_VERSION = "latest"
 }
 
 function Get-AgentTeamsLanguage {
@@ -715,8 +752,9 @@ function Resolve-EmbeddedImage {
         return
     }
 
-    $versioned = "$($script:AGENTTEAMS_REGISTRY)/agentteams/agentteams-embedded:$($script:AGENTTEAMS_VERSION)"
-    $latestTag = "$($script:AGENTTEAMS_REGISTRY)/agentteams/agentteams-embedded:latest"
+    $imagePrefix = "$($script:AGENTTEAMS_REGISTRY)/$($script:AGENTTEAMS_IMAGE_REPOSITORY)"
+    $versioned = "$imagePrefix/agentteams-embedded:$($script:AGENTTEAMS_VERSION)"
+    $latestTag = "$imagePrefix/agentteams-embedded:latest"
 
     if ($script:AGENTTEAMS_VERSION -eq "latest") {
         $script:EMBEDDED_IMAGE = $latestTag
@@ -908,7 +946,7 @@ AGENTTEAMS_WORKER_IDLE_TIMEOUT=$($Config.WORKER_IDLE_TIMEOUT)
 JVM_ARGS=$($env:JVM_ARGS)
 
 # Higress WASM plugin image registry (auto-selected by timezone)
-HIGRESS_ADMIN_WASM_PLUGIN_IMAGE_REGISTRY=$($Config.REGISTRY)
+HIGRESS_ADMIN_WASM_PLUGIN_IMAGE_REGISTRY=$($Config.HIGRESS_REGISTRY)
 
 # Data persistence
 AGENTTEAMS_DATA_DIR=$($Config.DATA_DIR)
@@ -2200,37 +2238,39 @@ function Install-Manager {
     $env:AGENTTEAMS_LANGUAGE = $script:AGENTTEAMS_LANGUAGE
 
     # Detect registry
-    $script:AGENTTEAMS_REGISTRY = Get-Registry -Timezone $script:AGENTTEAMS_TIMEZONE
+    $script:AGENTTEAMS_REGISTRY = Get-Registry
+    $script:AGENTTEAMS_HIGRESS_REGISTRY = Get-HigressRegistry -Timezone $script:AGENTTEAMS_TIMEZONE
+    Resolve-AgentTeamsVersion
 
     # Set image names
     $script:MANAGER_IMAGE = if ($env:AGENTTEAMS_INSTALL_MANAGER_IMAGE) {
         $env:AGENTTEAMS_INSTALL_MANAGER_IMAGE
     } else {
-        "$($script:AGENTTEAMS_REGISTRY)/agentteams/agentteams-manager:$($script:AGENTTEAMS_VERSION)"
+        "$($script:AGENTTEAMS_REGISTRY)/$($script:AGENTTEAMS_IMAGE_REPOSITORY)/agentteams-manager:$($script:AGENTTEAMS_VERSION)"
     }
 
     $script:WORKER_IMAGE = if ($env:AGENTTEAMS_INSTALL_WORKER_IMAGE) {
         $env:AGENTTEAMS_INSTALL_WORKER_IMAGE
     } else {
-        "$($script:AGENTTEAMS_REGISTRY)/agentteams/agentteams-worker:$($script:AGENTTEAMS_VERSION)"
+        "$($script:AGENTTEAMS_REGISTRY)/$($script:AGENTTEAMS_IMAGE_REPOSITORY)/agentteams-worker:$($script:AGENTTEAMS_VERSION)"
     }
 
     $script:COPAW_WORKER_IMAGE = if ($env:AGENTTEAMS_INSTALL_COPAW_WORKER_IMAGE) {
         $env:AGENTTEAMS_INSTALL_COPAW_WORKER_IMAGE
     } else {
-        "$($script:AGENTTEAMS_REGISTRY)/agentteams/agentteams-copaw-worker:$($script:AGENTTEAMS_VERSION)"
+        "$($script:AGENTTEAMS_REGISTRY)/$($script:AGENTTEAMS_IMAGE_REPOSITORY)/agentteams-copaw-worker:$($script:AGENTTEAMS_VERSION)"
     }
 
     $script:HERMES_WORKER_IMAGE = if ($env:AGENTTEAMS_INSTALL_HERMES_WORKER_IMAGE) {
         $env:AGENTTEAMS_INSTALL_HERMES_WORKER_IMAGE
     } else {
-        "$($script:AGENTTEAMS_REGISTRY)/agentteams/agentteams-hermes-worker:$($script:AGENTTEAMS_VERSION)"
+        "$($script:AGENTTEAMS_REGISTRY)/$($script:AGENTTEAMS_IMAGE_REPOSITORY)/agentteams-hermes-worker:$($script:AGENTTEAMS_VERSION)"
     }
 
     $script:QWENPAW_WORKER_IMAGE = if ($env:AGENTTEAMS_INSTALL_QWENPAW_WORKER_IMAGE) {
         $env:AGENTTEAMS_INSTALL_QWENPAW_WORKER_IMAGE
     } else {
-        "$($script:AGENTTEAMS_REGISTRY)/agentteams/agentteams-qwenpaw-worker:$($script:AGENTTEAMS_VERSION)"
+        "$($script:AGENTTEAMS_REGISTRY)/$($script:AGENTTEAMS_IMAGE_REPOSITORY)/agentteams-qwenpaw-worker:$($script:AGENTTEAMS_VERSION)"
     }
 
     # Resolve the required infrastructure Controller image.
@@ -2418,6 +2458,7 @@ function Install-Manager {
     # Store additional config
     $config.LANGUAGE = $script:AGENTTEAMS_LANGUAGE
     $config.REGISTRY = $script:AGENTTEAMS_REGISTRY
+    $config.HIGRESS_REGISTRY = $script:AGENTTEAMS_HIGRESS_REGISTRY
     $config.WORKER_IMAGE = $script:WORKER_IMAGE
     $config.COPAW_WORKER_IMAGE = $script:COPAW_WORKER_IMAGE
     $config.HERMES_WORKER_IMAGE = $script:HERMES_WORKER_IMAGE
@@ -2890,11 +2931,12 @@ function Install-Worker {
 
     # Detect timezone and registry
     $timezone = Get-AgentTeamsTimeZone
-    $registry = Get-Registry -Timezone $timezone
+    $registry = Get-Registry
+    Resolve-AgentTeamsVersion
     $workerImage = if ($env:AGENTTEAMS_INSTALL_WORKER_IMAGE) {
         $env:AGENTTEAMS_INSTALL_WORKER_IMAGE
     } else {
-        "$registry/agentteams/agentteams-worker:$($script:AGENTTEAMS_VERSION)"
+        "$registry/$($script:AGENTTEAMS_IMAGE_REPOSITORY)/agentteams-worker:$($script:AGENTTEAMS_VERSION)"
     }
 
     Write-Log (Get-Msg "worker.starting" -f $Name)
