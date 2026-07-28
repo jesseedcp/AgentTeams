@@ -64,6 +64,7 @@ param(
 # ============================================================
 
 $script:AGENTTEAMS_VERSION = if ($env:AGENTTEAMS_VERSION) { $env:AGENTTEAMS_VERSION } else { "" }
+$script:AGENTTEAMS_KNOWN_STABLE_VERSION = "latest"
 $script:AGENTTEAMS_RELEASE_REPOSITORY = if ($env:AGENTTEAMS_RELEASE_REPOSITORY) { $env:AGENTTEAMS_RELEASE_REPOSITORY } else { "jesseedcp/AgentTeams" }
 $script:AGENTTEAMS_IMAGE_REPOSITORY = if ($env:AGENTTEAMS_IMAGE_REPOSITORY) { $env:AGENTTEAMS_IMAGE_REPOSITORY } else { "jesseedcp" }
 $script:AGENTTEAMS_NON_INTERACTIVE = if ($env:AGENTTEAMS_NON_INTERACTIVE -eq "1" -or $NonInteractive) { $true } else { $false }
@@ -203,6 +204,78 @@ function Get-HigressRegistry {
     return "higress-registry.cn-hangzhou.cr.aliyuncs.com"
 }
 
+function ConvertTo-NormalizedVersion {
+    param([string]$Version)
+
+    if ($Version -eq "latest") {
+        return "latest"
+    }
+    $normalized = $Version -replace '\.beta\.', '-beta.'
+    if ($normalized -match '^[0-9]') {
+        $normalized = "v$normalized"
+    }
+    if ($normalized -notmatch '^v([0-9]+)(?:\.([0-9]+))?(?:\.([0-9]+))?([-+].*)?$') {
+        return $normalized
+    }
+    $major = $Matches[1]
+    $minor = if ($Matches[2]) { $Matches[2] } else { "0" }
+    $patch = if ($Matches[3]) { $Matches[3] } else { "0" }
+    $suffix = if ($Matches[4]) { $Matches[4] } else { "" }
+    return "v$major.$minor.$patch$suffix"
+}
+
+function Test-VersionLessThan {
+    param(
+        [string]$Left,
+        [string]$Right
+    )
+
+    $leftVersion = ConvertTo-NormalizedVersion $Left
+    $rightVersion = ConvertTo-NormalizedVersion $Right
+    if ($leftVersion -eq $rightVersion -or $leftVersion -eq "latest") {
+        return $false
+    }
+    if ($rightVersion -eq "latest") {
+        return $true
+    }
+    if ($leftVersion -notmatch '^v([0-9]+)\.([0-9]+)\.([0-9]+)(?:[-+].*)?$') {
+        return $false
+    }
+    $leftParts = @([int64]$Matches[1], [int64]$Matches[2], [int64]$Matches[3])
+    if ($rightVersion -notmatch '^v([0-9]+)\.([0-9]+)\.([0-9]+)(?:[-+].*)?$') {
+        return $false
+    }
+    $rightParts = @([int64]$Matches[1], [int64]$Matches[2], [int64]$Matches[3])
+    for ($index = 0; $index -lt 3; $index++) {
+        if ($leftParts[$index] -lt $rightParts[$index]) {
+            return $true
+        }
+        if ($leftParts[$index] -gt $rightParts[$index]) {
+            return $false
+        }
+    }
+    return $false
+}
+
+function Test-UseLegacyImageEnv {
+    param([string]$Version)
+
+    $selected = ConvertTo-NormalizedVersion $Version
+    if ($selected -eq "latest") {
+        $selected = ConvertTo-NormalizedVersion $script:AGENTTEAMS_KNOWN_STABLE_VERSION
+    }
+    return Test-VersionLessThan $selected "v1.2.0"
+}
+
+function Get-ControllerEnvPrefix {
+    param([string]$Version)
+
+    if (Test-UseLegacyImageEnv $Version) {
+        return ("HIC" + "LAW_")
+    }
+    return "AGENTTEAMS_"
+}
+
 function Resolve-AgentTeamsVersion {
     if ($script:AGENTTEAMS_VERSION) {
         return
@@ -219,6 +292,7 @@ function Resolve-AgentTeamsVersion {
             -ErrorAction Stop
         if ($release.tag_name) {
             $script:AGENTTEAMS_VERSION = [string]$release.tag_name
+            $script:AGENTTEAMS_KNOWN_STABLE_VERSION = [string]$release.tag_name
             return
         }
     } catch {
@@ -2241,6 +2315,7 @@ function Install-Manager {
     $script:AGENTTEAMS_REGISTRY = Get-Registry
     $script:AGENTTEAMS_HIGRESS_REGISTRY = Get-HigressRegistry -Timezone $script:AGENTTEAMS_TIMEZONE
     Resolve-AgentTeamsVersion
+    $script:AGENTTEAMS_VERSION = ConvertTo-NormalizedVersion $script:AGENTTEAMS_VERSION
 
     # Set image names
     $script:MANAGER_IMAGE = if ($env:AGENTTEAMS_INSTALL_MANAGER_IMAGE) {
@@ -2581,6 +2656,8 @@ function Install-Manager {
         $fsDomain = if ($config.FS_DOMAIN) { $config.FS_DOMAIN } else { "fs-local.agentteams.io" }
         if ($fsDomain -notmatch ":") { $fsDomain = "${fsDomain}:${internalGwPort}" }
 
+        # Controller env args
+        $ctrlEnvPrefix = Get-ControllerEnvPrefix $script:AGENTTEAMS_VERSION
         $ctrlArgs = @(
             "run", "-d",
             "--name", "agentteams-controller",
@@ -2588,68 +2665,77 @@ function Install-Manager {
             "--network-alias", "matrix-local.agentteams.io",
             "--network-alias", "aigw-local.agentteams.io",
             "--network-alias", "fs-local.agentteams.io",
-            "-e", "AGENTTEAMS_ADMIN_USER=$($config.ADMIN_USER)",
-            "-e", "AGENTTEAMS_ADMIN_PASSWORD=$($config.ADMIN_PASSWORD)",
-            "-e", "AGENTTEAMS_MANAGER_PASSWORD=$($config.MANAGER_PASSWORD)",
-            "-e", "AGENTTEAMS_REGISTRATION_TOKEN=$($config.REGISTRATION_TOKEN)",
-            "-e", "AGENTTEAMS_MINIO_USER=$($config.MINIO_USER)",
-            "-e", "AGENTTEAMS_MINIO_PASSWORD=$($config.MINIO_PASSWORD)",
-            "-e", "AGENTTEAMS_LLM_PROVIDER=$($config.LLM_PROVIDER)",
-            "-e", "AGENTTEAMS_LLM_API_KEY=$($config.LLM_API_KEY)",
-            "-e", "AGENTTEAMS_DEFAULT_MODEL=$($config.DEFAULT_MODEL)",
-            "-e", "AGENTTEAMS_MANAGER_GATEWAY_KEY=$($config.MANAGER_GATEWAY_KEY)",
-            "-e", "AGENTTEAMS_MANAGER_RUNTIME=agentscope",
-            "-e", "AGENTTEAMS_MANAGER_IMAGE=$managerImage",
-            "-e", "AGENTTEAMS_DEFAULT_WORKER_RUNTIME=$($config.DEFAULT_WORKER_RUNTIME)",
-            "-e", "AGENTTEAMS_WORKER_IMAGE=$($script:WORKER_IMAGE)",
-            "-e", "AGENTTEAMS_COPAW_WORKER_IMAGE=$($script:COPAW_WORKER_IMAGE)",
-            "-e", "AGENTTEAMS_HERMES_WORKER_IMAGE=$($script:HERMES_WORKER_IMAGE)",
-            "-e", "AGENTTEAMS_QWENPAW_WORKER_IMAGE=$($script:QWENPAW_WORKER_IMAGE)",
-            "-e", "AGENTTEAMS_MATRIX_DOMAIN=$matrixDomain",
-            "-e", "AGENTTEAMS_CINNY_HOMESERVER_URL=http://127.0.0.1:$($config.PORT_GATEWAY)",
-            "-e", "AGENTTEAMS_CINNY_PUBLIC_URL=http://127.0.0.1:$($config.PORT_CINNY)",
-            "-e", "AGENTTEAMS_CINNY_URL=http://127.0.0.1:8088",
-            "-e", "AGENTTEAMS_PORT_CINNY=$($config.PORT_CINNY)",
-            "-e", "AGENTTEAMS_MATRIX_URL=http://127.0.0.1:6167",
-            "-e", "AGENTTEAMS_MATRIX_E2EE=$($config.MATRIX_E2EE)",
-            "-e", "AGENTTEAMS_MATRIX_APPSERVICE_ENABLED=$($config.MATRIX_APPSERVICE_ENABLED)",
-            "-e", "AGENTTEAMS_MATRIX_APPSERVICE_AS_TOKEN=$($config.MATRIX_APPSERVICE_AS_TOKEN)",
-            "-e", "AGENTTEAMS_MATRIX_APPSERVICE_HS_TOKEN=$($config.MATRIX_APPSERVICE_HS_TOKEN)",
-            "-e", "AGENTTEAMS_MINIO_ENDPOINT=http://127.0.0.1:9000",
-            "-e", "AGENTTEAMS_MINIO_BUCKET=agentteams-storage",
-            "-e", "AGENTTEAMS_STORAGE_PREFIX=agentteams/agentteams-storage",
-            "-e", "AGENTTEAMS_FS_ENDPOINT=http://127.0.0.1:9000",
-            "-e", "AGENTTEAMS_AI_GATEWAY_URL=http://$aigwDomain",
-            "-e", "AGENTTEAMS_CONTROLLER_URL=http://agentteams-controller:8090",
-            "-e", "AGENTTEAMS_DOCKER_NETWORK=agentteams-net",
-            "-e", "AGENTTEAMS_WORKSPACE_DIR=$($config.WORKSPACE_DIR)",
-            "-e", "AGENTTEAMS_HOST_SHARE_DIR=$($config.HOST_SHARE_DIR)",
-            "-e", "AGENTTEAMS_MANAGER_ENABLED=true"
+            "-e", "${ctrlEnvPrefix}ADMIN_USER=$($config.ADMIN_USER)",
+            "-e", "${ctrlEnvPrefix}ADMIN_PASSWORD=$($config.ADMIN_PASSWORD)",
+            "-e", "${ctrlEnvPrefix}MANAGER_PASSWORD=$($config.MANAGER_PASSWORD)",
+            "-e", "${ctrlEnvPrefix}REGISTRATION_TOKEN=$($config.REGISTRATION_TOKEN)",
+            "-e", "${ctrlEnvPrefix}MINIO_USER=$($config.MINIO_USER)",
+            "-e", "${ctrlEnvPrefix}MINIO_PASSWORD=$($config.MINIO_PASSWORD)",
+            "-e", "${ctrlEnvPrefix}LLM_PROVIDER=$($config.LLM_PROVIDER)",
+            "-e", "${ctrlEnvPrefix}LLM_API_KEY=$($config.LLM_API_KEY)",
+            "-e", "${ctrlEnvPrefix}DEFAULT_MODEL=$($config.DEFAULT_MODEL)",
+            "-e", "${ctrlEnvPrefix}MANAGER_GATEWAY_KEY=$($config.MANAGER_GATEWAY_KEY)",
+            "-e", "${ctrlEnvPrefix}MANAGER_RUNTIME=agentscope",
+            "-e", "${ctrlEnvPrefix}MANAGER_IMAGE=$managerImage",
+            "-e", "${ctrlEnvPrefix}DEFAULT_WORKER_RUNTIME=$($config.DEFAULT_WORKER_RUNTIME)",
+            "-e", "${ctrlEnvPrefix}WORKER_IMAGE=$($script:WORKER_IMAGE)",
+            "-e", "${ctrlEnvPrefix}COPAW_WORKER_IMAGE=$($script:COPAW_WORKER_IMAGE)",
+            "-e", "${ctrlEnvPrefix}HERMES_WORKER_IMAGE=$($script:HERMES_WORKER_IMAGE)",
+            "-e", "${ctrlEnvPrefix}QWENPAW_WORKER_IMAGE=$($script:QWENPAW_WORKER_IMAGE)",
+            "-e", "${ctrlEnvPrefix}MATRIX_DOMAIN=$matrixDomain",
+            "-e", "${ctrlEnvPrefix}CINNY_HOMESERVER_URL=http://127.0.0.1:$($config.PORT_GATEWAY)",
+            "-e", "${ctrlEnvPrefix}CINNY_PUBLIC_URL=http://127.0.0.1:$($config.PORT_CINNY)",
+            "-e", "${ctrlEnvPrefix}CINNY_URL=http://127.0.0.1:8088",
+            "-e", "${ctrlEnvPrefix}PORT_CINNY=$($config.PORT_CINNY)",
+            "-e", "${ctrlEnvPrefix}MATRIX_URL=http://127.0.0.1:6167",
+            "-e", "${ctrlEnvPrefix}MATRIX_E2EE=$($config.MATRIX_E2EE)",
+            "-e", "${ctrlEnvPrefix}MINIO_ENDPOINT=http://127.0.0.1:9000",
+            "-e", "${ctrlEnvPrefix}MINIO_BUCKET=agentteams-storage",
+            "-e", "${ctrlEnvPrefix}STORAGE_PREFIX=agentteams/agentteams-storage",
+            "-e", "${ctrlEnvPrefix}FS_ENDPOINT=http://127.0.0.1:9000",
+            "-e", "${ctrlEnvPrefix}AI_GATEWAY_URL=http://$aigwDomain",
+            "-e", "${ctrlEnvPrefix}CONTROLLER_URL=http://agentteams-controller:8090",
+            "-e", "${ctrlEnvPrefix}DOCKER_NETWORK=agentteams-net",
+            "-e", "${ctrlEnvPrefix}WORKSPACE_DIR=$($config.WORKSPACE_DIR)",
+            "-e", "${ctrlEnvPrefix}HOST_SHARE_DIR=$($config.HOST_SHARE_DIR)",
+            "-e", "${ctrlEnvPrefix}MANAGER_ENABLED=true"
         )
+        if (Test-UseLegacyImageEnv $script:AGENTTEAMS_VERSION) {
+            $ctrlArgs += @(
+                "-e", "${ctrlEnvPrefix}FS_BUCKET=agentteams-storage",
+                "-e", "${ctrlEnvPrefix}RESOURCE_PREFIX=agentteams-"
+            )
+        } else {
+            $ctrlArgs += @(
+                "-e", "${ctrlEnvPrefix}MATRIX_APPSERVICE_ENABLED=$($config.MATRIX_APPSERVICE_ENABLED)",
+                "-e", "${ctrlEnvPrefix}MATRIX_APPSERVICE_AS_TOKEN=$($config.MATRIX_APPSERVICE_AS_TOKEN)",
+                "-e", "${ctrlEnvPrefix}MATRIX_APPSERVICE_HS_TOKEN=$($config.MATRIX_APPSERVICE_HS_TOKEN)"
+            )
+        }
 
         if ($script:AGENTTEAMS_TIMEZONE) {
             $ctrlArgs += @("-e", "TZ=$($script:AGENTTEAMS_TIMEZONE)")
         }
         if ($env:AGENTTEAMS_YOLO -eq "1") {
-            $ctrlArgs += @("-e", "AGENTTEAMS_YOLO=1")
+            $ctrlArgs += @("-e", "${ctrlEnvPrefix}YOLO=1")
         }
         if ($env:AGENTTEAMS_MATRIX_DEBUG -eq "1") {
-            $ctrlArgs += @("-e", "AGENTTEAMS_MATRIX_DEBUG=1")
+            $ctrlArgs += @("-e", "${ctrlEnvPrefix}MATRIX_DEBUG=1")
         }
         if ($config.GITHUB_TOKEN) {
-            $ctrlArgs += @("-e", "AGENTTEAMS_GITHUB_TOKEN=$($config.GITHUB_TOKEN)")
+            $ctrlArgs += @("-e", "${ctrlEnvPrefix}GITHUB_TOKEN=$($config.GITHUB_TOKEN)")
         }
         if ($config.EMBEDDING_MODEL) {
-            $ctrlArgs += @("-e", "AGENTTEAMS_EMBEDDING_MODEL=$($config.EMBEDDING_MODEL)")
+            $ctrlArgs += @("-e", "${ctrlEnvPrefix}EMBEDDING_MODEL=$($config.EMBEDDING_MODEL)")
         }
         if ($config.OPENAI_BASE_URL) {
-            $ctrlArgs += @("-e", "AGENTTEAMS_OPENAI_BASE_URL=$($config.OPENAI_BASE_URL)")
+            $ctrlArgs += @("-e", "${ctrlEnvPrefix}OPENAI_BASE_URL=$($config.OPENAI_BASE_URL)")
         }
         if ($env:AGENTTEAMS_AI_STREAM_IDLE_TIMEOUT_SECONDS) {
-            $ctrlArgs += @("-e", "AGENTTEAMS_AI_STREAM_IDLE_TIMEOUT_SECONDS=$($env:AGENTTEAMS_AI_STREAM_IDLE_TIMEOUT_SECONDS)")
+            $ctrlArgs += @("-e", "${ctrlEnvPrefix}AI_STREAM_IDLE_TIMEOUT_SECONDS=$($env:AGENTTEAMS_AI_STREAM_IDLE_TIMEOUT_SECONDS)")
         }
         if ($script:AGENTTEAMS_LANGUAGE) {
-            $ctrlArgs += @("-e", "AGENTTEAMS_LANGUAGE=$($script:AGENTTEAMS_LANGUAGE)")
+            $ctrlArgs += @("-e", "${ctrlEnvPrefix}LANGUAGE=$($script:AGENTTEAMS_LANGUAGE)")
         }
 
         # Optional: CMS/ARMS observability. In embedded mode the controller
@@ -2657,20 +2743,20 @@ function Install-Manager {
         $cmsTracesEnabled = if ($env:AGENTTEAMS_CMS_TRACES_ENABLED) { $env:AGENTTEAMS_CMS_TRACES_ENABLED } else { "false" }
         $cmsServiceName = if ($env:AGENTTEAMS_CMS_SERVICE_NAME) { $env:AGENTTEAMS_CMS_SERVICE_NAME } else { "agentteams-manager" }
         $cmsMetricsEnabled = if ($env:AGENTTEAMS_CMS_METRICS_ENABLED) { $env:AGENTTEAMS_CMS_METRICS_ENABLED } else { "false" }
-        $ctrlArgs += @("-e", "AGENTTEAMS_CMS_TRACES_ENABLED=$cmsTracesEnabled")
-        $ctrlArgs += @("-e", "AGENTTEAMS_CMS_SERVICE_NAME=$cmsServiceName")
-        $ctrlArgs += @("-e", "AGENTTEAMS_CMS_METRICS_ENABLED=$cmsMetricsEnabled")
+        $ctrlArgs += @("-e", "${ctrlEnvPrefix}CMS_TRACES_ENABLED=$cmsTracesEnabled")
+        $ctrlArgs += @("-e", "${ctrlEnvPrefix}CMS_SERVICE_NAME=$cmsServiceName")
+        $ctrlArgs += @("-e", "${ctrlEnvPrefix}CMS_METRICS_ENABLED=$cmsMetricsEnabled")
         if ($env:AGENTTEAMS_CMS_ENDPOINT) {
-            $ctrlArgs += @("-e", "AGENTTEAMS_CMS_ENDPOINT=$($env:AGENTTEAMS_CMS_ENDPOINT)")
+            $ctrlArgs += @("-e", "${ctrlEnvPrefix}CMS_ENDPOINT=$($env:AGENTTEAMS_CMS_ENDPOINT)")
         }
         if ($env:AGENTTEAMS_CMS_LICENSE_KEY) {
-            $ctrlArgs += @("-e", "AGENTTEAMS_CMS_LICENSE_KEY=$($env:AGENTTEAMS_CMS_LICENSE_KEY)")
+            $ctrlArgs += @("-e", "${ctrlEnvPrefix}CMS_LICENSE_KEY=$($env:AGENTTEAMS_CMS_LICENSE_KEY)")
         }
         if ($env:AGENTTEAMS_CMS_PROJECT) {
-            $ctrlArgs += @("-e", "AGENTTEAMS_CMS_PROJECT=$($env:AGENTTEAMS_CMS_PROJECT)")
+            $ctrlArgs += @("-e", "${ctrlEnvPrefix}CMS_PROJECT=$($env:AGENTTEAMS_CMS_PROJECT)")
         }
         if ($env:AGENTTEAMS_CMS_WORKSPACE) {
-            $ctrlArgs += @("-e", "AGENTTEAMS_CMS_WORKSPACE=$($env:AGENTTEAMS_CMS_WORKSPACE)")
+            $ctrlArgs += @("-e", "${ctrlEnvPrefix}CMS_WORKSPACE=$($env:AGENTTEAMS_CMS_WORKSPACE)")
         }
 
         # Mount the docker socket so the controller can spawn manager + workers.
@@ -2933,6 +3019,7 @@ function Install-Worker {
     $timezone = Get-AgentTeamsTimeZone
     $registry = Get-Registry
     Resolve-AgentTeamsVersion
+    $script:AGENTTEAMS_VERSION = ConvertTo-NormalizedVersion $script:AGENTTEAMS_VERSION
     $workerImage = if ($env:AGENTTEAMS_INSTALL_WORKER_IMAGE) {
         $env:AGENTTEAMS_INSTALL_WORKER_IMAGE
     } else {

@@ -7,7 +7,9 @@ on:
       - "manager/agent/**"
       - "manager/Dockerfile"
       - "manager/entrypoint.sh"
+      - "install/agentteams-install.sh"
       - "install/agentteams-install.ps1"
+      - "Makefile"
       - "scripts/export-debug-log.py"
       - "scripts/tests/test_export_debug_log.py"
       - "tests/install/**"
@@ -25,7 +27,9 @@ on:
       - "manager/agent/**"
       - "manager/Dockerfile"
       - "manager/entrypoint.sh"
+      - "install/agentteams-install.sh"
       - "install/agentteams-install.ps1"
+      - "Makefile"
       - "scripts/export-debug-log.py"
       - "scripts/tests/test_export_debug_log.py"
       - "tests/install/**"
@@ -66,6 +70,12 @@ jobs:
       - name: Verify static Manager parity
         run: PYTHON_BIN=python bash tests/test-28-agentscope-manager-parity.sh --static-only
 
+      - name: Verify fork release and installer compatibility
+        run: |
+          PYTHON_BIN=python bash tests/check-fork-release-chain.sh
+          bash tests/install/test-agentscope-manager-install.sh
+          bash tests/install/test-pre-1.2-env-compat.sh
+
       - name: Run debug-export compatibility tests
         run: python -m unittest scripts.tests.test_export_debug_log -v
 
@@ -78,6 +88,10 @@ jobs:
       - name: Verify AgentScope Manager installer surface
         shell: pwsh
         run: ./tests/install/test-agentscope-manager-install.ps1
+
+      - name: Verify pre-v1.2 image environment compatibility
+        shell: pwsh
+        run: ./tests/install/test-pre-1.2-env-compat.ps1
 
       - name: Verify keep-all upgrade and Matrix AppService secrets
         shell: pwsh

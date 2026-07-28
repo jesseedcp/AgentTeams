@@ -29,7 +29,7 @@ assert_contains "${INSTALLER}" 'AGENTTEAMS_MANAGER_RUNTIME=agentscope'
 assert_contains "${INSTALLER}" 'http://127.0.0.1:18799/readyz'
 assert_contains "${INSTALLER}" 'QWENPAW_WORKER_IMAGE'
 assert_absent "${INSTALLER}" 'OPEN''HUMAN_WORKER_IMAGE'
-assert_contains "${INSTALLER}" 'AGENTTEAMS_CINNY_PUBLIC_URL'
+assert_contains "${INSTALLER}" '${_ctrl_env_prefix}CINNY_PUBLIC_URL'
 assert_contains "${VERIFY}" 'http://127.0.0.1:18799/readyz'
 
 for legacy in \
