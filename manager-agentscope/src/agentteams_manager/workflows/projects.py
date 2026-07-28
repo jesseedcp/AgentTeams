@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -35,6 +35,7 @@ from agentteams_manager.domain.ports import (
     MatrixAdministrationPort,
     MatrixPort,
 )
+from agentteams_manager.state.tasks import ProjectPlanRevision
 from agentteams_manager.workflows.resources import MutationContext
 from agentteams_manager.workflows.tasks import (
     TaskControllerPort,
@@ -42,6 +43,16 @@ from agentteams_manager.workflows.tasks import (
     TaskService,
     TaskSupervisorPort,
 )
+
+ProjectStatus = Literal["planning", "active", "completed", "cancelled"]
+
+
+class ProjectMatrixPort(
+    MatrixPort,
+    MatrixAdministrationPort,
+    Protocol,
+):
+    """Combined Matrix surface required by project workflows."""
 
 
 class ProjectRepositoryPort(Protocol):
@@ -95,7 +106,7 @@ class ProjectGraphPort(Protocol):
         change_kind: str,
         created_by: str,
         now: datetime,
-    ) -> object: ...
+    ) -> ProjectPlanRevision: ...
 
     async def update_participants(
         self,
@@ -116,7 +127,7 @@ class ProjectGraphPort(Protocol):
         reason: str,
         created_by: str,
         now: datetime,
-    ) -> object: ...
+    ) -> ProjectPlanRevision: ...
 
     async def set_dependencies(
         self,
@@ -185,7 +196,7 @@ class ProjectService:
         task_service: TaskService,
         storage: ArtifactPort,
         controller: TaskControllerPort,
-        matrix: MatrixAdministrationPort | MatrixPort,
+        matrix: ProjectMatrixPort,
         topology: ProjectTopologyPort,
         graph: ProjectGraphPort,
         supervisor: TaskSupervisorPort,
@@ -1876,7 +1887,7 @@ def _project_metadata(project: ProjectRecord) -> ProjectMetadata:
         project_id=project.project_id,
         title=project.name,
         description=str(project.metadata["description"]),
-        status=project.status,
+        status=_project_status(project),
         room_id=project.room_id or None,
         participants=tuple(project.metadata.get("participants", ())),
         task_ids=tuple(project.metadata.get("task_ids", ())),
@@ -1895,12 +1906,26 @@ def _project_plan(project: ProjectRecord) -> ProjectPlan:
         project_id=project.project_id,
         title=project.name,
         description=str(project.metadata["description"]),
-        status=project.status,
+        status=_project_status(project),
         body=str(project.metadata["plan"]),
         task_ids=tuple(project.metadata.get("task_ids", ())),
         task_statuses=dict(project.metadata.get("task_statuses", {})),
         updated_at=project.updated_at,
     )
+
+
+def _project_status(project: ProjectRecord) -> ProjectStatus:
+    if project.status not in {
+        "planning",
+        "active",
+        "completed",
+        "cancelled",
+    }:
+        raise RecoveryError(
+            f"project/{project.project_id} has invalid status "
+            f"{project.status!r}",
+        )
+    return cast(ProjectStatus, project.status)
 
 
 def _project_receipt(

@@ -4,7 +4,6 @@ from dataclasses import dataclass
 
 import pytest
 from agentscope.permission import PermissionBehavior, PermissionDecision
-from agentscope.state import AgentState
 from agentscope.tool import ToolBase
 from pydantic import SecretStr, ValidationError
 

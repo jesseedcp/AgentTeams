@@ -12,7 +12,7 @@ FIXTURE = Path(__file__).parent / "fixtures" / "upstream-agentteams.json"
 def test_pinned_upstream_resource_contract_matches_local_sources() -> None:
     contract = json.loads(FIXTURE.read_text(encoding="utf-8"))
     assert contract["commit"] == (
-        "785c2db56a02c0635a66bba490ad0f6f327c790a"
+        "8de237da736a542766e132836b29c0a2a9c48740"
     )
 
     crd = (
@@ -104,6 +104,19 @@ def test_intentional_replacements_are_explicit() -> None:
     assert "Cinny" in differences["webClient"]
     assert "SQLite" in differences["stateStore"]
     assert "OpenHuman" in differences["removedWorker"]
+
+
+def test_latest_dashboard_delta_is_classified_as_replaced() -> None:
+    contract = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    delta = contract["latestUpstreamDelta"]
+    assert delta["commit"] == contract["commit"]
+    assert set(delta["scope"]) == set(delta["localDisposition"])
+    assert "built-in Manager admin console" in (
+        delta["localDisposition"]["dashboardQuickStart"]
+    )
+    assert "Worker CRDs and Kubernetes Secrets" in (
+        delta["localDisposition"]["legacyWorkerCredentialExtraction"]
+    )
 
 
 def _team_spec_schema(crd: str) -> str:

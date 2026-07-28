@@ -393,12 +393,15 @@ class MatrixClient:
         access_token = getattr(response, "access_token", None)
         if not access_token:
             return False
-        self._client.access_token = access_token
-        if getattr(response, "user_id", None):
-            self._client.user_id = response.user_id
-            self._client.user = response.user_id
-        if getattr(response, "device_id", None):
-            self._client.device_id = response.device_id
+        client = self._ensure_client()
+        client.access_token = access_token
+        user_id = getattr(response, "user_id", None)
+        if user_id:
+            client.user_id = user_id
+            client.user = user_id
+        device_id = getattr(response, "device_id", None)
+        if device_id:
+            client.device_id = device_id
         return True
 
     async def _dispatch_joined_timelines(
@@ -597,15 +600,12 @@ class MatrixClient:
         rows = getattr(response, "members", None)
         if not isinstance(rows, list):
             raise RuntimeError("Matrix member response is invalid")
-        user_ids = {
-            getattr(row, "user_id", None)
-            for row in rows
-        }
-        if None in user_ids or not all(
-            isinstance(user_id, str) and user_id
-            for user_id in user_ids
-        ):
-            raise RuntimeError("Matrix member identity is invalid")
+        user_ids: set[str] = set()
+        for row in rows:
+            user_id = getattr(row, "user_id", None)
+            if not isinstance(user_id, str) or not user_id:
+                raise RuntimeError("Matrix member identity is invalid")
+            user_ids.add(user_id)
         return tuple(sorted(user_ids))
 
     async def lookup_user(self, user_id: str) -> dict[str, str | None]:

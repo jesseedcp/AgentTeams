@@ -181,7 +181,7 @@ class OperationRecord(StrictModel):
         now = datetime.now(UTC)
         return cls(
             operation_id=operation_id,
-            kind=kind,
+            kind=OperationKind(kind),
             target_key=target_key,
             status=OperationStatus.PLANNED,
             request=request,

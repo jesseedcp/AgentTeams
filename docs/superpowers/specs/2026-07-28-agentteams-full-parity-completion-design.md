@@ -2,7 +2,7 @@
 
 日期：2026-07-28  
 状态：已批准执行  
-基线：`agentscope-ai/AgentTeams@785c2db56a02c0635a66bba490ad0f6f327c790a`
+基线：`agentscope-ai/AgentTeams@8de237da736a542766e132836b29c0a2a9c48740`
 
 ## 目标
 

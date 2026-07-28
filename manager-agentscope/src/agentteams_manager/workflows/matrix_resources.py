@@ -620,12 +620,12 @@ class MatrixResourceService:
     ) -> str | None:
         for room_id in await self._matrix.joined_rooms():
             for event in await self._matrix.room_state(room_id):
+                content = event.get("content")
                 if (
                     event.get("type") == "io.agentteams.creation"
                     and event.get("state_key", "") == ""
-                    and isinstance(event.get("content"), dict)
-                    and event["content"].get("operation_id")
-                    == operation_id
+                    and isinstance(content, dict)
+                    and content.get("operation_id") == operation_id
                 ):
                     return room_id
         return None
@@ -644,10 +644,11 @@ class MatrixResourceService:
             "unban": {"leave"},
         }[action]
         for event in await self._matrix.room_state(room_id):
+            content = event.get("content")
             if (
                 event.get("type") == "m.room.member"
                 and event.get("state_key") == user_id
-                and isinstance(event.get("content"), dict)
+                and isinstance(content, dict)
             ):
-                return event["content"].get("membership") in desired
+                return content.get("membership") in desired
         return False

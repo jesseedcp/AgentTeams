@@ -99,7 +99,9 @@ class WorkerCreateRequest(_Request):
         cls,
         value: tuple[int, ...],
     ) -> tuple[int, ...]:
-        return _unique_ports(value)
+        validated = _unique_ports(value)
+        assert validated is not None
+        return validated
 
     @model_validator(mode="after")
     def require_supported_console_runtime(self) -> WorkerCreateRequest:

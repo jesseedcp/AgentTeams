@@ -6,7 +6,7 @@ import hashlib
 from datetime import UTC, date, datetime
 from typing import Protocol
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 
 from agentteams_manager.clients.minio import ObjectVersionConflict
 from agentteams_manager.domain.errors import ConflictError, RecoveryError
@@ -14,7 +14,6 @@ from agentteams_manager.domain.ids import matrix_transaction_id
 from agentteams_manager.domain.models import (
     ExternalEffect,
     NotificationRecord,
-    ObjectReceipt,
     OperationKind,
     OperationRecord,
     OperationStatus,

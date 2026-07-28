@@ -1,6 +1,7 @@
 # AgentTeams Integration Tests
 
-Automated integration test suite that validates all 10 POC acceptance cases.
+Automated integration and Kubernetes behavioral acceptance suites for the
+AgentScope Manager fork.
 
 ## Architecture
 
@@ -33,6 +34,11 @@ Test Script                     AgentTeams System
 | test-09 | Case 9 | Multi-Worker GitHub collaboration |
 | test-10 | Case 10 | MCP permission dynamic revoke/restore |
 | test-11 | Feature | Multi-round GitHub PR collaboration |
+| test-28 | Parity | Fork release, 18 typed skills, upstream baseline, image/runtime contract |
+
+The Python Kubernetes suite additionally verifies writable Worker/Team/Project
+administration, confirmation gates, Worker console rollouts, Matrix session
+commands, Cinny routing, and Manager SQLite persistence.
 
 ## Running Tests
 
@@ -71,12 +77,44 @@ make test SKIP_INSTALL=1
 ./tests/run-all-tests.sh --container my-test-container
 ```
 
+### Kubernetes behavioral acceptance
+
+The Kubernetes tests are opt-in because they create short-lived Worker, Team,
+Project, Matrix, and confirmation state in the selected namespace.
+
+```bash
+# Structural fallback only; safe in ordinary CI
+python -m pytest manager-agentscope/tests/e2e -q
+
+# Live Kind/Kubernetes behavior, preserving the existing namespace data
+AGENTTEAMS_E2E_K8S=1 \
+AGENTTEAMS_E2E_NAMESPACE=agentteams-k8s-b35deb9 \
+AGENTTEAMS_E2E_GATEWAY_URL=http://127.0.0.1:18388 \
+python -m pytest manager-agentscope/tests/e2e -q
+
+# Also restart the Manager pod and prove the SQLite sentinel survives
+AGENTTEAMS_E2E_K8S=1 AGENTTEAMS_E2E_RESTART=1 \
+python -m pytest manager-agentscope/tests/e2e -q
+
+# Also run one real LLM-generated, Matrix-confirmed create_worker tool call
+AGENTTEAMS_E2E_K8S=1 AGENTTEAMS_E2E_LLM=1 \
+python -m pytest \
+  manager-agentscope/tests/e2e/test_k8s_matrix_commands.py -q
+```
+
+`AGENTTEAMS_E2E_LLM=1` requires the deployed Manager's configured model to be
+reachable. The test does not read or print the LLM key. It cleans up its
+temporary Worker even when the assertion fails.
+
 ## Required Environment Variables
 
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `AGENTTEAMS_LLM_API_KEY` | Yes | LLM API key for Agent behavior |
 | `AGENTTEAMS_GITHUB_TOKEN` | No | GitHub PAT for tests 08-11 |
+| `AGENTTEAMS_E2E_K8S` | No | Set to `1` to mutate and verify a live Kubernetes namespace |
+| `AGENTTEAMS_E2E_RESTART` | No | Set to `1` with the K8s gate to restart Manager and verify PVC persistence |
+| `AGENTTEAMS_E2E_LLM` | No | Set to `1` with the K8s gate for a real confirmed Matrix tool call |
 
 ## Helper Libraries
 

@@ -6,7 +6,7 @@ import asyncio
 import hashlib
 import inspect
 from collections.abc import Awaitable, Callable
-from typing import Literal, Protocol
+from typing import Literal, Protocol, cast
 from urllib.parse import urlsplit
 
 from agentscope.tool import ToolBase
@@ -285,6 +285,7 @@ class ServicePublishingReceipt(BaseModel):
 
 
 Sleep = Callable[[float], None | Awaitable[None]]
+ServicePublishingAction = Literal["publish", "unpublish"]
 
 
 class IntegrationService:
@@ -579,6 +580,7 @@ class IntegrationService:
         higress, verifier = self._require_mcp_dependencies(
             require_verifier=True,
         )
+        assert verifier is not None
         baseline_revision = self._registry.revision
         safe_request = _safe_configuration_request(
             request,
@@ -671,7 +673,10 @@ class IntegrationService:
             await verifier.call_server_tool(
                 request.server.name,
                 request.verification_tool,
-                request.verification_arguments,
+                cast(
+                    dict[str, object],
+                    request.verification_arguments,
+                ),
                 revision=runtime_revision,
             )
         except Exception as exc:
@@ -958,7 +963,7 @@ class IntegrationService:
             ports=requested,
             routes=routes,
             domains=tuple(route.domain for route in routes),
-            phase=converged.phase,
+            phase=converged.phase or "Unknown",
         )
         await self._supervisor.effect_succeeded(
             operation.operation_id,
@@ -1019,7 +1024,7 @@ class IntegrationService:
             action="unpublish",
             worker=worker,
             ports=requested,
-            phase=converged.phase,
+            phase=converged.phase or "Unknown",
         )
         await self._supervisor.effect_succeeded(
             operation.operation_id,
@@ -1384,7 +1389,7 @@ class IntegrationService:
             await verifier.call_server_tool(
                 name,
                 verification_tool,
-                arguments,
+                cast(dict[str, object], arguments),
                 revision=runtime_revision,
             )
         except Exception as exc:
@@ -1581,12 +1586,13 @@ class IntegrationService:
         action = _recovery_string(operation.request, "action")
         if action not in {"publish", "unpublish"}:
             raise RecoveryError("service recovery action is invalid")
+        typed_action = cast(ServicePublishingAction, action)
         worker_name = _recovery_string(operation.request, "worker")
         ports = _recovery_ports(operation.request)
         if self._runtime_mode == "aliyun":
             return await self._unsupported_service_receipt(
                 operation.operation_id,
-                action=action,
+                action=typed_action,
                 worker=worker_name,
                 ports=ports,
             )
@@ -1626,7 +1632,7 @@ class IntegrationService:
             routes = ()
         receipt = ServicePublishingReceipt(
             operation_id=operation.operation_id,
-            action=action,
+            action=typed_action,
             worker=worker_name,
             ports=ports,
             routes=routes,
@@ -1644,7 +1650,7 @@ class IntegrationService:
         self,
         operation_id: str,
         *,
-        action: Literal["publish", "unpublish"],
+        action: ServicePublishingAction,
         worker: str,
         ports: tuple[int, ...],
     ) -> ServicePublishingReceipt:

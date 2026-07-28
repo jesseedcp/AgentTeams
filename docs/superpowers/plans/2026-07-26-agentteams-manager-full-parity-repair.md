@@ -4,7 +4,7 @@
 
 **Goal:** Make the AgentScope 2.0 Manager behaviorally compatible with the latest official AgentTeams Team/Worker contract while retaining Cinny, Kubernetes, SQLite, MinIO recovery, and the new AgentScope runtime.
 
-**Architecture:** Treat official AgentTeams commit `785c2db56a02c0635a66bba490ad0f6f327c790a` as the audited resource-contract baseline, with no legacy Team compatibility path. Keep AgentScope as the conversational and tool runtime. Put durable orchestration state in SQLite, external-effect recovery in the existing MinIO journal/outbox, and resolve all Matrix actors and confirmations through topology-aware services rather than room-local prompt state.
+**Architecture:** Treat official AgentTeams commit `8de237da736a542766e132836b29c0a2a9c48740` as the current audited resource-contract baseline, with no legacy Team compatibility path. The earlier implementation passes used `785c2db`; the latest `8de237d` Dashboard-only delta is classified in `docs/parity/upstream-agentteams-8de237d.md`. Keep AgentScope as the conversational and tool runtime. Put durable orchestration state in SQLite, external-effect recovery in the existing MinIO journal/outbox, and resolve all Matrix actors and confirmations through topology-aware services rather than room-local prompt state.
 
 **Tech Stack:** Go controller and CLI, Kubernetes CRDs and Helm, Python 3.11+, AgentScope `2.0.4.post1`, SQLite, MinIO/S3, Matrix/Tuwunel, Cinny, pytest, Go test.
 

@@ -40,7 +40,6 @@ from agentteams_manager.state.confirmations import (
 from agentteams_manager.state.sessions import SessionSettings
 
 from .commands import parse_session_command
-from .media import MediaAdapter
 from .threads import RoomHistory
 
 
@@ -72,6 +71,13 @@ class ConfirmationNotifications(Protocol):
         confirmation_id: str,
         text: str,
     ) -> object: ...
+
+
+class SessionMedia(Protocol):
+    async def download(
+        self,
+        event: InboundEvent,
+    ) -> tuple[Any, ...]: ...
 
 
 class SessionMemory(Protocol):
@@ -108,7 +114,7 @@ class MatrixSessionRunner:
         admin_room_id: str = "!admin:local",
         confirmation_notifications: ConfirmationNotifications | None = None,
         history: RoomHistory | None = None,
-        media: MediaAdapter | None = None,
+        media: SessionMedia | None = None,
         memory: SessionMemory | None = None,
         monotonic: Callable[[], float] = time.monotonic,
         now: Callable[[], datetime] | None = None,
@@ -189,7 +195,7 @@ class MatrixSessionRunner:
         event: InboundEvent,
         policy: RoomPolicy,
     ) -> None:
-        attachments = ()
+        attachments: tuple[Any, ...] = ()
         if event.media:
             if self._media is None:
                 raise RuntimeError("Matrix media adapter is not configured")
@@ -1040,6 +1046,7 @@ class MatrixSessionRunner:
             )
             sequence += 1
         elif final and final != last_sent_text:
+            assert sent_event_id is not None
             await self._matrix.edit_text(
                 event.room_id,
                 sent_event_id,

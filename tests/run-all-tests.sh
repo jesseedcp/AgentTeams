@@ -264,6 +264,31 @@ for test_file in "${TESTS[@]}"; do
     echo ""
 done
 
+if [ "${AGENTTEAMS_E2E_K8S:-0}" = "1" ]; then
+    log "Running opt-in Kubernetes behavioral acceptance..."
+    if command -v python3 >/dev/null 2>&1 && \
+        python3 -c 'import sys; assert sys.version_info >= (3, 11)' \
+        >/dev/null 2>&1; then
+        E2E_PYTHON="$(command -v python3)"
+    elif command -v python >/dev/null 2>&1 && \
+        python -c 'import sys; assert sys.version_info >= (3, 11)' \
+        >/dev/null 2>&1; then
+        E2E_PYTHON="$(command -v python)"
+    else
+        E2E_PYTHON=""
+    fi
+    if [ -n "${E2E_PYTHON}" ] && (
+        cd "${PROJECT_ROOT}" &&
+        "${E2E_PYTHON}" -m pytest manager-agentscope/tests/e2e -q
+    ); then
+        RESULTS+=("PASS: kubernetes-behavioral-acceptance")
+        TOTAL_PASS=$((TOTAL_PASS + 1))
+    else
+        RESULTS+=("FAIL: kubernetes-behavioral-acceptance")
+        TOTAL_FAIL=$((TOTAL_FAIL + 1))
+    fi
+fi
+
 # ============================================================
 # Step 5: Report results
 # ============================================================

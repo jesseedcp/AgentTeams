@@ -12,11 +12,13 @@ async def test_all_upstream_manager_skills_load() -> None:
     skills = await registry.load()
 
     assert {skill.name for skill in skills} == {
-        "agentteams-find-worker",
-        "channel-management",
-        "file-sync-management",
-        "git-delegation-management",
-        "human-management",
+            "agentteams-find-worker",
+            "channel-management",
+            "coding-cli-management",
+            "file-sync-management",
+            "git-delegation-management",
+            "higress-gateway-management",
+            "human-management",
         "matrix-server-management",
         "mcp-server-management",
         "mcporter",

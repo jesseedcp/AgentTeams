@@ -15,11 +15,18 @@
 **AgentTeams 是一个开源的协作式多智能体运行平台。让多个 Agent 在一个受控、可审计的房间中协作，人类全程可见、随时可介入。采用 Manager-Workers 架构，由 AgentScope 2.0 Manager 统一调度多个 Workers，专注于企业内的人和 Agent、Agents 之间的协作场景。**
 
 Manager 运行时固定为 AgentScope 2.0；Worker 执行层可在 OpenClaw、CoPaw、Hermes 和 QwenPaw 之间选择。
+
+本 Fork 已对照
+`agentscope-ai/AgentTeams@8de237da736a542766e132836b29c0a2a9c48740`
+完成行为差异审计。八项已补齐能力、有意架构替换以及仍需真实平台凭据验证的
+项目，见[功能差异报告](docs/parity/upstream-agentteams-8de237d.md)。
+
 - 🧑‍💻 **设计了 Manger-Workers 架构**：不用真人去管理每个干活的 Worker Claw，实现由 Agent 管理 Agents。
 - 🤝 **多运行时协作**：OpenClaw、CoPaw、Hermes 和 QwenPaw Worker 可在同一个 IM 房间中共存协作，AgentScope Manager 统一管理它们的生命周期和协作关系。
 - 📚 **引入 MinIO 共享文件系统**：用于 Agent 之间的信息共享，大幅降低多 Agent 协作带来的 Token 消耗。
 - ⛑️ **引入 Higress AI Gateway**：流量入口和各类凭证风险降低了，减少了用户对原生龙虾在安全上的顾虑。
 - 🎨 **使用 Cinny IM 客户端+Tuwunel IM 服务器（均基于 Matrix 实时通信协议）**：节省钉钉、飞书 IM 的接入和企业内的审批成本，方便用户快速体验在 IM 的交互环境中体验模型服务的"爽感"，同时支持以 OpenClaw 原生的方式接入 IM。
+- 🛠️ **可写 Manager 管理台**：经过认证的 `/manager-admin/` 页面可以创建、修改和删除 Worker、Team、Project；所有写入复用 AgentScope 工具的确认、幂等和审计流程。
 
 ![架构](https://img.alicdn.com/imgextra/i4/O1CN01c1VlDE1zYZ46EW3OA_!!6000000006726-49-tps-9895-8231.webp)
 

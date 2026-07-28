@@ -4,9 +4,13 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-if command -v python3 >/dev/null 2>&1; then
+if command -v python3 >/dev/null 2>&1 && \
+    python3 -c 'import sys; assert sys.version_info >= (3, 11)' \
+    >/dev/null 2>&1; then
     PYTHON_CMD=(python3)
-elif command -v python >/dev/null 2>&1; then
+elif command -v python >/dev/null 2>&1 && \
+    python -c 'import sys; assert sys.version_info >= (3, 11)' \
+    >/dev/null 2>&1; then
     PYTHON_CMD=(python)
 elif command -v py >/dev/null 2>&1; then
     PYTHON_CMD=(py -3.12)

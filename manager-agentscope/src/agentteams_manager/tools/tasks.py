@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import inspect
 from collections.abc import Awaitable, Callable
-from typing import Any, Literal, Protocol
+from typing import Any, Literal, Protocol, cast
 
 from pydantic import (
     BaseModel,
@@ -1065,19 +1065,21 @@ class TaskToolkit:
                 raise PermissionDeniedError(
                     f"worker/{item.worker_name} is outside room scope",
                 )
-            method = (
-                self._file_sync.pull_root
-                if item.direction == "pull"
-                else self._file_sync.push_root
+            root = cast(
+                Literal["worker_workspace", "shared_knowledge"],
+                item.root,
             )
-            kwargs: dict[str, object] = {
-                "worker_name": item.worker_name,
-            }
-            if item.direction == "push":
-                kwargs["processor"] = (
-                    self._policy.resource_name or "manager"
+            if item.direction == "pull":
+                receipt = await self._file_sync.pull_root(
+                    root,
+                    worker_name=item.worker_name,
                 )
-            receipt = await method(item.root, **kwargs)
+            else:
+                receipt = await self._file_sync.push_root(
+                    root,
+                    processor=self._policy.resource_name or "manager",
+                    worker_name=item.worker_name,
+                )
             result = (
                 receipt.model_dump(mode="json")
                 if isinstance(receipt, BaseModel)

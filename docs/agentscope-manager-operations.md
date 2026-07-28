@@ -267,9 +267,12 @@ Cinny remains at `/`. The authenticated operations console is routed at
 Health, readiness, and metrics remain unauthenticated on their dedicated
 paths for Kubernetes probes and scraping.
 
-Optional Discord, Telegram, Slack, Feishu, WhatsApp, and Signal adapters are
-configured by `manager.externalChannels`. Each token and webhook HMAC secret
-is an `env:NAME` reference whose value is injected from one of
+Optional Discord, Telegram, Slack, Feishu, WhatsApp, DingTalk, and Signal
+adapters are configured by `manager.externalChannels`. Native mode verifies
+each platform's own webhook contract and uses its outbound API; Signal uses
+the explicitly declared relay mode because it has no common hosted Bot
+webhook. Legacy custom-HMAC documents migrate to relay mode. Every secret is
+an `env:NAME` reference whose value is injected from one of
 `manager.externalChannelSecretRefs`. First contact creates a durable `pending`
 record and posts an approval request to the Matrix Admin DM. Pending, blocked,
 and unknown contacts never enter an AgentScope turn. Only an Admin DM can use

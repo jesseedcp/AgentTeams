@@ -234,8 +234,10 @@ Cinny 继续占用根路径 `/`；经过认证的运维控制台位于
 `/manager-admin/`，其 API 使用 Manager 管理令牌作为 Bearer Token。
 Kubernetes 探针和监控使用的健康、就绪与 metrics 路径保持独立。
 
-Discord、Telegram、Slack、飞书、WhatsApp 和 Signal 均为可选适配器，通过
-`manager.externalChannels` 配置。Token 和 Webhook HMAC 密钥只能写成
+Discord、Telegram、Slack、飞书、WhatsApp、钉钉和 Signal 均为可选适配器，
+通过 `manager.externalChannels` 配置。native 模式校验各平台自己的 Webhook
+协议并使用原生出站 API；Signal 因没有统一托管 Bot Webhook，只支持明确声明
+的 relay 模式。旧自定义 HMAC 配置会迁移为 relay。所有密钥只能写成
 `env:NAME` 引用，真实值由 `manager.externalChannelSecretRefs` 指向的
 Kubernetes Secret 注入。首次联系人只会创建持久化 `pending` 记录，并在
 Matrix 管理员私聊发起审批；待审批、已屏蔽和未知联系人都不会进入 AgentScope

@@ -23,7 +23,7 @@ GATEWAY_URL = os.environ.get(
 
 
 def test_k8s_manager_has_cinny_route_service_and_persistent_state() -> None:
-    if not _live_namespace():
+    if not _live_acceptance_enabled():
         _assert_static_k8s_contract()
         return
     pod = _json("get", "pod", "agentteams-manager")
@@ -60,7 +60,7 @@ def test_k8s_manager_has_cinny_route_service_and_persistent_state() -> None:
 
 
 def test_manager_sqlite_survives_live_pod_restart_when_enabled() -> None:
-    if not _live_namespace() or os.environ.get(
+    if not _live_acceptance_enabled() or os.environ.get(
         "AGENTTEAMS_E2E_RESTART",
     ) != "1":
         _assert_static_k8s_contract()
@@ -208,6 +208,22 @@ def _assert_static_k8s_contract() -> None:
     assert "AGENTTEAMS_MANAGER_DATA_CLAIM" in deployment
     assert "kind: PersistentVolumeClaim" in pvc
     assert "hostPort: 18388" in kind_config
+    assert "codingCLI:" in values
+    assert "enabled: false" in values
+    assert (
+        ROOT
+        / "manager-agentscope"
+        / "src"
+        / "agentteams_manager"
+        / "admin"
+        / "commands.py"
+    ).is_file()
+    assert (
+        ROOT
+        / "docs"
+        / "parity"
+        / "upstream-agentteams-8de237d.md"
+    ).is_file()
 
 
 def _live_namespace() -> bool:
@@ -220,6 +236,13 @@ def _live_namespace() -> bool:
         text=True,
     )
     return result.returncode == 0
+
+
+def _live_acceptance_enabled() -> bool:
+    return (
+        os.environ.get("AGENTTEAMS_E2E_K8S") == "1"
+        and _live_namespace()
+    )
 
 
 def _run(*arguments: str) -> str:

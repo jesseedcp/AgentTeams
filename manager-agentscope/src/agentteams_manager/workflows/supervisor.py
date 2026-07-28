@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable, Mapping
-from typing import Any
+from typing import Any, cast
 
 from agentteams_manager.domain.errors import ConflictError
 from agentteams_manager.domain.models import (
@@ -500,13 +500,14 @@ class OperationSupervisor:
         details: dict[str, Any],
     ) -> JournalEvent:
         sequence = await self._operations.next_sequence(operation_id)
+        redacted_details = cast(dict[str, Any], redact(details))
         event = JournalEvent(
             operation_id=operation_id,
             sequence=sequence,
             event_type=event_type,
             payload={
                 "effect": effect.value,
-                **redact(details),
+                **redacted_details,
             },
             created_at=self._clock.now(),
         )

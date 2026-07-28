@@ -876,27 +876,31 @@ not a runtime console.
 
 ---
 
-## How to connect Feishu/DingTalk/WeCom/Discord/Telegram
+## How to connect Feishu/DingTalk/Discord/Telegram
 
-The AgentScope Manager currently has one production conversation adapter:
-Matrix. Cinny is the bundled client. Do not add an OpenClaw channel file to
-the Manager workspace; it is not loaded.
+Matrix remains the default conversation transport and Cinny is the bundled
+client. The AgentScope Manager can additionally configure native Discord,
+Telegram, Slack, Feishu, WhatsApp, and DingTalk webhooks through
+`manager.externalChannels`. Signal is available through relay mode. Credentials
+must be `env:NAME` references backed by `manager.externalChannelSecretRefs`;
+do not add an OpenClaw channel file to the Manager workspace.
 
-Additional platforms require a new authenticated adapter that converts inbound
-events to the same room-policy contract and preserves confirmation,
-idempotency, threading, media, and sender authorization. This is an extension
-point, not a configuration-only feature.
+Native adapters validate the platform signature, normalize the sender and
+destination, deduplicate events, and use the platform outbound API. Unknown
+contacts remain pending until approved in the Matrix Admin DM. WeCom is not a
+native provider in the current contract; use a signed relay or add a dedicated
+adapter before enabling it.
 
 ---
 
 ## Session and model management via IM
 
-The AgentScope Manager does not implement OpenClaw gateway slash commands.
-Use normal language in an authorized room. Model changes are performed by the
-confirmed `switch_model` typed tool, and identity changes by
-`update_manager_identity`.
+The AgentScope Manager implements its own deterministic session commands:
+`/new`, `/reset`, `/compact`, `/status`, `/model`, `/models`, `/help`,
+`/commands`, `/stop`, `/think`, `/reasoning`, `/verbose`, `/elevated`, and
+`/queue`. These are not delegated to an OpenClaw gateway or to the model.
+Identity and resource changes continue to use typed tools and confirmation.
 
-AgentScope state is stored per Matrix room. A container restart restores that
-state. Use a new authorized Matrix room when you intentionally need an empty
-conversation context. Worker slash commands, when available, depend on that
-Worker's selected runtime and do not apply to the Manager.
+AgentScope state and command settings are stored per Matrix room in SQLite, so
+a Manager restart restores them. `/new` starts an empty context in the same
+room; `/reset` clears the context while preserving its model setting.

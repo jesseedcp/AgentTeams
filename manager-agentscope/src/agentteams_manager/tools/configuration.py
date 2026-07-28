@@ -6,7 +6,7 @@ import inspect
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
 from agentteams_manager.domain.errors import PermissionDeniedError
 from agentteams_manager.domain.models import RoomKind, RoomPolicy

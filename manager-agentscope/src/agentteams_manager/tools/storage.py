@@ -253,7 +253,7 @@ class FileSyncService:
                 processor=processor,
             )
         task = await self._require_task(task_id)
-        request = {
+        request: dict[str, object] = {
             "action": "push_task",
             "task_id": task_id,
             "processor": processor,

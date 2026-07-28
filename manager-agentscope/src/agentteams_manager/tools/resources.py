@@ -45,7 +45,7 @@ from agentteams_manager.workflows.resources import (
     WorkerDiscovery,
 )
 from agentteams_manager.workflows.matrix_resources import (
-    ChannelResolver,
+    ChannelResolver as ChannelResolver,
     ChannelStore,
     MatrixMutationWorkflow,
 )
@@ -723,6 +723,8 @@ class ResourceToolkit:
                 worker_name=item.worker_name,
             )
         else:
+            assert item.discovery is not None
+            assert item.candidate_name is not None
             confirmation = self._resources.confirm_import(
                 item.discovery,
                 candidate_name=item.candidate_name,

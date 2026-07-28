@@ -27,5 +27,15 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 pythonpath = [".", "src"]
 
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
+
+[tool.mypy]
+python_version = "3.11"
+
+[[tool.mypy.overrides]]
+module = ["aioboto3", "nio", "nio.*"]
+ignore_missing_imports = true
+
 [tool.setuptools.packages.find]
 where = ["src"]

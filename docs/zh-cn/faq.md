@@ -830,23 +830,27 @@ docker exec -it agentteams-controller cat /var/log/agentteams/higress-console.lo
 
 ---
 
-## 如何对接飞书/钉钉/企业微信/Discord/Telegram
+## 如何对接飞书/钉钉/Discord/Telegram
 
-AgentScope Manager 当前只有一个生产对话适配器：Matrix，Cinny 是内置客户端。
-不要向 Manager 工作空间添加 OpenClaw channel 文件，它不会被加载。
+Matrix 仍是默认对话通道，Cinny 是内置客户端。AgentScope Manager 还能通过
+`manager.externalChannels` 配置 Discord、Telegram、Slack、飞书、WhatsApp
+和钉钉的原生 Webhook；Signal 使用 relay 模式。密钥必须写成 `env:NAME`
+引用，并由 `manager.externalChannelSecretRefs` 指向 Kubernetes Secret。
+不要向 Manager 工作空间添加 OpenClaw channel 文件。
 
-接入其他平台需要新的认证适配器，把入站事件转换到同一个房间权限契约，并保持
-确认、幂等、线程、媒体和发送者鉴权。这是扩展开发点，不是只改配置即可启用的
-功能。
+原生适配器会验证平台签名、归一化联系人和目标、去重事件，并调用平台出站
+API。未知联系人必须先在 Matrix 管理员私聊批准。当前没有企业微信原生
+provider；需要使用带签名的 relay 或先实现专用适配器。
 
 ---
 
 ## 通过 IM 管理会话和模型
 
-AgentScope Manager 不实现 OpenClaw gateway 斜杠命令。请在已授权房间中使用自然
-语言。模型变更通过需要确认的 `switch_model` typed 工具完成；身份变更通过
-`update_manager_identity` 完成。
+AgentScope Manager 自己实现确定性的会话命令：`/new`、`/reset`、
+`/compact`、`/status`、`/model`、`/models`、`/help`、`/commands`、
+`/stop`、`/think`、`/reasoning`、`/verbose`、`/elevated` 和 `/queue`。
+这些命令不会转交 OpenClaw gateway 或模型。身份和资源变更仍通过 typed 工具
+与确认流程完成。
 
-AgentScope 状态按 Matrix 房间保存，重启容器会恢复。确实需要空白对话上下文时，
-请新建已授权 Matrix 房间。Worker 是否支持斜杠命令取决于该 Worker 自己的运行时，
-不适用于 Manager。
+AgentScope 状态和命令设置按 Matrix 房间保存在 SQLite，Manager 重启后恢复。
+`/new` 在同一房间创建空白上下文；`/reset` 清空上下文但保留房间模型设置。

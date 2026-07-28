@@ -8,10 +8,10 @@ import hmac
 import json
 import re
 import secrets
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -826,7 +826,7 @@ class ResourceService:
     def _confirmation_signature(
         self,
         purpose: str,
-        payload: dict[str, object],
+        payload: Mapping[str, object],
     ) -> str:
         encoded = json.dumps(
             {"purpose": purpose, "payload": payload},
@@ -872,6 +872,7 @@ class ResourceService:
                 f"create worker/{request.name} previously failed",
             )
 
+        worker: WorkerResource | None
         if operation.status is OperationStatus.PLANNED:
             existing = await self._controller.get_worker(request.name)
             if existing is not None:
@@ -1853,7 +1854,7 @@ class ResourceService:
             effect,
             type(exc).__name__,
         )
-        worker = await self._controller.get_worker(name)
+        worker: WorkerResource | None = await self._controller.get_worker(name)
         if worker is None:
             raise AmbiguousEffectError(
                 f"worker/{name} create result is unknown",
@@ -1908,7 +1909,7 @@ class ResourceService:
         action = str(operation.request.get("action", ""))
         if action == "reset":
             return await self._resume_worker_reset(operation)
-        worker = await self._controller.get_worker(name)
+        worker: WorkerResource | None = await self._controller.get_worker(name)
         if worker is None:
             raise AmbiguousEffectError(
                 f"worker/{name} disappeared during recovery",
@@ -1952,12 +1953,12 @@ class ResourceService:
         if desired.name != name:
             raise RecoveryError("Worker reset target does not match desired")
         if operation.status is OperationStatus.SUCCEEDED:
-            worker = await self._require_worker(name)
-            if not _matches_worker_create(worker, desired):
+            succeeded_worker = await self._require_worker(name)
+            if not _matches_worker_create(succeeded_worker, desired):
                 raise RecoveryError(
                     f"succeeded reset worker/{name} changed desired state",
                 )
-            return worker
+            return succeeded_worker
         if operation.status is OperationStatus.FAILED:
             raise ConflictError(f"reset worker/{name} previously failed")
 
@@ -1983,7 +1984,7 @@ class ResourceService:
                 },
             )
 
-        worker = await self._controller.get_worker(name)
+        worker: WorkerResource | None = await self._controller.get_worker(name)
         if worker is None:
             await self._supervisor.before_effect(
                 operation.operation_id,
@@ -2583,10 +2584,14 @@ def _worker_create_from_resource(
         raise ConflictError(
             f"worker/{worker.name} has no desired model to preserve",
         )
+    if worker.runtime not in {"openclaw", "copaw", "hermes", "qwenpaw"}:
+        raise ConflictError(
+            f"worker/{worker.name} has unsupported runtime {worker.runtime!r}",
+        )
     spec = worker.spec
     return WorkerCreateRequest(
         name=worker.name,
-        runtime=worker.runtime,
+        runtime=cast(WorkerRuntime, worker.runtime),
         model=worker.model,
         image=str(spec.get("image") or "") or None,
         identity=str(spec.get("identity") or "") or None,

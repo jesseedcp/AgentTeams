@@ -16,6 +16,12 @@ Built on a **Manager-Workers architecture**, AgentTeams uses an **AgentScope 2.0
 
 The Manager runtime is fixed to AgentScope 2.0. Worker execution remains pluggable across OpenClaw, CoPaw, Hermes, and QwenPaw.
 
+This fork is behaviorally audited against
+`agentscope-ai/AgentTeams@8de237da736a542766e132836b29c0a2a9c48740`.
+See the [parity report](docs/parity/upstream-agentteams-8de237d.md) for the
+implemented capabilities, deliberate architectural replacements, and
+external validations that still require platform credentials.
+
 ## Key Features
 
 - 🧬 **Manager-Workers Architecture**: Eliminates the need for human oversight of individual Worker Claws by enabling Agents to manage other Agents.
@@ -27,6 +33,10 @@ The Manager runtime is fixed to AgentScope 2.0. Worker execution remains pluggab
 - 🔐 **Higress AI Gateway**: Centralizes traffic management and mitigates credential-related risks, alleviating user concerns about security vulnerabilities in the native Lobster framework.
 
 - ☎️ **Cinny IM Client + Tuwunel IM Server (both Matrix protocol-based)**: Eliminating DingTalk/Lark integration overhead and enterprise approval workflows. Enables rapid user onboarding to experience the "delight" of model services within an IM environment, while maintaining compatibility with native OpenClaw IM integration.
+
+- 🛠️ **Writable Manager Console**: The authenticated `/manager-admin/`
+  console creates, edits, and deletes Workers, Teams, and Projects through the
+  same confirmed, idempotent workflows used by the AgentScope tools.
 
 ## News
 

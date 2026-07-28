@@ -28,6 +28,7 @@ from agentteams_manager.domain.models import (
     ExternalEffect,
     JournalEvent,
     OperationKind,
+    OperationRecord,
     OperationStatus,
     ProcessingLeaseRecord,
     TaskRecord,

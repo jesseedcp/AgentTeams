@@ -37,9 +37,13 @@ fi
 log_section "Declared Skill Parity"
 
 PYTHON_BIN="${PYTHON_BIN:-}"
-if [ -z "${PYTHON_BIN}" ] && command -v python3 >/dev/null 2>&1; then
+if [ -z "${PYTHON_BIN}" ] && command -v python3 >/dev/null 2>&1 && \
+    python3 -c 'import sys; assert sys.version_info >= (3, 11)' \
+    >/dev/null 2>&1; then
     PYTHON_BIN="$(command -v python3)"
-elif [ -z "${PYTHON_BIN}" ] && command -v python >/dev/null 2>&1; then
+elif [ -z "${PYTHON_BIN}" ] && command -v python >/dev/null 2>&1 && \
+    python -c 'import sys; assert sys.version_info >= (3, 11)' \
+    >/dev/null 2>&1; then
     PYTHON_BIN="$(command -v python)"
 fi
 
@@ -59,7 +63,7 @@ skills = manifest["skills"]
 assert manifest["schemaVersion"] == 1
 assert manifest["managerRuntime"] == "agentscope"
 assert manifest["agentScopeVersion"] == "2.0.4.post1"
-assert len(skills) == 16
+assert len(skills) == 18
 names = {item["name"] for item in skills}
 disk = {
     path.name
@@ -82,9 +86,47 @@ for item in skills:
         assert (root / evidence).is_file(), (item["name"], evidence)
 PY
 then
-    log_pass "All 16 retained skills have typed-tool documents and evidence"
+    log_pass "All 18 retained skills have typed-tool documents and evidence"
 else
-    log_fail "All 16 retained skills have typed-tool documents and evidence"
+    log_fail "All 18 retained skills have typed-tool documents and evidence"
+fi
+
+log_section "Pinned Upstream Baseline"
+
+if [ -z "${PYTHON_BIN}" ]; then
+    log_fail "Latest upstream baseline and parity report are pinned"
+elif PROJECT_ROOT="${PROJECT_ROOT}" "${PYTHON_BIN}" - <<'PY'
+import json
+import os
+import pathlib
+
+root = pathlib.Path(os.environ["PROJECT_ROOT"])
+expected = "8de237da736a542766e132836b29c0a2a9c48740"
+fixture = json.loads(
+    (
+        root
+        / "manager-agentscope/tests/contract/fixtures"
+        / "upstream-agentteams.json"
+    ).read_text(encoding="utf-8")
+)
+assert fixture["commit"] == expected
+assert fixture["latestUpstreamDelta"]["commit"] == expected
+report = (
+    root / "docs/parity/upstream-agentteams-8de237d.md"
+).read_text(encoding="utf-8")
+assert expected in report
+for category in ("已实现", "有意替换", "有意删除", "外部未验证"):
+    assert category in report
+for evidence in (
+    "manager-agentscope/tests/e2e/test_k8s_admin_and_console.py",
+    "manager-agentscope/tests/e2e/test_k8s_matrix_commands.py",
+):
+    assert (root / evidence).is_file()
+PY
+then
+    log_pass "Latest upstream baseline and parity report are pinned"
+else
+    log_fail "Latest upstream baseline and parity report are pinned"
 fi
 
 if [ -z "${PYTHON_BIN}" ]; then
@@ -284,7 +326,7 @@ fi
 IMAGE_SKILLS=$(docker exec "${_AGENT_CTR}" sh -c \
     'find /opt/agentteams/manager/skills -mindepth 1 -maxdepth 1 -type d | wc -l' \
     2>/dev/null | tr -d '[:space:]')
-assert_eq "16" "${IMAGE_SKILLS}" "Running image contains exactly 16 Manager skills"
+assert_eq "18" "${IMAGE_SKILLS}" "Running image contains exactly 18 Manager skills"
 
 LEGACY_BINARIES=$(docker exec "${_AGENT_CTR}" sh -c '
     for path in \

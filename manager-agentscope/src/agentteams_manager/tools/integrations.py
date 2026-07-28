@@ -10,6 +10,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    JsonValue,
     SecretStr,
     model_validator,
 )
@@ -110,7 +111,7 @@ class _ConfigureMCPInput(_Input):
     )
     workers: tuple[str, ...] = ()
     verification_tool: str | None = None
-    verification_arguments: dict[str, object] = Field(
+    verification_arguments: dict[str, JsonValue] = Field(
         default_factory=dict,
         repr=False,
     )

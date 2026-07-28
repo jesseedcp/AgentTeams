@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal, Protocol
+from typing import Any, Literal, Protocol, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -33,6 +33,21 @@ from agentteams_manager.domain.models import (
 )
 from agentteams_manager.domain.ports import ArtifactPort, Clock, MatrixPort
 from agentteams_manager.workflows.resources import MutationContext
+
+TaskDocumentStatus = Literal[
+    "prepared",
+    "assigned",
+    "active",
+    "pending",
+    "ready",
+    "dispatched",
+    "in_progress",
+    "blocked",
+    "revision_needed",
+    "completed",
+    "failed",
+    "cancelled",
+]
 
 
 class TaskError(RuntimeError):
@@ -432,7 +447,7 @@ class TaskService:
         if task.status in {"completed", "failed", "cancelled"}:
             return _task_receipt(operation.operation_id, task)
 
-        durable_status = (
+        durable_status = _task_document_status(
             "prepared" if task.status == "prepared" else task.status
         )
         prepared = _task_metadata(task, status=durable_status)
@@ -548,11 +563,9 @@ class TaskService:
         task_id: str,
         context: MutationContext,
     ) -> TaskReceipt:
-        from agentteams_manager.state.tasks import ProjectTaskState
-
         if self._project_graph is None:
             raise RuntimeError("project graph is not configured")
-        task = await self._require_task(task_id)
+        await self._require_task(task_id)
         operation_id = operation_id_for(
             context.room_id,
             context.event_id,
@@ -575,6 +588,9 @@ class TaskService:
     ) -> TaskReceipt:
         from agentteams_manager.state.tasks import ProjectTaskState
 
+        project_graph = self._project_graph
+        if project_graph is None:
+            raise RuntimeError("project graph is not configured")
         task_id = str(operation.request.get("task_id", ""))
         if not task_id:
             raise RecoveryError("ready dispatch is missing task identity")
@@ -633,7 +649,7 @@ class TaskService:
                 exc,
             )
             raise
-        updated = await self._project_graph.transition(
+        updated = await project_graph.transition(
             task_id,
             expected={ProjectTaskState.READY},
             target=ProjectTaskState.DISPATCHED,
@@ -1453,7 +1469,11 @@ def _task_id_for(operation: OperationRecord) -> str:
     )
 
 
-def _task_metadata(task: TaskRecord, *, status: str) -> TaskMetadata:
+def _task_metadata(
+    task: TaskRecord,
+    *,
+    status: TaskDocumentStatus,
+) -> TaskMetadata:
     completed_at_raw = task.metadata.get("completed_at")
     return TaskMetadata(
         task_id=task.task_id,
@@ -1483,6 +1503,26 @@ def _task_metadata(task: TaskRecord, *, status: str) -> TaskMetadata:
             else None
         ),
     )
+
+
+def _task_document_status(status: str) -> TaskDocumentStatus:
+    allowed = {
+        "prepared",
+        "assigned",
+        "active",
+        "pending",
+        "ready",
+        "dispatched",
+        "in_progress",
+        "blocked",
+        "revision_needed",
+        "completed",
+        "failed",
+        "cancelled",
+    }
+    if status not in allowed:
+        raise RecoveryError(f"invalid durable task status {status!r}")
+    return cast(TaskDocumentStatus, status)
 
 
 def _task_receipt(

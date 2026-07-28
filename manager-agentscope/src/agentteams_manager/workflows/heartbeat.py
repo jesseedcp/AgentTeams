@@ -499,6 +499,7 @@ class SemanticSupervisor:
             if is_running and not stale:
                 responsive.add(worker.name)
             if is_running and stale:
+                assert heartbeat is not None
                 alerts.append(
                     _supervision_alert(
                         "worker_nonresponsive",

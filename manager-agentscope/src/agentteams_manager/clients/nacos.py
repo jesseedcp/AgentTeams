@@ -6,7 +6,7 @@ import hashlib
 import json
 import os
 import re
-from typing import Any, Literal
+from typing import Any, Literal, cast
 from urllib.parse import quote, unquote, urlsplit
 
 import httpx
@@ -535,7 +535,13 @@ def _candidate(
     worker = manifest.get("worker", {})
     if not isinstance(worker, dict):
         worker = {}
-    runtime = worker.get("runtime", manifest.get("runtime", "openclaw"))
+    runtime = str(
+        worker.get("runtime", manifest.get("runtime", "openclaw")),
+    )
+    if runtime not in {"openclaw", "copaw", "hermes", "qwenpaw"}:
+        raise NacosProtocolError(
+            f"AgentSpec {summary.name!r} has unsupported runtime {runtime!r}",
+        )
     display_name = worker.get(
         "displayName",
         manifest.get("displayName", summary.name),
@@ -555,7 +561,7 @@ def _candidate(
             name=summary.name,
             display_name=str(display_name),
             description=str(description),
-            runtime=runtime,
+            runtime=cast(NacosRuntime, runtime),
             package_uri=package_uri,
             version=resolved_version,
             digest=_digest(spec.digest_value()),

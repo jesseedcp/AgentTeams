@@ -7,7 +7,7 @@ import inspect
 import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Protocol
+from typing import Protocol, cast
 from urllib.parse import urlsplit
 
 from agentscope.mcp import HttpMCPConfig, MCPClient
@@ -51,7 +51,10 @@ class MCPRegistry:
         self,
         *,
         gateway_key: SecretStr,
-        client_factory: MCPClientFactory = MCPClient,
+        client_factory: MCPClientFactory = cast(
+            MCPClientFactory,
+            MCPClient,
+        ),
         reserved_tool_names: frozenset[str] = frozenset(),
         discovery_timeout: float = 30,
         execution_timeout: float = 30,
@@ -195,9 +198,11 @@ class MCPRegistry:
                 f"MCP tool {tool_name!r} is not exposed by {server_name!r}",
             )
         try:
-            result = tool.call(**arguments)
-            if inspect.isawaitable(result):
-                result = await result
+            raw_result = tool.call(**arguments)
+            if inspect.isawaitable(raw_result):
+                result = await raw_result
+            else:
+                result = raw_result
         except Exception as exc:
             raise MCPPreparationError(
                 f"MCP tool {tool_name!r} failed "
