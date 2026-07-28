@@ -588,12 +588,16 @@ func (k *K8sBackend) Status(ctx context.Context, name string) (*WorkerResult, er
 		// When phase maps to Running, additionally check the Ready condition.
 		// A pod can have phase Running but Ready=False (e.g. CrashLoopBackOff).
 		if msg, ready := podReadyCondition(pod.Status.Conditions); !ready {
-			if msg != "" {
+			message = msg
+			if msg != "" && !podReadinessStillStarting(
+				pod.Status.Conditions,
+			) {
 				// Ready=False + message: container has an actual error.
 				status = StatusFailed
-				message = msg
 			} else {
-				// Ready=False + no message: container still starting up.
+				// Kubernetes attaches a non-empty ContainersNotReady message
+				// while readiness probes are still warming up. Container
+				// waiting/termination failures were classified above.
 				status = StatusStarting
 			}
 		}
@@ -679,6 +683,17 @@ func podReadyCondition(conditions []corev1.PodCondition) (string, bool) {
 	}
 	// No Ready condition yet — treat as healthy (backward compat).
 	return "", true
+}
+
+func podReadinessStillStarting(conditions []corev1.PodCondition) bool {
+	for i := range conditions {
+		condition := conditions[i]
+		if condition.Type == corev1.PodReady &&
+			condition.Status != corev1.ConditionTrue {
+			return condition.Reason == "ContainersNotReady"
+		}
+	}
+	return false
 }
 
 func (k *K8sBackend) podName(prefix, name string) string {

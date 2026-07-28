@@ -1409,6 +1409,20 @@ func TestK8sStatus_ReadyCondition(t *testing.T) {
 			wantMessage: "crash info",
 		},
 		{
+			name:     "Running + ContainersNotReady is still starting",
+			podPhase: corev1.PodRunning,
+			conditions: []corev1.PodCondition{
+				{
+					Type:    corev1.PodReady,
+					Status:  corev1.ConditionFalse,
+					Reason:  "ContainersNotReady",
+					Message: "containers with unready status: [worker]",
+				},
+			},
+			wantStatus:  StatusStarting,
+			wantMessage: "containers with unready status: [worker]",
+		},
+		{
 			name:     "Running + Ready=False without message",
 			podPhase: corev1.PodRunning,
 			conditions: []corev1.PodCondition{
