@@ -1,9 +1,11 @@
 package service
 
 import (
+	"strings"
 	"testing"
 
 	v1beta1 "github.com/agentscope-ai/AgentTeams/agentteams-controller/api/v1beta1"
+	"github.com/agentscope-ai/AgentTeams/agentteams-controller/internal/backend"
 	"github.com/agentscope-ai/AgentTeams/agentteams-controller/internal/config"
 )
 
@@ -143,5 +145,83 @@ func TestWorkerEnvNeverReceivesManagerMCPSecrets(t *testing.T) {
 	env := builder.Build("alice", &WorkerProvisionResult{})
 	if _, exists := env["AGENTTEAMS_MCP_GITHUB_TOKEN"]; exists {
 		t.Fatal("Worker environment contains Manager GitHub MCP secret")
+	}
+}
+
+func TestApplyWorkerConsoleEnvUsesDeclarativeDesiredState(t *testing.T) {
+	tests := []struct {
+		name        string
+		runtime     string
+		console     *v1beta1.WorkerConsoleSpec
+		wantPort    string
+		wantErrPart string
+	}{
+		{
+			name:    "absent is disabled",
+			runtime: backend.RuntimeCopaw,
+		},
+		{
+			name:    "explicit false is disabled",
+			runtime: backend.RuntimeQwenPaw,
+			console: &v1beta1.WorkerConsoleSpec{Enabled: false},
+		},
+		{
+			name:     "copaw defaults to port 8088",
+			runtime:  backend.RuntimeCopaw,
+			console:  &v1beta1.WorkerConsoleSpec{Enabled: true},
+			wantPort: "8088",
+		},
+		{
+			name:     "qwenpaw accepts a custom port",
+			runtime:  backend.RuntimeQwenPaw,
+			console:  &v1beta1.WorkerConsoleSpec{Enabled: true, Port: 9090},
+			wantPort: "9090",
+		},
+		{
+			name:        "openclaw rejects enabled console",
+			runtime:     backend.RuntimeOpenClaw,
+			console:     &v1beta1.WorkerConsoleSpec{Enabled: true},
+			wantErrPart: "not supported",
+		},
+		{
+			name:        "invalid port is rejected",
+			runtime:     backend.RuntimeCopaw,
+			console:     &v1beta1.WorkerConsoleSpec{Enabled: true, Port: 70000},
+			wantErrPart: "between 1 and 65535",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env := map[string]string{"AGENTTEAMS_CONSOLE_PORT": "legacy"}
+			err := ApplyWorkerConsoleEnv(env, tt.runtime, tt.console)
+			if tt.wantErrPart != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErrPart) {
+					t.Fatalf("error = %v, want substring %q", err, tt.wantErrPart)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ApplyWorkerConsoleEnv returned error: %v", err)
+			}
+			got, exists := env["AGENTTEAMS_CONSOLE_PORT"]
+			if tt.wantPort == "" {
+				if exists {
+					t.Fatalf("console env must be absent when disabled, got %q", got)
+				}
+				return
+			}
+			if !exists || got != tt.wantPort {
+				t.Fatalf("console port = %q (exists=%v), want %q", got, exists, tt.wantPort)
+			}
+		})
+	}
+}
+
+func TestWorkerEnvBuilderDoesNotEnableConsoleImplicitly(t *testing.T) {
+	env := NewWorkerEnvBuilder(config.WorkerEnvDefaults{}).
+		Build("alice", &WorkerProvisionResult{})
+	if got, exists := env["AGENTTEAMS_CONSOLE_PORT"]; exists {
+		t.Fatalf("base worker env unexpectedly enables console on port %q", got)
 	}
 }

@@ -8,7 +8,10 @@ from agentscope.message import ToolCallBlock
 from agentscope.state import AgentState
 from pydantic import SecretStr
 
-from agentteams_manager.clients.agt import WorkerCreateRequest
+from agentteams_manager.clients.agt import (
+    WorkerCreateRequest,
+    WorkerUpdateRequest,
+)
 from agentteams_manager.domain.models import (
     HumanResource,
     RoomKind,
@@ -28,6 +31,7 @@ from agentteams_manager.workflows.resources import MutationContext
 class Resources:
     def __init__(self) -> None:
         self.created: list[tuple[WorkerCreateRequest, MutationContext]] = []
+        self.updated: list[tuple[WorkerUpdateRequest, MutationContext]] = []
         self.reset: list[tuple[str, MutationContext]] = []
         self.workers = (
             WorkerResource(
@@ -78,6 +82,27 @@ class Resources:
         worker = await self.get_worker(name)
         assert worker is not None
         return worker
+
+    async def update_worker(
+        self,
+        request: WorkerUpdateRequest,
+        *,
+        context: MutationContext,
+    ) -> WorkerResource:
+        self.updated.append((request, context))
+        worker = await self.get_worker(request.name)
+        assert worker is not None
+        return worker.model_copy(
+            update={
+                "spec": {
+                    **worker.spec,
+                    "console": {
+                        "enabled": request.console_enabled,
+                        "port": request.console_port or 8088,
+                    },
+                },
+            },
+        )
 
     async def list_teams(self) -> tuple[TeamResource, ...]:
         return ()
@@ -305,6 +330,34 @@ async def test_reset_worker_uses_one_confirmable_resource_operation() -> None:
 
     assert resources.reset == [("alice", _context())]
     assert json.loads(chunk.content[0].text)["tool"] == "reset_worker"
+
+
+@pytest.mark.asyncio
+async def test_update_worker_console_uses_typed_request_and_returns_status() -> None:
+    toolkit, resources = _toolkit()
+    tool = next(item for item in toolkit.tools if item.name == "update_worker")
+
+    chunk = await tool.call(
+        name="alice",
+        console_enabled=True,
+        console_port=9090,
+    )
+
+    assert resources.updated == [
+        (
+            WorkerUpdateRequest(
+                name="alice",
+                console_enabled=True,
+                console_port=9090,
+            ),
+            _context(),
+        ),
+    ]
+    payload = json.loads(chunk.content[0].text)
+    assert payload["result"]["spec"]["console"] == {
+        "enabled": True,
+        "port": 9090,
+    }
 
 
 @pytest.mark.asyncio

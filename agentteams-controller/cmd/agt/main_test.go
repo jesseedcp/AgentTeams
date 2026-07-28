@@ -80,6 +80,46 @@ func TestUpdateWorkerExposeSendsNumericPorts(t *testing.T) {
 	}
 }
 
+func TestUpdateWorkerConsoleFlagsSendDeclarativeState(t *testing.T) {
+	enabled := runMCPUpdateCommand(
+		t,
+		updateWorkerCmd(),
+		[]string{"--name", "alice", "--console", "--console-port", "9090"},
+		"",
+		"/api/v1/workers/alice",
+	)
+	console, ok := enabled["console"].(map[string]interface{})
+	if !ok || console["enabled"] != true || console["port"] != float64(9090) {
+		t.Fatalf("enabled console payload = %#v", enabled["console"])
+	}
+
+	disabled := runMCPUpdateCommand(
+		t,
+		updateWorkerCmd(),
+		[]string{"--name", "alice", "--no-console"},
+		"",
+		"/api/v1/workers/alice",
+	)
+	console, ok = disabled["console"].(map[string]interface{})
+	if !ok || console["enabled"] != false {
+		t.Fatalf("disabled console payload = %#v", disabled["console"])
+	}
+	if _, exists := console["port"]; exists {
+		t.Fatalf("disabled console payload must omit port: %#v", console)
+	}
+}
+
+func TestUpdateWorkerRejectsConsoleAndNoConsoleTogether(t *testing.T) {
+	cmd := updateWorkerCmd()
+	cmd.SetArgs([]string{"--name", "alice", "--console", "--no-console"})
+	err := cmd.Execute()
+	if err == nil ||
+		!strings.Contains(err.Error(), "none of the others") ||
+		!strings.Contains(err.Error(), "console") {
+		t.Fatalf("error = %v, want mutually exclusive console flags", err)
+	}
+}
+
 func TestUpdateWorkerRejectsExposeAndClearExposeTogether(t *testing.T) {
 	cmd := updateWorkerCmd()
 	cmd.SetArgs([]string{

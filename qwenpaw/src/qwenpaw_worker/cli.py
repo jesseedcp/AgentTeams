@@ -28,7 +28,11 @@ def main() -> None:
         storage_prefix: Optional[str] = typer.Option(None, "--storage-prefix", help="Storage prefix"),
         shared_prefix: Optional[str] = typer.Option(None, "--shared-prefix", help="Shared storage prefix"),
         runtime_config: Optional[str] = typer.Option(None, "--runtime-config", help="Local runtime.yaml path"),
-        console_port: int = typer.Option(8088, "--console-port", help="QwenPaw API port"),
+        console_port: Optional[int] = typer.Option(
+            None,
+            "--console-port",
+            help="Expose the QwenPaw web console on this port",
+        ),
     ) -> None:
         """Start the QwenPaw Worker."""
         config = WorkerConfig(
@@ -42,7 +46,8 @@ def main() -> None:
             storage_prefix=storage_prefix,
             shared_prefix=shared_prefix,
             runtime_config_path=Path(runtime_config) if runtime_config else None,
-            console_port=console_port,
+            console_port=console_port or 8088,
+            console_enabled=console_port is not None,
         )
         configure_worker_logging(config.qwenpaw_working_dir)
         worker = Worker(config)

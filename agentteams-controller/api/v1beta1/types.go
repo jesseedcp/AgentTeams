@@ -3,6 +3,8 @@
 package v1beta1
 
 import (
+	"fmt"
+
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -151,6 +153,43 @@ type WorkerResourceSpec struct {
 	Memory string `json:"memory,omitempty"`
 }
 
+const DefaultWorkerConsolePort = 8088
+
+// WorkerConsoleSpec declares whether a runtime's optional web console should
+// be started. The console is disabled when this field is absent or Enabled is
+// false. Port zero means DefaultWorkerConsolePort.
+type WorkerConsoleSpec struct {
+	Enabled bool `json:"enabled"`
+	Port    int  `json:"port,omitempty"`
+}
+
+// EffectivePort returns the configured console port after applying the
+// runtime-independent default.
+func (s WorkerConsoleSpec) EffectivePort() int {
+	if s.Port != 0 {
+		return s.Port
+	}
+	return DefaultWorkerConsolePort
+}
+
+// Validate checks the console contract against an already-resolved Worker
+// runtime. Only CoPaw and QwenPaw currently expose a supported web console.
+func (s WorkerConsoleSpec) Validate(runtime string) error {
+	if s.Port < 0 || s.Port > 65535 {
+		return fmt.Errorf("worker console port must be between 1 and 65535")
+	}
+	if !s.Enabled {
+		return nil
+	}
+	if s.EffectivePort() < 1 || s.EffectivePort() > 65535 {
+		return fmt.Errorf("worker console port must be between 1 and 65535")
+	}
+	if runtime != "copaw" && runtime != "qwenpaw" {
+		return fmt.Errorf("worker console is not supported by runtime %q", runtime)
+	}
+	return nil
+}
+
 // Worker volume provider constants.
 const (
 	WorkerVolumeTypeOSS = "OSS"
@@ -182,6 +221,7 @@ type WorkerSpec struct {
 	McpServers    []MCPServer                `json:"mcpServers,omitempty"`
 	Package       string                     `json:"package,omitempty"` // file://, http(s)://, or nacos://[user:pass@]host:port/...; optional ?authType=nacos|sts-agentteams|none
 	Expose        []ExposePort               `json:"expose,omitempty"`  // ports to expose via Higress gateway
+	Console       *WorkerConsoleSpec         `json:"console,omitempty"` // optional CoPaw/QwenPaw web console
 	ChannelPolicy *ChannelPolicySpec         `json:"channelPolicy,omitempty"`
 	Channels      *ChannelsSpec              `json:"channels,omitempty"`
 	Resources     *AgentResourceRequirements `json:"resources,omitempty"`

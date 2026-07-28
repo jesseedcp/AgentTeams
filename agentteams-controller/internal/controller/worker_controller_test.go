@@ -1571,6 +1571,12 @@ func TestHashAppliedWorkerSpecForRuntimeQwenPawExcludesHotConfig(t *testing.T) {
 	if got := hashAppliedWorkerSpecForRuntime(changedEnv, "qwenpaw"); got == baseHash {
 		t.Fatalf("qwenpaw env change must affect pod hash: got %q", got)
 	}
+
+	changedConsole := base
+	changedConsole.Console = &v1beta1.WorkerConsoleSpec{Enabled: true, Port: 9090}
+	if got := hashAppliedWorkerSpecForRuntime(changedConsole, "qwenpaw"); got == baseHash {
+		t.Fatalf("qwenpaw console change must affect pod hash: got %q", got)
+	}
 }
 
 func workerBoolPtr(v bool) *bool { return &v }

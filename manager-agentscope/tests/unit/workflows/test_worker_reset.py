@@ -26,6 +26,7 @@ class Controller:
                 "soul": "Be precise.",
                 "package": "nacos://workers/alice@v1",
                 "expose": [8080],
+                "console": {"enabled": True, "port": 9090},
             },
             status={"containerState": "running"},
         )
@@ -56,6 +57,10 @@ class Controller:
                 "soul": request.soul or "",
                 "package": request.package_uri or "",
                 "expose": list(request.expose),
+                "console": {
+                    "enabled": request.console_enabled,
+                    "port": request.console_port,
+                },
             },
             status={"containerState": "running"},
         )
@@ -107,4 +112,6 @@ async def test_reset_worker_recreates_exact_desired_configuration_once() -> None
     assert request.skills == ("python",)
     assert request.package_uri == "nacos://workers/alice@v1"
     assert request.expose == (8080,)
+    assert request.console_enabled is True
+    assert request.console_port == 9090
     assert topology.refreshed == 1

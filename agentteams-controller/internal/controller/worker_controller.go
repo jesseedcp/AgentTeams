@@ -713,7 +713,7 @@ func WorkerPodMapFunc(namespace string) handler.MapFunc {
 // fields zeroed):
 //
 //	ModelProvider, Runtime, Image, WorkerName, Identity, Soul,
-//	Agents, Skills, RemoteSkills, Package, ChannelPolicy, ContainerManaged,
+//	Agents, Skills, RemoteSkills, Package, Console, ChannelPolicy, ContainerManaged,
 //	DeployMode, BackendRuntime, Labels, Env, Volumes, Mounts.
 //
 // Excluded (do not trigger pod recreation):
@@ -829,6 +829,7 @@ func hashQwenPawPodSpecWithResources(spec v1beta1.WorkerSpec, resources *v1beta1
 		DeployMode       *string                            `json:"deployMode,omitempty"`
 		BackendRuntime   *string                            `json:"backendRuntime,omitempty"`
 		Resources        *v1beta1.AgentResourceRequirements `json:"resources,omitempty"`
+		Console          *v1beta1.WorkerConsoleSpec         `json:"console,omitempty"`
 		Env              map[string]string                  `json:"env,omitempty"`
 		Labels           map[string]string                  `json:"labels,omitempty"`
 		Volumes          []v1beta1.WorkerVolumeSpec         `json:"volumes,omitempty"`
@@ -843,6 +844,7 @@ func hashQwenPawPodSpecWithResources(spec v1beta1.WorkerSpec, resources *v1beta1
 		DeployMode:       spec.DeployMode,
 		BackendRuntime:   spec.BackendRuntime,
 		Resources:        resources,
+		Console:          spec.Console,
 		Env:              spec.Env,
 		Labels:           spec.Labels,
 		Volumes:          spec.Volumes,

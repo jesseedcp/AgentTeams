@@ -94,6 +94,11 @@ func (h *ResourceHandler) CreateWorker(w http.ResponseWriter, r *http.Request) {
 	if runtime == "" {
 		runtime = backend.RuntimeOpenClaw
 	}
+	console, err := normalizedWorkerConsole(req.Console, runtime)
+	if err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	worker := &v1beta1.Worker{
 		ObjectMeta: metav1.ObjectMeta{
@@ -113,6 +118,7 @@ func (h *ResourceHandler) CreateWorker(w http.ResponseWriter, r *http.Request) {
 			McpServers:       req.McpServers,
 			Package:          req.Package,
 			Expose:           req.Expose,
+			Console:          console,
 			ChannelPolicy:    req.ChannelPolicy,
 			Resources:        req.Resources,
 			ContainerManaged: &containerManaged,
@@ -267,6 +273,17 @@ func (h *ResourceHandler) UpdateWorker(w http.ResponseWriter, r *http.Request) {
 				(*req.Expose)...,
 			)
 		}
+		if req.Console != nil {
+			console, err := normalizedWorkerConsole(
+				req.Console,
+				backend.ResolveRuntime(worker.Spec.Runtime, backend.RuntimeOpenClaw),
+			)
+			if err != nil {
+				httputil.WriteError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			worker.Spec.Console = console
+		}
 		if req.ChannelPolicy != nil {
 			worker.Spec.ChannelPolicy = req.ChannelPolicy
 		}
@@ -278,6 +295,16 @@ func (h *ResourceHandler) UpdateWorker(w http.ResponseWriter, r *http.Request) {
 		}
 		if req.State != nil {
 			worker.Spec.State = req.State
+		}
+		if worker.Spec.Console != nil {
+			effectiveRuntime := backend.ResolveRuntime(
+				worker.Spec.Runtime,
+				backend.RuntimeOpenClaw,
+			)
+			if err := worker.Spec.Console.Validate(effectiveRuntime); err != nil {
+				httputil.WriteError(w, http.StatusBadRequest, err.Error())
+				return
+			}
 		}
 
 		if err := h.client.Update(ctx, &worker); err != nil {
@@ -841,6 +868,7 @@ func workerToResponse(w *v1beta1.Worker) WorkerResponse {
 		McpServers:       append([]v1beta1.MCPServer(nil), w.Spec.McpServers...),
 		Package:          w.Spec.Package,
 		Expose:           append([]v1beta1.ExposePort(nil), w.Spec.Expose...),
+		Console:          responseWorkerConsole(w.Spec.Console),
 		BackendRuntime:   w.Spec.GetBackendRuntime(),
 		ContainerManaged: w.Spec.DesiredContainerMan(),
 		ChannelPolicy:    w.Spec.ChannelPolicy,
@@ -856,6 +884,36 @@ func workerToResponse(w *v1beta1.Worker) WorkerResponse {
 		resp.ExposedPorts = append(resp.ExposedPorts, ExposedPortInfo{Port: ep.Port, Domain: ep.Domain})
 	}
 	return resp
+}
+
+func normalizedWorkerConsole(
+	console *v1beta1.WorkerConsoleSpec,
+	runtime string,
+) (*v1beta1.WorkerConsoleSpec, error) {
+	if console == nil {
+		return nil, nil
+	}
+	normalized := *console
+	if err := normalized.Validate(runtime); err != nil {
+		return nil, err
+	}
+	if normalized.Enabled && normalized.Port == 0 {
+		normalized.Port = v1beta1.DefaultWorkerConsolePort
+	}
+	return &normalized, nil
+}
+
+func responseWorkerConsole(
+	console *v1beta1.WorkerConsoleSpec,
+) *v1beta1.WorkerConsoleSpec {
+	if console == nil {
+		return nil
+	}
+	response := *console
+	if response.Enabled && response.Port == 0 {
+		response.Port = v1beta1.DefaultWorkerConsolePort
+	}
+	return &response
 }
 
 func teamToResponse(t *v1beta1.Team) TeamResponse {

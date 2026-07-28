@@ -906,8 +906,14 @@ func buildMemberWorkerEnv(ctx context.Context, d MemberDeps, m MemberContext, pr
 	}
 	logger := log.FromContext(ctx)
 	workerEnv := d.EnvBuilder.Build(m.RuntimeName, prov)
-	workerEnv["AGENTTEAMS_WORKER_CR_NAME"] = m.Name
-	// Legacy runtime scripts still read this fallback while AgentTeams env adoption is in progress.
+	effectiveRuntime := backend.ResolveRuntime(m.Spec.Runtime, d.DefaultRuntime)
+	if err := service.ApplyWorkerConsoleEnv(
+		workerEnv,
+		effectiveRuntime,
+		m.Spec.Console,
+	); err != nil {
+		return nil, fmt.Errorf("configure worker console: %w", err)
+	}
 	workerEnv["AGENTTEAMS_WORKER_CR_NAME"] = m.Name
 	if m.ModelProviderInfo != nil && m.ModelProviderInfo.IntranetURL != "" {
 		workerEnv["AGENTTEAMS_AI_GATEWAY_URL"] = m.ModelProviderInfo.IntranetURL

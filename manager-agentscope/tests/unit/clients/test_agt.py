@@ -32,6 +32,7 @@ def _worker(name: str = "alice", runtime: str = "qwenpaw") -> dict:
         "skills": ["git", "review"],
         "package": "oss://workers/release.zip",
         "expose": [{"port": 8080}],
+        "console": {"enabled": True, "port": 9090},
         "exposedPorts": [
             {
                 "port": 8080,
@@ -55,6 +56,7 @@ async def test_get_worker_uses_json_and_parses_runtime() -> None:
     assert worker.spec["identity"] == "Release specialist"
     assert worker.spec["package"] == "oss://workers/release.zip"
     assert worker.spec["expose"] == [8080]
+    assert worker.spec["console"] == {"enabled": True, "port": 9090}
     assert worker.status["exposedPorts"] == [
         {
             "port": 8080,
@@ -167,6 +169,74 @@ async def test_update_worker_preserves_explicit_empty_arrays() -> None:
         "",
         "--clear-expose",
     )
+
+
+@pytest.mark.asyncio
+async def test_create_and_update_worker_console_map_to_typed_flags() -> None:
+    process = FakeProcess()
+    created = _worker(runtime="copaw")
+    process.queue_json(created)
+    process.queue_error("", returncode=0)
+    disabled = _worker(runtime="copaw")
+    disabled["console"] = {"enabled": False}
+    process.queue_json(disabled)
+    client = AgtClient(process)
+
+    await client.create_worker(
+        WorkerCreateRequest(
+            name="alice",
+            runtime="copaw",
+            model="qwen3.6-plus",
+            console_enabled=True,
+            console_port=9090,
+        ),
+    )
+    assert process.calls[0][0] == (
+        "agt",
+        "create",
+        "worker",
+        "--name",
+        "alice",
+        "--model",
+        "qwen3.6-plus",
+        "--runtime",
+        "copaw",
+        "--console",
+        "--console-port",
+        "9090",
+        "--no-wait",
+        "-o",
+        "json",
+    )
+
+    worker = await client.update_worker(
+        WorkerUpdateRequest(name="alice", console_enabled=False),
+    )
+    assert worker.spec["console"] == {"enabled": False, "port": 8088}
+    assert process.calls[-2][0] == (
+        "agt",
+        "update",
+        "worker",
+        "--name",
+        "alice",
+        "--no-console",
+    )
+
+
+def test_worker_console_request_validation() -> None:
+    with pytest.raises(ValidationError, match="console"):
+        WorkerCreateRequest(
+            name="alice",
+            runtime="hermes",
+            model="qwen3.6-plus",
+            console_enabled=True,
+        )
+    with pytest.raises(ValidationError, match="console_port"):
+        WorkerUpdateRequest(
+            name="alice",
+            console_enabled=False,
+            console_port=9090,
+        )
 
 
 @pytest.mark.asyncio

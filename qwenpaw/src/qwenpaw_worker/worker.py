@@ -746,7 +746,11 @@ class Worker:
 
     async def _run_qwenpaw(self) -> None:
         qwenpaw_bin = shutil.which("qwenpaw") or str(Path(sys.executable).with_name("qwenpaw"))
-        host = "0.0.0.0"
+        # QwenPaw's local API is also used by the Worker adapter and model
+        # synchronizer, so headless mode keeps it alive on loopback. Enabling
+        # the console changes only the bind address, making the UI reachable
+        # through the Controller-managed port.
+        host = "0.0.0.0" if self.config.console_enabled else "127.0.0.1"
         log_level = os.getenv("QWENPAW_LOG_LEVEL", "info")
         command = [
             qwenpaw_bin,

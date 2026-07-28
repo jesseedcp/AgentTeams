@@ -33,12 +33,34 @@ func (b *WorkerEnvBuilder) Build(workerName string, prov *WorkerProvisionResult)
 		"AGENTTEAMS_FS_SECRET_KEY":       prov.MinIOPassword,
 		"OPENCLAW_DISABLE_BONJOUR":       "1",
 		"OPENCLAW_MDNS_HOSTNAME":         "agentteams-w-" + workerName,
-		"AGENTTEAMS_CONSOLE_PORT":        "8088",
 		"HOME":                           "/root/agentteams-fs/agents/" + workerName,
 	}
 
 	b.applyClusterDefaults(env)
 	return env
+}
+
+// ApplyWorkerConsoleEnv translates the declarative Worker console desired
+// state into the runtime entrypoint contract. Deleting the variable is
+// intentional: both supported entrypoints interpret an absent value as
+// headless mode.
+func ApplyWorkerConsoleEnv(
+	env map[string]string,
+	runtime string,
+	console *v1beta1.WorkerConsoleSpec,
+) error {
+	delete(env, "AGENTTEAMS_CONSOLE_PORT")
+	if console == nil {
+		return nil
+	}
+	if err := console.Validate(runtime); err != nil {
+		return err
+	}
+	if !console.Enabled {
+		return nil
+	}
+	env["AGENTTEAMS_CONSOLE_PORT"] = strconv.Itoa(console.EffectivePort())
+	return nil
 }
 
 // BuildManager returns the env map for a Manager container.

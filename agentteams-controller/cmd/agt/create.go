@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	v1beta1 "github.com/agentscope-ai/AgentTeams/agentteams-controller/api/v1beta1"
 	"github.com/spf13/cobra"
 )
 
@@ -40,6 +41,8 @@ func createWorkerCmd() *cobra.Command {
 		skills      string
 		packageURI  string
 		expose      string
+		console     bool
+		consolePort int
 		outputFmt   string
 		waitTimeout time.Duration
 		noWait      bool
@@ -99,6 +102,15 @@ func createWorkerCmd() *cobra.Command {
 				}
 				req["expose"] = ports
 			}
+			if console || cmd.Flags().Changed("console-port") {
+				if consolePort < 1 || consolePort > 65535 {
+					return fmt.Errorf("--console-port must be between 1 and 65535")
+				}
+				req["console"] = map[string]interface{}{
+					"enabled": true,
+					"port":    consolePort,
+				}
+			}
 
 			client := NewAPIClient()
 			var createResp map[string]interface{}
@@ -139,6 +151,13 @@ func createWorkerCmd() *cobra.Command {
 	cmd.Flags().StringVar(&skills, "skills", "", "Comma-separated built-in skills")
 	cmd.Flags().StringVar(&packageURI, "package", "", "Package URI (nacos://[?authType=...], http://, oss://) or shorthand")
 	cmd.Flags().StringVar(&expose, "expose", "", "Comma-separated ports to expose (e.g. 8080,3000)")
+	cmd.Flags().BoolVar(&console, "console", false, "Enable the CoPaw/QwenPaw web console")
+	cmd.Flags().IntVar(
+		&consolePort,
+		"console-port",
+		v1beta1.DefaultWorkerConsolePort,
+		"Web console container port (implies --console)",
+	)
 	cmd.Flags().StringVarP(&outputFmt, "output", "o", "", "Output format (json)")
 	cmd.Flags().DurationVar(&waitTimeout, "wait-timeout", 3*time.Minute, "Maximum time to wait for the Worker to report Ready")
 	cmd.Flags().BoolVar(&noWait, "no-wait", false, "Return immediately after the controller accepts the create request, without polling for Ready")

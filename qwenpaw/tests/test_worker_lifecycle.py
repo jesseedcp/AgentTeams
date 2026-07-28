@@ -1193,6 +1193,47 @@ async def test_qwenpaw_process_exit_marks_runtime_not_ready(
 
 
 @pytest.mark.anyio
+async def test_headless_qwenpaw_binds_internal_api_to_loopback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _config(tmp_path)
+    config.console_enabled = False
+    worker = Worker(config)
+    captured: tuple[str, ...] = ()
+
+    class FakeProcess:
+        pid = 12345
+        returncode = 0
+
+        async def wait(self):
+            return self.returncode
+
+    async def fake_create_subprocess_exec(*args, **_kwargs):
+        nonlocal captured
+        captured = tuple(str(item) for item in args)
+        return FakeProcess()
+
+    async def idle_heartbeat_probe_loop(self):
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(
+        "qwenpaw_worker.worker.asyncio.create_subprocess_exec",
+        fake_create_subprocess_exec,
+    )
+    monkeypatch.setattr(
+        "qwenpaw_worker.worker.Worker._heartbeat_probe_loop",
+        idle_heartbeat_probe_loop,
+    )
+
+    await worker._run_qwenpaw()
+    await worker.stop()
+
+    assert captured[captured.index("--host") + 1] == "127.0.0.1"
+    assert captured[captured.index("--port") + 1] == "8088"
+
+
+@pytest.mark.anyio
 async def test_stop_logs_failed_background_task_and_still_terminates_process(
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,

@@ -222,6 +222,127 @@ func TestCreateWorkerAcceptsEveryWorkerRuntime(t *testing.T) {
 	}
 }
 
+func TestWorkerConsoleCreateAndUpdateRoundTrip(t *testing.T) {
+	scheme := newServerTestScheme(t)
+	k8sClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+	handler := NewResourceHandler(k8sClient, "default", nil, "")
+
+	createReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/workers",
+		bytes.NewReader([]byte(`{
+			"name":"console-worker",
+			"runtime":"copaw",
+			"console":{"enabled":true,"port":9090}
+		}`)),
+	)
+	createRec := httptest.NewRecorder()
+	handler.CreateWorker(createRec, createReq)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("create status = %d: %s", createRec.Code, createRec.Body.String())
+	}
+
+	var created WorkerResponse
+	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+	if created.Console == nil || !created.Console.Enabled || created.Console.Port != 9090 {
+		t.Fatalf("create response console = %#v", created.Console)
+	}
+
+	updateReq := httptest.NewRequest(
+		http.MethodPut,
+		"/api/v1/workers/console-worker",
+		bytes.NewReader([]byte(`{"console":{"enabled":false}}`)),
+	)
+	updateReq.SetPathValue("name", "console-worker")
+	updateRec := httptest.NewRecorder()
+	handler.UpdateWorker(updateRec, updateReq)
+	if updateRec.Code != http.StatusOK {
+		t.Fatalf("update status = %d: %s", updateRec.Code, updateRec.Body.String())
+	}
+
+	var updated WorkerResponse
+	if err := json.Unmarshal(updateRec.Body.Bytes(), &updated); err != nil {
+		t.Fatalf("decode update response: %v", err)
+	}
+	if updated.Console == nil || updated.Console.Enabled {
+		t.Fatalf("update response console = %#v, want disabled", updated.Console)
+	}
+
+	var got v1beta1.Worker
+	if err := k8sClient.Get(
+		context.Background(),
+		client.ObjectKey{Name: "console-worker", Namespace: "default"},
+		&got,
+	); err != nil {
+		t.Fatalf("get worker: %v", err)
+	}
+	if got.Spec.Console == nil || got.Spec.Console.Enabled {
+		t.Fatalf("persisted console = %#v, want disabled", got.Spec.Console)
+	}
+}
+
+func TestWorkerConsoleRejectsUnsupportedRuntimeAndInvalidPort(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "unsupported runtime",
+			body: `{"name":"bad-console","runtime":"openclaw","console":{"enabled":true}}`,
+		},
+		{
+			name: "invalid port",
+			body: `{"name":"bad-console","runtime":"copaw","console":{"enabled":true,"port":70000}}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scheme := newServerTestScheme(t)
+			k8sClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+			handler := NewResourceHandler(k8sClient, "default", nil, "")
+			req := httptest.NewRequest(
+				http.MethodPost,
+				"/api/v1/workers",
+				bytes.NewReader([]byte(tt.body)),
+			)
+			rec := httptest.NewRecorder()
+			handler.CreateWorker(rec, req)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestWorkerConsoleRejectsRuntimeChangeThatWouldInvalidateConsole(t *testing.T) {
+	scheme := newServerTestScheme(t)
+	worker := &v1beta1.Worker{}
+	worker.Name = "console-worker"
+	worker.Namespace = "default"
+	worker.Spec.Runtime = backend.RuntimeCopaw
+	worker.Spec.Console = &v1beta1.WorkerConsoleSpec{Enabled: true}
+	k8sClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(worker).
+		Build()
+	handler := NewResourceHandler(k8sClient, "default", nil, "")
+
+	req := httptest.NewRequest(
+		http.MethodPut,
+		"/api/v1/workers/console-worker",
+		bytes.NewReader([]byte(`{"runtime":"hermes"}`)),
+	)
+	req.SetPathValue("name", "console-worker")
+	rec := httptest.NewRecorder()
+	handler.UpdateWorker(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestGetHumanIncludesPermissionScope(t *testing.T) {
 	scheme := newServerTestScheme(t)
 	human := &v1beta1.Human{}

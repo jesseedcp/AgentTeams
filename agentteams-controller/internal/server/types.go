@@ -18,6 +18,7 @@ type CreateWorkerRequest struct {
 	McpServers    []v1beta1.MCPServer                `json:"mcpServers,omitempty"`
 	Package       string                             `json:"package,omitempty"`
 	Expose        []v1beta1.ExposePort               `json:"expose,omitempty"`
+	Console       *v1beta1.WorkerConsoleSpec         `json:"console,omitempty"`
 	ChannelPolicy *v1beta1.ChannelPolicySpec         `json:"channelPolicy,omitempty"`
 	Resources     *v1beta1.AgentResourceRequirements `json:"resources,omitempty"`
 
@@ -43,6 +44,7 @@ type UpdateWorkerRequest struct {
 	McpServers    *[]v1beta1.MCPServer               `json:"mcpServers,omitempty"`
 	Package       *string                            `json:"package,omitempty"`
 	Expose        *[]v1beta1.ExposePort              `json:"expose,omitempty"`
+	Console       *v1beta1.WorkerConsoleSpec         `json:"console,omitempty"`
 	ChannelPolicy *v1beta1.ChannelPolicySpec         `json:"channelPolicy,omitempty"`
 	Resources     *v1beta1.AgentResourceRequirements `json:"resources,omitempty"`
 
@@ -70,6 +72,7 @@ type WorkerResponse struct {
 	McpServers       []v1beta1.MCPServer        `json:"mcpServers,omitempty"`
 	Package          string                     `json:"package,omitempty"`
 	Expose           []v1beta1.ExposePort       `json:"expose,omitempty"`
+	Console          *v1beta1.WorkerConsoleSpec `json:"console,omitempty"`
 	BackendRuntime   string                     `json:"backendRuntime,omitempty"`
 	ChannelPolicy    *v1beta1.ChannelPolicySpec `json:"channelPolicy,omitempty"`
 	ContainerState   string                     `json:"containerState,omitempty"`

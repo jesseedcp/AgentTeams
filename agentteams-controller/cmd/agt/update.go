@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 
+	v1beta1 "github.com/agentscope-ai/AgentTeams/agentteams-controller/api/v1beta1"
 	"github.com/spf13/cobra"
 )
 
@@ -53,6 +54,9 @@ func updateWorkerCmd() *cobra.Command {
 		packageURI  string
 		expose      string
 		clearExpose bool
+		console     bool
+		noConsole   bool
+		consolePort int
 		mcpFile     string
 	)
 
@@ -111,6 +115,18 @@ func updateWorkerCmd() *cobra.Command {
 			if clearExpose {
 				req["expose"] = make([]map[string]interface{}, 0)
 			}
+			if console || cmd.Flags().Changed("console-port") {
+				if consolePort < 1 || consolePort > 65535 {
+					return fmt.Errorf("--console-port must be between 1 and 65535")
+				}
+				req["console"] = map[string]interface{}{
+					"enabled": true,
+					"port":    consolePort,
+				}
+			}
+			if noConsole {
+				req["console"] = map[string]interface{}{"enabled": false}
+			}
 			if cmd.Flags().Changed("mcp-servers-file") {
 				servers, err := readMCPServers(cmd, mcpFile)
 				if err != nil {
@@ -149,6 +165,16 @@ func updateWorkerCmd() *cobra.Command {
 		"Remove every exposed port",
 	)
 	cmd.MarkFlagsMutuallyExclusive("expose", "clear-expose")
+	cmd.Flags().BoolVar(&console, "console", false, "Enable the CoPaw/QwenPaw web console")
+	cmd.Flags().BoolVar(&noConsole, "no-console", false, "Disable the Worker web console")
+	cmd.Flags().IntVar(
+		&consolePort,
+		"console-port",
+		v1beta1.DefaultWorkerConsolePort,
+		"Web console container port (implies --console)",
+	)
+	cmd.MarkFlagsMutuallyExclusive("console", "no-console")
+	cmd.MarkFlagsMutuallyExclusive("console-port", "no-console")
 	cmd.Flags().StringVar(
 		&mcpFile,
 		"mcp-servers-file",

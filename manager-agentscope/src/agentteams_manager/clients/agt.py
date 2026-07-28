@@ -80,6 +80,8 @@ class WorkerCreateRequest(_Request):
     skills: tuple[str, ...] = ()
     package_uri: str | None = None
     expose: tuple[Port, ...] = ()
+    console_enabled: bool = False
+    console_port: Port = 8088
     team: ResourceName | None = None
     role: Literal["team_leader", "worker"] | None = None
 
@@ -99,6 +101,14 @@ class WorkerCreateRequest(_Request):
     ) -> tuple[int, ...]:
         return _unique_ports(value)
 
+    @model_validator(mode="after")
+    def require_supported_console_runtime(self) -> WorkerCreateRequest:
+        if self.console_enabled and self.runtime not in {"copaw", "qwenpaw"}:
+            raise ValueError(
+                "Worker console is supported only by copaw and qwenpaw",
+            )
+        return self
+
 
 class WorkerUpdateRequest(_Request):
     name: ResourceName
@@ -110,6 +120,8 @@ class WorkerUpdateRequest(_Request):
     skills: tuple[str, ...] | None = None
     package_uri: str | None = None
     expose: tuple[Port, ...] | None = None
+    console_enabled: bool | None = None
+    console_port: Port | None = None
 
     @field_validator("package_uri")
     @classmethod
@@ -129,6 +141,20 @@ class WorkerUpdateRequest(_Request):
 
     @model_validator(mode="after")
     def require_change(self) -> WorkerUpdateRequest:
+        if self.console_enabled is False and self.console_port is not None:
+            raise ValueError(
+                "console_port cannot be set when console_enabled is false",
+            )
+        if (
+            self.runtime in {"openclaw", "hermes"}
+            and (
+                self.console_enabled is True
+                or self.console_port is not None
+            )
+        ):
+            raise ValueError(
+                "Worker console is supported only by copaw and qwenpaw",
+            )
         changed = (
             self.model,
             self.runtime,
@@ -138,6 +164,8 @@ class WorkerUpdateRequest(_Request):
             self.skills,
             self.package_uri,
             self.expose,
+            self.console_enabled,
+            self.console_port,
         )
         if all(value is None for value in changed):
             raise ValueError("at least one Worker field must change")
@@ -200,6 +228,13 @@ class _ExposedPortPayload(_ExposePayload):
     domain: str = Field(min_length=1)
 
 
+class _ConsolePayload(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    enabled: bool = False
+    port: Port = 8088
+
+
 class _WorkerPayload(BaseModel):
     model_config = ConfigDict(extra="allow", populate_by_name=True)
 
@@ -217,6 +252,7 @@ class _WorkerPayload(BaseModel):
     )
     package_uri: str = Field(default="", alias="package")
     expose: tuple[_ExposePayload, ...] = ()
+    console: _ConsolePayload | None = None
     exposed_ports: tuple[_ExposedPortPayload, ...] = Field(
         default=(),
         alias="exposedPorts",
@@ -248,6 +284,11 @@ class _WorkerPayload(BaseModel):
                     item.port
                     for item in self.expose
                 ],
+                "console": (
+                    self.console.model_dump(mode="json")
+                    if self.console is not None
+                    else None
+                ),
                 "mcpServers": [
                     server.model_dump(mode="json")
                     for server in self.mcp_servers
@@ -449,6 +490,14 @@ class AgtClient:
         _flag(argv, "--package", request.package_uri)
         if request.expose:
             _flag(argv, "--expose", ",".join(map(str, request.expose)))
+        if request.console_enabled:
+            argv.extend(
+                (
+                    "--console",
+                    "--console-port",
+                    str(request.console_port),
+                ),
+            )
         _flag(argv, "--team", request.team)
         _flag(argv, "--role", request.role)
         argv.extend(("--no-wait", "-o", "json"))
@@ -480,6 +529,15 @@ class AgtClient:
                 )
             else:
                 argv.append("--clear-expose")
+        if request.console_enabled is False:
+            argv.append("--no-console")
+        elif (
+            request.console_enabled is True
+            or request.console_port is not None
+        ):
+            argv.append("--console")
+            if request.console_port is not None:
+                argv.extend(("--console-port", str(request.console_port)))
         await self._command(tuple(argv))
         worker = await self.get_worker(request.name)
         if worker is None:

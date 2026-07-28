@@ -420,7 +420,7 @@ class ResourceToolkit:
             ),
             (
                 "update_worker",
-                "Update typed fields on one existing Worker.",
+                "Update one Worker, including CoPaw/QwenPaw console state.",
                 WorkerUpdateRequest,
                 self._update_worker,
                 False,

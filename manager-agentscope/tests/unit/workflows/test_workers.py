@@ -113,10 +113,22 @@ class Controller:
     ) -> WorkerResource:
         self.update_calls.append(request)
         current = self.workers[request.name]
+        spec = dict(current.spec)
+        if request.console_enabled is not None:
+            spec["console"] = {
+                "enabled": request.console_enabled,
+                "port": request.console_port or 8088,
+            }
+        elif request.console_port is not None:
+            spec["console"] = {
+                "enabled": True,
+                "port": request.console_port,
+            }
         changed = current.model_copy(
             update={
                 "model": request.model or current.model,
                 "runtime": request.runtime or current.runtime,
+                "spec": spec,
             },
         )
         self.workers[request.name] = changed
@@ -323,6 +335,38 @@ async def test_update_sleep_wake_and_delete_prove_controller_state() -> None:
     assert controller.delete_calls == ["alice"]
     assert await controller.get_worker("alice") is None
     assert topology.refreshes == 4
+
+
+@pytest.mark.asyncio
+async def test_update_worker_console_proves_controller_state() -> None:
+    controller = Controller()
+    controller.workers["alice"] = WorkerResource(
+        name="alice",
+        runtime="copaw",
+        model="qwen3.6-plus",
+        phase="Running",
+        room_id="!alice:example",
+        spec={"console": {"enabled": False, "port": 8088}},
+    )
+    workflow, _, _, _ = service(controller)
+
+    updated = await workflow.update_worker(
+        WorkerUpdateRequest(
+            name="alice",
+            console_enabled=True,
+            console_port=9090,
+        ),
+        context=context("console"),
+    )
+
+    assert updated.spec["console"] == {"enabled": True, "port": 9090}
+    assert controller.update_calls == [
+        WorkerUpdateRequest(
+            name="alice",
+            console_enabled=True,
+            console_port=9090,
+        ),
+    ]
 
 
 @pytest.mark.asyncio

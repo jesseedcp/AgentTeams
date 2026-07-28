@@ -39,6 +39,7 @@ class WorkerConfig:
         fs_bucket: str = "agentteams-storage",
         install_dir: Optional[Path] = None,
         console_port: int = 8088,
+        console_enabled: bool = True,
         worker_cr_name: Optional[str] = None,
         shared_dir: Optional[Path] = None,
         storage_prefix: Optional[str] = None,
@@ -76,6 +77,7 @@ class WorkerConfig:
             else _join_prefix(storage_root, "shared")
         )
         self.console_port = console_port
+        self.console_enabled = console_enabled
         self.runtime_config_path_override = runtime_config_path
         self.runtime_config_poll_interval = runtime_config_poll_interval
 

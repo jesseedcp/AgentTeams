@@ -154,6 +154,41 @@ func TestCreateWorkerRejectsLegacyTeamOwnershipFlags(t *testing.T) {
 	}
 }
 
+func TestCreateWorkerConsoleFlagsSendDesiredState(t *testing.T) {
+	var got map[string]interface{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/workers" {
+			t.Fatalf("request = %s %s, want POST /api/v1/workers", r.Method, r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{}`)
+	}))
+	t.Cleanup(server.Close)
+	t.Setenv("AGENTTEAMS_CONTROLLER_URL", server.URL)
+	t.Setenv("AGENTTEAMS_AUTH_TOKEN", "")
+	t.Setenv("AGENTTEAMS_AUTH_TOKEN_FILE", "")
+
+	cmd := createWorkerCmd()
+	cmd.SetArgs([]string{
+		"--name", "alice",
+		"--runtime", "copaw",
+		"--console",
+		"--console-port", "9090",
+		"--no-wait",
+	})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("create worker: %v", err)
+	}
+
+	console, ok := got["console"].(map[string]interface{})
+	if !ok || console["enabled"] != true || console["port"] != float64(9090) {
+		t.Fatalf("console payload = %#v", got["console"])
+	}
+}
+
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (fn roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {

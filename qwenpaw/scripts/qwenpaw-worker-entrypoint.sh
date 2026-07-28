@@ -8,7 +8,8 @@
 #   AGENTTEAMS_FS_ACCESS_KEY - MinIO/OSS access key (required in local mode)
 #   AGENTTEAMS_FS_SECRET_KEY - MinIO/OSS secret key (required in local mode)
 #   AGENTTEAMS_RUNTIME       - "k8s" for controller-managed mc-wrapper storage access
-#   TZ                   - Timezone (optional)
+#   AGENTTEAMS_CONSOLE_PORT - Optional web console port; absent means headless
+#   TZ                      - Timezone (optional)
 
 set -e
 
@@ -20,7 +21,7 @@ WORKER_CR_NAME="${AGENTTEAMS_WORKER_CR_NAME:-${WORKER_NAME}}"
 # install_dir is its parent so install_dir/<name> == HOME.
 INSTALL_DIR="/root/agentteams-fs/agents"
 WORKER_HOME="${AGENTTEAMS_WORKER_HOME:-${INSTALL_DIR}/${WORKER_NAME}}"
-CONSOLE_PORT="${AGENTTEAMS_CONSOLE_PORT:-8088}"
+CONSOLE_PORT="${AGENTTEAMS_CONSOLE_PORT:-}"
 
 log() {
     echo "[agentteams-qwenpaw-worker $(date '+%Y-%m-%d %H:%M:%S')] $1"
@@ -95,8 +96,10 @@ CMD_ARGS=(
     --fs-secret "${FS_SECRET_KEY}"
     --fs-bucket "${FS_BUCKET}"
     --install-dir "${INSTALL_DIR}"
-    --console-port "${CONSOLE_PORT}"
 )
+if [ -n "${CONSOLE_PORT}" ]; then
+    CMD_ARGS+=(--console-port "${CONSOLE_PORT}")
+fi
 
 log "Starting qwenpaw-worker: ${WORKER_NAME}"
 log "  Worker CR name: ${WORKER_CR_NAME}"
@@ -105,6 +108,10 @@ log "  Install dir: ${INSTALL_DIR}"
 log "  Worker home: ${WORKER_HOME}"
 log "  QwenPaw working dir: ${QWENPAW_WORKING_DIR}"
 log "  QwenPaw venv: ${VENV}"
-log "  Console port: ${CONSOLE_PORT}"
+if [ -n "${CONSOLE_PORT}" ]; then
+    log "  Console port: ${CONSOLE_PORT}"
+else
+    log "  Console: disabled"
+fi
 
 exec "${VENV}/bin/qwenpaw-worker" "${CMD_ARGS[@]}"

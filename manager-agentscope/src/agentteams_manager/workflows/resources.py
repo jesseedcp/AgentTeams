@@ -2539,6 +2539,7 @@ def _matches_worker_create(
     worker: WorkerResource,
     request: WorkerCreateRequest,
 ) -> bool:
+    console_enabled, console_port = _worker_console_state(worker)
     return (
         worker.name == request.name
         and worker.runtime == request.runtime
@@ -2567,6 +2568,11 @@ def _matches_worker_create(
             not request.expose
             or tuple(worker.spec.get("expose", ())) == request.expose
         )
+        and console_enabled is request.console_enabled
+        and (
+            not request.console_enabled
+            or console_port == request.console_port
+        )
     )
 
 
@@ -2588,6 +2594,8 @@ def _worker_create_from_resource(
         skills=worker.skills,
         package_uri=str(spec.get("package") or "") or None,
         expose=tuple(int(port) for port in spec.get("expose", ())),
+        console_enabled=_worker_console_state(worker)[0],
+        console_port=_worker_console_state(worker)[1],
     )
 
 
@@ -2602,6 +2610,16 @@ def _matches_worker_update(
     if (
         request.image is not None
         and worker.spec.get("image") != request.image
+    ):
+        return False
+    console_enabled, console_port = _worker_console_state(worker)
+    if (
+        request.console_enabled is not None
+        and console_enabled is not request.console_enabled
+    ):
+        return False
+    if request.console_port is not None and (
+        not console_enabled or console_port != request.console_port
     ):
         return False
     fields: tuple[tuple[object | None, object], ...] = (
@@ -2626,6 +2644,19 @@ def _matches_worker_update(
     ):
         return False
     return True
+
+
+def _worker_console_state(worker: WorkerResource) -> tuple[bool, int]:
+    console = worker.spec.get("console")
+    if not isinstance(console, dict):
+        return False, 8088
+    enabled = bool(console.get("enabled", False))
+    raw_port = console.get("port", 8088)
+    try:
+        port = int(raw_port)
+    except (TypeError, ValueError):
+        port = 8088
+    return enabled, port
 
 
 def _matches_human_create(

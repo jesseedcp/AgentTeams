@@ -118,6 +118,23 @@ spec:
                         enum: [http, grpc]
                         default: http
                         description: Protocol (default http)
+                console:
+                  type: object
+                  required: [enabled]
+                  description: >
+                    Optional CoPaw/QwenPaw web console desired state. The
+                    console is disabled when this object is absent or enabled
+                    is false. Publishing the port externally remains a
+                    separate spec.expose operation.
+                  properties:
+                    enabled:
+                      type: boolean
+                      description: Whether the runtime web console is started.
+                    port:
+                      type: integer
+                      minimum: 1
+                      maximum: 65535
+                      description: Console container port; defaults to 8088.
                 channelPolicy:
                   type: object
                   description: "Additive/subtractive overrides for communication policies (on top of defaults)"
