@@ -49,6 +49,15 @@
       ]
     },
     {
+      "name": "higress-gateway-management",
+      "skillFile": "manager/agent/skills/higress-gateway-management/SKILL.md",
+      "tools": ["list_gateway_resources", "get_gateway_resource", "upsert_gateway_resource", "delete_gateway_resource"],
+      "evidence": [
+        "manager-agentscope/tests/integration/test_gateway_management.py",
+        "manager-agentscope/tests/unit/workflows/test_gateway.py"
+      ]
+    },
+    {
       "name": "matrix-server-management",
       "skillFile": "manager/agent/skills/matrix-server-management/SKILL.md",
       "tools": ["list_matrix_rooms", "list_matrix_members", "lookup_matrix_user", "register_matrix_user", "get_matrix_room_state", "upload_matrix_media", "download_matrix_media", "invite_matrix_user", "kick_matrix_user", "ban_matrix_user", "unban_matrix_user"],

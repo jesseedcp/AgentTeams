@@ -52,7 +52,7 @@ class _ListMCPInput(_Input):
 
 SecretReference = Annotated[
     str,
-    Field(pattern=r"^[A-Z][A-Z0-9_]{2,127}$"),
+    Field(pattern=r"^env:[A-Z][A-Z0-9_]{2,127}$"),
 ]
 
 

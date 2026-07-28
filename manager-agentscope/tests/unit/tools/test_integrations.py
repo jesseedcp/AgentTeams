@@ -4,11 +4,10 @@ import json
 
 import pytest
 from agentscope.permission import PermissionBehavior, PermissionContext
-from pydantic import SecretStr
-
 from agentteams_manager.domain.models import RoomKind, RoomPolicy
 from agentteams_manager.tools.integrations import IntegrationToolkit
 from agentteams_manager.workflows.resources import MutationContext
+from pydantic import SecretStr
 
 
 class Service:
@@ -82,7 +81,7 @@ async def test_admin_mcp_tool_is_closed_confirmed_and_secret_typed() -> None:
         context_provider=_context,
         secret_resolver=lambda reference: SecretStr(
             {
-                "AGENTTEAMS_MCP_GITHUB_TOKEN": "github-secret",
+                "env:AGENTTEAMS_MCP_GITHUB_TOKEN": "github-secret",
             }[reference],
         ),
     )
@@ -115,7 +114,7 @@ async def test_admin_mcp_tool_is_closed_confirmed_and_secret_typed() -> None:
                 "  config:\n"
                 '    accessToken: ""\n'
             ),
-            "credential_ref": "AGENTTEAMS_MCP_GITHUB_TOKEN",
+            "credential_ref": "env:AGENTTEAMS_MCP_GITHUB_TOKEN",
             "service": {
                 "name": "github-api",
                 "domain": "api.github.com",

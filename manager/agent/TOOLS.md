@@ -26,6 +26,7 @@ so optional MCP tools and room-specific restrictions remain truthful.
 - `delegate_task`
 - `delegate_team_task`
 - `delete_channel`
+- `delete_gateway_resource`
 - `delete_human`
 - `delete_project`
 - `delete_task`
@@ -33,6 +34,7 @@ so optional MCP tools and room-specific restrictions remain truthful.
 - `delete_worker`
 - `download_matrix_media`
 - `find_worker`
+- `get_gateway_resource`
 - `get_human`
 - `get_matrix_room_state`
 - `get_project`
@@ -47,6 +49,7 @@ so optional MCP tools and room-specific restrictions remain truthful.
 - `kick_matrix_user`
 - `list_channels`
 - `list_external_contacts`
+- `list_gateway_resources`
 - `list_humans`
 - `list_matrix_members`
 - `list_matrix_rooms`
@@ -84,6 +87,7 @@ so optional MCP tools and room-specific restrictions remain truthful.
 - `update_team`
 - `update_worker`
 - `upload_matrix_media`
+- `upsert_gateway_resource`
 - `wake_worker`
 - `write_host_file`
 

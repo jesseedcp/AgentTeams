@@ -99,6 +99,7 @@ class OperationKind(StrEnum):
     GIT_DELEGATION = "git_delegation"
     FILE_SYNC = "file_sync"
     CONFIGURE_MCP = "configure_mcp"
+    CONFIGURE_GATEWAY = "configure_gateway"
     SWITCH_MODEL = "switch_model"
     UPDATE_MANAGER_IDENTITY = "update_manager_identity"
     PUBLISH_SERVICE = "publish_service"

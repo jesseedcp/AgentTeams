@@ -18,6 +18,7 @@ REQUIRED_MANAGER_SKILLS = frozenset(
         "file-sync-management",
         "git-delegation-management",
         "human-management",
+        "higress-gateway-management",
         "matrix-server-management",
         "mcp-server-management",
         "mcporter",

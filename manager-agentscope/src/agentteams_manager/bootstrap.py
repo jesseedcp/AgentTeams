@@ -85,11 +85,13 @@ from .state.tasks import ProjectGraphRepository, TaskRepository
 from .state.topology import TopologyRepository
 from .tools.channels import ChannelToolkitFactory
 from .tools.configuration import ConfigurationToolkitFactory
+from .tools.gateway import GatewayToolkitFactory
 from .tools.host_files import HostFileAccess, HostFileToolkitFactory
 from .tools.integrations import IntegrationToolkitFactory
 from .tools.resources import ResourceToolkitFactory
 from .tools.storage import FileSyncService
 from .tools.tasks import TaskToolkitFactory
+from .workflows.gateway import GatewayService
 from .workflows.git_delegation import (
     GitDelegationService,
     ProcessingLeaseService,
@@ -624,6 +626,10 @@ def build_application(
         worker_notifications=WorkerNotifier(agt=agt, matrix=matrix),
         runtime_mode=config.runtime_mode,
     )
+    gateway_service = GatewayService(
+        gateway=higress,
+        supervisor=supervisor,
+    )
 
     resource_tools = ResourceToolkitFactory(
         resources=resource_service,
@@ -663,6 +669,11 @@ def build_application(
         ),
         IntegrationToolkitFactory(
             service=integration_service,
+            secret_resolver=_environment_secret,
+            yolo=config.yolo,
+        ),
+        GatewayToolkitFactory(
+            service=gateway_service,
             secret_resolver=_environment_secret,
             yolo=config.yolo,
         ),
@@ -763,6 +774,7 @@ def build_application(
         integration_recovery=IntegrationRecovery(
             operations=operations,
             integrations=integration_service,
+            gateways=gateway_service,
         ),
         notification_recovery=NotificationRecovery(
             operations=operations,
@@ -815,6 +827,9 @@ def build_application(
         OperationKind.PUBLISH_SERVICE,
     ):
         resumers[kind] = integration_service.resume_operation
+    resumers[OperationKind.CONFIGURE_GATEWAY] = (
+        gateway_service.resume_operation
+    )
 
     readiness = ReadinessState()
     admin_service = AdminSnapshotService(

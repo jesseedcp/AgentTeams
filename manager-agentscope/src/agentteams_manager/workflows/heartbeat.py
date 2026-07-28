@@ -169,12 +169,13 @@ class IntegrationOperationResumer(Protocol):
 
 
 class IntegrationRecovery:
-    """Recover only operations owned by the integration boundary."""
+    """Recover operations owned by integration and gateway boundaries."""
 
     _KINDS = frozenset(
         {
             OperationKind.SWITCH_MODEL,
             OperationKind.CONFIGURE_MCP,
+            OperationKind.CONFIGURE_GATEWAY,
             OperationKind.PUBLISH_SERVICE,
         },
     )
@@ -184,9 +185,11 @@ class IntegrationRecovery:
         *,
         operations: TaskOperationReader,
         integrations: IntegrationOperationResumer,
+        gateways: IntegrationOperationResumer | None = None,
     ) -> None:
         self._operations = operations
         self._integrations = integrations
+        self._gateways = gateways
 
     async def reconcile_pending_integrations(
         self,
@@ -202,7 +205,14 @@ class IntegrationRecovery:
         needs_attention: list[str] = []
         for operation in operations:
             try:
-                await self._integrations.resume_operation(operation)
+                if operation.kind is OperationKind.CONFIGURE_GATEWAY:
+                    if self._gateways is None:
+                        raise RecoveryError(
+                            "gateway recovery service is unavailable",
+                        )
+                    await self._gateways.resume_operation(operation)
+                else:
+                    await self._integrations.resume_operation(operation)
             except AmbiguousEffectError:
                 pending.append(operation.operation_id)
             except RecoveryError:

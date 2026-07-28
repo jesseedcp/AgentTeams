@@ -3,7 +3,6 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
-
 from agentteams_manager.domain.errors import (
     AmbiguousEffectError,
     RecoveryError,
@@ -63,21 +62,28 @@ async def test_integration_recovery_routes_only_owned_operation_kinds() -> None:
         _operation("2" * 32, OperationKind.CONFIGURE_MCP),
         _operation("3" * 32, OperationKind.PUBLISH_SERVICE),
     )
+    gateway = _operation("5" * 32, OperationKind.CONFIGURE_GATEWAY)
     ignored = _operation("4" * 32, OperationKind.CREATE_WORKER)
     resumer = Resumer()
+    gateway_resumer = Resumer()
     recovery = IntegrationRecovery(
-        operations=Operations((*owned, ignored)),
+        operations=Operations((*owned, gateway, ignored)),
         integrations=resumer,
+        gateways=gateway_resumer,
     )
 
     report = await recovery.reconcile_pending_integrations()
 
-    assert report.inspected == 3
+    assert report.inspected == 4
     assert report.reconciled == tuple(
         operation.operation_id
-        for operation in owned
+        for operation in (*owned, gateway)
     )
-    assert resumer.calls == list(report.reconciled)
+    assert resumer.calls == [
+        operation.operation_id
+        for operation in owned
+    ]
+    assert gateway_resumer.calls == [gateway.operation_id]
 
 
 @pytest.mark.asyncio

@@ -22,7 +22,7 @@ resources, runtime files, or Worker files directly.
 
 Never ask an administrator to paste an upstream token into Matrix. The
 credential must already exist as an environment or mounted-secret reference
-such as `AGENTTEAMS_MCP_GITHUB_TOKEN`; pass only that reference to
+such as `env:AGENTTEAMS_MCP_GITHUB_TOKEN`; pass only that reference to
 `configure_mcp`. The process resolves it after the AgentScope tool boundary.
 The value may exist in memory while Higress is updated, but never in chat,
 SQLite, MinIO journals, Controller resources, runtime documents, or Worker
