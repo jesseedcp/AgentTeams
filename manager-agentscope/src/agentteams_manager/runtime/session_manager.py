@@ -14,9 +14,12 @@ from agentscope.message import Msg, TextBlock, UserMsg
 from agentscope.state import AgentState
 
 from agentteams_manager.domain.models import InboundEvent, RoomPolicy
-from agentteams_manager.state.sessions import SessionRepository
-from agentteams_manager.tools.base import bind_matrix_turn
 from agentteams_manager.runtime.messages import current_message_text
+from agentteams_manager.state.sessions import (
+    SessionRepository,
+    SessionSettings,
+)
+from agentteams_manager.tools.base import bind_matrix_turn
 
 
 class AgentFactoryPort(Protocol):
@@ -29,6 +32,7 @@ class AgentFactoryPort(Protocol):
         policy: RoomPolicy,
         state: AgentState | None = None,
         model_override: str | None = None,
+        thinking_effort: str | None = None,
     ) -> Any: ...
 
 
@@ -39,6 +43,8 @@ class RoomSession:
     policy_revision: int
     runtime_revision: int
     model_override: str | None = None
+    thinking_effort: str | None = None
+    elevated_mode: str = "off"
     last_event_id: str | None = None
 
 
@@ -47,6 +53,12 @@ class RoomSessionStatus:
     room_id: str
     session_id: str | None
     model_override: str | None
+    thinking_effort: str | None
+    reasoning_visibility: str
+    verbose_mode: str
+    elevated_mode: str
+    queue_mode: str
+    queue_limit: int
     context_messages: int
     summary_characters: int
     summary: str
@@ -67,6 +79,7 @@ class RoomSessionManager:
         self._cache: dict[str, RoomSession] = {}
         self._room_locks: dict[str, asyncio.Lock] = {}
         self._cache_guard = asyncio.Lock()
+        self._active_tasks: dict[str, asyncio.Task[Any]] = {}
         self._session_timezone = session_timezone
         self._now = now or (lambda: datetime.now(UTC))
 
@@ -105,6 +118,8 @@ class RoomSessionManager:
             and cached.policy_revision == policy.revision
             and cached.runtime_revision == runtime_revision
             and cached.model_override == settings.model_override
+            and cached.thinking_effort == settings.thinking_effort
+            and cached.elevated_mode == settings.elevated_mode
         ):
             return cached
 
@@ -118,25 +133,24 @@ class RoomSessionManager:
                 else None
             )
         )
-        if settings.model_override is None:
-            agent = await self._factory.create(
-                room_id,
-                policy,
-                state=state,
-            )
-        else:
-            agent = await self._factory.create(
-                room_id,
-                policy,
-                state=state,
-                model_override=settings.model_override,
-            )
+        create_options: dict[str, Any] = {"state": state}
+        if settings.model_override is not None:
+            create_options["model_override"] = settings.model_override
+        if settings.thinking_effort is not None:
+            create_options["thinking_effort"] = settings.thinking_effort
+        agent = await self._factory.create(
+            room_id,
+            _effective_policy(policy, settings.elevated_mode),
+            **create_options,
+        )
         session = RoomSession(
             agent=agent,
             lock=lock,
             policy_revision=policy.revision,
             runtime_revision=runtime_revision,
             model_override=settings.model_override,
+            thinking_effort=settings.thinking_effort,
+            elevated_mode=settings.elevated_mode,
             last_event_id=(
                 cached.last_event_id
                 if cached is not None
@@ -191,6 +205,12 @@ class RoomSessionManager:
                 policy,
                 lock,
             )
+            task = asyncio.current_task()
+            if task is None:
+                raise RuntimeError("AgentScope turn has no asyncio task")
+            self._active_tasks[event.room_id] = task
+            state_before = session.agent.state.model_copy(deep=True)
+            cancelled = False
             canonical_input = inputs if isinstance(inputs, Msg) else None
             projected_input = canonical_input
             if (
@@ -226,8 +246,14 @@ class RoomSessionManager:
                         if on_event is not None:
                             on_event(item, session.agent.state)
                         yield item
+            except asyncio.CancelledError:
+                cancelled = True
+                session.agent.state = state_before
+                raise
             finally:
-                if canonical_input is not None:
+                if self._active_tasks.get(event.room_id) is task:
+                    self._active_tasks.pop(event.room_id, None)
+                if canonical_input is not None and not cancelled:
                     session.agent.state.context = [
                         (
                             canonical_input
@@ -236,8 +262,9 @@ class RoomSessionManager:
                         )
                         for message in session.agent.state.context
                     ]
-                session.last_event_id = event.event_id
-                await self._save(event.room_id, session)
+                if not cancelled:
+                    session.last_event_id = event.event_id
+                    await self._save(event.room_id, session)
 
     async def _lock_for(self, room_id: str) -> asyncio.Lock:
         lock = self._room_locks.get(room_id)
@@ -260,6 +287,57 @@ class RoomSessionManager:
     async def reset(self, room_id: str) -> None:
         """Drop one parked continuation and its persisted room state."""
         await self._drop_state(room_id)
+
+    async def settings(self, room_id: str) -> SessionSettings:
+        return await self._sessions.settings(
+            room_id,
+            now=self._now(),
+            timezone=self._session_timezone,
+        )
+
+    async def queue_settings(self, room_id: str) -> tuple[str, int]:
+        settings = await self.settings(room_id)
+        return settings.queue_mode, settings.queue_limit
+
+    async def update_settings(
+        self,
+        room_id: str,
+        **changes: Any,
+    ) -> SessionSettings:
+        return await self._sessions.update(
+            room_id,
+            now=self._now(),
+            **changes,
+        )
+
+    async def switch_model(
+        self,
+        room_id: str,
+        policy: RoomPolicy,
+        model_override: str | None,
+    ) -> RoomSessionStatus:
+        """Change only the room model and rebuild while preserving state."""
+        await self.update_settings(
+            room_id,
+            model_override=model_override,
+        )
+        await self.get_or_create(room_id, policy)
+        return await self.status(room_id)
+
+    async def cancel(self, room_id: str) -> bool:
+        """Cancel the in-flight turn for a room and wait for rollback."""
+        task = self._active_tasks.get(room_id)
+        if task is None or task.done():
+            return False
+        if task is asyncio.current_task():
+            task.cancel()
+            return True
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        return True
 
     async def new(
         self,
@@ -372,6 +450,12 @@ class RoomSessionManager:
             room_id=room_id,
             session_id=state.session_id if state is not None else None,
             model_override=settings.model_override,
+            thinking_effort=settings.thinking_effort,
+            reasoning_visibility=settings.reasoning_visibility,
+            verbose_mode=settings.verbose_mode,
+            elevated_mode=settings.elevated_mode,
+            queue_mode=settings.queue_mode,
+            queue_limit=settings.queue_limit,
             context_messages=len(state.context) if state is not None else 0,
             summary_characters=(
                 len(summary)
@@ -454,3 +538,14 @@ class RoomSessionManager:
 def _context_line(message: Any) -> str:
     text = message.get_text_content() or ""
     return f"{message.role}/{message.name}: {text}"[:2_000]
+
+
+def _effective_policy(
+    policy: RoomPolicy,
+    elevated_mode: str,
+) -> RoomPolicy:
+    if elevated_mode == "ask":
+        return policy.model_copy(
+            update={"confirm_tools": policy.allowed_tools},
+        )
+    return policy

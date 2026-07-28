@@ -32,6 +32,30 @@ class RoomKind(StrEnum):
     UNKNOWN = "unknown"
 
 
+class SessionCommandAction(StrEnum):
+    NEW = "new"
+    RESET = "reset"
+    COMPACT = "compact"
+    STATUS = "status"
+    MODEL = "model"
+    MODELS = "models"
+    HELP = "help"
+    COMMANDS = "commands"
+    STOP = "stop"
+    THINK = "think"
+    REASONING = "reasoning"
+    VERBOSE = "verbose"
+    ELEVATED = "elevated"
+    QUEUE = "queue"
+    UNKNOWN = "unknown"
+
+
+class SessionCommand(FrozenStrictModel):
+    action: SessionCommandAction
+    arguments: tuple[str, ...] = ()
+    source_name: str
+
+
 class OperationStatus(StrEnum):
     PLANNED = "planned"
     PREPARED = "prepared"

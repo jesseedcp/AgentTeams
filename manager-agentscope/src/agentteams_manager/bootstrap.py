@@ -15,8 +15,11 @@ from urllib.parse import urlsplit
 
 from pydantic import SecretStr
 
-from .application import ManagerApplication
 from .admin.service import AdminSnapshotService
+from .application import ManagerApplication
+from .channels.http_providers import HttpChannelAdapter
+from .channels.matrix import MatrixChannelEscalation
+from .channels.service import ChannelService, ExternalContactRepository
 from .clients.agt import AgtClient
 from .clients.git import GitClient
 from .clients.higress import HigressClient
@@ -31,9 +34,6 @@ from .clients.model_gateway import (
 )
 from .clients.nacos import NacosClient
 from .clients.process import ProcessRunner
-from .channels.http_providers import HttpChannelAdapter
-from .channels.matrix import MatrixChannelEscalation
-from .channels.service import ChannelService, ExternalContactRepository
 from .config import (
     ManagerConfig,
     PromptSources,
@@ -82,8 +82,8 @@ from .state.recovery import RecoveryCoordinator
 from .state.sessions import SessionRepository
 from .state.tasks import ProjectGraphRepository, TaskRepository
 from .state.topology import TopologyRepository
-from .tools.configuration import ConfigurationToolkitFactory
 from .tools.channels import ChannelToolkitFactory
+from .tools.configuration import ConfigurationToolkitFactory
 from .tools.host_files import HostFileAccess, HostFileToolkitFactory
 from .tools.integrations import IntegrationToolkitFactory
 from .tools.resources import ResourceToolkitFactory
@@ -449,10 +449,11 @@ def build_application(
 
     agt = AgtClient(ProcessRunner(allowed_executables=("agt",)))
     git = GitClient(ProcessRunner(allowed_executables=("git",)))
+    known_models = _load_known_models()
     model_gateway = ModelGatewayClient(
         base_url=config.ai_gateway_url,
         api_key=config.gateway_key,
-        known_models=_load_known_models(),
+        known_models=known_models,
     )
     nacos = NacosClient.from_environment()
     higress = _higress_client(config)
@@ -697,6 +698,10 @@ def build_application(
         media=MatrixMedia(matrix),
         memory=memory_repository,
         metrics=metrics,
+        known_models={
+            name: capabilities.reasoning
+            for name, capabilities in known_models.items()
+        },
     )
     policy = RoomPolicyResolver(
         topology=topology,
@@ -708,6 +713,9 @@ def build_application(
         claims=operations,
         resolver=policy,
         handler=runner.handle,
+        control_handler=runner.handle_control,
+        queue_settings=sessions.queue_settings,
+        interrupt_handler=sessions.cancel,
     )
     matrix_runtime = MatrixRuntime(
         matrix=matrix,

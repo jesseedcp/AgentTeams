@@ -10,6 +10,7 @@ from agentscope.event import (
     DataBlockDeltaEvent,
     RequireUserConfirmEvent,
     TextBlockDeltaEvent,
+    ThinkingBlockDeltaEvent,
     ToolCallEndEvent,
     ToolCallStartEvent,
     ToolResultDataDeltaEvent,
@@ -40,6 +41,7 @@ class StreamProjection:
     media: tuple[ProjectedMedia, ...]
     pending_confirmations: tuple[ToolCallBlock, ...]
     confirmation_reply_id: str | None = None
+    thinking_observed: bool = False
 
 
 class EventStreamProjector:
@@ -52,11 +54,14 @@ class EventStreamProjector:
         self._media: list[ProjectedMedia] = []
         self._confirmations: list[ToolCallBlock] = []
         self._confirmation_reply_id: str | None = None
+        self._thinking_observed = False
 
     async def accept(self, event: AgentEvent) -> StreamProjection:
         """Apply one public event and return the current projection."""
         if isinstance(event, TextBlockDeltaEvent):
             self._text.append(event.delta)
+        elif isinstance(event, ThinkingBlockDeltaEvent):
+            self._thinking_observed = True
         elif isinstance(event, ToolCallStartEvent):
             self._tools[event.tool_call_id] = ProjectedToolCall(
                 tool_call_id=event.tool_call_id,
@@ -115,6 +120,7 @@ class EventStreamProjector:
             media=tuple(self._media),
             pending_confirmations=tuple(self._confirmations),
             confirmation_reply_id=self._confirmation_reply_id,
+            thinking_observed=self._thinking_observed,
         )
 
     async def consume(

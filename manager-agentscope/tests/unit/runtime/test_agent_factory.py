@@ -2,8 +2,6 @@ from pathlib import Path
 
 import pytest
 from agentscope.tool import Toolkit
-from pydantic import SecretStr
-
 from agentteams_manager.config import (
     ManagerConfig,
     PromptSources,
@@ -13,6 +11,7 @@ from agentteams_manager.domain.models import RoomKind, RoomPolicy
 from agentteams_manager.runtime.agent_factory import AgentFactory
 from agentteams_manager.runtime.prompts import PromptBuilder
 from agentteams_manager.tools.base import ManagerTool
+from pydantic import SecretStr
 
 
 class EmptyToolkitFactory:
@@ -128,6 +127,39 @@ async def test_factory_creates_direct_agentscope_agent(
     assert agent.state.session_id == "matrix:!room:example"
     assert agent.model.model == "qwen3.6-plus"
     assert agent.model.context_size == 150_000
+
+
+@pytest.mark.asyncio
+async def test_factory_applies_room_thinking_effort_to_model(
+    tmp_path: Path,
+) -> None:
+    factory = AgentFactory(
+        config=manager_config(tmp_path),
+        runtime=runtime_document(),
+        prompt_builder=PromptBuilder(Path("manager/agent")),
+        toolkit_factory=EmptyToolkitFactory(),
+    )
+    policy = RoomPolicy(
+        room_id="!room:example",
+        kind=RoomKind.ADMIN_DM,
+        revision=1,
+    )
+
+    high = await factory.create(
+        "!room:example",
+        policy,
+        thinking_effort="high",
+    )
+    off = await factory.create(
+        "!other:example",
+        policy.model_copy(update={"room_id": "!other:example"}),
+        thinking_effort="off",
+    )
+
+    assert high.model.parameters.thinking_enable is True
+    assert high.model.parameters.reasoning_effort == "high"
+    assert off.model.parameters.thinking_enable is False
+    assert off.model.parameters.reasoning_effort is None
 
 
 @pytest.mark.asyncio

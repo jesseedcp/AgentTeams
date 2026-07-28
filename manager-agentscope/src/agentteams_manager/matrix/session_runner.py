@@ -3,16 +3,14 @@
 from __future__ import annotations
 
 import json
-import re
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 
 from agentscope.event import (
     ConfirmResult,
     RequireUserConfirmEvent,
-    TextBlockDeltaEvent,
     UserConfirmResultEvent,
 )
 from agentscope.message import TextBlock, UserMsg
@@ -27,15 +25,21 @@ from agentteams_manager.domain.models import (
     InboundEvent,
     RoomKind,
     RoomPolicy,
+    SessionCommandAction,
 )
-from agentteams_manager.runtime.event_stream import EventStreamProjector
+from agentteams_manager.runtime.event_stream import (
+    EventStreamProjector,
+    StreamProjection,
+)
 from agentteams_manager.runtime.messages import current_message_text
 from agentteams_manager.runtime.session_manager import RoomSessionManager
 from agentteams_manager.state.confirmations import (
     ConfirmationRequest,
     ConfirmationService,
 )
+from agentteams_manager.state.sessions import SessionSettings
 
+from .commands import parse_session_command
 from .media import MediaAdapter
 from .threads import RoomHistory
 
@@ -111,6 +115,7 @@ class MatrixSessionRunner:
         confirmation_ttl: timedelta = timedelta(minutes=15),
         edit_interval_seconds: float = 0.5,
         metrics: Any | None = None,
+        known_models: Mapping[str, bool] | None = None,
     ) -> None:
         self._sessions = sessions
         self._matrix = matrix
@@ -126,6 +131,7 @@ class MatrixSessionRunner:
         self._confirmation_ttl = confirmation_ttl
         self._edit_interval = edit_interval_seconds
         self._metrics = metrics
+        self._known_models = dict(known_models or {})
 
     async def handle(
         self,
@@ -157,6 +163,26 @@ class MatrixSessionRunner:
             await self._run_user_turn(event, policy)
         finally:
             await self._set_typing(event.room_id, False)
+
+    async def handle_control(
+        self,
+        event: InboundEvent,
+        policy: RoomPolicy,
+    ) -> None:
+        """Handle queue-bypassing commands such as /stop."""
+        if (
+            policy.silent
+            or event.sender_id not in policy.allowed_senders
+        ):
+            return
+        parsed = parse_session_command(event.body)
+        if (
+            parsed is None
+            or parsed.action is not SessionCommandAction.STOP
+        ):
+            return
+        await self._mark_read(event.room_id, event.event_id)
+        await self._send_stop_result(event)
 
     async def _run_user_turn(
         self,
@@ -244,8 +270,19 @@ class MatrixSessionRunner:
         event: InboundEvent,
         policy: RoomPolicy,
     ) -> bool:
+        confirmation_command = _global_confirmation_command(event.body)
+        if confirmation_command is not None:
+            confirmation_action, confirmation_id = confirmation_command
+            if (
+                confirmation_action in {"confirm", "deny"}
+                or (
+                    confirmation_action == "reset"
+                    and confirmation_id is not None
+                )
+            ):
+                return False
         try:
-            parsed = _session_command(event.body)
+            parsed = parse_session_command(event.body)
         except ValueError as error:
             await self._send_session_command_result(
                 event,
@@ -255,7 +292,8 @@ class MatrixSessionRunner:
             return True
         if parsed is None:
             return False
-        action, argument = parsed
+        action = parsed.action
+        arguments = parsed.arguments
         pending = await self._confirmations.pending()
         source_pending = tuple(
             request
@@ -263,20 +301,100 @@ class MatrixSessionRunner:
             if request.source_room_id == event.room_id
         )
         if (
-            action == "reset"
+            action is SessionCommandAction.RESET
             and pending
             and event.sender_id == self._admin_user_id
             and policy.kind is RoomKind.ADMIN_DM
         ):
             return False
-        if action in {"new", "compact"} and source_pending:
+        if (
+            action
+            in {SessionCommandAction.NEW, SessionCommandAction.COMPACT}
+            and source_pending
+        ):
             await self._send_session_command_result(
                 event,
                 "当前会话有操作等待审批，请先批准、拒绝或取消审批。",
                 action=action,
             )
             return True
-        if action == "new":
+        if action is SessionCommandAction.UNKNOWN:
+            await self._send_session_command_result(
+                event,
+                f"未知命令：{parsed.source_name}\n"
+                "使用 /help 查看可用命令。",
+                action="unknown",
+            )
+            return True
+        if action is SessionCommandAction.HELP:
+            await self._send_session_command_result(
+                event,
+                _short_command_help(),
+                action=action,
+            )
+            return True
+        if action is SessionCommandAction.COMMANDS:
+            await self._send_session_command_result(
+                event,
+                _command_catalog(),
+                action=action,
+            )
+            return True
+        if action is SessionCommandAction.MODELS:
+            await self._send_session_command_result(
+                event,
+                self._model_catalog(),
+                action=action,
+            )
+            return True
+        if action is SessionCommandAction.MODEL:
+            await self._handle_model_command(
+                event,
+                policy,
+                arguments[0] if arguments else None,
+            )
+            return True
+        if action is SessionCommandAction.THINK:
+            await self._handle_think_command(
+                event,
+                arguments[0] if arguments else None,
+            )
+            return True
+        if action is SessionCommandAction.REASONING:
+            await self._handle_choice_command(
+                event,
+                field="reasoning_visibility",
+                label="推理摘要显示",
+                value=arguments[0] if arguments else None,
+                choices=frozenset({"off", "on", "stream"}),
+                action=action,
+            )
+            return True
+        if action is SessionCommandAction.VERBOSE:
+            await self._handle_choice_command(
+                event,
+                field="verbose_mode",
+                label="工具摘要详细度",
+                value=arguments[0] if arguments else None,
+                choices=frozenset({"off", "on", "full"}),
+                action=action,
+            )
+            return True
+        if action is SessionCommandAction.ELEVATED:
+            await self._handle_elevated_command(
+                event,
+                policy,
+                arguments[0] if arguments else None,
+            )
+            return True
+        if action is SessionCommandAction.QUEUE:
+            await self._handle_queue_command(event, arguments)
+            return True
+        if action is SessionCommandAction.STOP:
+            await self._send_stop_result(event)
+            return True
+        if action is SessionCommandAction.NEW:
+            argument = arguments[0] if arguments else None
             status = await self._sessions.new(
                 event.room_id,
                 model_override=argument,
@@ -289,7 +407,7 @@ class MatrixSessionRunner:
                 action=action,
             )
             return True
-        if action == "reset":
+        if action is SessionCommandAction.RESET:
             current = await self._sessions.status(event.room_id)
             await self._sessions.new(
                 event.room_id,
@@ -302,7 +420,7 @@ class MatrixSessionRunner:
                 action=action,
             )
             return True
-        if action == "compact":
+        if action is SessionCommandAction.COMPACT:
             status = await self._sessions.compact(event.room_id)
             summary = status.summary.strip() or (
                 f"Session context contains "
@@ -334,6 +452,258 @@ class MatrixSessionRunner:
         await self._send_session_status(event, policy, pending)
         return True
 
+    async def _handle_model_command(
+        self,
+        event: InboundEvent,
+        policy: RoomPolicy,
+        argument: str | None,
+    ) -> None:
+        normalized = argument.lower() if argument is not None else "list"
+        if normalized == "list":
+            await self._send_session_command_result(
+                event,
+                self._model_catalog(),
+                action="model-list",
+            )
+            return
+        if normalized == "status":
+            status = await self._sessions.status(event.room_id)
+            await self._send_session_command_result(
+                event,
+                "当前会话模型："
+                f"{status.model_override or '运行时默认模型'}",
+                action="model-status",
+            )
+            return
+        try:
+            selected = self._resolve_model(argument)
+        except ValueError as error:
+            await self._send_session_command_result(
+                event,
+                f"无法切换模型：{error}",
+                action="model-error",
+            )
+            return
+        status = await self._sessions.switch_model(
+            event.room_id,
+            policy,
+            selected,
+        )
+        await self._send_session_command_result(
+            event,
+            "已切换当前房间模型，原会话上下文已保留。模型："
+            f"{status.model_override or '运行时默认模型'}",
+            action="model",
+        )
+
+    async def _handle_think_command(
+        self,
+        event: InboundEvent,
+        argument: str | None,
+    ) -> None:
+        settings = await self._sessions.settings(event.room_id)
+        if argument is None or argument.lower() == "status":
+            await self._send_session_command_result(
+                event,
+                "当前思考级别："
+                f"{settings.thinking_effort or 'default'}",
+                action="think-status",
+            )
+            return
+        normalized = argument.lower()
+        if normalized == "on":
+            normalized = "medium"
+        selected = None if normalized == "default" else normalized
+        allowed = {"off", "minimal", "low", "medium", "high", "xhigh"}
+        if selected is not None and selected not in allowed:
+            await self._send_session_command_result(
+                event,
+                "思考级别必须是 default、off、minimal、low、"
+                "medium、high 或 xhigh。",
+                action="think-error",
+            )
+            return
+        model = settings.model_override
+        if (
+            selected not in {None, "off"}
+            and model in self._known_models
+            and not self._known_models[model]
+        ):
+            await self._send_session_command_result(
+                event,
+                f"模型 {model} 不支持思考模式，设置未改变。",
+                action="think-error",
+            )
+            return
+        updated = await self._sessions.update_settings(
+            event.room_id,
+            thinking_effort=selected,
+        )
+        await self._send_session_command_result(
+            event,
+            "思考级别已设置为："
+            f"{updated.thinking_effort or 'default'}",
+            action="think",
+        )
+
+    async def _handle_choice_command(
+        self,
+        event: InboundEvent,
+        *,
+        field: str,
+        label: str,
+        value: str | None,
+        choices: frozenset[str],
+        action: SessionCommandAction,
+    ) -> None:
+        settings = await self._sessions.settings(event.room_id)
+        current = str(getattr(settings, field))
+        if value is None or value.lower() == "status":
+            await self._send_session_command_result(
+                event,
+                f"当前{label}：{current}",
+                action=f"{action}-status",
+            )
+            return
+        normalized = value.lower()
+        if normalized not in choices:
+            await self._send_session_command_result(
+                event,
+                f"{label}必须是：{', '.join(sorted(choices))}",
+                action=f"{action}-error",
+            )
+            return
+        updated = await self._sessions.update_settings(
+            event.room_id,
+            **{field: normalized},
+        )
+        await self._send_session_command_result(
+            event,
+            f"{label}已设置为：{getattr(updated, field)}",
+            action=action,
+        )
+
+    async def _handle_elevated_command(
+        self,
+        event: InboundEvent,
+        policy: RoomPolicy,
+        value: str | None,
+    ) -> None:
+        if (
+            event.sender_id != self._admin_user_id
+            or event.sender_id not in policy.allowed_senders
+        ):
+            await self._send_session_command_result(
+                event,
+                "仅管理员可以修改 elevated 确认策略。",
+                action="elevated-denied",
+            )
+            return
+        normalized = value.lower() if value is not None else "status"
+        if normalized == "on":
+            normalized = "ask"
+        await self._handle_choice_command(
+            event,
+            field="elevated_mode",
+            label="elevated 确认策略",
+            value=normalized,
+            choices=frozenset({"off", "ask", "full"}),
+            action=SessionCommandAction.ELEVATED,
+        )
+
+    async def _handle_queue_command(
+        self,
+        event: InboundEvent,
+        arguments: tuple[str, ...],
+    ) -> None:
+        settings = await self._sessions.settings(event.room_id)
+        if not arguments or arguments[0].lower() == "status":
+            await self._send_session_command_result(
+                event,
+                "当前队列："
+                f"{settings.queue_mode}，上限 {settings.queue_limit}",
+                action="queue-status",
+            )
+            return
+        mode = arguments[0].lower()
+        if mode == "queue":
+            mode = "followup"
+        if mode not in {"followup", "collect", "interrupt"}:
+            await self._send_session_command_result(
+                event,
+                "队列模式必须是 followup、collect 或 interrupt。",
+                action="queue-error",
+            )
+            return
+        try:
+            limit = (
+                int(arguments[1])
+                if len(arguments) == 2
+                else settings.queue_limit
+            )
+        except ValueError:
+            limit = 0
+        if not 1 <= limit <= 100:
+            await self._send_session_command_result(
+                event,
+                "队列上限必须是 1 到 100 的整数。",
+                action="queue-error",
+            )
+            return
+        updated = await self._sessions.update_settings(
+            event.room_id,
+            queue_mode=mode,
+            queue_limit=limit,
+        )
+        await self._send_session_command_result(
+            event,
+            f"队列已设置为 {updated.queue_mode}，"
+            f"上限 {updated.queue_limit}。",
+            action="queue",
+        )
+
+    async def _send_stop_result(self, event: InboundEvent) -> None:
+        stopped = await self._sessions.cancel(event.room_id)
+        text = (
+            "已停止当前任务，未完成的回复不会写入会话历史。"
+            if stopped
+            else "当前没有正在运行的任务。"
+        )
+        await self._send_session_command_result(
+            event,
+            text,
+            action="stop",
+        )
+
+    def _resolve_model(self, argument: str | None) -> str | None:
+        if argument is None:
+            raise ValueError("missing model")
+        normalized = argument.lower()
+        if normalized == "default":
+            return None
+        if argument.isdigit():
+            index = int(argument)
+            models = tuple(self._known_models)
+            if not 1 <= index <= len(models):
+                raise ValueError("model number is outside the list")
+            return models[index - 1]
+        if argument in self._known_models or "/" in argument:
+            return argument
+        raise ValueError(
+            "model is not in the configured list; use /models",
+        )
+
+    def _model_catalog(self) -> str:
+        if not self._known_models:
+            return "当前没有已配置的已知模型。"
+        lines = ["可用模型："]
+        lines.extend(
+            f"{index}. {model}"
+            for index, model in enumerate(self._known_models, start=1)
+        )
+        lines.append("使用 /model <序号|provider/model> 切换。")
+        return "\n".join(lines)
+
     async def _send_session_status(
         self,
         event: InboundEvent,
@@ -347,6 +717,11 @@ class MatrixSessionRunner:
             f"- 房间类型：{policy.kind.value}",
             f"- 会话 ID：{status.session_id or '(尚未创建)'}",
             f"- 模型：{model}",
+            f"- 思考级别：{status.thinking_effort or 'default'}",
+            f"- 推理摘要：{status.reasoning_visibility}",
+            f"- 工具摘要：{status.verbose_mode}",
+            f"- elevated：{status.elevated_mode}",
+            f"- 队列：{status.queue_mode}（上限 {status.queue_limit}）",
             f"- 上下文消息：{status.context_messages}",
             f"- 摘要字符：{status.summary_characters}",
             f"- 下次 04:00 重置：{status.next_reset_at.isoformat()}",
@@ -595,6 +970,7 @@ class MatrixSessionRunner:
         transient_context: str = "",
     ) -> None:
         projector = EventStreamProjector()
+        settings = await self._sessions.settings(event.room_id)
         operation_id = operation_id_for(
             event.room_id,
             event.event_id,
@@ -625,12 +1001,13 @@ class MatrixSessionRunner:
             transient_context=transient_context,
         ):
             projection = await projector.accept(agent_event)
-            if isinstance(agent_event, TextBlockDeltaEvent) and projection.text:
+            visible = _stream_projection_text(projection, settings)
+            if visible and visible != last_sent_text:
                 now = self._monotonic()
                 if sent_event_id is None:
                     sent_event_id = await self._matrix.send_text(
                         event.room_id,
-                        projection.text,
+                        visible,
                         txn_id=matrix_transaction_id(
                             operation_id,
                             sequence,
@@ -638,22 +1015,22 @@ class MatrixSessionRunner:
                         thread_id=event.thread_id,
                     )
                     sequence += 1
-                    last_sent_text = projection.text
+                    last_sent_text = visible
                     last_edit_at = now
                 elif now - last_edit_at >= self._edit_interval:
                     await self._matrix.edit_text(
                         event.room_id,
                         sent_event_id,
-                        projection.text,
+                        visible,
                         txn_id=matrix_transaction_id(
                             operation_id,
                             sequence,
                         ),
                     )
                     sequence += 1
-                    last_sent_text = projection.text
+                    last_sent_text = visible
                     last_edit_at = now
-        final = projector.snapshot().text
+        final = _final_projection_text(projector.snapshot(), settings)
         if final and sent_event_id is None:
             sent_event_id = await self._matrix.send_text(
                 event.room_id,
@@ -789,24 +1166,83 @@ def _global_confirmation_command(
     return action, parts[1] if len(parts) == 2 else None
 
 
-_MODEL_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
+def _short_command_help() -> str:
+    return (
+        "会话命令：\n"
+        "/new [model] · /reset · /compact · /status\n"
+        "/model [list|status|default|序号|provider/model] · /models\n"
+        "/stop · /think · /reasoning · /verbose\n"
+        "/elevated · /queue · /help · /commands"
+    )
 
 
-def _session_command(
-    body: str,
-) -> tuple[str, str | None] | None:
-    parts = body.strip().split()
-    if not parts:
-        return None
-    command = parts[0].lower()
-    if command == "/new" and len(parts) <= 2:
-        model = parts[1] if len(parts) == 2 else None
-        if model is not None and _MODEL_NAME.fullmatch(model) is None:
-            raise ValueError("invalid model name")
-        return "new", model
-    if command in {"/reset", "/compact", "/status"} and len(parts) == 1:
-        return command[1:], None
-    return None
+def _command_catalog() -> str:
+    return (
+        "完整命令目录：\n"
+        "- /new [model]：新建空白会话\n"
+        "- /reset：清空上下文并保留房间设置\n"
+        "- /compact：压缩旧上下文\n"
+        "- /status：查看会话状态\n"
+        "- /model、/models：列出、查看或切换模型\n"
+        "- /stop：立即取消当前运行\n"
+        "- /think <default|off|minimal|low|medium|high|xhigh>\n"
+        "- /reasoning <off|on|stream>：只显示安全推理状态\n"
+        "- /verbose <off|on|full>：控制工具执行摘要\n"
+        "- /elevated <off|ask|full>：管理员确认策略\n"
+        "- /queue <followup|collect|interrupt> [1-100]\n"
+        "- /help：简要帮助\n"
+        "- /commands：本目录"
+    )
+
+
+def _stream_projection_text(
+    projection: StreamProjection,
+    settings: SessionSettings,
+) -> str:
+    text = projection.text
+    if (
+        not text
+        and projection.thinking_observed
+        and settings.reasoning_visibility == "stream"
+    ):
+        text = "模型正在推理（内部思维内容不会公开）…"
+    if settings.verbose_mode == "full" and projection.tool_calls:
+        text = _append_public_section(
+            text,
+            _tool_summary(projection),
+        )
+    return text
+
+
+def _final_projection_text(
+    projection: StreamProjection,
+    settings: SessionSettings,
+) -> str:
+    text = projection.text
+    if (
+        projection.thinking_observed
+        and settings.reasoning_visibility in {"on", "stream"}
+    ):
+        text = _append_public_section(
+            text,
+            "推理摘要：模型使用了推理模式；内部思维内容未公开。",
+        )
+    if settings.verbose_mode in {"on", "full"} and projection.tool_calls:
+        text = _append_public_section(text, _tool_summary(projection))
+    return text
+
+
+def _tool_summary(projection: StreamProjection) -> str:
+    lines = ["工具执行："]
+    lines.extend(
+        f"- {tool.name} ({tool.state})"
+        for tool in projection.tool_calls
+    )
+    return "\n".join(lines)
+
+
+def _append_public_section(text: str, section: str) -> str:
+    return f"{text}\n\n{section}" if text else section
 
 
 def _approval_prompt(request: ConfirmationRequest) -> str:

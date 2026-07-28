@@ -1,6 +1,15 @@
 """Initial SQLite schema for durable operations."""
 
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
+
+SESSION_SETTINGS_MIGRATION_COLUMNS = {
+    "thinking_effort": "TEXT",
+    "reasoning_visibility": "TEXT NOT NULL DEFAULT 'off'",
+    "verbose_mode": "TEXT NOT NULL DEFAULT 'off'",
+    "elevated_mode": "TEXT NOT NULL DEFAULT 'off'",
+    "queue_mode": "TEXT NOT NULL DEFAULT 'followup'",
+    "queue_limit": "INTEGER NOT NULL DEFAULT 20",
+}
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS operations (
@@ -52,6 +61,12 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE TABLE IF NOT EXISTS session_settings (
   room_id TEXT PRIMARY KEY,
   model_override TEXT,
+  thinking_effort TEXT,
+  reasoning_visibility TEXT NOT NULL DEFAULT 'off',
+  verbose_mode TEXT NOT NULL DEFAULT 'off',
+  elevated_mode TEXT NOT NULL DEFAULT 'off',
+  queue_mode TEXT NOT NULL DEFAULT 'followup',
+  queue_limit INTEGER NOT NULL DEFAULT 20,
   timezone TEXT NOT NULL,
   next_reset_at TEXT NOT NULL,
   updated_at TEXT NOT NULL

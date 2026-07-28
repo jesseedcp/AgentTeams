@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol, cast
 
 from agentscope.agent import Agent
 from agentscope.credential import OpenAICredential
@@ -13,8 +13,8 @@ from agentscope.tool import Toolkit
 from agentteams_manager.config import ManagerConfig, RuntimeDocument
 from agentteams_manager.domain.models import RoomPolicy
 
-from .prompts import PromptBuilder
 from .config_watcher import RuntimeRegistry
+from .prompts import PromptBuilder
 
 
 class ToolkitFactory(Protocol):
@@ -37,6 +37,16 @@ class MCPRegistryPort(Protocol):
         *,
         active_revision: int,
     ) -> None: ...
+
+
+ReasoningEffort = Literal[
+    "none",
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+]
 
 
 class AgentFactory:
@@ -81,6 +91,7 @@ class AgentFactory:
         policy: RoomPolicy,
         state: AgentState | None = None,
         model_override: str | None = None,
+        thinking_effort: str | None = None,
     ) -> Agent:
         runtime = self._current_runtime()
         credential = OpenAICredential(
@@ -93,7 +104,16 @@ class AgentFactory:
             context_size=runtime.context_window,
             parameters=OpenAIChatModel.Parameters(
                 max_tokens=runtime.max_tokens,
-                thinking_enable=runtime.reasoning,
+                thinking_enable=(
+                    runtime.reasoning
+                    if thinking_effort is None
+                    else thinking_effort != "off"
+                ),
+                reasoning_effort=(
+                    None
+                    if thinking_effort in {None, "off"}
+                    else cast(ReasoningEffort, thinking_effort)
+                ),
             ),
         )
         toolkit = await self._toolkit_factory.for_policy(policy)

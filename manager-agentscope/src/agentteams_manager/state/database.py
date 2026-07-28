@@ -8,7 +8,11 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TypeVar
 
-from .schema import SCHEMA_SQL, SCHEMA_VERSION
+from .schema import (
+    SCHEMA_SQL,
+    SCHEMA_VERSION,
+    SESSION_SETTINGS_MIGRATION_COLUMNS,
+)
 
 T = TypeVar("T")
 
@@ -42,6 +46,20 @@ class Database:
                         f"({current} > {SCHEMA_VERSION})",
                     )
                 connection.executescript(SCHEMA_SQL)
+                columns = {
+                    row["name"]
+                    for row in connection.execute(
+                        "PRAGMA table_info(session_settings)",
+                    )
+                }
+                for name, declaration in (
+                    SESSION_SETTINGS_MIGRATION_COLUMNS.items()
+                ):
+                    if name not in columns:
+                        connection.execute(
+                            "ALTER TABLE session_settings "
+                            f"ADD COLUMN {name} {declaration}",
+                        )
                 connection.execute(
                     f"PRAGMA user_version={SCHEMA_VERSION}",
                 )
@@ -97,4 +115,3 @@ class Database:
 
     async def close(self) -> None:
         """Connections are transaction-scoped, so shutdown needs no action."""
-
