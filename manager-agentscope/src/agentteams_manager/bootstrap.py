@@ -746,6 +746,7 @@ def build_application(
     policy = RoomPolicyResolver(
         topology=topology,
         admin_user_id=config.admin_user_id,
+        admin_room_id=config.manager_admin_room_id,
         manager_user_id=config.manager_user_id,
         revision=topology.revision,
     )

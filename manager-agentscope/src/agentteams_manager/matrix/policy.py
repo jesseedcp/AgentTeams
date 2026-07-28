@@ -260,11 +260,13 @@ class RoomPolicyResolver:
         *,
         topology: TopologyReader,
         admin_user_id: str,
+        admin_room_id: str | None = None,
         manager_user_id: str = "@manager:local",
         revision: int | RevisionProvider = 1,
     ) -> None:
         self._topology = topology
         self._admin_user_id = admin_user_id
+        self._admin_room_id = admin_room_id
         self._manager_user_id = manager_user_id
         self._revision = revision
 
@@ -282,7 +284,14 @@ class RoomPolicyResolver:
                 revision,
                 force_silent=True,
             )
-        if event.is_direct and event.sender_id == self._admin_user_id:
+        configured_admin_room = (
+            self._admin_room_id is not None
+            and event.room_id == self._admin_room_id
+        )
+        if (
+            event.sender_id == self._admin_user_id
+            and (event.is_direct or configured_admin_room)
+        ):
             return RoomPolicy(
                 room_id=event.room_id,
                 kind=RoomKind.ADMIN_DM,

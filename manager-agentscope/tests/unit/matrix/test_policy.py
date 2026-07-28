@@ -98,6 +98,28 @@ async def test_admin_dm_gets_management_tools() -> None:
 
 
 @pytest.mark.asyncio
+async def test_configured_admin_room_survives_empty_direct_room_cache() -> None:
+    resolver = RoomPolicyResolver(
+        topology=FakeTopology(),
+        admin_user_id="@admin:local",
+        admin_room_id="!admin-dm:local",
+    )
+
+    policy = await resolver.resolve(
+        _event(
+            room_id="!admin-dm:local",
+            sender_id="@admin:local",
+            is_direct=False,
+        ),
+    )
+
+    assert not policy.silent
+    assert policy.kind is RoomKind.ADMIN_DM
+    assert policy.allowed_senders == frozenset({"@admin:local"})
+    assert "create_worker" in policy.allowed_tools
+
+
+@pytest.mark.asyncio
 async def test_worker_identity_gets_only_worker_room_tools() -> None:
     binding = SimpleNamespace(
         room_kind=RoomKind.WORKER_ROOM,
