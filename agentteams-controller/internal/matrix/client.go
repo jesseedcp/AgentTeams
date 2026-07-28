@@ -932,6 +932,18 @@ func (c *TuwunelClient) InviteToRoomWithToken(ctx context.Context, roomID, userI
 		if strings.Contains(lower, "already in") || strings.Contains(lower, "already a member") {
 			return nil
 		}
+		members, listErr := c.ListRoomMembersWithToken(
+			ctx,
+			roomID,
+			inviterToken,
+		)
+		if listErr == nil {
+			for _, member := range members {
+				if member.UserID == userID {
+					return nil
+				}
+			}
+		}
 	}
 	return fmt.Errorf("invite %s to %s: HTTP %d %s %s: %s",
 		userID, roomID, statusCode, resp.ErrCode, resp.Error, truncate(respBody, 500))

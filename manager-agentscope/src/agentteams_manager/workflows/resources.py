@@ -274,6 +274,8 @@ class ResourceController(ReconciliationController, Protocol):
 
 
 class ResourceSupervisor(Protocol):
+    async def get(self, operation_id: str) -> OperationRecord | None: ...
+
     async def begin(
         self,
         *,
@@ -1108,7 +1110,8 @@ class ResourceService:
         *,
         context: MutationContext,
     ) -> None:
-        await self._require_worker(name)
+        if await self._supervisor.get(context.operation_id) is None:
+            await self._require_worker(name)
 
         async def mutate() -> None:
             await self._controller.delete_worker(name)
@@ -1160,21 +1163,29 @@ class ResourceService:
         *,
         context: MutationContext,
     ) -> tuple[str, ...]:
+        recorded_operation = await self._supervisor.get(
+            context.operation_id,
+        )
         existing = await self._controller.get_team(name)
         current_members = (
             (existing.leader, *existing.workers)
             if existing is not None
             else ()
         )
+        request: dict[str, object]
+        if recorded_operation is not None:
+            request = recorded_operation.request
+        else:
+            request = {
+                "name": name,
+                "action": "delete",
+                "preserved_workers": list(current_members),
+            }
         operation = await self._supervisor.begin(
             operation_id=context.operation_id,
             kind=OperationKind.DELETE_TEAM,
             target_key=f"team/{name}",
-            request={
-                "name": name,
-                "action": "delete",
-                "preserved_workers": list(current_members),
-            },
+            request=request,
         )
         recorded_members = operation.request.get("preserved_workers", ())
         preserved_workers = tuple(

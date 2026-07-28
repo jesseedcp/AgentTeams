@@ -26,13 +26,13 @@ grep -q 'app.kubernetes.io/name: agentteams' "${render}"
 grep -q 'name: AGENTTEAMS_MANAGER_RUNTIME' "${render}"
 grep -q 'value: "agentscope"' "${render}"
 grep -q 'name: AGENTTEAMS_MANAGER_IMAGE' "${render}"
-grep -Fq '"codingCLI":{"enabled":false' "${render}"
+grep -Fq '\"codingCLI\":{\"enabled\":false' "${render}"
 grep -q 'name: AGENTTEAMS_WORKER_IMAGE' "${render}"
 grep -q 'name: AGENTTEAMS_COPAW_WORKER_IMAGE' "${render}"
 grep -q 'name: AGENTTEAMS_HERMES_WORKER_IMAGE' "${render}"
 grep -q 'name: AGENTTEAMS_QWENPAW_WORKER_IMAGE' "${render}"
 ! grep -qi 'open''human' "${render}"
-grep -q 'agentteams/agentteams-qwenpaw-worker:' "${render}"
+grep -q 'ghcr.io/jesseedcp/agentteams-qwenpaw-worker:' "${render}"
 grep -q 'AGENTTEAMS_MCP_GITHUB_TOKEN: "github-test"' "${render}"
 ! grep -q 'agentteams-manager-copaw' "${render}"
 grep -q 'name: agentteams-cinny' "${render}"
@@ -82,9 +82,9 @@ helm template agentteams "${CHART}" "${COMMON_ARGS[@]}" \
     --set manager.codingCLI.providers[0]=claude \
     --set manager.codingCLI.hostPath=/srv/agentteams-coding-cli \
     > "${coding_render}"
-grep -Fq '"enabled":true' "${coding_render}"
-grep -Fq '"providers":["claude"]' "${coding_render}"
-grep -Fq '"hostPath":"/srv/agentteams-coding-cli"' "${coding_render}"
+grep -Fq '\"enabled\":true' "${coding_render}"
+grep -Fq '\"providers\":[\"claude\"]' "${coding_render}"
+grep -Fq '\"hostPath\":\"/srv/agentteams-coding-cli\"' "${coding_render}"
 
 helm template agentteams "${CHART}" "${CREDENTIAL_ARGS[@]}" \
     -f "${CHART}/values-kind.yaml" \

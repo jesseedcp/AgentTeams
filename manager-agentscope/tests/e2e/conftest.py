@@ -107,6 +107,30 @@ class K8sHarness:
             variable,
         ).strip()
 
+    def wait_for_manager_ready(self, *, timeout: float = 300) -> None:
+        def ready() -> bool:
+            pod = self.try_kubectl_json(
+                "get",
+                "pod",
+                "agentteams-manager",
+            )
+            conditions = (pod or {}).get("status", {}).get(
+                "conditions",
+                (),
+            )
+            return any(
+                item.get("type") == "Ready"
+                and item.get("status") == "True"
+                for item in conditions
+            )
+
+        self.wait(
+            ready,
+            timeout=timeout,
+            interval=2,
+            description="Manager pod readiness",
+        )
+
     def wait(
         self,
         predicate: Callable[[], Any],
@@ -209,6 +233,7 @@ class K8sHarness:
         )
 
     def matrix_context(self) -> tuple[str, str, str]:
+        self.wait_for_manager_ready()
         username = self.pod_env(
             "agentteams-manager",
             "AGENTTEAMS_ADMIN_USER",
@@ -335,14 +360,28 @@ class K8sHarness:
                 raw = response.read()
                 return HTTPResult(
                     response.status,
-                    json.loads(raw) if raw else {},
+                    self._decode_json(raw),
                 )
         except HTTPError as error:
             raw = error.read()
             return HTTPResult(
                 error.code,
-                json.loads(raw) if raw else {},
+                self._decode_json(raw),
             )
+
+    @staticmethod
+    def _decode_json(raw: bytes) -> dict[str, Any]:
+        if not raw:
+            return {}
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            return {
+                "error": {
+                    "code": "non_json_response",
+                    "message": raw.decode("utf-8", errors="replace"),
+                },
+            }
 
 
 @pytest.fixture(scope="session")

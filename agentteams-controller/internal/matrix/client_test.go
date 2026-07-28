@@ -658,6 +658,74 @@ func TestInviteToRoom_Idempotent(t *testing.T) {
 	}
 }
 
+func TestInviteToRoom_TuwunelJoinedOrBannedChecksMembership(t *testing.T) {
+	for _, tt := range []struct {
+		name       string
+		membership string
+		wantError  bool
+	}{
+		{name: "already joined", membership: "join"},
+		{name: "banned", membership: "ban", wantError: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var memberChecks atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(
+				func(w http.ResponseWriter, r *http.Request) {
+					switch r.URL.Path {
+					case "/_matrix/client/v3/login":
+						adminLoginHandler(t, w)
+					case "/_matrix/client/v3/rooms/!room:d/invite":
+						w.WriteHeader(http.StatusForbidden)
+						_ = json.NewEncoder(w).Encode(map[string]string{
+							"errcode": "M_FORBIDDEN",
+							"error": "Auth check failed: cannot invite user " +
+								"that is joined or banned",
+						})
+					case "/_matrix/client/v3/rooms/!room:d/members":
+						memberChecks.Add(1)
+						_ = json.NewEncoder(w).Encode(map[string]interface{}{
+							"chunk": []map[string]interface{}{
+								{
+									"state_key": "@alice:d",
+									"content": map[string]string{
+										"membership": tt.membership,
+									},
+								},
+							},
+						})
+					default:
+						t.Errorf("unexpected path: %s", r.URL.Path)
+						w.WriteHeader(http.StatusNotFound)
+					}
+				},
+			))
+			defer server.Close()
+
+			c := NewTuwunelClient(Config{
+				ServerURL: server.URL, Domain: "d",
+				AdminUser: "admin", AdminPassword: "pw",
+			}, server.Client())
+			err := c.InviteToRoom(
+				context.Background(),
+				"!room:d",
+				"@alice:d",
+			)
+			if tt.wantError && err == nil {
+				t.Fatal("expected banned membership to remain an error")
+			}
+			if !tt.wantError && err != nil {
+				t.Fatalf("already joined must be idempotent: %v", err)
+			}
+			if memberChecks.Load() != 1 {
+				t.Fatalf(
+					"member checks = %d, want 1",
+					memberChecks.Load(),
+				)
+			}
+		})
+	}
+}
+
 func TestInviteToRoom_RealError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

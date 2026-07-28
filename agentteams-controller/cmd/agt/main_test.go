@@ -12,6 +12,57 @@ import (
 	sigyaml "sigs.k8s.io/yaml"
 )
 
+func TestApplyReadsDashFileFromStdin(t *testing.T) {
+	var updated map[string]interface{}
+	server := httptest.NewServer(http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.Method == http.MethodGet &&
+				r.URL.Path == "/api/v1/teams/release":
+				_, _ = w.Write([]byte(`{"name":"release"}`))
+			case r.Method == http.MethodPut &&
+				r.URL.Path == "/api/v1/teams/release":
+				if err := json.NewDecoder(r.Body).Decode(&updated); err != nil {
+					t.Errorf("decode update: %v", err)
+				}
+				_, _ = w.Write([]byte(`{"name":"release"}`))
+			default:
+				t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+				http.NotFound(w, r)
+			}
+		},
+	))
+	defer server.Close()
+	t.Setenv("AGENTTEAMS_CONTROLLER_URL", server.URL)
+	t.Setenv("AGENTTEAMS_AUTH_TOKEN", "")
+	t.Setenv("AGENTTEAMS_AUTH_TOKEN_FILE", "")
+
+	cmd := applyCmd()
+	cmd.SetArgs([]string{"-f", "-"})
+	cmd.SetIn(strings.NewReader(`
+apiVersion: agentteams.io/v1beta1
+kind: Team
+metadata:
+  name: release
+spec:
+  leaderName: alice
+  workerNames:
+    - bob
+  description: Release team
+`))
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("apply stdin: %v", err)
+	}
+	if updated["leaderName"] != "alice" ||
+		updated["description"] != "Release team" {
+		t.Fatalf("updated team = %#v", updated)
+	}
+	workers, ok := updated["workerNames"].([]interface{})
+	if !ok || len(workers) != 1 || workers[0] != "bob" {
+		t.Fatalf("workerNames = %#v, want [bob]", updated["workerNames"])
+	}
+}
+
 func TestUpdateManagerMCPServersFromStdin(t *testing.T) {
 	req := runMCPUpdateCommand(
 		t,
@@ -206,6 +257,59 @@ func TestGetResponseTypesPreserveSkillsAndMCPServers(t *testing.T) {
 	}
 	if len(manager.McpServers) != 1 || manager.McpServers[0].Name != "jira" {
 		t.Fatalf("manager mcpServers = %#v", manager.McpServers)
+	}
+}
+
+func TestWorkerResponsePreservesMutableDesiredState(t *testing.T) {
+	data := []byte(`{
+		"name":"alice",
+		"phase":"Running",
+		"workerName":"alice-runtime",
+		"identity":"Release lead",
+		"soul":"Be concise",
+		"agents":"Delegate reviews",
+		"package":"nacos://registry/public/workers/alice",
+		"expose":[{"port":8080}],
+		"console":{"enabled":true,"port":9090},
+		"containerManaged":true,
+		"state":"Running",
+		"backendRuntime":"docker"
+	}`)
+	var worker workerResp
+	if err := json.Unmarshal(data, &worker); err != nil {
+		t.Fatalf("decode worker: %v", err)
+	}
+	encoded, err := json.Marshal(worker)
+	if err != nil {
+		t.Fatalf("encode worker: %v", err)
+	}
+	var output map[string]interface{}
+	if err := json.Unmarshal(encoded, &output); err != nil {
+		t.Fatalf("decode forwarded worker: %v", err)
+	}
+
+	want := map[string]interface{}{
+		"workerName":       "alice-runtime",
+		"identity":         "Release lead",
+		"soul":             "Be concise",
+		"agents":           "Delegate reviews",
+		"package":          "nacos://registry/public/workers/alice",
+		"containerManaged": true,
+		"state":            "Running",
+		"backendRuntime":   "docker",
+	}
+	for key, value := range want {
+		if output[key] != value {
+			t.Errorf("%s = %#v, want %#v", key, output[key], value)
+		}
+	}
+	expose, ok := output["expose"].([]interface{})
+	if !ok || len(expose) != 1 {
+		t.Fatalf("expose = %#v, want one port", output["expose"])
+	}
+	console, ok := output["console"].(map[string]interface{})
+	if !ok || console["enabled"] != true || console["port"] != float64(9090) {
+		t.Fatalf("console = %#v, want enabled port 9090", output["console"])
 	}
 }
 

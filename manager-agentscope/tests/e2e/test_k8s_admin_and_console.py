@@ -17,6 +17,7 @@ def test_admin_crud_confirmations_and_worker_console(
     if not k8s_harness.enabled:
         _assert_static_admin_contract()
         return
+    k8s_harness.wait_for_manager_ready()
 
     suffix = uuid.uuid4().hex[:8]
     leader = f"e2e-lead-{suffix}"
@@ -203,6 +204,7 @@ def test_admin_crud_confirmations_and_worker_console(
             "team",
             team,
             "--ignore-not-found=true",
+            "--wait=false",
             check=False,
         )
         for name in (member, leader):
@@ -211,6 +213,7 @@ def test_admin_crud_confirmations_and_worker_console(
                 "worker",
                 name,
                 "--ignore-not-found=true",
+                "--wait=false",
                 check=False,
             )
 

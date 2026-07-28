@@ -323,13 +323,25 @@ class MatrixClient:
         client = self._ensure_client()
         since = await self._state.get_value("matrix.sync_token")
         try:
+            if self._needs_full_state and since is not None:
+                hydration = await client.sync(
+                    timeout=0,
+                    since=None,
+                    full_state=True,
+                )
+                if _is_unknown_token(hydration):
+                    raise MatrixUnknownTokenError("M_UNKNOWN_TOKEN")
+                if not hasattr(hydration, "next_batch"):
+                    raise RuntimeError(
+                        f"Matrix room hydration failed: {hydration}",
+                    )
             response = await client.sync(
                 timeout=self.config.sync_timeout_ms,
                 since=since,
-                # The durable cursor survives a Pod restart, but nio's room
-                # membership cache does not. Rehydrate full room state on the
-                # first sync while still resuming the timeline from `since`.
-                full_state=self._needs_full_state,
+                # A fresh account has no cursor, so this first response also
+                # hydrates nio's in-memory room cache. Restarts hydrate above
+                # before safely resuming the durable incremental cursor.
+                full_state=self._needs_full_state and since is None,
             )
         except Exception as exc:
             if _is_unknown_token(exc):

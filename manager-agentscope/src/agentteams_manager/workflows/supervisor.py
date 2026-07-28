@@ -66,6 +66,9 @@ class OperationSupervisor:
         self._locks_guard = asyncio.Lock()
         self._journal_guard = asyncio.Lock()
 
+    async def get(self, operation_id: str) -> OperationRecord | None:
+        return await self._operations.get(operation_id)
+
     async def begin(
         self,
         *,

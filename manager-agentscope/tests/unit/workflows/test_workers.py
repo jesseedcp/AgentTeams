@@ -25,6 +25,7 @@ from agentteams_manager.workflows.resources import (
 class Supervisor:
     def __init__(self) -> None:
         self.statuses: dict[str, OperationStatus] = {}
+        self.records: dict[str, SimpleNamespace] = {}
         self.last_operation_id = ""
         self.calls: list[tuple[str, object]] = []
 
@@ -40,13 +41,24 @@ class Supervisor:
             operation_id,
             OperationStatus.PLANNED,
         )
-        return SimpleNamespace(
-            operation_id=operation_id,
-            kind=kwargs["kind"],
-            target_key=kwargs["target_key"],
-            request=kwargs["request"],
-            status=status,
-        )
+        record = self.records.get(operation_id)
+        if record is None:
+            record = SimpleNamespace(
+                operation_id=operation_id,
+                kind=kwargs["kind"],
+                target_key=kwargs["target_key"],
+                request=kwargs["request"],
+                status=status,
+            )
+            self.records[operation_id] = record
+        record.status = status
+        return record
+
+    async def get(self, operation_id: str) -> object | None:
+        record = self.records.get(operation_id)
+        if record is not None:
+            record.status = self.statuses[operation_id]
+        return record
 
     async def before_effect(self, *args: object) -> object:
         self.calls.append(("before", args))
@@ -335,6 +347,26 @@ async def test_update_sleep_wake_and_delete_prove_controller_state() -> None:
     assert controller.delete_calls == ["alice"]
     assert await controller.get_worker("alice") is None
     assert topology.refreshes == 4
+
+
+@pytest.mark.asyncio
+async def test_delete_worker_retry_succeeds_after_worker_disappears() -> None:
+    controller = Controller()
+    controller.workers["alice"] = WorkerResource(
+        name="alice",
+        runtime="qwenpaw",
+        model="qwen3.6-plus",
+        phase="Running",
+        room_id="!alice:example",
+    )
+    workflow, _, _, topology = service(controller)
+    mutation = context("delete-retry")
+
+    await workflow.delete_worker("alice", context=mutation)
+    await workflow.delete_worker("alice", context=mutation)
+
+    assert controller.delete_calls == ["alice"]
+    assert topology.refreshes == 1
 
 
 @pytest.mark.asyncio

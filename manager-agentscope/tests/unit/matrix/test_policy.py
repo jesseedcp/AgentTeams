@@ -95,6 +95,7 @@ async def test_admin_dm_gets_management_tools() -> None:
 
     assert policy.kind is RoomKind.ADMIN_DM
     assert "create_worker" in policy.allowed_tools
+    assert policy.resource_scope_all
 
 
 @pytest.mark.asyncio
@@ -117,6 +118,7 @@ async def test_configured_admin_room_survives_empty_direct_room_cache() -> None:
     assert policy.kind is RoomKind.ADMIN_DM
     assert policy.allowed_senders == frozenset({"@admin:local"})
     assert "create_worker" in policy.allowed_tools
+    assert policy.resource_scope_all
 
 
 @pytest.mark.asyncio

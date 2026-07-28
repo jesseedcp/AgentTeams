@@ -287,19 +287,53 @@ func getManagersCmd() *cobra.Command {
 // ---------------------------------------------------------------------------
 
 type workerResp struct {
-	Name           string          `json:"name"`
-	Phase          string          `json:"phase"`
-	Model          string          `json:"model,omitempty"`
-	Runtime        string          `json:"runtime,omitempty"`
-	Image          string          `json:"image,omitempty"`
-	ContainerState string          `json:"containerState,omitempty"`
-	MatrixUserID   string          `json:"matrixUserID,omitempty"`
-	RoomID         string          `json:"roomID,omitempty"`
-	Message        string          `json:"message,omitempty"`
-	Team           string          `json:"team,omitempty"`
-	Role           string          `json:"role,omitempty"`
-	Skills         []string        `json:"skills,omitempty"`
-	McpServers     []mcpServerSpec `json:"mcpServers,omitempty"`
+	Name             string                   `json:"name"`
+	WorkerName       string                   `json:"workerName,omitempty"`
+	Phase            string                   `json:"phase"`
+	ContainerManaged bool                     `json:"containerManaged"`
+	State            string                   `json:"state,omitempty"`
+	Model            string                   `json:"model,omitempty"`
+	Runtime          string                   `json:"runtime,omitempty"`
+	Image            string                   `json:"image,omitempty"`
+	Identity         string                   `json:"identity,omitempty"`
+	Soul             string                   `json:"soul,omitempty"`
+	Agents           string                   `json:"agents,omitempty"`
+	Skills           []string                 `json:"skills,omitempty"`
+	McpServers       []mcpServerSpec          `json:"mcpServers,omitempty"`
+	Package          string                   `json:"package,omitempty"`
+	Expose           []workerExposeResp       `json:"expose,omitempty"`
+	Console          *workerConsoleResp       `json:"console,omitempty"`
+	BackendRuntime   string                   `json:"backendRuntime,omitempty"`
+	ChannelPolicy    *workerChannelPolicyResp `json:"channelPolicy,omitempty"`
+	ContainerState   string                   `json:"containerState,omitempty"`
+	MatrixUserID     string                   `json:"matrixUserID,omitempty"`
+	RoomID           string                   `json:"roomID,omitempty"`
+	Message          string                   `json:"message,omitempty"`
+	ExposedPorts     []workerExposedPortResp  `json:"exposedPorts,omitempty"`
+	Team             string                   `json:"team,omitempty"`
+	Role             string                   `json:"role,omitempty"`
+}
+
+type workerExposeResp struct {
+	Port     int    `json:"port"`
+	Protocol string `json:"protocol,omitempty"`
+}
+
+type workerConsoleResp struct {
+	Enabled bool `json:"enabled"`
+	Port    int  `json:"port,omitempty"`
+}
+
+type workerChannelPolicyResp struct {
+	GroupAllowExtra []string `json:"groupAllowExtra,omitempty"`
+	GroupDenyExtra  []string `json:"groupDenyExtra,omitempty"`
+	DmAllowExtra    []string `json:"dmAllowExtra,omitempty"`
+	DmDenyExtra     []string `json:"dmDenyExtra,omitempty"`
+}
+
+type workerExposedPortResp struct {
+	Port   int    `json:"port"`
+	Domain string `json:"domain"`
 }
 
 type workerListResp struct {

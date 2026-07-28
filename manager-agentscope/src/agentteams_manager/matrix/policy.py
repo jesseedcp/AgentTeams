@@ -299,6 +299,7 @@ class RoomPolicyResolver:
                 allowed_tools=ALL_MANAGER_TOOLS,
                 confirm_tools=CONFIRM_TOOLS,
                 allowed_senders=frozenset({event.sender_id}),
+                resource_scope_all=True,
             )
 
         binding = await self._topology.room_binding(event.room_id)

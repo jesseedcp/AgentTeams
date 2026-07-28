@@ -9,7 +9,7 @@ import subprocess
 import time
 import uuid
 from pathlib import Path
-from urllib.request import urlopen
+from urllib.request import ProxyHandler, build_opener
 
 ROOT = Path(".")
 NAMESPACE = os.environ.get(
@@ -43,19 +43,18 @@ def test_k8s_manager_has_cinny_route_service_and_persistent_state() -> None:
     paths = ingress["spec"]["rules"][0]["http"]["paths"]
     assert any(item["path"] == "/manager-admin" for item in paths)
 
-    with urlopen(f"{GATEWAY_URL}/manager-admin/", timeout=10) as page:
-        assert page.status == 200
-        assert b"AgentTeams Manager" in page.read()
-    with urlopen(f"{GATEWAY_URL}/", timeout=10) as page:
-        assert page.status == 200
-    with urlopen(f"{GATEWAY_URL}/config.json", timeout=10) as page:
-        cinny_config = json.load(page)
+    status, body = _gateway_get("/manager-admin/")
+    assert status == 200
+    assert b"AgentTeams Manager" in body
+    status, _ = _gateway_get("/")
+    assert status == 200
+    status, body = _gateway_get("/config.json")
+    assert status == 200
+    cinny_config = json.loads(body)
     assert cinny_config["homeserverList"] == [GATEWAY_URL]
-    with urlopen(
-        f"{GATEWAY_URL}/.well-known/matrix/client",
-        timeout=10,
-    ) as page:
-        matrix_client = json.load(page)
+    status, body = _gateway_get("/.well-known/matrix/client")
+    assert status == 200
+    matrix_client = json.loads(body)
     assert matrix_client["m.homeserver"]["base_url"] == GATEWAY_URL
 
 
@@ -89,6 +88,12 @@ def test_manager_sqlite_survives_live_pod_restart_when_enabled() -> None:
                 time.sleep(2)
         assert after == before
         assert persisted == sentinel
+        recreated = _json("get", "pod", "agentteams-manager")
+        recreated_uid = recreated["metadata"]["uid"]
+        time.sleep(25)
+        stable = _json("get", "pod", "agentteams-manager")
+        assert stable["metadata"]["uid"] == recreated_uid
+        assert _condition(stable, "Ready") == "True"
     finally:
         _delete_manager_sqlite_sentinel()
 
@@ -115,6 +120,30 @@ def _wait_for_manager_pod(*, timeout: float = 60) -> None:
         if time.monotonic() >= deadline:
             raise TimeoutError("Manager pod was not recreated")
         time.sleep(2)
+
+
+def _gateway_get(
+    path: str,
+    *,
+    timeout: float = 60,
+) -> tuple[int, bytes]:
+    """Wait for one local Higress route without inheriting host proxies."""
+    opener = build_opener(ProxyHandler({}))
+    deadline = time.monotonic() + timeout
+    last_error: BaseException | None = None
+    while time.monotonic() < deadline:
+        try:
+            with opener.open(
+                f"{GATEWAY_URL}{path}",
+                timeout=10,
+            ) as page:
+                return page.status, page.read()
+        except OSError as error:
+            last_error = error
+            time.sleep(2)
+    raise TimeoutError(
+        f"timed out waiting for gateway route {path}: {last_error}",
+    )
 
 
 def _manager_sqlite_identity() -> str:

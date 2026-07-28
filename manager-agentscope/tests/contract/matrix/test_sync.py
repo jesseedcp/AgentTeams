@@ -34,6 +34,7 @@ class FakeNio:
         self.sync_calls: list[dict[str, Any]] = []
         self.joined_rooms: list[str] = []
         self.next_sync = self.response()
+        self.sync_responses: list[object] = []
         self.unknown_token_failures = 0
         self.login_calls = 0
         self.olm = object()
@@ -62,6 +63,8 @@ class FakeNio:
         if self.unknown_token_failures:
             self.unknown_token_failures -= 1
             raise RuntimeError("M_UNKNOWN_TOKEN")
+        if self.sync_responses:
+            return self.sync_responses.pop(0)
         return self.next_sync
 
     async def join(self, room_id: str) -> None:
@@ -101,22 +104,31 @@ def _config(tmp_path: Path, *, password: str | None = None) -> MatrixClientConfi
 
 
 @pytest.mark.asyncio
-async def test_sync_resumes_from_persisted_token(tmp_path: Path) -> None:
+async def test_restart_hydrates_rooms_before_resuming_persisted_token(
+    tmp_path: Path,
+) -> None:
     state = FakeState()
     state.values["matrix.sync_token"] = "saved-token"
     nio = FakeNio()
+    nio.sync_responses = [
+        nio.response(next_batch="hydration-only"),
+        nio.response(next_batch="next-token"),
+    ]
     client = MatrixClient(_config(tmp_path), state, nio_client=nio)
 
     await client.sync_once()
 
-    assert nio.sync_calls[0]["since"] == "saved-token"
+    assert nio.sync_calls[0]["since"] is None
     assert nio.sync_calls[0]["full_state"] is True
+    assert nio.sync_calls[1]["since"] == "saved-token"
+    assert nio.sync_calls[1]["full_state"] is False
     assert state.values["matrix.sync_token"] == "next-token"
     assert client.ready.is_set()
 
     await client.sync_once()
 
-    assert nio.sync_calls[1]["full_state"] is False
+    assert nio.sync_calls[2]["since"] == "next-token"
+    assert nio.sync_calls[2]["full_state"] is False
 
 
 @pytest.mark.asyncio

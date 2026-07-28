@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -26,7 +27,7 @@ func applyCmd() *cobra.Command {
   agt apply worker --name alice --model qwen3.6-plus`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(files) > 0 {
-				return applyFromFiles(files)
+				return applyFromFilesWithInput(files, cmd.InOrStdin())
 			}
 			return cmd.Help()
 		},
@@ -54,12 +55,32 @@ type yamlMetadata struct {
 }
 
 func applyFromFiles(files []string) error {
+	return applyFromFilesWithInput(files, os.Stdin)
+}
+
+func applyFromFilesWithInput(files []string, stdin io.Reader) error {
 	client := NewAPIClient()
+	var stdinData []byte
+	stdinRead := false
 
 	for _, f := range files {
-		data, err := os.ReadFile(f)
-		if err != nil {
-			return fmt.Errorf("read %s: %w", f, err)
+		var data []byte
+		if f == "-" {
+			if !stdinRead {
+				var err error
+				stdinData, err = io.ReadAll(stdin)
+				if err != nil {
+					return fmt.Errorf("read stdin: %w", err)
+				}
+				stdinRead = true
+			}
+			data = stdinData
+		} else {
+			var err error
+			data, err = os.ReadFile(f)
+			if err != nil {
+				return fmt.Errorf("read %s: %w", f, err)
+			}
 		}
 
 		docs := splitYAMLDocs(string(data))

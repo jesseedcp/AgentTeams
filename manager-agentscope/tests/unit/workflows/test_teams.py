@@ -11,7 +11,11 @@ from agentteams_manager.domain.models import (
     TeamResource,
     WorkerResource,
 )
-from agentteams_manager.domain.errors import NotFoundError
+from agentteams_manager.domain.errors import (
+    AmbiguousEffectError,
+    ConflictError,
+    NotFoundError,
+)
 from agentteams_manager.workflows.resources import (
     MutationContext,
     ResourceService,
@@ -22,10 +26,23 @@ from agentteams_manager.workflows.resources import (
 class Supervisor:
     def __init__(self) -> None:
         self.statuses: dict[str, OperationStatus] = {}
+        self.records: dict[str, SimpleNamespace] = {}
 
     async def begin(self, **kwargs: object) -> object:
         operation_id = str(kwargs["operation_id"])
-        return SimpleNamespace(
+        existing = self.records.get(operation_id)
+        if existing is not None:
+            if (
+                existing.kind != kwargs["kind"]
+                or existing.target_key != kwargs["target_key"]
+                or existing.request != kwargs["request"]
+            ):
+                raise ConflictError(
+                    f"operation ID collision for {operation_id}",
+                )
+            existing.status = self.statuses[operation_id]
+            return existing
+        record = SimpleNamespace(
             operation_id=operation_id,
             kind=kwargs["kind"],
             target_key=kwargs["target_key"],
@@ -35,6 +52,14 @@ class Supervisor:
                 OperationStatus.PLANNED,
             ),
         )
+        self.records[operation_id] = record
+        return record
+
+    async def get(self, operation_id: str) -> object | None:
+        record = self.records.get(operation_id)
+        if record is not None:
+            record.status = self.statuses[operation_id]
+        return record
 
     async def before_effect(self, *args: object) -> object:
         self.statuses[str(args[0])] = OperationStatus.DISPATCHED
@@ -61,6 +86,7 @@ class Controller:
         self.simple_requests: list[object] = []
         self.apply_documents: list[bytes] = []
         self.deleted: list[str] = []
+        self.defer_team_deletes = False
 
     async def get_worker(self, name: str) -> WorkerResource | None:
         return self.workers.get(name)
@@ -92,7 +118,8 @@ class Controller:
 
     async def delete_team(self, name: str) -> None:
         self.deleted.append(name)
-        self.teams.pop(name, None)
+        if not self.defer_team_deletes:
+            self.teams.pop(name, None)
 
 
 class Topology:
@@ -147,12 +174,14 @@ def team_ready(
 
 def make_service(
     controller: Controller,
+    *,
+    supervisor: Supervisor | None = None,
 ) -> tuple[ResourceService, Topology]:
     topology = Topology()
     return (
         ResourceService(
             controller=controller,
-            supervisor=Supervisor(),
+            supervisor=supervisor or Supervisor(),
             topology=topology,
             matrix=Matrix(),
             sleeper=no_sleep,
@@ -285,6 +314,32 @@ async def test_delete_team_is_proved_absent_before_topology_refresh() -> None:
     assert controller.deleted == ["alpha"]
     assert await controller.get_team("alpha") is None
     assert preserved_workers == ("alpha-lead", "researcher", "coder")
+    assert topology.refreshes == 1
+
+
+@pytest.mark.asyncio
+async def test_delete_team_retry_reuses_the_original_member_snapshot() -> None:
+    controller = Controller()
+    controller.teams["alpha"] = team_ready()
+    controller.defer_team_deletes = True
+    supervisor = Supervisor()
+    service, topology = make_service(
+        controller,
+        supervisor=supervisor,
+    )
+    mutation = context("delete-alpha-retry")
+
+    with pytest.raises(AmbiguousEffectError):
+        await service.delete_team("alpha", context=mutation)
+
+    controller.teams.pop("alpha")
+    preserved_workers = await service.delete_team(
+        "alpha",
+        context=mutation,
+    )
+
+    assert preserved_workers == ("alpha-lead", "researcher", "coder")
+    assert controller.deleted == ["alpha"]
     assert topology.refreshes == 1
 
 
