@@ -15,6 +15,7 @@ from urllib.parse import urlsplit
 
 from pydantic import SecretStr
 
+from .admin.commands import AdminCommandFacade
 from .admin.service import AdminSnapshotService
 from .application import ManagerApplication
 from .channels.http_providers import build_channel_adapter
@@ -822,12 +823,19 @@ def build_application(
         controller=agt,
         runtime_registry=runtime_registry,
     )
+    admin_commands = AdminCommandFacade(
+        resources=resource_service,
+        projects=projects,
+        project_workflows=project_service,
+        admin_room_id=config.manager_admin_room_id,
+    )
     health = HealthServer(
         readiness=readiness,
         metrics=metrics,
         port=config.health_port,
         admin_token=config.admin_api_token,
         admin_snapshot=admin_service.snapshot,
+        admin_command=admin_commands.execute,
         webhook_handler=(
             channel_service.handle_webhook
             if channel_service.providers

@@ -5,12 +5,14 @@ from __future__ import annotations
 import asyncio
 import hmac
 import json
+import logging
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import asdict, dataclass
-from urllib.parse import parse_qsl, urlsplit
+from urllib.parse import parse_qsl, unquote, urlsplit
 
-from pydantic import SecretStr
+from pydantic import SecretStr, ValidationError
 
+from agentteams_manager.admin.commands import AdminAPIError, AdminCommand
 from agentteams_manager.admin.ui import ADMIN_HTML
 from agentteams_manager.channels.base import (
     ChannelWebhookRequest,
@@ -18,7 +20,13 @@ from agentteams_manager.channels.base import (
 )
 from agentteams_manager.observability.metrics import MetricsRegistry
 
+logger = logging.getLogger(__name__)
+
 AdminSnapshot = Callable[[str], Awaitable[dict[str, object]]]
+AdminCommandHandler = Callable[
+    [AdminCommand],
+    Awaitable[dict[str, object]],
+]
 WebhookHandler = Callable[
     [str, ChannelWebhookRequest],
     Awaitable[ChannelWebhookResponse],
@@ -51,6 +59,7 @@ class HealthServer:
         port: int = 18799,
         admin_token: SecretStr | None = None,
         admin_snapshot: AdminSnapshot | None = None,
+        admin_command: AdminCommandHandler | None = None,
         webhook_handler: WebhookHandler | None = None,
     ) -> None:
         self.readiness = readiness
@@ -59,6 +68,7 @@ class HealthServer:
         self._port = port
         self._admin_token = admin_token
         self._admin_snapshot = admin_snapshot
+        self._admin_command = admin_command
         self._webhook_handler = webhook_handler
         self._server: asyncio.Server | None = None
 
@@ -124,6 +134,14 @@ class HealthServer:
                     path,
                     headers,
                     query,
+                )
+            elif path.startswith("/manager-admin/api/v1/"):
+                await self._admin_resource_api(
+                    reader,
+                    writer,
+                    method,
+                    path,
+                    headers,
                 )
             elif method != "GET":
                 await self._respond(writer, 405, b"method not allowed\n")
@@ -270,6 +288,220 @@ class HealthServer:
             await self._admin_snapshot(section),
         )
 
+    async def _admin_resource_api(
+        self,
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+        method: str,
+        path: str,
+        headers: dict[str, str],
+    ) -> None:
+        if self._admin_token is None or self._admin_command is None:
+            await self._json_error(
+                writer,
+                503,
+                "admin_console_disabled",
+                "admin console is disabled",
+            )
+            return
+        if not self._admin_authorized(headers):
+            await self._json_error(
+                writer,
+                401,
+                "unauthorized",
+                "a valid admin bearer token is required",
+            )
+            return
+        if method not in {"GET", "POST", "PATCH", "DELETE"}:
+            await self._json_error(
+                writer,
+                405,
+                "method_not_allowed",
+                "method is not allowed for this endpoint",
+            )
+            return
+
+        suffix = path.removeprefix("/manager-admin/api/v1/")
+        segments = suffix.split("/")
+        if (
+            not segments
+            or segments[0] not in {"workers", "teams", "projects"}
+            or len(segments) > 2
+            or any(not segment for segment in segments)
+        ):
+            await self._json_error(
+                writer,
+                404,
+                "not_found",
+                "admin resource endpoint does not exist",
+            )
+            return
+
+        payload: dict[str, object] = {}
+        idempotency_key = headers.get("idempotency-key")
+        if method != "GET":
+            if not idempotency_key:
+                await self._json_error(
+                    writer,
+                    400,
+                    "idempotency_key_required",
+                    "Idempotency-Key is required for admin writes",
+                )
+                return
+            body = await self._read_admin_json(reader, writer, headers)
+            if body is None:
+                return
+            payload = body
+
+        try:
+            command = AdminCommand.model_validate(
+                {
+                    "method": method,
+                    "resource": segments[0],
+                    "name": (
+                        unquote(segments[1])
+                        if len(segments) == 2
+                        else None
+                    ),
+                    "payload": payload,
+                    "idempotency_key": idempotency_key,
+                },
+            )
+            result = await self._admin_command(command)
+        except ValidationError as exc:
+            await self._json_error(
+                writer,
+                422,
+                "validation_error",
+                "request validation failed",
+                details=json.loads(exc.json(include_url=False)),
+            )
+            return
+        except AdminAPIError as exc:
+            await self._json_error(
+                writer,
+                exc.status,
+                exc.code,
+                exc.message,
+                details=exc.details,
+            )
+            return
+        except Exception:
+            logger.exception("unhandled Manager admin API failure")
+            await self._json_error(
+                writer,
+                500,
+                "internal_error",
+                "the admin operation could not be completed",
+            )
+            return
+
+        await self._json(
+            writer,
+            201 if method == "POST" else 200,
+            result,
+        )
+
+    async def _read_admin_json(
+        self,
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+        headers: dict[str, str],
+    ) -> dict[str, object] | None:
+        content_type = headers.get("content-type", "")
+        media_type = content_type.partition(";")[0].strip().casefold()
+        if media_type != "application/json":
+            await self._json_error(
+                writer,
+                415,
+                "unsupported_media_type",
+                "admin write bodies must use application/json",
+            )
+            return None
+        try:
+            length = int(headers.get("content-length", "0"))
+        except ValueError:
+            await self._json_error(
+                writer,
+                400,
+                "invalid_content_length",
+                "Content-Length must be an integer",
+            )
+            return None
+        if length < 0:
+            await self._json_error(
+                writer,
+                400,
+                "invalid_content_length",
+                "Content-Length cannot be negative",
+            )
+            return None
+        if length > 64 * 1024:
+            await self._json_error(
+                writer,
+                413,
+                "payload_too_large",
+                "admin request bodies cannot exceed 64 KiB",
+            )
+            return None
+        try:
+            raw_body = await asyncio.wait_for(
+                reader.readexactly(length),
+                timeout=3,
+            )
+            parsed = json.loads(raw_body)
+        except (asyncio.IncompleteReadError, TimeoutError):
+            await self._json_error(
+                writer,
+                400,
+                "incomplete_body",
+                "request body was incomplete",
+            )
+            return None
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            await self._json_error(
+                writer,
+                400,
+                "invalid_json",
+                "request body is not valid JSON",
+            )
+            return None
+        if not isinstance(parsed, dict):
+            await self._json_error(
+                writer,
+                400,
+                "invalid_body",
+                "request body must be a JSON object",
+            )
+            return None
+        return parsed
+
+    def _admin_authorized(self, headers: dict[str, str]) -> bool:
+        if self._admin_token is None:
+            return False
+        expected = (
+            "Bearer " + self._admin_token.get_secret_value()
+        ).encode()
+        supplied = headers.get("authorization", "").encode()
+        return hmac.compare_digest(supplied, expected)
+
+    async def _json_error(
+        self,
+        writer: asyncio.StreamWriter,
+        status: int,
+        code: str,
+        message: str,
+        *,
+        details: object | None = None,
+    ) -> None:
+        error: dict[str, object] = {
+            "code": code,
+            "message": message,
+        }
+        if details is not None:
+            error["details"] = details
+        await self._json(writer, status, {"error": error})
+
     async def _json(
         self,
         writer: asyncio.StreamWriter,
@@ -298,6 +530,7 @@ class HealthServer:
     ) -> None:
         reasons = {
             200: "OK",
+            201: "Created",
             204: "No Content",
             202: "Accepted",
             400: "Bad Request",
@@ -305,8 +538,11 @@ class HealthServer:
             403: "Forbidden",
             404: "Not Found",
             405: "Method Not Allowed",
+            409: "Conflict",
             413: "Content Too Large",
             415: "Unsupported Media Type",
+            422: "Unprocessable Content",
+            500: "Internal Server Error",
             503: "Service Unavailable",
         }
         extra_headers = "".join(

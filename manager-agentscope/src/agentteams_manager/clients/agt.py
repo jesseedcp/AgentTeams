@@ -309,8 +309,11 @@ class _TeamPayload(BaseModel):
     model_config = ConfigDict(extra="allow", populate_by_name=True)
 
     name: str
+    team_name: str = Field(default="", alias="teamName")
     phase: str = "Pending"
     description: str = ""
+    admin: dict[str, Any] | None = None
+    heartbeat_every: str = Field(default="", alias="heartbeatEvery")
     leader_name: str = Field(alias="leaderName")
     worker_names: tuple[str, ...] = Field(
         default=(),
@@ -331,7 +334,10 @@ class _TeamPayload(BaseModel):
             workers=self.worker_names,
             phase=self.phase,
             spec={
+                "teamName": self.team_name or self.name,
                 "description": self.description,
+                "admin": self.admin,
+                "heartbeatEvery": self.heartbeat_every,
                 "teamRoomID": self.team_room_id,
                 "leaderDMRoomID": self.leader_dm_room_id,
                 "peerMentions": self.peer_mentions,
