@@ -18,6 +18,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
@@ -31,6 +32,7 @@ type Config struct {
 	ManagerRuntime   string
 	ManagerImage     string
 	ManagerResources *v1beta1.AgentResourceRequirements
+	ManagerCodingCLI *v1beta1.ManagerCodingCLISpec
 	AdminUser        string
 	AdminPassword    string
 	Namespace        string
@@ -601,42 +603,71 @@ func (i *Initializer) ensureManagerCR(
 		metav1.GetOptions{},
 	)
 	if err == nil {
-		if len(desiredMCPServers) == 0 {
-			logger.Info("Manager CR already exists, skipping creation")
+		changed := false
+		if len(desiredMCPServers) > 0 {
+			existing, _, nestedErr := unstructured.NestedSlice(
+				current.Object,
+				"spec",
+				"mcpServers",
+			)
+			if nestedErr != nil {
+				return fmt.Errorf("read Manager MCP servers: %w", nestedErr)
+			}
+			merged := mergeManagerMCPServers(
+				existing,
+				desiredMCPServers,
+			)
+			if !reflect.DeepEqual(existing, merged) {
+				if err := unstructured.SetNestedSlice(
+					current.Object,
+					merged,
+					"spec",
+					"mcpServers",
+				); err != nil {
+					return fmt.Errorf("set Manager MCP servers: %w", err)
+				}
+				changed = true
+			}
+		}
+		if i.Config.ManagerCodingCLI != nil {
+			desired, convertErr := managerCodingCLIMap(
+				i.Config.ManagerCodingCLI,
+			)
+			if convertErr != nil {
+				return convertErr
+			}
+			existing, _, nestedErr := unstructured.NestedMap(
+				current.Object,
+				"spec",
+				"codingCLI",
+			)
+			if nestedErr != nil {
+				return fmt.Errorf("read Manager coding CLI state: %w", nestedErr)
+			}
+			if !reflect.DeepEqual(existing, desired) {
+				if err := unstructured.SetNestedMap(
+					current.Object,
+					desired,
+					"spec",
+					"codingCLI",
+				); err != nil {
+					return fmt.Errorf("set Manager coding CLI state: %w", err)
+				}
+				changed = true
+			}
+		}
+		if !changed {
+			logger.Info("Manager CR already contains bootstrap desired state")
 			return nil
-		}
-		existing, _, nestedErr := unstructured.NestedSlice(
-			current.Object,
-			"spec",
-			"mcpServers",
-		)
-		if nestedErr != nil {
-			return fmt.Errorf("read Manager MCP servers: %w", nestedErr)
-		}
-		merged := mergeManagerMCPServers(
-			existing,
-			desiredMCPServers,
-		)
-		if reflect.DeepEqual(existing, merged) {
-			logger.Info("Manager CR already contains bootstrap MCP state")
-			return nil
-		}
-		if err := unstructured.SetNestedSlice(
-			current.Object,
-			merged,
-			"spec",
-			"mcpServers",
-		); err != nil {
-			return fmt.Errorf("set Manager MCP servers: %w", err)
 		}
 		if _, err := dynClient.Resource(gvr).Namespace(ns).Update(
 			ctx,
 			current,
 			metav1.UpdateOptions{},
 		); err != nil {
-			return fmt.Errorf("update Manager MCP servers: %w", err)
+			return fmt.Errorf("update Manager bootstrap desired state: %w", err)
 		}
-		logger.Info("Manager CR bootstrap MCP state updated")
+		logger.Info("Manager CR bootstrap desired state updated")
 		return nil
 	}
 	if !apierrors.IsNotFound(err) {
@@ -658,6 +689,15 @@ func (i *Initializer) ensureManagerCR(
 			nil,
 			desiredMCPServers,
 		)
+	}
+	if i.Config.ManagerCodingCLI != nil {
+		codingCLI, convertErr := managerCodingCLIMap(
+			i.Config.ManagerCodingCLI,
+		)
+		if convertErr != nil {
+			return convertErr
+		}
+		spec["codingCLI"] = codingCLI
 	}
 
 	metadata := map[string]interface{}{
@@ -683,6 +723,19 @@ func (i *Initializer) ensureManagerCR(
 		return fmt.Errorf("create Manager CR: %w", err)
 	}
 	return nil
+}
+
+func managerCodingCLIMap(
+	spec *v1beta1.ManagerCodingCLISpec,
+) (map[string]interface{}, error) {
+	if err := spec.Validate(); err != nil {
+		return nil, fmt.Errorf("validate Manager coding CLI state: %w", err)
+	}
+	value, err := runtime.DefaultUnstructuredConverter.ToUnstructured(spec)
+	if err != nil {
+		return nil, fmt.Errorf("convert Manager coding CLI state: %w", err)
+	}
+	return value, nil
 }
 
 func mergeManagerMCPServers(

@@ -98,6 +98,15 @@ materialized condition flag.
   "runtime" (.Values.manager.runtime | default "agentscope")
   "image" (include "agentteams.manager.image" .)
   "resources" .Values.manager.resources
+  "codingCLI" (dict
+    "enabled" (.Values.manager.codingCLI.enabled | default false)
+    "providers" (.Values.manager.codingCLI.providers | default (list))
+    "hostPath" (.Values.manager.codingCLI.hostPath | default "")
+    "mountPath" (.Values.manager.codingCLI.mountPath | default "/opt/agentteams/coding-cli")
+    "trustedDirectory" (.Values.manager.codingCLI.trustedDirectory | default "/opt/agentteams/coding-cli/bin")
+    "timeoutSeconds" (.Values.manager.codingCLI.timeoutSeconds | default 600)
+    "maxOutputBytes" (.Values.manager.codingCLI.maxOutputBytes | default 65536)
+  )
 -}}
 {{- $spec | toJson -}}
 {{- end }}

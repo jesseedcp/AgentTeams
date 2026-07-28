@@ -128,6 +128,31 @@ Helm 安装：
 环境变量名，绝不能把真实密钥当作引用字符串；AgentScope 会在工具执行时
 解析对应环境变量。
 
+## 可选 Coding CLI 委托
+
+Manager 基础镜像不会安装 Claude Code、Gemini CLI 或 Qoder CLI。只启用你
+实际维护的 Provider，并选择派生 Manager 镜像或只读节点目录挂载：
+
+```yaml
+manager:
+  codingCLI:
+    enabled: true
+    providers: [claude]
+    hostPath: /srv/agentteams-coding-cli
+    mountPath: /opt/agentteams/coding-cli
+    trustedDirectory: /opt/agentteams/coding-cli/bin
+```
+
+挂载目录内应按选择提供 `bin/claude`、`bin/gemini` 或 `bin/qodercli`。
+`hostPath` 必须存在于所有可能运行 Manager 的节点；生产环境使用派生镜像
+通常更便携。Provider 凭据应通过 Manager Pod Template 的 `envFrom` Secret
+引用或只读厂商登录目录注入。不要把 Provider Token 写进 Helm values、
+Manager CR、Prompt 或任务产物。
+
+修改 `codingCLI` 会改变 Pod 的环境和挂载，因此 Controller 会重建 Manager
+Pod。相关工具仍只允许管理员房间调用，并且必须确认。
+`coding_cli_status` 会分别显示“已配置”和“容器内实际可用”。
+
 ## 运行时 revision
 
 模型、MCP、服务和 Manager 身份变更都通过 typed Manager 工具和 Controller

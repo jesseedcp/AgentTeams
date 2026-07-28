@@ -494,6 +494,97 @@ func TestUpdateManagerRejectsWorkerRuntime(t *testing.T) {
 	}
 }
 
+func TestUpdateManagerCodingCLIConfigurationRoundTrip(t *testing.T) {
+	scheme := newServerTestScheme(t)
+	manager := &v1beta1.Manager{}
+	manager.Name = "m1"
+	manager.Namespace = "default"
+	manager.Spec.Model = "qwen3.5-plus"
+	manager.Spec.Runtime = backend.RuntimeAgentScope
+	k8sClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(manager).
+		Build()
+	handler := NewResourceHandler(k8sClient, "default", nil, "")
+	body := []byte(`{
+		"codingCLI":{
+			"enabled":true,
+			"providers":["claude"],
+			"hostPath":"/srv/coding-cli",
+			"mountPath":"/opt/coding-cli",
+			"trustedDirectory":"/opt/coding-cli/bin"
+		}
+	}`)
+	req := httptest.NewRequest(
+		http.MethodPut,
+		"/api/v1/managers/m1",
+		bytes.NewReader(body),
+	)
+	req.SetPathValue("name", "m1")
+	rec := httptest.NewRecorder()
+
+	handler.UpdateManager(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected %d, got %d: %s", http.StatusOK, rec.Code, rec.Body.String())
+	}
+	var updated v1beta1.Manager
+	if err := k8sClient.Get(
+		context.Background(),
+		client.ObjectKey{Name: "m1", Namespace: "default"},
+		&updated,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if updated.Spec.CodingCLI == nil ||
+		!updated.Spec.CodingCLI.Enabled ||
+		len(updated.Spec.CodingCLI.Providers) != 1 {
+		t.Fatalf("stored coding CLI = %+v", updated.Spec.CodingCLI)
+	}
+	var response ManagerResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.CodingCLI == nil ||
+		response.CodingCLI.TrustedDirectory != "/opt/coding-cli/bin" {
+		t.Fatalf("response coding CLI = %+v", response.CodingCLI)
+	}
+}
+
+func TestUpdateManagerRejectsInvalidCodingCLIConfiguration(t *testing.T) {
+	scheme := newServerTestScheme(t)
+	manager := &v1beta1.Manager{}
+	manager.Name = "m1"
+	manager.Namespace = "default"
+	manager.Spec.Model = "qwen3.5-plus"
+	manager.Spec.Runtime = backend.RuntimeAgentScope
+	k8sClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(manager).
+		Build()
+	handler := NewResourceHandler(k8sClient, "default", nil, "")
+	req := httptest.NewRequest(
+		http.MethodPut,
+		"/api/v1/managers/m1",
+		bytes.NewReader([]byte(
+			`{"codingCLI":{"enabled":true,"providers":["shell"]}}`,
+		)),
+	)
+	req.SetPathValue("name", "m1")
+	rec := httptest.NewRecorder()
+
+	handler.UpdateManager(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf(
+			"expected %d, got %d: %s",
+			http.StatusBadRequest,
+			rec.Code,
+			rec.Body.String(),
+		)
+	}
+}
+
 // TestCreate_EmptyControllerName_NoLabel verifies embedded-mode behavior:
 // when controllerName is empty, the handler does not stamp any controller
 // label (and does not introduce a stray labels map on resources that had

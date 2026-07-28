@@ -861,6 +861,58 @@ func TestK8sAgentScopeManagerHostShareIsExplicitOptIn(t *testing.T) {
 	}
 }
 
+func TestK8sCreateMountsExplicitHostVolumesReadOnly(t *testing.T) {
+	client := newFakeK8sCoreClient()
+	b := NewK8sBackendWithClient(client, K8sConfig{
+		Namespace:    "agentteams",
+		ManagerImage: "agentteams/manager:latest",
+	}, "agentteams-worker-", nil)
+
+	if _, err := b.Create(context.Background(), CreateRequest{
+		Name:    "manager-coding",
+		Runtime: RuntimeAgentScope,
+		Volumes: []VolumeMount{{
+			HostPath:      "/srv/agentteams-coding-cli",
+			ContainerPath: "/opt/agentteams/coding-cli",
+			ReadOnly:      true,
+		}},
+	}); err != nil {
+		t.Fatalf("Create AgentScope Manager failed: %v", err)
+	}
+	pod, err := b.client.Pods("agentteams").Get(
+		context.Background(),
+		"agentteams-worker-manager-coding",
+		metav1.GetOptions{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var hostVolume *corev1.Volume
+	for index := range pod.Spec.Volumes {
+		if pod.Spec.Volumes[index].HostPath != nil &&
+			pod.Spec.Volumes[index].HostPath.Path == "/srv/agentteams-coding-cli" {
+			hostVolume = &pod.Spec.Volumes[index]
+			break
+		}
+	}
+	if hostVolume == nil {
+		t.Fatalf("coding CLI host volume missing: %+v", pod.Spec.Volumes)
+	}
+	var foundMount bool
+	for _, mount := range pod.Spec.Containers[0].VolumeMounts {
+		if mount.Name == hostVolume.Name {
+			foundMount = mount.MountPath == "/opt/agentteams/coding-cli" &&
+				mount.ReadOnly
+		}
+	}
+	if !foundMount {
+		t.Fatalf(
+			"coding CLI read-only mount missing: %+v",
+			pod.Spec.Containers[0].VolumeMounts,
+		)
+	}
+}
+
 // ── Integration tests: K8sBackend.Create + PodTemplate + ownerRefs ───────
 
 // testControllerName is the canonical ControllerName used across integration

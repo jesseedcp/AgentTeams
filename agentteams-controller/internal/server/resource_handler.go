@@ -683,6 +683,12 @@ func (h *ResourceHandler) CreateManager(w http.ResponseWriter, r *http.Request) 
 		)
 		return
 	}
+	if req.CodingCLI != nil {
+		if err := req.CodingCLI.Validate(); err != nil {
+			httputil.WriteError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
 
 	mgr := &v1beta1.Manager{
 		ObjectMeta: metav1.ObjectMeta{
@@ -702,6 +708,7 @@ func (h *ResourceHandler) CreateManager(w http.ResponseWriter, r *http.Request) 
 			Package:       req.Package,
 			State:         req.State,
 			Resources:     req.Resources,
+			CodingCLI:     req.CodingCLI,
 		},
 	}
 	if req.Config != nil {
@@ -769,6 +776,12 @@ func (h *ResourceHandler) UpdateManager(w http.ResponseWriter, r *http.Request) 
 		)
 		return
 	}
+	if req.CodingCLI != nil {
+		if err := req.CodingCLI.Validate(); err != nil {
+			httputil.WriteError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
 
 	ctx := r.Context()
 	for attempt := 0; attempt < k8sUpdateMaxRetries; attempt++ {
@@ -816,6 +829,9 @@ func (h *ResourceHandler) UpdateManager(w http.ResponseWriter, r *http.Request) 
 		}
 		if req.Resources != nil {
 			mgr.Spec.Resources = req.Resources
+		}
+		if req.CodingCLI != nil {
+			mgr.Spec.CodingCLI = req.CodingCLI.DeepCopy()
 		}
 
 		if err := h.client.Update(ctx, &mgr); err != nil {
@@ -971,6 +987,7 @@ func managerToResponse(m *v1beta1.Manager) ManagerResponse {
 		Version:      m.Status.Version,
 		Message:      m.Status.Message,
 		McpServers:   append([]v1beta1.MCPServer(nil), m.Spec.McpServers...),
+		CodingCLI:    m.Spec.CodingCLI.DeepCopy(),
 		WelcomeSent:  m.Status.WelcomeSent,
 	}
 	if resp.Phase == "" {

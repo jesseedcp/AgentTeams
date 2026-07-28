@@ -20,6 +20,38 @@ Validate public values at render time. Supported combinations:
 {{- if ne $managerRuntime "agentscope" -}}
 {{- fail (printf "unsupported manager.runtime %q: only \"agentscope\" is supported" $managerRuntime) -}}
 {{- end -}}
+{{- $codingCLI := .Values.manager.codingCLI -}}
+{{- $codingProviders := $codingCLI.providers | default (list) -}}
+{{- if and ($codingCLI.enabled | default false) (eq (len $codingProviders) 0) -}}
+{{- fail "manager.codingCLI.enabled=true requires at least one provider" -}}
+{{- end -}}
+{{- $seenCodingProviders := dict -}}
+{{- range $provider := $codingProviders -}}
+  {{- if not (has $provider (list "claude" "gemini" "qodercli")) -}}
+  {{- fail (printf "unsupported manager.codingCLI provider %q" $provider) -}}
+  {{- end -}}
+  {{- if hasKey $seenCodingProviders $provider -}}
+  {{- fail (printf "duplicate manager.codingCLI provider %q" $provider) -}}
+  {{- end -}}
+  {{- $_ := set $seenCodingProviders $provider true -}}
+{{- end -}}
+{{- if and ($codingCLI.hostPath | default "") (not (hasPrefix "/" $codingCLI.hostPath)) -}}
+{{- fail "manager.codingCLI.hostPath must be an absolute node path" -}}
+{{- end -}}
+{{- if not (hasPrefix "/" ($codingCLI.mountPath | default "/opt/agentteams/coding-cli")) -}}
+{{- fail "manager.codingCLI.mountPath must be absolute" -}}
+{{- end -}}
+{{- if not (hasPrefix "/" ($codingCLI.trustedDirectory | default "/opt/agentteams/coding-cli/bin")) -}}
+{{- fail "manager.codingCLI.trustedDirectory must be absolute" -}}
+{{- end -}}
+{{- $codingTimeout := $codingCLI.timeoutSeconds | default 600 | int -}}
+{{- if or (lt $codingTimeout 1) (gt $codingTimeout 3600) -}}
+{{- fail "manager.codingCLI.timeoutSeconds must be between 1 and 3600" -}}
+{{- end -}}
+{{- $codingOutput := $codingCLI.maxOutputBytes | default 65536 | int -}}
+{{- if or (lt $codingOutput 1024) (gt $codingOutput 1048576) -}}
+{{- fail "manager.codingCLI.maxOutputBytes must be between 1024 and 1048576" -}}
+{{- end -}}
 
 {{- $gatewayProvider := .Values.gateway.provider | default "" -}}
 {{- $gatewayMode := .Values.gateway.mode | default "" -}}

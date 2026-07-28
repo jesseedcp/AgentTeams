@@ -143,6 +143,34 @@ replace them. Never place a literal secret in an `env:NAME` reference:
 AgentScope resolves the referenced uppercase environment variable at tool
 execution time.
 
+## Optional coding CLI delegation
+
+The base Manager image does not install Claude Code, Gemini CLI, or Qoder CLI.
+Enable only the providers you operate and either use a derived Manager image
+or mount a node directory read-only:
+
+```yaml
+manager:
+  codingCLI:
+    enabled: true
+    providers: [claude]
+    hostPath: /srv/agentteams-coding-cli
+    mountPath: /opt/agentteams/coding-cli
+    trustedDirectory: /opt/agentteams/coding-cli/bin
+```
+
+The mounted directory must contain `bin/claude`, `bin/gemini`, or
+`bin/qodercli` as selected. A `hostPath` must exist on every node that can run
+the Manager; a derived image is more portable. Provide provider credentials
+through `envFrom` Secret references in the Manager Pod template or a
+read-only vendor login mount. Do not put provider tokens in Helm values,
+Manager resources, prompts, or task artifacts.
+
+Changing `codingCLI` recreates the Manager Pod because its environment and
+mounts change. The tools remain admin-room-only and confirmation-gated.
+`coding_cli_status` reports configured and actually available providers
+separately.
+
 ## Runtime revisions
 
 Model, MCP, service, and Manager identity changes are submitted through typed

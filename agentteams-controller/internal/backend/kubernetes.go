@@ -341,6 +341,12 @@ func (k *K8sBackend) Create(ctx context.Context, req CreateRequest) (*WorkerResu
 		ReadOnly:  true,
 	}
 	extraVolumes, extraVolumeMounts := podWorkerDepsVolumes(req.WorkersDeps)
+	hostVolumes, hostVolumeMounts, err := podHostPathVolumes(req.Volumes)
+	if err != nil {
+		return nil, err
+	}
+	extraVolumes = append(extraVolumes, hostVolumes...)
+	extraVolumeMounts = append(extraVolumeMounts, hostVolumeMounts...)
 	if req.Runtime == RuntimeAgentScope {
 		dataVolume := corev1.Volume{
 			Name: "manager-data",
@@ -516,6 +522,44 @@ func (k *K8sBackend) Start(ctx context.Context, name string) error {
 
 func (k *K8sBackend) Stop(ctx context.Context, name string) error {
 	return k.Delete(ctx, name)
+}
+
+func podHostPathVolumes(
+	mounts []VolumeMount,
+) ([]corev1.Volume, []corev1.VolumeMount, error) {
+	volumes := make([]corev1.Volume, 0, len(mounts))
+	volumeMounts := make([]corev1.VolumeMount, 0, len(mounts))
+	for index, mount := range mounts {
+		if !strings.HasPrefix(mount.HostPath, "/") {
+			return nil, nil, fmt.Errorf(
+				"kubernetes host volume %d host path must be absolute",
+				index,
+			)
+		}
+		if !strings.HasPrefix(mount.ContainerPath, "/") {
+			return nil, nil, fmt.Errorf(
+				"kubernetes host volume %d container path must be absolute",
+				index,
+			)
+		}
+		name := fmt.Sprintf("agentteams-host-%d", index)
+		hostPathType := corev1.HostPathDirectory
+		volumes = append(volumes, corev1.Volume{
+			Name: name,
+			VolumeSource: corev1.VolumeSource{
+				HostPath: &corev1.HostPathVolumeSource{
+					Path: mount.HostPath,
+					Type: &hostPathType,
+				},
+			},
+		})
+		volumeMounts = append(volumeMounts, corev1.VolumeMount{
+			Name:      name,
+			MountPath: mount.ContainerPath,
+			ReadOnly:  mount.ReadOnly,
+		})
+	}
+	return volumes, volumeMounts, nil
 }
 
 func (k *K8sBackend) Status(ctx context.Context, name string) (*WorkerResult, error) {

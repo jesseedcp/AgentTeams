@@ -92,6 +92,10 @@ func (b *WorkerEnvBuilder) BuildManager(managerName string, prov *ManagerProvisi
 	if modelName == "" {
 		modelName = "qwen3.6-plus"
 	}
+	codingCLI := v1beta1.ManagerCodingCLISpec{}
+	if spec.CodingCLI != nil {
+		codingCLI = *spec.CodingCLI
+	}
 
 	env := map[string]string{
 		"AGENTTEAMS_MANAGER_NAME":                        managerName,
@@ -105,6 +109,11 @@ func (b *WorkerEnvBuilder) BuildManager(managerName string, prov *ManagerProvisi
 		"AGENTTEAMS_MANAGER_HEARTBEAT_INTERVAL_SECONDS":  strconv.FormatInt(heartbeatSeconds, 10),
 		"AGENTTEAMS_MANAGER_WORKER_IDLE_TIMEOUT_SECONDS": strconv.FormatInt(idleSeconds, 10),
 		"AGENTTEAMS_DEFAULT_MODEL":                       modelName,
+		"AGENTTEAMS_CODING_CLI_ENABLED":                  strconv.FormatBool(codingCLI.Enabled),
+		"AGENTTEAMS_CODING_CLI_PROVIDERS":                strings.Join(codingCLI.Providers, ","),
+		"AGENTTEAMS_CODING_CLI_TRUSTED_DIRECTORY":        codingCLI.EffectiveTrustedDirectory(),
+		"AGENTTEAMS_CODING_CLI_TIMEOUT_SECONDS":          strconv.Itoa(codingCLI.EffectiveTimeoutSeconds()),
+		"AGENTTEAMS_CODING_CLI_MAX_OUTPUT_BYTES":         strconv.Itoa(codingCLI.EffectiveMaxOutputBytes()),
 		"AGENTTEAMS_FS_ACCESS_KEY":                       managerName,
 		"AGENTTEAMS_FS_SECRET_KEY":                       prov.MinIOPassword,
 		"AGENTTEAMS_RUNTIME":                             deploymentRuntime,

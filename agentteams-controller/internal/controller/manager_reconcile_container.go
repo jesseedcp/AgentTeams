@@ -144,6 +144,14 @@ func (r *ManagerReconciler) ensureManagerContainerAbsent(ctx context.Context, s 
 func (r *ManagerReconciler) createManagerContainer(ctx context.Context, s *managerScope, wb backend.WorkerBackend) (reconcile.Result, error) {
 	m := s.manager
 	logger := log.FromContext(ctx)
+	if m.Spec.CodingCLI != nil {
+		if err := m.Spec.CodingCLI.Validate(); err != nil {
+			return reconcile.Result{}, fmt.Errorf(
+				"invalid Manager coding CLI configuration: %w",
+				err,
+			)
+		}
+	}
 	if !backend.ValidManagerRuntime(m.Spec.Runtime) {
 		return reconcile.Result{}, fmt.Errorf(
 			"unsupported Manager runtime %q",
@@ -204,6 +212,15 @@ func (r *ManagerReconciler) createManagerContainer(ctx context.Context, s *manag
 			},
 		),
 		Owner: m,
+	}
+	if m.Spec.CodingCLI != nil &&
+		m.Spec.CodingCLI.Enabled &&
+		m.Spec.CodingCLI.HostPath != "" {
+		createReq.Volumes = append(createReq.Volumes, backend.VolumeMount{
+			HostPath:      m.Spec.CodingCLI.HostPath,
+			ContainerPath: m.Spec.CodingCLI.EffectiveMountPath(),
+			ReadOnly:      true,
+		})
 	}
 	if wb.Name() != "k8s" {
 		token, err := r.Provisioner.RequestManagerSAToken(ctx, m.Name)
@@ -293,6 +310,7 @@ type managerPodSpec struct {
 	AccessEntries []v1beta1.AccessEntry              `json:"accessEntries,omitempty"`
 	Env           map[string]string                  `json:"env,omitempty"`
 	Labels        map[string]string                  `json:"labels,omitempty"`
+	CodingCLI     *v1beta1.ManagerCodingCLISpec      `json:"codingCLI,omitempty"`
 }
 
 // hashAppliedManagerSpec computes a fnv64a hash over pod-affecting fields only.
@@ -309,6 +327,7 @@ func hashAppliedManagerSpec(spec v1beta1.ManagerSpec) string {
 		AccessEntries: spec.AccessEntries,
 		Env:           spec.Env,
 		Labels:        spec.Labels,
+		CodingCLI:     spec.CodingCLI,
 	}
 	buf, err := json.Marshal(podSpec)
 	if err != nil {

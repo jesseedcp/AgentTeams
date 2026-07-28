@@ -512,10 +512,13 @@ Rough minimum: 2 CPU, 4 GB RAM, Docker/Podman. You get **`agentteams-controller`
 
 ```bash
 # From repository root (chart lives under helm/agentteams)
-helm install agentteams ./helm/agentteams
+kubectl apply -f ./helm/agentteams/crds
+helm upgrade --install agentteams ./helm/agentteams
 ```
 
 You can also install from a published Helm chart once the repo is added. The chart wires **`agentteams-controller`**, gateway, homeserver, and storage per `values.yaml`; Manager and Worker Pods follow the same CRD API as embedded installs.
+Apply the CRDs before every chart upgrade because Helm installs files under
+`crds/` on first install but does not upgrade them automatically.
 
 ## 9. Status and roadmap
 

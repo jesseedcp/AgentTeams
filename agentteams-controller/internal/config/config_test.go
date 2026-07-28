@@ -160,6 +160,15 @@ func TestLoadConfigAppliesManagerSpec(t *testing.T) {
 		"model":"qwen-max",
 		"runtime":"agentscope",
 		"image":"agentteams/manager:test",
+		"codingCLI":{
+			"enabled":true,
+			"providers":["claude"],
+			"hostPath":"/srv/coding-cli",
+			"mountPath":"/opt/coding-cli",
+			"trustedDirectory":"/opt/coding-cli/bin",
+			"timeoutSeconds":900,
+			"maxOutputBytes":131072
+		},
 		"resources":{
 			"requests":{"cpu":"750m","memory":"1536Mi"},
 			"limits":{"cpu":"3","memory":"5Gi"}
@@ -198,6 +207,27 @@ func TestLoadConfigAppliesManagerSpec(t *testing.T) {
 	if cfg.ManagerSpecResources.Requests.CPU != "750m" || cfg.ManagerSpecResources.Limits.Memory != "5Gi" {
 		t.Fatalf("ManagerSpecResources = %+v", cfg.ManagerSpecResources)
 	}
+	if cfg.ManagerCodingCLI == nil || !cfg.ManagerCodingCLI.Enabled {
+		t.Fatalf("ManagerCodingCLI = %+v, want enabled config", cfg.ManagerCodingCLI)
+	}
+	if got := cfg.ManagerCodingCLI.TrustedDirectory; got != "/opt/coding-cli/bin" {
+		t.Fatalf("ManagerCodingCLI.TrustedDirectory = %q", got)
+	}
+}
+
+func TestLoadConfigRejectsInvalidManagerCodingCLI(t *testing.T) {
+	t.Setenv("AGENTTEAMS_MANAGER_SPEC", `{
+		"model":"qwen-max",
+		"codingCLI":{"enabled":true,"providers":["shell"]}
+	}`)
+
+	defer func() {
+		if recover() == nil {
+			t.Fatal("LoadConfig() accepted invalid Manager coding CLI spec")
+		}
+	}()
+
+	_ = LoadConfig()
 }
 
 func TestLoadConfigUsesManagerEnvFallback(t *testing.T) {

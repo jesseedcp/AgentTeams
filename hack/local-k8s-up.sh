@@ -178,6 +178,18 @@ helm dependency build "$CHART_DIR"
 
 # ── Step 4: Helm install / upgrade ──────────────────────────────────────────
 
+# Helm installs CRDs on first install but intentionally does not upgrade them.
+# Apply the source-controlled schemas explicitly so existing clusters accept
+# newly added Manager/Worker fields before the controller writes them.
+log "Applying AgentTeams CRDs..."
+kubectl apply -f "${CHART_DIR}/crds"
+for crd in managers teams workers humans; do
+    kubectl wait \
+        --for=condition=Established \
+        "crd/${crd}.agentteams.io" \
+        --timeout=60s
+done
+
 HELM_SET_OVERRIDES=""
 if [ -n "$REGISTRATION_TOKEN" ]; then
     HELM_SET_OVERRIDES="${HELM_SET_OVERRIDES} --set credentials.registrationToken=${REGISTRATION_TOKEN}"

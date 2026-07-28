@@ -4,6 +4,9 @@ package v1beta1
 
 import (
 	"fmt"
+	"path"
+	"path/filepath"
+	"strings"
 
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -679,6 +682,7 @@ type ManagerSpec struct {
 	Package       string                     `json:"package,omitempty"`       // file://, http(s)://, or nacos://; optional ?authType= for Nacos
 	Config        ManagerConfig              `json:"config,omitempty"`
 	Resources     *AgentResourceRequirements `json:"resources,omitempty"`
+	CodingCLI     *ManagerCodingCLISpec      `json:"codingCLI,omitempty"`
 
 	// State is the desired lifecycle state of the manager.
 	// Valid values: "Running" (default), "Sleeping", "Stopped".
@@ -700,6 +704,100 @@ type ManagerSpec struct {
 	// godoc): pod-template < CR metadata.labels < CR spec.labels <
 	// controller system labels.
 	Labels map[string]string `json:"labels,omitempty"`
+}
+
+const (
+	DefaultManagerCodingCLIMountPath      = "/opt/agentteams/coding-cli"
+	DefaultManagerCodingCLITimeoutSeconds = 600
+	DefaultManagerCodingCLIMaxOutputBytes = 64 * 1024
+)
+
+// ManagerCodingCLISpec declares the optional, closed coding-CLI execution
+// boundary used by the AgentScope Manager. The base image contains no vendor
+// CLI; operators either mount a read-only directory or provide a derived image.
+type ManagerCodingCLISpec struct {
+	Enabled          bool     `json:"enabled"`
+	Providers        []string `json:"providers,omitempty"`
+	HostPath         string   `json:"hostPath,omitempty"`
+	MountPath        string   `json:"mountPath,omitempty"`
+	TrustedDirectory string   `json:"trustedDirectory,omitempty"`
+	TimeoutSeconds   int      `json:"timeoutSeconds,omitempty"`
+	MaxOutputBytes   int      `json:"maxOutputBytes,omitempty"`
+}
+
+func (s ManagerCodingCLISpec) EffectiveMountPath() string {
+	if s.MountPath != "" {
+		return path.Clean(s.MountPath)
+	}
+	return DefaultManagerCodingCLIMountPath
+}
+
+func (s ManagerCodingCLISpec) EffectiveTrustedDirectory() string {
+	if s.TrustedDirectory != "" {
+		return path.Clean(s.TrustedDirectory)
+	}
+	return path.Join(s.EffectiveMountPath(), "bin")
+}
+
+func (s ManagerCodingCLISpec) EffectiveTimeoutSeconds() int {
+	if s.TimeoutSeconds != 0 {
+		return s.TimeoutSeconds
+	}
+	return DefaultManagerCodingCLITimeoutSeconds
+}
+
+func (s ManagerCodingCLISpec) EffectiveMaxOutputBytes() int {
+	if s.MaxOutputBytes != 0 {
+		return s.MaxOutputBytes
+	}
+	return DefaultManagerCodingCLIMaxOutputBytes
+}
+
+// Validate rejects implicit executables, unsafe paths, and unbounded process
+// settings before the reconciler creates a Manager container.
+func (s ManagerCodingCLISpec) Validate() error {
+	if s.Enabled && len(s.Providers) == 0 {
+		return fmt.Errorf("enabled Manager coding CLI requires at least one provider")
+	}
+	seen := make(map[string]struct{}, len(s.Providers))
+	for _, provider := range s.Providers {
+		switch provider {
+		case "claude", "gemini", "qodercli":
+		default:
+			return fmt.Errorf("unsupported Manager coding CLI provider %q", provider)
+		}
+		if _, exists := seen[provider]; exists {
+			return fmt.Errorf("duplicate Manager coding CLI provider %q", provider)
+		}
+		seen[provider] = struct{}{}
+	}
+	if s.HostPath != "" &&
+		!path.IsAbs(s.HostPath) &&
+		!filepath.IsAbs(s.HostPath) {
+		return fmt.Errorf("Manager coding CLI hostPath must be absolute")
+	}
+	mountPath := s.EffectiveMountPath()
+	if !path.IsAbs(mountPath) {
+		return fmt.Errorf("Manager coding CLI mountPath must be absolute")
+	}
+	trustedDirectory := s.EffectiveTrustedDirectory()
+	if !path.IsAbs(trustedDirectory) {
+		return fmt.Errorf("Manager coding CLI trustedDirectory must be absolute")
+	}
+	if s.HostPath != "" &&
+		trustedDirectory != mountPath &&
+		!strings.HasPrefix(trustedDirectory, strings.TrimRight(mountPath, "/")+"/") {
+		return fmt.Errorf("Manager coding CLI trustedDirectory must be inside mountPath")
+	}
+	timeout := s.EffectiveTimeoutSeconds()
+	if timeout < 1 || timeout > 3600 {
+		return fmt.Errorf("Manager coding CLI timeoutSeconds must be between 1 and 3600")
+	}
+	maxOutput := s.EffectiveMaxOutputBytes()
+	if maxOutput < 1024 || maxOutput > 1024*1024 {
+		return fmt.Errorf("Manager coding CLI maxOutputBytes must be between 1024 and 1048576")
+	}
+	return nil
 }
 
 // DesiredState returns the effective desired state, defaulting to "Running".

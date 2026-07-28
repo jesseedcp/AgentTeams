@@ -89,6 +89,13 @@ func TestWorkerEnvBuilderBuildManagerUsesAgentScopeContract(t *testing.T) {
 	}, v1beta1.ManagerSpec{
 		Model:   "qwen3.6-plus",
 		Runtime: "agentscope",
+		CodingCLI: &v1beta1.ManagerCodingCLISpec{
+			Enabled:          true,
+			Providers:        []string{"claude", "qodercli"},
+			TrustedDirectory: "/opt/vendor/bin",
+			TimeoutSeconds:   900,
+			MaxOutputBytes:   131072,
+		},
 		Config: v1beta1.ManagerConfig{
 			HeartbeatInterval: "30m",
 			WorkerIdleTimeout: "12h",
@@ -117,6 +124,11 @@ func TestWorkerEnvBuilderBuildManagerUsesAgentScopeContract(t *testing.T) {
 		"AGENTTEAMS_HIGRESS_ADMIN_PASSWORD":              "admin-password",
 		"AGENTTEAMS_AI_GATEWAY_ADMIN_URL":                "http://higress.example.com:8001",
 		"AGENTTEAMS_MCP_GITHUB_TOKEN":                    "github-secret",
+		"AGENTTEAMS_CODING_CLI_ENABLED":                  "true",
+		"AGENTTEAMS_CODING_CLI_PROVIDERS":                "claude,qodercli",
+		"AGENTTEAMS_CODING_CLI_TRUSTED_DIRECTORY":        "/opt/vendor/bin",
+		"AGENTTEAMS_CODING_CLI_TIMEOUT_SECONDS":          "900",
+		"AGENTTEAMS_CODING_CLI_MAX_OUTPUT_BYTES":         "131072",
 		"SKILLS_API_URL":                                 "nacos://skills.example.com:8848/public",
 	} {
 		if got := env[key]; got != want {
@@ -134,6 +146,20 @@ func TestWorkerEnvBuilderBuildManagerUsesAgentScopeContract(t *testing.T) {
 		if _, ok := env[legacyKey]; ok {
 			t.Fatalf("unexpected legacy env %s in manager env", legacyKey)
 		}
+	}
+}
+
+func TestWorkerEnvBuilderBuildManagerDisablesCodingCLIByDefault(t *testing.T) {
+	env := NewWorkerEnvBuilder(config.WorkerEnvDefaults{}).BuildManager(
+		"manager",
+		&ManagerProvisionResult{},
+		v1beta1.ManagerSpec{},
+	)
+	if got := env["AGENTTEAMS_CODING_CLI_ENABLED"]; got != "false" {
+		t.Fatalf("AGENTTEAMS_CODING_CLI_ENABLED = %q, want false", got)
+	}
+	if got := env["AGENTTEAMS_CODING_CLI_PROVIDERS"]; got != "" {
+		t.Fatalf("AGENTTEAMS_CODING_CLI_PROVIDERS = %q, want empty", got)
 	}
 }
 

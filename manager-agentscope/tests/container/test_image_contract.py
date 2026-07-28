@@ -18,6 +18,8 @@ def test_manager_image_contains_agentscope_and_no_legacy_gateway() -> None:
     ).read_text(encoding="utf-8")
     assert "manager/agent/skills" in dockerfile
     assert "manager/configs/known-models.json" in dockerfile
+    assert "/opt/agentteams/coding-cli/bin" in dockerfile
+    assert "npm install" not in dockerfile
     for forbidden in (
         "openclaw gateway",
         "copaw app",

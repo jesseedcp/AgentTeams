@@ -206,3 +206,73 @@ func TestEnsureManagerCRUpdatesExistingMCPStateIdempotently(t *testing.T) {
 		t.Fatalf("Manager MCP counts = %#v", counts)
 	}
 }
+
+func TestEnsureManagerCRUpdatesExistingCodingCLIState(t *testing.T) {
+	gvr := schema.GroupVersionResource{
+		Group:    v1beta1.GroupName,
+		Version:  v1beta1.Version,
+		Resource: "managers",
+	}
+	current := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": v1beta1.GroupName + "/" + v1beta1.Version,
+		"kind":       "Manager",
+		"metadata": map[string]interface{}{
+			"name":      "default",
+			"namespace": "default",
+		},
+		"spec": map[string]interface{}{
+			"model":   "qwen",
+			"runtime": "agentscope",
+			"codingCLI": map[string]interface{}{
+				"enabled":   false,
+				"providers": []interface{}{},
+			},
+		},
+	}}
+	client := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(
+		runtime.NewScheme(),
+		map[schema.GroupVersionResource]string{gvr: "ManagerList"},
+		current,
+	)
+	initializer := &Initializer{
+		Dynamic: client,
+		Config: Config{
+			Namespace:      "default",
+			ManagerEnabled: true,
+			ManagerCodingCLI: &v1beta1.ManagerCodingCLISpec{
+				Enabled:          true,
+				Providers:        []string{"claude"},
+				HostPath:         "/srv/coding-cli",
+				MountPath:        "/opt/coding-cli",
+				TrustedDirectory: "/opt/coding-cli/bin",
+			},
+		},
+	}
+
+	if err := initializer.ensureManagerCR(context.Background(), nil); err != nil {
+		t.Fatalf("ensureManagerCR: %v", err)
+	}
+	observed, err := client.Resource(gvr).Namespace("default").Get(
+		context.Background(),
+		"default",
+		metav1.GetOptions{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	codingCLI, found, err := unstructured.NestedMap(
+		observed.Object,
+		"spec",
+		"codingCLI",
+	)
+	if err != nil || !found {
+		t.Fatalf("Manager coding CLI state: found=%v err=%v", found, err)
+	}
+	if codingCLI["enabled"] != true {
+		t.Fatalf("Manager coding CLI state = %#v", codingCLI)
+	}
+	providers, ok := codingCLI["providers"].([]interface{})
+	if !ok || len(providers) != 1 || providers[0] != "claude" {
+		t.Fatalf("Manager coding CLI providers = %#v", providers)
+	}
+}

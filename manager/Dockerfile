@@ -61,7 +61,10 @@ COPY manager/configs/known-models.json /opt/agentteams/config/known-models.json
 COPY --chmod=755 manager/entrypoint.sh /opt/agentteams/entrypoint.sh
 
 RUN mkdir -p /var/lib/agentteams-manager \
-    && chmod 700 /var/lib/agentteams-manager
+        /opt/agentteams/coding-cli/bin \
+    && chmod 700 /var/lib/agentteams-manager \
+    && chmod 755 /opt/agentteams/coding-cli \
+        /opt/agentteams/coding-cli/bin
 
 WORKDIR /var/lib/agentteams-manager
 

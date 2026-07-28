@@ -26,6 +26,7 @@ grep -q 'app.kubernetes.io/name: agentteams' "${render}"
 grep -q 'name: AGENTTEAMS_MANAGER_RUNTIME' "${render}"
 grep -q 'value: "agentscope"' "${render}"
 grep -q 'name: AGENTTEAMS_MANAGER_IMAGE' "${render}"
+grep -Fq '"codingCLI":{"enabled":false' "${render}"
 grep -q 'name: AGENTTEAMS_WORKER_IMAGE' "${render}"
 grep -q 'name: AGENTTEAMS_COPAW_WORKER_IMAGE' "${render}"
 grep -q 'name: AGENTTEAMS_HERMES_WORKER_IMAGE' "${render}"
@@ -55,6 +56,8 @@ for resource in managers teams workers; do
 done
 grep -q 'enum: \[agentscope\]' \
     "${CHART}/crds/managers.agentteams.io.yaml"
+grep -q 'enum: \[claude, gemini, qodercli\]' \
+    "${CHART}/crds/managers.agentteams.io.yaml"
 ! grep -q 'enum: \[openclaw, copaw\]' \
     "${CHART}/crds/managers.agentteams.io.yaml"
 grep -q 'enum: \[openclaw, copaw, hermes, qwenpaw\]' \
@@ -65,6 +68,23 @@ if helm template agentteams "${CHART}" "${COMMON_ARGS[@]}" \
     echo "FAIL: Helm accepted a non-AgentScope Manager runtime" >&2
     exit 1
 fi
+
+if helm template agentteams "${CHART}" "${COMMON_ARGS[@]}" \
+    --set manager.codingCLI.enabled=true >/dev/null 2>&1; then
+    echo "FAIL: Helm accepted enabled coding CLI without a provider" >&2
+    exit 1
+fi
+
+coding_render="$(mktemp)"
+trap 'rm -f "${render}" "${kind_render}" "${coding_render}"' EXIT
+helm template agentteams "${CHART}" "${COMMON_ARGS[@]}" \
+    --set manager.codingCLI.enabled=true \
+    --set manager.codingCLI.providers[0]=claude \
+    --set manager.codingCLI.hostPath=/srv/agentteams-coding-cli \
+    > "${coding_render}"
+grep -Fq '"enabled":true' "${coding_render}"
+grep -Fq '"providers":["claude"]' "${coding_render}"
+grep -Fq '"hostPath":"/srv/agentteams-coding-cli"' "${coding_render}"
 
 helm template agentteams "${CHART}" "${CREDENTIAL_ARGS[@]}" \
     -f "${CHART}/values-kind.yaml" \
@@ -77,6 +97,8 @@ grep -Fq \
     '{"m.homeserver":{"base_url":"http://127.0.0.1:18388"}}' \
     "${kind_render}"
 grep -Fq -- '-f "${CHART_DIR}/values-kind.yaml"' \
+    "${ROOT_DIR}/hack/local-k8s-up.sh"
+grep -Fq 'kubectl apply -f "${CHART_DIR}/crds"' \
     "${ROOT_DIR}/hack/local-k8s-up.sh"
 for image in console higress pilot gateway proxyv2; do
     grep -Fq "higress/${image}:2.2.1" "${ROOT_DIR}/hack/local-k8s-up.sh"

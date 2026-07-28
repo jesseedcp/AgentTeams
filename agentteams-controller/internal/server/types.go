@@ -202,6 +202,7 @@ type CreateManagerRequest struct {
 	Config        *v1beta1.ManagerConfig             `json:"config,omitempty"`
 	State         *string                            `json:"state,omitempty"` // desired lifecycle state: Running, Sleeping, Stopped
 	Resources     *v1beta1.AgentResourceRequirements `json:"resources,omitempty"`
+	CodingCLI     *v1beta1.ManagerCodingCLISpec      `json:"codingCLI,omitempty"`
 }
 
 type UpdateManagerRequest struct {
@@ -218,21 +219,23 @@ type UpdateManagerRequest struct {
 	Config        *v1beta1.ManagerConfig             `json:"config,omitempty"`
 	State         *string                            `json:"state,omitempty"` // desired lifecycle state: Running, Sleeping, Stopped
 	Resources     *v1beta1.AgentResourceRequirements `json:"resources,omitempty"`
+	CodingCLI     *v1beta1.ManagerCodingCLISpec      `json:"codingCLI,omitempty"`
 }
 
 type ManagerResponse struct {
-	Name         string              `json:"name"`
-	Phase        string              `json:"phase"`
-	State        string              `json:"state,omitempty"` // desired lifecycle state
-	Model        string              `json:"model,omitempty"`
-	Runtime      string              `json:"runtime,omitempty"`
-	Image        string              `json:"image,omitempty"`
-	Identity     string              `json:"identity,omitempty"`
-	MatrixUserID string              `json:"matrixUserID,omitempty"`
-	RoomID       string              `json:"roomID,omitempty"`
-	Version      string              `json:"version,omitempty"`
-	Message      string              `json:"message,omitempty"`
-	McpServers   []v1beta1.MCPServer `json:"mcpServers,omitempty"`
+	Name         string                        `json:"name"`
+	Phase        string                        `json:"phase"`
+	State        string                        `json:"state,omitempty"` // desired lifecycle state
+	Model        string                        `json:"model,omitempty"`
+	Runtime      string                        `json:"runtime,omitempty"`
+	Image        string                        `json:"image,omitempty"`
+	Identity     string                        `json:"identity,omitempty"`
+	MatrixUserID string                        `json:"matrixUserID,omitempty"`
+	RoomID       string                        `json:"roomID,omitempty"`
+	Version      string                        `json:"version,omitempty"`
+	Message      string                        `json:"message,omitempty"`
+	McpServers   []v1beta1.MCPServer           `json:"mcpServers,omitempty"`
+	CodingCLI    *v1beta1.ManagerCodingCLISpec `json:"codingCLI,omitempty"`
 	// WelcomeSent mirrors ManagerStatus.WelcomeSent so installers / CLI can
 	// poll for first-boot onboarding completion (DM joined + LLM auth ready
 	// + welcome prompt actually delivered). Always present (false until set)

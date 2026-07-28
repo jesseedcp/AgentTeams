@@ -64,6 +64,49 @@ spec:
                         enum: [http, sse]
                         default: http
                         description: Transport protocol (http=Streamable HTTP, sse=Server-Sent Events).
+                codingCLI:
+                  type: object
+                  description: >
+                    Optional bounded coding-CLI delegation for the AgentScope
+                    Manager. Vendor executables are not bundled in the base
+                    image; provide a derived image or an explicit read-only
+                    hostPath mount.
+                  properties:
+                    enabled:
+                      type: boolean
+                      default: false
+                    providers:
+                      type: array
+                      default: []
+                      x-kubernetes-list-type: set
+                      items:
+                        type: string
+                        enum: [claude, gemini, qodercli]
+                    hostPath:
+                      type: string
+                      pattern: ^/
+                      description: Optional absolute node directory mounted read-only.
+                    mountPath:
+                      type: string
+                      pattern: ^/
+                      default: /opt/agentteams/coding-cli
+                    trustedDirectory:
+                      type: string
+                      pattern: ^/
+                      default: /opt/agentteams/coding-cli/bin
+                    timeoutSeconds:
+                      type: integer
+                      minimum: 1
+                      maximum: 3600
+                      default: 600
+                    maxOutputBytes:
+                      type: integer
+                      minimum: 1024
+                      maximum: 1048576
+                      default: 65536
+                  x-kubernetes-validations:
+                    - rule: "!has(self.enabled) || !self.enabled || (has(self.providers) && size(self.providers) > 0)"
+                      message: enabled codingCLI requires at least one provider
                 package:
                   type: string
                   description: "Package URI: file://, http(s)://, or nacos://"

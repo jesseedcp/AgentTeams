@@ -113,6 +113,7 @@ type Config struct {
 	ManagerHostReadAllowlist  string
 	ManagerHostWriteAllowlist string
 	ManagerSpecResources      *v1beta1.AgentResourceRequirements
+	ManagerCodingCLI          *v1beta1.ManagerCodingCLISpec
 	K8sManagerCPURequest      string
 	K8sManagerMemoryRequest   string
 	K8sManagerCPU             string
@@ -253,6 +254,7 @@ type managerSpecEnv struct {
 	Runtime   string                            `json:"runtime"`
 	Image     string                            `json:"image"`
 	Resources v1beta1.AgentResourceRequirements `json:"resources"`
+	CodingCLI *v1beta1.ManagerCodingCLISpec     `json:"codingCLI"`
 }
 
 func LoadConfig() *Config {
@@ -702,6 +704,12 @@ func applyManagerSpec(cfg *Config, specJSON string) error {
 	}
 	if spec.Resources.Limits.Memory != "" {
 		cfg.K8sManagerMemory = spec.Resources.Limits.Memory
+	}
+	if spec.CodingCLI != nil {
+		if err := spec.CodingCLI.Validate(); err != nil {
+			return err
+		}
+		cfg.ManagerCodingCLI = spec.CodingCLI.DeepCopy()
 	}
 
 	return nil

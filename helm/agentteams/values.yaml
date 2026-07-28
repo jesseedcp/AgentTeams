@@ -259,6 +259,16 @@ manager:
     hostPath: ""
     readAllowlist: []
     writeAllowlist: []
+  codingCLI:
+    # Optional bounded delegation to operator-installed coding CLIs.
+    # The base Manager image intentionally bundles no vendor CLI.
+    enabled: false
+    providers: []               # any of: claude, gemini, qodercli
+    hostPath: ""                # optional node directory, mounted read-only
+    mountPath: /opt/agentteams/coding-cli
+    trustedDirectory: /opt/agentteams/coding-cli/bin
+    timeoutSeconds: 600
+    maxOutputBytes: 65536
   externalChannels: []
   externalChannelSecretRefs: []
   persistence:

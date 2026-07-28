@@ -202,6 +202,72 @@ func TestManagerSpec_DeepCopyResources(t *testing.T) {
 	}
 }
 
+func TestManagerCodingCLISpecDefaultsValidationAndDeepCopy(t *testing.T) {
+	spec := ManagerCodingCLISpec{
+		Enabled:          true,
+		Providers:        []string{"claude", "gemini"},
+		HostPath:         "/srv/agentteams-coding-cli",
+		MountPath:        "/opt/vendor-coding",
+		TrustedDirectory: "/opt/vendor-coding/bin",
+	}
+	if err := spec.Validate(); err != nil {
+		t.Fatalf("Validate() = %v", err)
+	}
+	if got := spec.EffectiveTimeoutSeconds(); got != 600 {
+		t.Fatalf("EffectiveTimeoutSeconds() = %d, want 600", got)
+	}
+	if got := spec.EffectiveMaxOutputBytes(); got != 64*1024 {
+		t.Fatalf("EffectiveMaxOutputBytes() = %d, want 65536", got)
+	}
+
+	manager := ManagerSpec{Model: "m", CodingCLI: &spec}
+	copied := manager.DeepCopy()
+	manager.CodingCLI.Providers[0] = "qodercli"
+	if got := copied.CodingCLI.Providers[0]; got != "claude" {
+		t.Fatalf("DeepCopy aliased CodingCLI providers: %v", copied.CodingCLI)
+	}
+
+	for name, invalid := range map[string]ManagerCodingCLISpec{
+		"enabled without providers": {
+			Enabled: true,
+		},
+		"unknown provider": {
+			Providers: []string{"shell"},
+		},
+		"duplicate provider": {
+			Providers: []string{"claude", "claude"},
+		},
+		"relative host path": {
+			Providers: []string{"claude"},
+			HostPath:  "vendor/bin",
+		},
+		"relative mount path": {
+			Providers: []string{"claude"},
+			MountPath: "opt/vendor",
+		},
+		"trusted directory escape": {
+			Providers:        []string{"claude"},
+			HostPath:         "/srv/vendor",
+			MountPath:        "/opt/vendor",
+			TrustedDirectory: "/usr/local/bin",
+		},
+		"timeout too high": {
+			Providers:      []string{"claude"},
+			TimeoutSeconds: 3601,
+		},
+		"output too small": {
+			Providers:      []string{"claude"},
+			MaxOutputBytes: 100,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := invalid.Validate(); err == nil {
+				t.Fatalf("Validate() accepted invalid spec: %+v", invalid)
+			}
+		})
+	}
+}
+
 func TestTeamSpecUsesRequiredStandaloneWorkerReferencesOnly(t *testing.T) {
 	teamType := reflect.TypeOf(TeamSpec{})
 	for _, legacyJSONName := range []string{"leader", "workers"} {

@@ -216,7 +216,8 @@ type CreateRequest struct {
 	// `ResolveRuntime`).
 	Labels map[string]string `json:"-"`
 
-	// Volumes are host bind mounts (Docker backend only; ignored by K8s).
+	// Volumes are explicit host bind mounts. Docker maps them directly; the
+	// Kubernetes backend projects them as HostPath volumes.
 	Volumes []VolumeMount `json:"-"`
 
 	// NetworkAliases are DNS names added to the container within the Docker network.

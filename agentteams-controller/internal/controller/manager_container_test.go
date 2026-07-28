@@ -229,6 +229,62 @@ func TestCreateManagerContainerUsesDefaultResourcesWhenSpecResourcesUnset(t *tes
 	}
 }
 
+func TestCreateManagerContainerMountsCodingCLIBinariesReadOnly(t *testing.T) {
+	m := &v1beta1.Manager{}
+	m.Name = "default"
+	m.Namespace = "agentteams"
+	m.Spec.Runtime = backend.RuntimeAgentScope
+	m.Spec.CodingCLI = &v1beta1.ManagerCodingCLISpec{
+		Enabled:          true,
+		Providers:        []string{"claude"},
+		HostPath:         "/srv/agentteams-coding-cli",
+		MountPath:        "/opt/vendor-coding",
+		TrustedDirectory: "/opt/vendor-coding/bin",
+	}
+
+	req := captureManagerCreateRequest(t, m, nil)
+	if len(req.Volumes) != 1 {
+		t.Fatalf("CreateRequest.Volumes = %+v, want one coding CLI mount", req.Volumes)
+	}
+	got := req.Volumes[0]
+	if got.HostPath != "/srv/agentteams-coding-cli" ||
+		got.ContainerPath != "/opt/vendor-coding" ||
+		!got.ReadOnly {
+		t.Fatalf("coding CLI mount = %+v", got)
+	}
+}
+
+func TestCreateManagerContainerRejectsInvalidCodingCLI(t *testing.T) {
+	m := &v1beta1.Manager{}
+	m.Name = "default"
+	m.Namespace = "agentteams"
+	m.Spec.Runtime = backend.RuntimeAgentScope
+	m.Spec.CodingCLI = &v1beta1.ManagerCodingCLISpec{
+		Enabled:   true,
+		Providers: []string{"shell"},
+	}
+
+	mockBackend := mocks.NewMockWorkerBackend()
+	r := &ManagerReconciler{
+		Provisioner:    mocks.NewMockManagerProvisioner(),
+		EnvBuilder:     mocks.NewMockManagerEnvBuilder(),
+		ResourcePrefix: auth.DefaultResourcePrefix,
+	}
+	_, err := r.createManagerContainer(
+		context.Background(),
+		&managerScope{
+			manager: m,
+			provResult: &service.ManagerProvisionResult{
+				MatrixToken: "token",
+			},
+		},
+		mockBackend,
+	)
+	if err == nil {
+		t.Fatal("createManagerContainer accepted invalid coding CLI spec")
+	}
+}
+
 func TestModelAndMCPChangeDoNotChangeManagerPodHash(t *testing.T) {
 	before := v1beta1.ManagerSpec{
 		Model:   "qwen3.6-plus",
@@ -289,6 +345,12 @@ func TestPodAffectingManagerFieldsChangePodHash(t *testing.T) {
 	changed = base
 	changed.Labels = map[string]string{"tier": "other"}
 	cases["labels"] = changed
+	changed = base
+	changed.CodingCLI = &v1beta1.ManagerCodingCLISpec{
+		Enabled:   true,
+		Providers: []string{"claude"},
+	}
+	cases["codingCLI"] = changed
 
 	for name, spec := range cases {
 		t.Run(name, func(t *testing.T) {

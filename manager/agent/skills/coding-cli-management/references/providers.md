@@ -29,3 +29,22 @@ credentials in Helm values, a Manager resource, a prompt, or a task artifact.
 
 Configured but unavailable is a normal state when the base Manager image is
 used without an operator-provided vendor CLI layer.
+
+Helm example:
+
+```yaml
+manager:
+  codingCLI:
+    enabled: true
+    providers: [claude]
+    hostPath: /srv/agentteams-coding-cli
+    mountPath: /opt/agentteams/coding-cli
+    trustedDirectory: /opt/agentteams/coding-cli/bin
+    timeoutSeconds: 600
+    maxOutputBytes: 65536
+```
+
+The example expects `/srv/agentteams-coding-cli/bin/claude` on every eligible
+Kubernetes node. A derived Manager image can omit `hostPath` and place the
+same executable at `trustedDirectory`. Apply the chart CRDs before a Helm
+upgrade because Helm does not upgrade CRDs from the `crds/` directory.

@@ -577,10 +577,13 @@ bash <(curl -sSL https://raw.githubusercontent.com/jesseedcp/AgentTeams/main/ins
 
 ```bash
 # 在克隆下来的仓库根目录执行（Chart 位于 helm/agentteams）
-helm install agentteams ./helm/agentteams
+kubectl apply -f ./helm/agentteams/crds
+helm upgrade --install agentteams ./helm/agentteams
 ```
 
 也可在配置好 Helm 仓库后使用发布的 chart 包。Chart 按 `values.yaml` 编排 **agentteams-controller**、网关、Homeserver、存储等；Manager 与 Worker Pod 的 API 与 Embedded 安装一致。
+每次升级 Chart 前都应先应用 CRD，因为 Helm 首次安装会创建 `crds/` 下的
+定义，但后续 `helm upgrade` 不会自动升级这些 CRD。
 
 ## 9. 项目状态与路线图
 
