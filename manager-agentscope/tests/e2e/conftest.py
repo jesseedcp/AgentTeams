@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import shutil
@@ -52,7 +53,7 @@ class K8sHarness:
             ["kubectl", "get", "namespace", self.namespace],
             capture_output=True,
             check=False,
-            text=True,
+            encoding="utf-8",
         )
         return result.returncode == 0
 
@@ -66,7 +67,7 @@ class K8sHarness:
             ["kubectl", "-n", self.namespace, *arguments],
             capture_output=True,
             check=check,
-            text=True,
+            encoding="utf-8",
             timeout=timeout,
         ).stdout
 
@@ -88,9 +89,14 @@ class K8sHarness:
             ],
             capture_output=True,
             check=False,
-            text=True,
+            encoding="utf-8",
         )
         return json.loads(result.stdout) if result.returncode == 0 else None
+
+    def secret_value(self, name: str, key: str) -> str:
+        secret = self.kubectl_json("get", "secret", name)
+        encoded = str(secret["data"][key])
+        return base64.b64decode(encoded).decode("utf-8")
 
     def pod_env(self, name: str, variable: str) -> str:
         return self.kubectl(
@@ -163,13 +169,52 @@ class K8sHarness:
         )
         return self._json_request(request)
 
+    def admin_wait_for_success(
+        self,
+        method: str,
+        path: str,
+        payload: dict[str, Any] | None,
+        *,
+        expected_status: int,
+        timeout: float = 300,
+    ) -> HTTPResult:
+        """Resume one idempotent admin mutation until effects converge."""
+        idempotency_key = f"e2e-{uuid.uuid4().hex}"
+
+        def completed() -> HTTPResult | None:
+            result = self.admin_request(
+                method,
+                path,
+                payload,
+                idempotency_key=idempotency_key,
+            )
+            if (
+                result.status == 202
+                and result.payload.get("error", {}).get("code")
+                == "effect_pending"
+            ):
+                return None
+            if result.status != expected_status:
+                raise AssertionError(
+                    f"admin mutation returned HTTP {result.status}: "
+                    f"{result.payload}",
+                )
+            return result
+
+        return self.wait(
+            completed,
+            timeout=timeout,
+            interval=2,
+            description=f"{method} {path} to converge",
+        )
+
     def matrix_context(self) -> tuple[str, str, str]:
         username = self.pod_env(
             "agentteams-manager",
             "AGENTTEAMS_ADMIN_USER",
         )
-        password = self.pod_env(
-            "agentteams-manager",
+        password = self.secret_value(
+            "agentteams-runtime-env",
             "AGENTTEAMS_ADMIN_PASSWORD",
         )
         login = self.matrix_request(

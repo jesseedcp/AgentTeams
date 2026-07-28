@@ -110,6 +110,7 @@ class MatrixClient:
         self._registration_http = registration_http
         self._handler: InboundHandler | None = None
         self._sync_task: asyncio.Task[None] | None = None
+        self._needs_full_state = True
         self._sleeper = sleeper
         self.ready = asyncio.Event()
         self.history = RoomHistory(limit=config.history_limit)
@@ -214,6 +215,7 @@ class MatrixClient:
     async def start(self, handler: InboundHandler) -> None:
         """Prepare encryption state and start the owned sync loop."""
         self.bind_handler(handler)
+        self._needs_full_state = True
         CryptoStore(self.config.crypto_store).prepare()
         self.config.media_dir.mkdir(parents=True, exist_ok=True)
         client = self._ensure_client()
@@ -324,7 +326,10 @@ class MatrixClient:
             response = await client.sync(
                 timeout=self.config.sync_timeout_ms,
                 since=since,
-                full_state=since is None,
+                # The durable cursor survives a Pod restart, but nio's room
+                # membership cache does not. Rehydrate full room state on the
+                # first sync while still resuming the timeline from `since`.
+                full_state=self._needs_full_state,
             )
         except Exception as exc:
             if _is_unknown_token(exc):
@@ -348,6 +353,7 @@ class MatrixClient:
         if next_batch:
             await self._state.set_value("matrix.sync_token", next_batch)
         await maintain_e2ee(client, enabled=self.config.encryption)
+        self._needs_full_state = False
         self.ready.set()
 
     async def run_sync_loop(self) -> None:

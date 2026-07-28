@@ -123,14 +123,26 @@ function resourceURL(section,name=""){const base=writable.has(section)?
 function setNotice(message,kind=""){notice.textContent=message;
 notice.className="notice "+kind}
 async function request(url,options={}){
-const headers={Authorization:"Bearer "+token,...(options.headers||{})};
-const response=await fetch(url,{...options,headers});
+const{returnResponse=false,...fetchOptions}=options;
+const headers={Authorization:"Bearer "+token,...(fetchOptions.headers||{})};
+const response=await fetch(url,{...fetchOptions,headers});
 let data={};try{data=await response.json()}catch{}
 if(response.status===401){login.style.display="grid";throw Error("令牌无效或已过期")}
 if(!response.ok){const error=data.error||{};
 const detail=error.details?" "+JSON.stringify(error.details):"";
 throw Error((error.message||("HTTP "+response.status))+detail)}
-return data}
+return returnResponse?{status:response.status,data}:data}
+async function mutate(url,method,payload){
+const idempotencyKey=crypto.randomUUID();
+for(let attempt=0;attempt<150;attempt++){
+const result=await request(url,{method,returnResponse:true,
+headers:{"Content-Type":"application/json",
+"Idempotency-Key":idempotencyKey},body:JSON.stringify(payload)});
+if(result.status!==202)return result.data;
+if((result.data.error||{}).code!=="effect_pending")return result.data;
+setNotice("控制器正在完成资源配置…");
+await new Promise(resolve=>setTimeout(resolve,2000))}
+throw Error("操作仍在后台执行，请稍后刷新查看最终状态")}
 async function load(section=active){active=section;
 document.querySelector("#title").textContent=section[0].toUpperCase()+section.slice(1);
 document.querySelectorAll("nav button").forEach(button=>
@@ -195,9 +207,7 @@ if(!payload||Array.isArray(payload)||typeof payload!=="object")
 throw Error("请求内容必须是 JSON 对象");
 if(document.querySelector("#confirmed").checked)payload.confirmed=true;
 const name=edit.method==="POST"?"":edit.name;
-await request(resourceURL(edit.resource,name),{method:edit.method,
-headers:{"Content-Type":"application/json",
-"Idempotency-Key":crypto.randomUUID()},body:JSON.stringify(payload)});
+await mutate(resourceURL(edit.resource,name),edit.method,payload);
 editor.close();setNotice("操作已提交并完成。","good");await load()}
 catch(error){document.querySelector("#editorError").textContent=error.message}
 finally{submit.disabled=false}};

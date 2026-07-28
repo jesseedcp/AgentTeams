@@ -108,7 +108,7 @@ def _wait_for_manager_pod(*, timeout: float = 60) -> None:
             ],
             capture_output=True,
             check=False,
-            text=True,
+            encoding="utf-8",
         )
         if result.returncode == 0:
             return
@@ -233,7 +233,7 @@ def _live_namespace() -> bool:
         ["kubectl", "get", "namespace", NAMESPACE],
         capture_output=True,
         check=False,
-        text=True,
+        encoding="utf-8",
     )
     return result.returncode == 0
 
@@ -250,7 +250,7 @@ def _run(*arguments: str) -> str:
         ["kubectl", "-n", NAMESPACE, *arguments],
         capture_output=True,
         check=True,
-        text=True,
+        encoding="utf-8",
     ).stdout
 
 

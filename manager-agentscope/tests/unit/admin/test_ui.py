@@ -7,6 +7,10 @@ def test_admin_ui_supports_safe_resource_mutations() -> None:
     assert 'method:"POST"' in ADMIN_HTML
     assert 'openEditor("PATCH"' in ADMIN_HTML
     assert 'openEditor("DELETE"' in ADMIN_HTML
+    assert "async function mutate" in ADMIN_HTML
+    assert "result.status!==202" in ADMIN_HTML
+    assert '"Idempotency-Key":idempotencyKey' in ADMIN_HTML
+    assert "setTimeout(resolve,2000)" in ADMIN_HTML
     assert "<dialog" in ADMIN_HTML
     assert "sessionStorage" not in ADMIN_HTML
     assert "localStorage" not in ADMIN_HTML

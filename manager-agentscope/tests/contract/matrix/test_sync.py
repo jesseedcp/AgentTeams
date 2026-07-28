@@ -110,8 +110,13 @@ async def test_sync_resumes_from_persisted_token(tmp_path: Path) -> None:
     await client.sync_once()
 
     assert nio.sync_calls[0]["since"] == "saved-token"
+    assert nio.sync_calls[0]["full_state"] is True
     assert state.values["matrix.sync_token"] == "next-token"
     assert client.ready.is_set()
+
+    await client.sync_once()
+
+    assert nio.sync_calls[1]["full_state"] is False
 
 
 @pytest.mark.asyncio

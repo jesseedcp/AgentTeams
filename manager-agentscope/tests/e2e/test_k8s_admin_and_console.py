@@ -39,7 +39,7 @@ def test_admin_crud_confirmations_and_worker_console(
 
     try:
         for name in (leader, member):
-            created = k8s_harness.admin_request(
+            created = k8s_harness.admin_wait_for_success(
                 "POST",
                 "workers",
                 {
@@ -47,27 +47,27 @@ def test_admin_crud_confirmations_and_worker_console(
                     "runtime": "qwenpaw",
                     "model": default_model,
                 },
+                expected_status=201,
             )
-            assert created.status == 201, created.payload
             assert created.payload["item"]["name"] == name
 
-        patched = k8s_harness.admin_request(
+        patched = k8s_harness.admin_wait_for_success(
             "PATCH",
             f"workers/{leader}",
             {"identity": "Kubernetes parity test leader"},
+            expected_status=200,
         )
-        assert patched.status == 200, patched.payload
         assert patched.payload["item"]["name"] == leader
 
         _wait_for_ready_worker_pod(k8s_harness, leader)
         first_uid = _worker_pod(k8s_harness, leader)["metadata"]["uid"]
 
-        enabled = k8s_harness.admin_request(
+        enabled = k8s_harness.admin_wait_for_success(
             "PATCH",
             f"workers/{leader}",
             {"console_enabled": True, "console_port": 8088},
+            expected_status=200,
         )
-        assert enabled.status == 200, enabled.payload
         assert enabled.payload["item"]["spec"]["console"] == {
             "enabled": True,
             "port": 8088,
@@ -79,12 +79,12 @@ def test_admin_crud_confirmations_and_worker_console(
             previous_uid=str(first_uid),
         )
 
-        disabled = k8s_harness.admin_request(
+        disabled = k8s_harness.admin_wait_for_success(
             "PATCH",
             f"workers/{leader}",
             {"console_enabled": False},
+            expected_status=200,
         )
-        assert disabled.status == 200, disabled.payload
         assert disabled.payload["item"]["spec"]["console"]["enabled"] is False
         _wait_for_console_state(
             k8s_harness,
@@ -93,7 +93,7 @@ def test_admin_crud_confirmations_and_worker_console(
             previous_uid=str(enabled_pod["metadata"]["uid"]),
         )
 
-        created_team = k8s_harness.admin_request(
+        created_team = k8s_harness.admin_wait_for_success(
             "POST",
             "teams",
             {
@@ -102,17 +102,17 @@ def test_admin_crud_confirmations_and_worker_console(
                 "worker_names": [member],
                 "description": "Kubernetes parity acceptance",
             },
+            expected_status=201,
         )
-        assert created_team.status == 201, created_team.payload
         assert created_team.payload["item"]["leader"] == leader
         assert created_team.payload["item"]["workers"] == [member]
 
-        patched_team = k8s_harness.admin_request(
+        k8s_harness.admin_wait_for_success(
             "PATCH",
             f"teams/{team}",
             {"description": "Kubernetes parity acceptance updated"},
+            expected_status=200,
         )
-        assert patched_team.status == 200, patched_team.payload
 
         refused_team_delete = k8s_harness.admin_request(
             "DELETE",
@@ -120,12 +120,12 @@ def test_admin_crud_confirmations_and_worker_console(
             {},
         )
         _assert_confirmation_required(refused_team_delete)
-        deleted_team = k8s_harness.admin_request(
+        deleted_team = k8s_harness.admin_wait_for_success(
             "DELETE",
             f"teams/{team}",
             {"confirmed": True},
+            expected_status=200,
         )
-        assert deleted_team.status == 200, deleted_team.payload
         assert set(deleted_team.payload["preserved_workers"]) == {
             leader,
             member,
@@ -137,7 +137,7 @@ def test_admin_crud_confirmations_and_worker_console(
             == leader
         )
 
-        created_project = k8s_harness.admin_request(
+        created_project = k8s_harness.admin_wait_for_success(
             "POST",
             "projects",
             {
@@ -146,11 +146,11 @@ def test_admin_crud_confirmations_and_worker_console(
                 "plan": "1. Verify the Manager admin workflow.",
                 "participants": [leader, member],
             },
+            expected_status=201,
         )
-        assert created_project.status == 201, created_project.payload
         project_id = str(created_project.payload["item"]["project_id"])
 
-        revised_project = k8s_harness.admin_request(
+        k8s_harness.admin_wait_for_success(
             "PATCH",
             f"projects/{project_id}",
             {
@@ -161,8 +161,8 @@ def test_admin_crud_confirmations_and_worker_console(
                 "change_kind": "minor",
                 "reason": "acceptance coverage",
             },
+            expected_status=200,
         )
-        assert revised_project.status == 200, revised_project.payload
 
         refused_project_close = k8s_harness.admin_request(
             "DELETE",
@@ -170,12 +170,12 @@ def test_admin_crud_confirmations_and_worker_console(
             {"force": True},
         )
         _assert_confirmation_required(refused_project_close)
-        closed_project = k8s_harness.admin_request(
+        k8s_harness.admin_wait_for_success(
             "DELETE",
             f"projects/{project_id}",
             {"confirmed": True, "force": True},
+            expected_status=200,
         )
-        assert closed_project.status == 200, closed_project.payload
         project_id = None
 
         for name in (member, leader):
@@ -185,12 +185,12 @@ def test_admin_crud_confirmations_and_worker_console(
                 {},
             )
             _assert_confirmation_required(refused_worker_delete)
-            deleted_worker = k8s_harness.admin_request(
+            k8s_harness.admin_wait_for_success(
                 "DELETE",
                 f"workers/{name}",
                 {"confirmed": True},
+                expected_status=200,
             )
-            assert deleted_worker.status == 200, deleted_worker.payload
     finally:
         if project_id is not None:
             k8s_harness.admin_request(
