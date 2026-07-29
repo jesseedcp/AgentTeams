@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import asyncio
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from nio import SyncError
 from pydantic import SecretStr
 
 from agentteams_manager.matrix.client import MatrixClient, MatrixClientConfig
@@ -35,6 +38,7 @@ class FakeNio:
         self.joined_rooms: list[str] = []
         self.next_sync = self.response()
         self.sync_responses: list[object] = []
+        self.hanging_syncs = 0
         self.unknown_token_failures = 0
         self.login_calls = 0
         self.olm = object()
@@ -60,9 +64,12 @@ class FakeNio:
 
     async def sync(self, **kwargs: Any) -> object:
         self.sync_calls.append(kwargs)
+        if self.hanging_syncs:
+            self.hanging_syncs -= 1
+            await asyncio.Event().wait()
         if self.unknown_token_failures:
             self.unknown_token_failures -= 1
-            raise RuntimeError("M_UNKNOWN_TOKEN")
+            return SyncError("token expired", "M_UNKNOWN_TOKEN")
         if self.sync_responses:
             return self.sync_responses.pop(0)
         return self.next_sync
@@ -129,6 +136,34 @@ async def test_restart_hydrates_rooms_before_resuming_persisted_token(
 
     assert nio.sync_calls[2]["since"] == "next-token"
     assert nio.sync_calls[2]["full_state"] is False
+
+
+@pytest.mark.asyncio
+async def test_successful_hydration_may_contain_unknown_token_text(
+    tmp_path: Path,
+) -> None:
+    state = FakeState()
+    state.values["matrix.sync_token"] = "saved-token"
+    nio = FakeNio()
+    diagnostic_event = SimpleNamespace(
+        body="Earlier error: M_UNKNOWN_TOKEN",
+    )
+    nio.sync_responses = [
+        nio.response(
+            joined={
+                "!diagnostics:local": SimpleNamespace(
+                    timeline=SimpleNamespace(events=[diagnostic_event]),
+                ),
+            },
+            next_batch="hydration-token",
+        ),
+        nio.response(next_batch="incremental-token"),
+    ]
+    client = MatrixClient(_config(tmp_path), state, nio_client=nio)
+
+    await client.sync_once()
+
+    assert state.values["matrix.sync_token"] == "incremental-token"
 
 
 @pytest.mark.asyncio
@@ -294,3 +329,66 @@ async def test_unknown_token_refresh_is_bounded(tmp_path: Path) -> None:
 
     assert nio.login_calls == 3
     assert delays == [5, 10, 20]
+
+
+@pytest.mark.asyncio
+async def test_sync_watchdog_recovers_from_a_hung_request(
+    tmp_path: Path,
+) -> None:
+    state = FakeState()
+    nio = FakeNio()
+    nio.hanging_syncs = 1
+    recovered = asyncio.Event()
+    delays: list[float] = []
+
+    async def record_delay(seconds: float) -> None:
+        delays.append(seconds)
+
+    async def handler(event: object) -> None:
+        del event
+        recovered.set()
+
+    nio.next_sync = nio.response(
+        joined={
+            "!admin:local": SimpleNamespace(
+                timeline=SimpleNamespace(
+                    events=[
+                        SimpleNamespace(
+                            event_id="$recovered",
+                            sender="@admin:local",
+                            body="create team",
+                            server_timestamp=1_700_000_000_000,
+                            source={
+                                "type": "m.room.message",
+                                "content": {"body": "create team"},
+                            },
+                        ),
+                    ],
+                ),
+            ),
+        },
+        next_batch="recovered-token",
+    )
+    config = replace(
+        _config(tmp_path),
+        sync_watchdog_timeout_seconds=0.01,
+    )
+    client = MatrixClient(
+        config,
+        state,
+        nio_client=nio,
+        sleeper=record_delay,
+    )
+    client.bind_handler(handler)
+
+    task = asyncio.create_task(client.run_sync_loop())
+    try:
+        await asyncio.wait_for(recovered.wait(), timeout=1)
+    finally:
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    assert delays == [5]
+    assert state.values["matrix.sync_token"] == "recovered-token"
+    assert client.ready.is_set()

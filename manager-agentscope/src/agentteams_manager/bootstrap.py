@@ -205,7 +205,11 @@ class MatrixRuntime:
 
     @property
     def ready(self) -> bool:
-        return self._matrix.ready.is_set()
+        return self._matrix.sync_healthy
+
+    @property
+    def live(self) -> bool:
+        return self._matrix.supervisor_live
 
     async def start(self) -> None:
         await self._router.start()
@@ -892,6 +896,7 @@ def build_application(
         readiness=readiness,
         metrics=metrics,
         port=config.health_port,
+        liveness_probe=lambda: matrix_runtime.live,
         admin_token=config.admin_api_token,
         admin_snapshot=admin_service.snapshot,
         admin_command=admin_commands.execute,

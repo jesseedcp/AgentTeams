@@ -7,7 +7,7 @@ import hmac
 import json
 import logging
 from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass, field
 from urllib.parse import parse_qsl, unquote, urlsplit
 
 from pydantic import SecretStr, ValidationError
@@ -32,6 +32,7 @@ WebhookHandler = Callable[
     Awaitable[ChannelWebhookResponse],
 ]
 CapabilitySnapshot = Callable[[], Mapping[str, object]]
+LivenessProbe = Callable[[], bool]
 
 
 @dataclass(slots=True)
@@ -41,13 +42,50 @@ class ReadinessState:
     config_ready: bool = False
     matrix_ready: bool = False
     heartbeat_ready: bool = False
+    _matrix_probe: Callable[[], bool] | None = field(
+        default=None,
+        init=False,
+        repr=False,
+        compare=False,
+    )
+
+    def bind_matrix_probe(
+        self,
+        probe: Callable[[], bool] | None,
+    ) -> None:
+        self._matrix_probe = probe
+
+    def _refresh_matrix(self) -> None:
+        if self._matrix_probe is None:
+            return
+        try:
+            self.matrix_ready = bool(self._matrix_probe())
+        except Exception:
+            self.matrix_ready = False
 
     @property
     def ready(self) -> bool:
-        return all(asdict(self).values())
+        self._refresh_matrix()
+        return all(
+            (
+                self.database_ready,
+                self.recovery_ready,
+                self.config_ready,
+                self.matrix_ready,
+                self.heartbeat_ready,
+            ),
+        )
 
     def as_dict(self) -> dict[str, bool]:
-        return {**asdict(self), "ready": self.ready}
+        ready = self.ready
+        return {
+            "database_ready": self.database_ready,
+            "recovery_ready": self.recovery_ready,
+            "config_ready": self.config_ready,
+            "matrix_ready": self.matrix_ready,
+            "heartbeat_ready": self.heartbeat_ready,
+            "ready": ready,
+        }
 
 
 class HealthServer:
@@ -63,6 +101,7 @@ class HealthServer:
         admin_command: AdminCommandHandler | None = None,
         webhook_handler: WebhookHandler | None = None,
         capability_snapshot: CapabilitySnapshot | None = None,
+        liveness_probe: LivenessProbe | None = None,
     ) -> None:
         self.readiness = readiness
         self._metrics = metrics
@@ -73,6 +112,7 @@ class HealthServer:
         self._admin_command = admin_command
         self._webhook_handler = webhook_handler
         self._capability_snapshot = capability_snapshot
+        self._liveness_probe = liveness_probe
         self._server: asyncio.Server | None = None
 
     @property
@@ -149,14 +189,22 @@ class HealthServer:
             elif method != "GET":
                 await self._respond(writer, 405, b"method not allowed\n")
             elif path == "/healthz":
-                payload: dict[str, object] = {"status": "ok"}
+                live = True
+                if self._liveness_probe is not None:
+                    try:
+                        live = bool(self._liveness_probe())
+                    except Exception:
+                        live = False
+                payload: dict[str, object] = {
+                    "status": "ok" if live else "unhealthy",
+                }
                 if self._capability_snapshot is not None:
                     payload["capabilities"] = dict(
                         self._capability_snapshot(),
                     )
                 await self._json(
                     writer,
-                    200,
+                    200 if live else 503,
                     payload,
                 )
             elif path == "/readyz":

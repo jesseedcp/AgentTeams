@@ -78,6 +78,9 @@ class ManagerApplication:
             self.start_log.append("config_watcher")
 
             await self._matrix.start()
+            self.readiness.bind_matrix_probe(
+                lambda: _service_ready(self._matrix),
+            )
             self.readiness.matrix_ready = _service_ready(self._matrix)
             if not self.readiness.matrix_ready:
                 raise RuntimeError("Matrix transport is not ready")
@@ -114,6 +117,7 @@ class ManagerApplication:
         await self._stop_components()
 
     def _clear_readiness(self) -> None:
+        self.readiness.bind_matrix_probe(None)
         self.readiness.database_ready = False
         self.readiness.recovery_ready = False
         self.readiness.config_ready = False

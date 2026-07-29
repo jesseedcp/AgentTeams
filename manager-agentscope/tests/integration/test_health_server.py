@@ -63,6 +63,34 @@ async def test_health_server_rejects_non_get_requests() -> None:
 
 
 @pytest.mark.asyncio
+async def test_health_endpoint_fails_when_critical_supervisor_exits() -> None:
+    live = True
+    server = HealthServer(
+        readiness=ReadinessState(),
+        metrics=MetricsRegistry(),
+        host="127.0.0.1",
+        port=0,
+        liveness_probe=lambda: live,
+    )
+    await server.start()
+    try:
+        async with httpx.AsyncClient(
+            base_url=f"http://127.0.0.1:{server.bound_port}",
+            trust_env=False,
+        ) as client:
+            response = await client.get("/healthz")
+            assert response.status_code == 200
+            assert response.json()["status"] == "ok"
+
+            live = False
+            response = await client.get("/healthz")
+            assert response.status_code == 503
+            assert response.json()["status"] == "unhealthy"
+    finally:
+        await server.stop()
+
+
+@pytest.mark.asyncio
 async def test_health_reports_optional_capability_configuration_separately(
 ) -> None:
     server = HealthServer(

@@ -7,6 +7,8 @@ import hashlib
 import hmac
 import html
 import json
+import logging
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -17,6 +19,7 @@ import httpx
 from nio import (
     AsyncClient,
     AsyncClientConfig,
+    ErrorResponse,
     RoomPreset,
     RoomVisibility,
 )
@@ -31,6 +34,7 @@ from .media import MediaAdapter
 from .threads import RoomHistory, ThreadProjector
 
 InboundHandler = Callable[[InboundEvent], Awaitable[None]]
+logger = logging.getLogger(__name__)
 
 
 class MatrixState(Protocol):
@@ -60,6 +64,9 @@ class MatrixClientConfig:
     password: SecretStr | None = None
     registration_token: SecretStr | None = None
     sync_timeout_ms: int = 30_000
+    sync_watchdog_timeout_seconds: float = 55.0
+    sync_stale_after_seconds: float = 90.0
+    sync_retry_delay_seconds: float = 5.0
     history_limit: int = 50
     encryption: bool = True
     vision_enabled: bool = True
@@ -107,13 +114,38 @@ class MatrixClient:
         self.config = config
         self._state = state
         self._client = nio_client
+        self._client_injected = nio_client is not None
+        self._client_prepared = nio_client is not None
+        self._access_token = config.access_token.get_secret_value()
         self._registration_http = registration_http
         self._handler: InboundHandler | None = None
         self._sync_task: asyncio.Task[None] | None = None
         self._needs_full_state = True
         self._sleeper = sleeper
+        self._clock = time.monotonic
+        self._last_sync_success_monotonic: float | None = None
+        self.last_sync_success_at: datetime | None = None
         self.ready = asyncio.Event()
         self.history = RoomHistory(limit=config.history_limit)
+
+    @property
+    def sync_healthy(self) -> bool:
+        """Return whether the supervised loop is live and recently synced."""
+        task = self._sync_task
+        if (
+            not self.ready.is_set()
+            or task is None
+            or task.done()
+            or self._last_sync_success_monotonic is None
+        ):
+            return False
+        age = self._clock() - self._last_sync_success_monotonic
+        return age <= self.config.sync_stale_after_seconds
+
+    @property
+    def supervisor_live(self) -> bool:
+        """Return false only after a started supervisor has terminated."""
+        return self._sync_task is None or not self._sync_task.done()
 
     async def register_user(
         self,
@@ -220,10 +252,12 @@ class MatrixClient:
         self.config.media_dir.mkdir(parents=True, exist_ok=True)
         client = self._ensure_client()
         await self._prepare_crypto(client)
+        self._client_prepared = True
         self._sync_task = asyncio.create_task(
-            self.run_sync_loop(),
-            name="matrix-sync",
+            self._supervise_sync_loop(),
+            name="matrix-sync-supervisor",
         )
+        self._sync_task.add_done_callback(self._on_sync_task_done)
 
     async def wait_until_ready(self, *, timeout: float = 60) -> None:
         """Wait for the first durable sync or surface an exited sync task."""
@@ -264,6 +298,11 @@ class MatrixClient:
                 encryption_enabled=self.config.encryption,
                 store_sync_tokens=False,
                 request_timeout=request_timeout,
+                # Manager owns retries and client recreation. Leaving either
+                # value as None lets matrix-nio wait forever inside _send(),
+                # preventing the outer watchdog from observing the failure.
+                max_timeouts=0,
+                max_limit_exceeded=0,
             )
             self._client = AsyncClient(
                 self.config.homeserver,
@@ -273,9 +312,7 @@ class MatrixClient:
                 config=nio_config,
             )
         if created or not getattr(self._client, "access_token", None):
-            self._client.access_token = (
-                self.config.access_token.get_secret_value()
-            )
+            self._client.access_token = self._access_token
         self._client.user_id = self.config.user_id
         self._client.user = self.config.user_id
         return self._client
@@ -316,11 +353,12 @@ class MatrixClient:
         close = getattr(self._client, "close", None)
         if close is not None:
             await close()
+        self._client_prepared = False
         self.ready.clear()
 
     async def sync_once(self) -> None:
         """Run one resumable sync and durably advance its cursor."""
-        client = self._ensure_client()
+        client = await self._ensure_prepared_client()
         since = await self._state.get_value("matrix.sync_token")
         try:
             if self._needs_full_state and since is not None:
@@ -366,6 +404,8 @@ class MatrixClient:
             await self._state.set_value("matrix.sync_token", next_batch)
         await maintain_e2ee(client, enabled=self.config.encryption)
         self._needs_full_state = False
+        self._last_sync_success_monotonic = self._clock()
+        self.last_sync_success_at = datetime.now(UTC)
         self.ready.set()
 
     async def run_sync_loop(self) -> None:
@@ -374,10 +414,24 @@ class MatrixClient:
         delays = (5, 10, 20)
         while True:
             try:
-                await self.sync_once()
+                await asyncio.wait_for(
+                    self.sync_once(),
+                    timeout=self.config.sync_watchdog_timeout_seconds,
+                )
                 refresh_attempts = 0
+                # A homeserver or test double may return immediately. Yield
+                # so cancellation, readiness, and room-handler tasks cannot
+                # be starved by a hot sync loop.
+                await asyncio.sleep(0)
             except MatrixUnknownTokenError as exc:
                 self.ready.clear()
+                logger.warning(
+                    "Matrix access token was rejected; attempting refresh",
+                    extra={
+                        "refresh_attempt": refresh_attempts + 1,
+                        "refresh_limit": len(delays),
+                    },
+                )
                 if self.config.password is None:
                     raise RuntimeError(
                         "Matrix token expired and no password is available",
@@ -396,9 +450,82 @@ class MatrixClient:
                         ) from exc
             except asyncio.CancelledError:
                 raise
+            except TimeoutError:
+                self.ready.clear()
+                logger.exception(
+                    "Matrix sync watchdog expired; rebuilding transport",
+                    extra={
+                        "watchdog_seconds": (
+                            self.config.sync_watchdog_timeout_seconds
+                        ),
+                    },
+                )
+                await self._rebuild_client()
+                await self._sleeper(
+                    self.config.sync_retry_delay_seconds,
+                )
             except Exception:
                 self.ready.clear()
-                await self._sleeper(1)
+                logger.exception(
+                    "Matrix sync failed; rebuilding transport",
+                )
+                await self._rebuild_client()
+                await self._sleeper(
+                    self.config.sync_retry_delay_seconds,
+                )
+
+    async def _supervise_sync_loop(self) -> None:
+        """Restart a sync loop that exits outside the normal retry path."""
+        while True:
+            try:
+                await self.run_sync_loop()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                self.ready.clear()
+                logger.exception(
+                    "Matrix sync loop exited unexpectedly; restarting",
+                )
+                await self._rebuild_client()
+                await self._sleeper(
+                    self.config.sync_retry_delay_seconds,
+                )
+
+    def _on_sync_task_done(self, task: asyncio.Task[None]) -> None:
+        self.ready.clear()
+        if task.cancelled():
+            return
+        error = task.exception()
+        if error is None:
+            logger.error("Matrix sync supervisor stopped unexpectedly")
+            return
+        logger.error(
+            "Matrix sync supervisor crashed",
+            exc_info=(type(error), error, error.__traceback__),
+        )
+
+    async def _ensure_prepared_client(self) -> Any:
+        client = self._ensure_client()
+        if not self._client_prepared:
+            await self._prepare_crypto(client)
+            self._client_prepared = True
+        return client
+
+    async def _rebuild_client(self) -> None:
+        """Close a failed owned transport so the next sync starts cleanly."""
+        if self._client_injected:
+            return
+        client = self._client
+        self._client = None
+        self._client_prepared = False
+        self._needs_full_state = True
+        close = getattr(client, "close", None)
+        if close is None:
+            return
+        try:
+            await asyncio.wait_for(close(), timeout=5)
+        except Exception:
+            logger.exception("Failed to close stale Matrix transport")
 
     async def _refresh_token(self) -> bool:
         password = self.config.password
@@ -412,6 +539,7 @@ class MatrixClient:
         if not access_token:
             return False
         client = self._ensure_client()
+        self._access_token = access_token
         client.access_token = access_token
         user_id = getattr(response, "user_id", None)
         if user_id:
@@ -847,7 +975,18 @@ def _require_matrix_success(response: object, operation: str) -> None:
 
 
 def _is_unknown_token(value: object) -> bool:
-    text = str(value)
-    return "M_UNKNOWN_TOKEN" in text or (
-        "401" in text and "token" in text.lower()
-    )
+    if isinstance(value, MatrixUnknownTokenError):
+        return True
+    if isinstance(value, ErrorResponse):
+        error_code = value.status_code
+        return error_code == "M_UNKNOWN_TOKEN" or (
+            error_code in {"401", 401}
+            and "token" in value.message.lower()
+        )
+    error_code = getattr(value, "errcode", None)
+    if error_code == "M_UNKNOWN_TOKEN":
+        return True
+    http_status = getattr(value, "status", None)
+    if http_status is None:
+        http_status = getattr(value, "status_code", None)
+    return http_status in {"401", 401}
