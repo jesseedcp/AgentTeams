@@ -739,9 +739,21 @@ def build_application(
         memory=memory_repository,
         metrics=metrics,
         known_models={
-            name: capabilities.reasoning
-            for name, capabilities in known_models.items()
+            config.default_model: (
+                known_models[config.default_model].reasoning
+                if config.default_model in known_models
+                else True
+            ),
         },
+        default_model=config.default_model,
+        known_models_provider=lambda: {
+            runtime_registry.current.document.model: (
+                runtime_registry.current.document.reasoning
+            ),
+        },
+        default_model_provider=lambda: (
+            runtime_registry.current.document.model
+        ),
     )
     policy = RoomPolicyResolver(
         topology=topology,

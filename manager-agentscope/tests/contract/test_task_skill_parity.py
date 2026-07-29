@@ -9,7 +9,7 @@ from agentteams_manager.tools.tasks import TASK_TOOL_NAMES
 
 ROOT = Path("manager/agent/skills")
 FAMILIES = {
-    "file-sync-management": {"sync_files"},
+    "file-sync-management": {"sync_files", "read_task_file"},
     "git-delegation-management": {
         "inspect_git_request",
         "git_delegate",

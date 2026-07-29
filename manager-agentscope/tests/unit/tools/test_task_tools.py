@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 import pytest
 
 from agentteams_manager.domain.models import (
+    ProjectRecord,
     RoomKind,
     RoomPolicy,
     TaskRecord,
@@ -20,6 +21,7 @@ from agentteams_manager.workflows.resources import MutationContext
 class Tasks:
     def __init__(self) -> None:
         self.completed: list[tuple[str, str]] = []
+        self.created: list[dict[str, object]] = []
 
     async def list_all(self):
         return ()
@@ -51,18 +53,57 @@ class Tasks:
             "status": "completed",
         }
 
+    async def create_finite(self, **kwargs):
+        self.created.append(kwargs)
+        return {
+            "operation_id": "a" * 32,
+            "task_id": "task-standalone",
+            "status": "dispatched",
+        }
+
 
 class Projects:
+    def __init__(self) -> None:
+        self.added: list[dict[str, object]] = []
+
     async def list_all(self):
         return ()
 
     async def get(self, project_id: str):
-        del project_id
-        return None
+        return ProjectRecord(
+            project_id=project_id,
+            name="Project",
+            room_id="!project:example",
+            status="active",
+            metadata={"participants": ["alice"]},
+            created_at=datetime(2026, 7, 23, tzinfo=UTC),
+            updated_at=datetime(2026, 7, 23, tzinfo=UTC),
+        )
+
+    async def add_task(self, **kwargs):
+        self.added.append(kwargs)
+        return {
+            "operation_id": "b" * 32,
+            "task_id": "task-project",
+            "status": "dispatched",
+        }
 
 
 class FileSync:
-    pass
+    async def read_task_file(
+        self,
+        task_id: str,
+        path: str,
+        *,
+        max_bytes: int,
+    ):
+        return {
+            "task_id": task_id,
+            "path": path,
+            "content": "artifact",
+            "bytes_read": len("artifact"),
+            "max_bytes": max_bytes,
+        }
 
 
 class Git:
@@ -141,6 +182,31 @@ def test_project_change_tools_are_registered_with_closed_schemas() -> None:
 
 
 @pytest.mark.asyncio
+async def test_read_task_file_is_policy_scoped_and_read_only() -> None:
+    toolkit = TaskToolkit(
+        policy=_policy(allowed_tools=frozenset({"read_task_file"})),
+        tasks=Tasks(),
+        projects=Projects(),
+        task_service=Tasks(),
+        project_service=Projects(),
+        file_sync=FileSync(),
+        git=Git(),
+        context_provider=_context,
+    )
+
+    tool = toolkit.tools[0]
+    chunk = await tool.call(
+        task_id="task-1",
+        path="result.md",
+        max_bytes=4096,
+    )
+
+    assert tool.name == "read_task_file"
+    assert tool.is_read_only is True
+    assert json.loads(chunk.content[0].text)["content"] == "artifact"
+
+
+@pytest.mark.asyncio
 async def test_completion_uses_bound_matrix_event_not_model_input() -> None:
     service = Tasks()
     toolkit = TaskToolkit(
@@ -164,3 +230,64 @@ async def test_completion_uses_bound_matrix_event_not_model_input() -> None:
             task_id="task-1",
             worker_event_id="$forged",
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("tool_name", "payload", "expected_team"),
+    [
+        (
+            "create_task",
+            {
+                "title": "Project work",
+                "specification": "Do the indexed work",
+                "assigned_to": "alice",
+                "project_id": "project-123",
+                "project_room_id": "!spoofed:example",
+            },
+            None,
+        ),
+        (
+            "delegate_team_task",
+            {
+                "title": "Team project work",
+                "specification": "Delegate through the Leader",
+                "leader": "alice",
+                "team_name": "alpha",
+                "project_id": "project-123",
+                "project_room_id": "!spoofed:example",
+            },
+            "alpha",
+        ),
+    ],
+)
+async def test_generic_project_delegation_uses_project_service(
+    tool_name: str,
+    payload: dict[str, object],
+    expected_team: str | None,
+) -> None:
+    tasks = Tasks()
+    projects = Projects()
+    toolkit = TaskToolkit(
+        policy=_policy(
+            allowed_tools=frozenset({tool_name}),
+            resource_scope_all=True,
+        ),
+        tasks=tasks,
+        projects=projects,
+        task_service=tasks,
+        project_service=projects,
+        file_sync=FileSync(),
+        git=Git(),
+        context_provider=_context,
+    )
+    tool = next(item for item in toolkit.tools if item.name == tool_name)
+
+    await tool.call(**payload)
+
+    assert tasks.created == []
+    assert len(projects.added) == 1
+    assert projects.added[0]["project_id"] == "project-123"
+    assert projects.added[0]["assigned_to"] == "alice"
+    assert projects.added[0]["delegated_to_team"] == expected_team
+    assert "project_room_id" not in projects.added[0]

@@ -505,7 +505,13 @@ old context
                     "gatewayKeyEnv": "AGENTTEAMS_WORKER_GATEWAY_KEY",
                 },
                 "storage": {"bucket": "secret-ish-bucket"},
-                "desired": {"model": {"model": "qwen-plus"}},
+                "desired": {
+                    "model": {
+                        "providerId": "agentteams-gateway",
+                        "model": "qwen-plus",
+                        "gatewayKey": "must-not-leak",
+                    },
+                },
             },
         )
     )
@@ -517,6 +523,12 @@ old context
     assert "## Runtime Team Context" in text
     assert "runtimeName: leader-runtime" in text
     assert "member.runtimeName: worker-a" in text
+    assert "runtime.model.providerId: agentteams-gateway" in text
+    assert "runtime.model.name: qwen-plus" in text
+    assert (
+        "runtime.coordinator.matrixUserId: "
+        "@leader-runtime:matrix.local"
+    ) in text
     assert not (config.qwenpaw_working_dir / "teamharness" / "team-context.json").exists()
     assert "desired" not in text
     assert "storage" not in text
@@ -524,6 +536,60 @@ old context
     assert "gatewayKeyEnv" not in text
     assert "AGENTTEAMS_WORKER_MATRIX_TOKEN" not in text
     assert "secret-ish-bucket" not in text
+    assert "must-not-leak" not in text
+
+
+def test_runtime_updater_restores_team_context_after_adapter_overwrite(
+    tmp_path: Path,
+) -> None:
+    config = _config(tmp_path)
+    teams_md = config.default_workspace_dir / "TEAMS.md"
+
+    def overwrite_with_legacy_context() -> None:
+        teams_md.parent.mkdir(parents=True, exist_ok=True)
+        teams_md.write_text(
+            """# TeamHarness Contract
+
+<!-- BEGIN AGENTTEAMS RUNTIME TEAM CONTEXT -->
+## Runtime Team Context
+
+- member.name: worker-a
+<!-- END AGENTTEAMS RUNTIME TEAM CONTEXT -->
+""",
+            encoding="utf-8",
+        )
+
+    updater = RuntimeUpdater(
+        config=config,
+        adapter_apply=overwrite_with_legacy_context,
+        package_manager=_NoopPackageManager(),
+    )
+    updater.apply_once(
+        runtime_config=MemberRuntimeConfig(
+            path=config.runtime_config_path,
+            raw={
+                "metadata": {"generation": "1"},
+                "member": {
+                    "name": "worker-a",
+                    "runtimeName": "worker-a",
+                    "role": "worker",
+                    "runtime": "qwenpaw",
+                    "matrixUserId": "@worker-a:matrix.local",
+                },
+                "desired": {
+                    "model": {
+                        "providerId": "agentteams-gateway",
+                        "model": "qwen-plus",
+                    },
+                },
+            },
+        )
+    )
+
+    text = teams_md.read_text(encoding="utf-8")
+    assert "runtime.model.providerId: agentteams-gateway" in text
+    assert "runtime.model.name: qwen-plus" in text
+    assert "runtime.coordinator.matrixUserId: @manager:matrix.local" in text
 
 
 def test_runtime_updater_rebuilds_missing_teams_md_with_renderer(tmp_path: Path) -> None:
@@ -1169,6 +1235,7 @@ def test_runtime_updater_configures_matrix_channel_in_agent_config(
                 "member": {
                     "runtime": "qwenpaw",
                     "matrixUserId": "@worker-a:matrix.local",
+                    "personalRoomId": "!worker:matrix.local",
                 },
                 "credentials": {"matrixTokenEnv": "AGENTTEAMS_WORKER_MATRIX_TOKEN"},
             },
@@ -1188,6 +1255,71 @@ def test_runtime_updater_configures_matrix_channel_in_agent_config(
     assert matrix.filter_thinking is False
     assert matrix.groups["*"]["requireMention"] is True
     assert matrix.groups["!team:matrix.local"]["requireMention"] is True
+    assert matrix.groups["!worker:matrix.local"]["requireMention"] is False
+
+
+def test_runtime_updater_allows_plain_messages_in_standalone_worker_room(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _config(tmp_path)
+    monkeypatch.setenv("AGENTTEAMS_MATRIX_URL", "http://matrix.example.com:6167")
+    monkeypatch.setenv("AGENTTEAMS_WORKER_MATRIX_TOKEN", "matrix-token")
+    saved = {}
+    matrix_config = types.SimpleNamespace(
+        enabled=False,
+        homeserver="",
+        user_id="",
+        access_token="",
+        password="legacy",
+        encryption=False,
+        group_disabled=True,
+        dm_disabled=True,
+        filter_tool_messages=False,
+        filter_thinking=False,
+        groups={"!worker:matrix.local": {"autoReply": True}},
+    )
+    agent_config = types.SimpleNamespace(
+        channels=types.SimpleNamespace(matrix=matrix_config),
+    )
+    config_module = types.ModuleType("qwenpaw.config.config")
+    config_module.load_agent_config = lambda _agent_id: agent_config
+    config_module.save_agent_config = lambda agent_id, value: saved.update(
+        {agent_id: value},
+    )
+    monkeypatch.setitem(sys.modules, "qwenpaw", types.ModuleType("qwenpaw"))
+    monkeypatch.setitem(
+        sys.modules,
+        "qwenpaw.config",
+        types.ModuleType("qwenpaw.config"),
+    )
+    monkeypatch.setitem(sys.modules, "qwenpaw.config.config", config_module)
+
+    RuntimeUpdater(
+        config=config,
+        package_manager=_NoopPackageManager(),
+    ).apply_once(
+        runtime_config=MemberRuntimeConfig(
+            path=config.runtime_config_path,
+            raw={
+                "metadata": {"generation": "1"},
+                "member": {
+                    "runtime": "qwenpaw",
+                    "matrixUserId": "@worker-a:matrix.local",
+                    "personalRoomId": "!worker:matrix.local",
+                },
+                "credentials": {
+                    "matrixTokenEnv": "AGENTTEAMS_WORKER_MATRIX_TOKEN",
+                },
+            },
+        ),
+    )
+
+    matrix = saved["default"].channels.matrix
+    assert matrix.groups["*"]["requireMention"] is True
+    assert matrix.groups["!worker:matrix.local"] == {
+        "requireMention": False,
+    }
 
 
 def test_runtime_updater_configures_dingtalk_channel_in_agent_config(

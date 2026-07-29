@@ -410,10 +410,11 @@ func (p *Provisioner) ProvisionWorker(ctx context.Context, req WorkerProvisionRe
 	}
 
 	invite := []string{adminMatrixID}
-	if authorityID != adminMatrixID {
-		invite = append(invite, authorityID)
+	if p.managerEnabled {
+		invite = appendUniqueStrings(invite, managerMatrixID)
 	}
-	invite = append(invite, workerMatrixID)
+	invite = appendUniqueStrings(invite, authorityID)
+	invite = appendUniqueStrings(invite, workerMatrixID)
 
 	leaderMatrixID := ""
 	if req.TeamLeaderName != "" {
@@ -464,7 +465,7 @@ func (p *Provisioner) ProvisionWorker(ctx context.Context, req WorkerProvisionRe
 	// provisioning) or recovered power levels are applied. This may
 	// (re)invite the worker if it had been removed from the room.
 	if !roomInfo.Created {
-		if err := p.ReconcileRoomMembership(ctx, roomID, []string{adminMatrixID, authorityID, workerMatrixID}); err != nil {
+		if err := p.ReconcileRoomMembership(ctx, roomID, invite); err != nil {
 			logger.Error(err, "failed to reconcile worker room membership (non-fatal)", "roomID", roomID)
 		}
 	}

@@ -64,8 +64,73 @@ async def test_worker_uploaded_result_is_pulled_before_read(
     )
 
     root = await service.pull_task(task_id)
+    result = await service.read_task_file(
+        task_id,
+        "result.md",
+    )
 
     assert (root / "result.md").read_text(encoding="utf-8") == "fresh"
+    assert result.task_id == task_id
+    assert result.path == "result.md"
+    assert result.content == "fresh"
+    assert result.bytes_read == 5
+
+    with pytest.raises(ValueError, match="relative"):
+        await service.read_task_file(task_id, "../result.md")
+
+
+@pytest.mark.asyncio
+async def test_task_file_read_rejects_symlinks_and_oversized_content(
+    tmp_path: Path,
+) -> None:
+    database = Database(tmp_path / "manager.db")
+    await database.open()
+    task_id = "task-20260723-120000-abc123"
+    now = datetime(2026, 7, 23, 12, tzinfo=UTC)
+    tasks = TaskRepository(database)
+    await tasks.create(
+        TaskRecord(
+            task_id=task_id,
+            task_type="finite",
+            status="assigned",
+            title="Task",
+            assigned_to="alice",
+            room_id="!alice:example",
+            created_at=now,
+            updated_at=now,
+        ),
+    )
+    cache_root = tmp_path / "cache"
+    root = cache_root / "shared" / "tasks" / task_id
+    root.mkdir(parents=True)
+    (root / "large.md").write_text("0123456789", encoding="utf-8")
+    service = FileSyncService(
+        storage=MinioClient(FakeS3(), bucket="agentteams"),
+        leases=ProcessingLeaseService(
+            leases=LeaseRepository(database),
+            storage=MinioClient(FakeS3(), bucket="leases"),
+            clock=FixedClock(),
+        ),
+        tasks=tasks,
+        cache_root=cache_root,
+    )
+
+    with pytest.raises(ValueError, match="maximum"):
+        await service.read_task_file(
+            task_id,
+            "large.md",
+            max_bytes=5,
+        )
+
+    target = root / "target.md"
+    target.write_text("secret", encoding="utf-8")
+    link = root / "link.md"
+    try:
+        link.symlink_to(target)
+    except OSError:
+        pytest.skip("symlink creation is unavailable on this Windows host")
+    with pytest.raises(ValueError, match="symlink"):
+        await service.read_task_file(task_id, "link.md")
 
 
 @pytest.mark.asyncio

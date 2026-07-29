@@ -114,6 +114,42 @@ def _string_fields(value: Any, keys: List[str]) -> Dict[str, str]:
     return result
 
 
+def _coordinator_matrix_user_id(
+    team: Dict[str, Any],
+    member: Dict[str, Any],
+) -> str:
+    role = _string(member.get("role")).casefold()
+    member_id = _string(member.get("matrixUserId"))
+    domain = member_id.split(":", 1)[1] if ":" in member_id else ""
+    if _string(team.get("name")) and role not in {
+        "leader",
+        "team_leader",
+        "team-leader",
+    }:
+        leader_name = _string(
+            team.get("leaderRuntimeName") or team.get("leaderName"),
+        )
+        members = team.get("members")
+        if isinstance(members, list):
+            for item in members:
+                if not isinstance(item, dict):
+                    continue
+                if (
+                    _string(item.get("runtimeName")) == leader_name
+                    or _string(item.get("name")) == leader_name
+                    or _string(item.get("role")).casefold()
+                    in {"leader", "team_leader", "team-leader"}
+                ):
+                    leader_id = _string(item.get("matrixUserId"))
+                    if leader_id:
+                        return leader_id
+        if leader_name and domain:
+            return f"@{leader_name}:{domain}"
+    if domain:
+        return f"@manager:{domain}"
+    return ""
+
+
 def _read_json(path: Path) -> Dict[str, Any]:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -157,6 +193,7 @@ def render_team_context(config: Dict[str, Any]) -> str:
     member = _section(config, "member")
     desired = _section(config, "desired")
     package = _section(desired, "agentPackage")
+    model = _section(desired, "model")
     channel_policy = _section(desired, "channelPolicy")
     base_prompt = ASSET_DIR / "prompts" / "team" / "TEAMS.md"
     base = base_prompt.read_text(encoding="utf-8").strip() if base_prompt.exists() else ""
@@ -178,6 +215,7 @@ def render_team_context(config: Dict[str, Any]) -> str:
         ("team.teamRoomId", team.get("teamRoomId")),
         ("team.leaderName", team.get("leaderName")),
         ("team.leaderRuntimeName", team.get("leaderRuntimeName")),
+        ("team.leaderDmRoomId", team.get("leaderDmRoomId")),
         ("team.admin.name", _section(team, "admin").get("name")),
         ("team.admin.matrixUserId", _section(team, "admin").get("matrixUserId")),
         ("member.name", member.get("name")),
@@ -188,6 +226,17 @@ def render_team_context(config: Dict[str, Any]) -> str:
         ("member.personalRoomId", member.get("personalRoomId")),
         ("desired.agentPackage.name", package.get("name")),
         ("desired.agentPackage.version", package.get("version")),
+        (
+            "runtime.model.providerId",
+            model.get("providerId")
+            or model.get("provider_id")
+            or model.get("provider"),
+        ),
+        ("runtime.model.name", model.get("model") or model.get("name")),
+        (
+            "runtime.coordinator.matrixUserId",
+            _coordinator_matrix_user_id(team, member),
+        ),
     ]
     for key, value in facts:
         text = _string(value)

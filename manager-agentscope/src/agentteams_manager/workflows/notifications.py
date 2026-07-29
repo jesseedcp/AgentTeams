@@ -206,8 +206,9 @@ class NotificationService:
         text: str,
     ) -> NotificationReceipt:
         notification_id = _notification_id(source_operation_id)
+        source_key = _notification_source_key(source_operation_id)
         existing = await self._notifications.get_by_source(
-            source_operation_id,
+            source_key,
         )
         room_id = existing.room_id if existing else await self.resolve_room()
         txn_id = matrix_transaction_id(notification_id, 0)
@@ -240,7 +241,9 @@ class NotificationService:
     ) -> NotificationReceipt:
         intent = _notification_intent(operation)
         notification_id = operation.operation_id
-        source_operation_id = intent["source_operation_id"]
+        source_operation_id = _notification_source_key(
+            intent["source_operation_id"],
+        )
         recipient = intent["recipient"]
         room_id = intent["room_id"]
         text = intent["text"]
@@ -351,7 +354,9 @@ class NotificationService:
         )
 
     async def already_sent(self, operation_id: str) -> bool:
-        record = await self._notifications.get_by_source(operation_id)
+        record = await self._notifications.get_by_source(
+            _notification_source_key(operation_id),
+        )
         return record is not None and record.status == "sent"
 
     async def send_terminal_failure(self, operation_id: str) -> None:
@@ -364,6 +369,14 @@ class NotificationService:
 def _notification_id(source_operation_id: str) -> str:
     return hashlib.sha256(
         f"notification\0{source_operation_id}".encode("utf-8"),
+    ).hexdigest()[:32]
+
+
+def _notification_source_key(source_operation_id: str) -> str:
+    if len(source_operation_id) == 32:
+        return source_operation_id
+    return hashlib.sha256(
+        f"notification-source\0{source_operation_id}".encode("utf-8"),
     ).hexdigest()[:32]
 
 

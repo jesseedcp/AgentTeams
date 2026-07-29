@@ -188,6 +188,35 @@ class AgentTeamsPluginCliTest(unittest.TestCase):
         log_lines = (self.project / "teamharness-install.jsonl").read_text(encoding="utf-8").splitlines()
         self.assertIn("qwenpaw", [json.loads(line).get("runtime") for line in log_lines])
 
+    def test_loongsuite_plugin_probe_dispatches_to_claude_adapter(self) -> None:
+        package = self.package_teamharness()
+        fake_bin = self.write_fake_runtime("claude")
+        dest_dir = self.project / "pilot-data" / "plugins" / "teamharness"
+        dest_dir.mkdir(parents=True)
+
+        with tarfile.open(package, "r:gz") as archive:
+            archive.extractall(dest_dir)
+
+        result = subprocess.run(
+            ["bash", str(dest_dir / "scripts" / "install.sh")],
+            cwd=self.project,
+            env={
+                **os.environ,
+                "PATH": f"{fake_bin}{os.pathsep}{os.environ.get('PATH', '')}",
+                "PILOT_DATA_DIR": str(self.project / "pilot-data"),
+                "PILOT_LOG_DIR": str(self.project / "pilot-data" / "logs" / "teamharness"),
+                "TEAMHARNESS_INSTALL_LOG": str(self.project / "teamharness-install.jsonl"),
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        log_lines = (self.project / "teamharness-install.jsonl").read_text(encoding="utf-8").splitlines()
+        self.assertIn("claude-code", [json.loads(line).get("runtime") for line in log_lines])
+
     def test_cli_reports_invalid_package_without_traceback(self) -> None:
         broken = self.project / "broken.tar.gz"
         broken.write_text("not a tarball", encoding="utf-8")

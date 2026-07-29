@@ -168,16 +168,18 @@ if(writable.has(active)){const actions=document.createElement("td");
 actions.className="row-actions";
 const change=document.createElement("button");change.className="action";
 change.textContent="编辑";change.onclick=event=>{event.stopPropagation();
-openEditor("PATCH",active,item.name||item.project_id,item)};
+openEditor("PATCH",active,resourceIdentifier(active,item),item)};
 const remove=document.createElement("button");
 remove.className="action danger";remove.textContent=active==="projects"?"关闭":"删除";
 remove.onclick=event=>{event.stopPropagation();
-openEditor("DELETE",active,item.name||item.project_id,item)};
+openEditor("DELETE",active,resourceIdentifier(active,item),item)};
 actions.append(change,remove);row.append(actions)}
 row.onclick=()=>document.querySelector("#detail").textContent=
 JSON.stringify(item,null,2);body.append(row)});
 document.querySelector("#status").innerHTML="<span>STATUS <b>ONLINE</b></span>"+
 "<span>RECORDS <b>"+items.length+"</b></span>"}
+function resourceIdentifier(resource,item){
+return resource==="projects"?item.project_id:item.name}
 function patchTemplate(resource,item){if(resource==="workers")return{
 model:item.model||""};if(resource==="teams")return{
 leader_name:item.leader,worker_names:item.workers||[],
@@ -194,7 +196,7 @@ const payload=method==="POST"?templates[resource]:
 method==="PATCH"?patchTemplate(resource,item):{};
 document.querySelector("#payload").value=JSON.stringify(payload,null,2);
 document.querySelector("#payload").disabled=method==="DELETE";
-document.querySelector("#confirmed").checked=method==="DELETE";
+document.querySelector("#confirmed").checked=false;
 document.querySelector("#editorError").textContent="";editor.showModal()}
 document.querySelector("#create").onclick=()=>openEditor("POST",active);
 document.querySelector("#refresh").onclick=()=>load();
@@ -205,6 +207,8 @@ submit.disabled=true;try{let payload=edit.method==="DELETE"?{}:
 JSON.parse(document.querySelector("#payload").value);
 if(!payload||Array.isArray(payload)||typeof payload!=="object")
 throw Error("请求内容必须是 JSON 对象");
+if(edit.method==="DELETE"&&!document.querySelector("#confirmed").checked)
+throw Error("删除或关闭前必须手动勾选确认");
 if(document.querySelector("#confirmed").checked)payload.confirmed=true;
 const name=edit.method==="POST"?"":edit.name;
 await mutate(resourceURL(edit.resource,name),edit.method,payload);

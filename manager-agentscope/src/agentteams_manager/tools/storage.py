@@ -119,6 +119,16 @@ class FileRootReceipt(BaseModel):
     manifest_sha256: str
 
 
+class TaskFileReadReceipt(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    task_id: str
+    path: str
+    content: str
+    bytes_read: int = Field(ge=0)
+    sha256: str
+
+
 class FileSyncSupervisor(Protocol):
     async def begin(
         self,
@@ -358,6 +368,59 @@ class FileSyncService:
             destination,
         )
         return destination
+
+    async def read_task_file(
+        self,
+        task_id: str,
+        path: str,
+        *,
+        max_bytes: int = 256 * 1024,
+    ) -> TaskFileReadReceipt:
+        """Read one bounded UTF-8 file from the verified task cache."""
+
+        await self._require_task(task_id)
+        if not 1 <= max_bytes <= 1024 * 1024:
+            raise ValueError("maximum read size must be 1 to 1048576 bytes")
+        relative = Path(path)
+        if (
+            not path.strip()
+            or relative.is_absolute()
+            or ".." in relative.parts
+        ):
+            raise ValueError("task file path must be relative and contained")
+        root = self._task_root(task_id).resolve()
+        candidate = root.joinpath(relative)
+        current = root
+        for part in relative.parts:
+            current = current / part
+            if current.is_symlink():
+                raise ValueError("task file path must not contain a symlink")
+        absolute = candidate.resolve(strict=True)
+        if not absolute.is_relative_to(root):
+            raise ValueError("task file path escapes task root")
+        if not absolute.is_file():
+            raise ValueError("task file path is not a file")
+        size = absolute.stat().st_size
+        if size > max_bytes:
+            raise ValueError(
+                f"task file exceeds maximum read size of {max_bytes} bytes",
+            )
+        data = absolute.read_bytes()
+        if len(data) > max_bytes:
+            raise ValueError(
+                f"task file exceeds maximum read size of {max_bytes} bytes",
+            )
+        try:
+            content = data.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise ValueError("task file is not valid UTF-8 text") from exc
+        return TaskFileReadReceipt(
+            task_id=task_id,
+            path=relative.as_posix(),
+            content=content,
+            bytes_read=len(data),
+            sha256=hashlib.sha256(data).hexdigest(),
+        )
 
     async def push_task(
         self,

@@ -62,6 +62,7 @@ TASK_TOOL_NAMES = frozenset(
         "update_project_participants",
         "delete_project",
         "sync_files",
+        "read_task_file",
         "inspect_git_request",
         "git_delegate",
         "git_delegate_high_risk",
@@ -268,6 +269,15 @@ class SyncFilesInput(_Input):
         return self
 
 
+class ReadTaskFileInput(_TaskIdInput):
+    path: str = Field(min_length=1, max_length=1_024)
+    max_bytes: int = Field(
+        default=256 * 1024,
+        ge=1,
+        le=1024 * 1024,
+    )
+
+
 class GitDelegationInput(_Input):
     message: str = Field(min_length=1, max_length=100_000)
 
@@ -307,6 +317,14 @@ class ProjectReader(Protocol):
 
 class FileSyncPort(Protocol):
     async def pull_task(self, task_id: str) -> object: ...
+
+    async def read_task_file(
+        self,
+        task_id: str,
+        path: str,
+        *,
+        max_bytes: int,
+    ) -> object: ...
 
     async def push_task(
         self,
@@ -682,6 +700,13 @@ class TaskToolkit:
                 False,
             ),
             (
+                "read_task_file",
+                "Read one bounded UTF-8 file from a pulled task cache.",
+                ReadTaskFileInput,
+                self._read_task_file,
+                True,
+            ),
+            (
                 "inspect_git_request",
                 "Parse a Git request and report its risk without execution.",
                 GitDelegationInput,
@@ -797,6 +822,17 @@ class TaskToolkit:
             worker=item.assigned_to,
             team=item.delegated_to_team,
         )
+        if item.project_id is not None:
+            await self._require_visible_project(item.project_id)
+            return await self._project_service.add_task(
+                project_id=item.project_id,
+                title=item.title,
+                specification=item.specification,
+                assigned_to=item.assigned_to,
+                delegated_to_team=item.delegated_to_team,
+                dependencies=(),
+                context=await self._context(),
+            )
         return await TaskTools(self._task_service).create_finite(
             item,
             context=await self._context(),
@@ -836,6 +872,17 @@ class TaskToolkit:
             worker=item.leader,
             team=item.team_name,
         )
+        if item.project_id is not None:
+            await self._require_visible_project(item.project_id)
+            return await self._project_service.add_task(
+                project_id=item.project_id,
+                title=item.title,
+                specification=item.specification,
+                assigned_to=item.leader,
+                delegated_to_team=item.team_name,
+                dependencies=(),
+                context=await self._context(),
+            )
         return await self._task_service.create_finite(
             title=item.title,
             spec=item.specification,
@@ -1091,6 +1138,15 @@ class TaskToolkit:
             task_id=item.task_id,
             worker_name=item.worker_name,
             result=result,
+        )
+
+    async def _read_task_file(self, request: BaseModel) -> object:
+        item = ReadTaskFileInput.model_validate(request)
+        await self._require_visible_task(item.task_id)
+        return await self._file_sync.read_task_file(
+            item.task_id,
+            item.path,
+            max_bytes=item.max_bytes,
         )
 
     async def _inspect_git(self, request: BaseModel) -> object:

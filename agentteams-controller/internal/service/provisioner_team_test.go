@@ -326,11 +326,12 @@ func TestProvisionWorkerFreshCredentialsRecreatesStaleRoomAlias(t *testing.T) {
 	matrixClient.created = false
 	creds := fakeCredentialStore{}
 	p := NewProvisioner(ProvisionerConfig{
-		Matrix:       matrixClient,
-		Gateway:      fakeGateway{},
-		Creds:        creds,
-		MatrixDomain: "localhost",
-		AdminUser:    "admin",
+		Matrix:         matrixClient,
+		Gateway:        fakeGateway{},
+		Creds:          creds,
+		MatrixDomain:   "localhost",
+		AdminUser:      "admin",
+		ManagerEnabled: true,
 	})
 
 	result, err := p.ProvisionWorker(context.Background(), WorkerProvisionRequest{Name: "alice"})
@@ -368,11 +369,12 @@ func TestProvisionWorkerTeamMemberRoomMeta(t *testing.T) {
 	matrixClient := newFakeTeamMatrix()
 	creds := fakeCredentialStore{}
 	p := NewProvisioner(ProvisionerConfig{
-		Matrix:       matrixClient,
-		Gateway:      fakeGateway{},
-		Creds:        creds,
-		MatrixDomain: "localhost",
-		AdminUser:    "admin",
+		Matrix:         matrixClient,
+		Gateway:        fakeGateway{},
+		Creds:          creds,
+		MatrixDomain:   "localhost",
+		AdminUser:      "admin",
+		ManagerEnabled: true,
 	})
 
 	_, err := p.ProvisionWorker(context.Background(), WorkerProvisionRequest{
@@ -383,6 +385,14 @@ func TestProvisionWorkerTeamMemberRoomMeta(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("ProvisionWorker: %v", err)
+	}
+	if got, want := matrixClient.createRooms[0].Invite, []string{
+		"@admin:localhost",
+		"@manager:localhost",
+		"@lead:localhost",
+		"@dev:localhost",
+	}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("team worker room invites=%v, want %v", got, want)
 	}
 	state := requireRoomState(t, matrixClient, "!worker-new:localhost")
 	if got := state.content["teamName"]; got != "alpha" {
@@ -397,6 +407,48 @@ func TestProvisionWorkerTeamMemberRoomMeta(t *testing.T) {
 	}
 	if got := leader["workerName"]; got != "lead" {
 		t.Fatalf("leader workerName=%v, want lead", got)
+	}
+}
+
+func TestProvisionWorkerExistingTeamRoomKeepsManagerMembership(t *testing.T) {
+	matrixClient := newFakeTeamMatrix()
+	matrixClient.created = false
+	matrixClient.members["!worker-old:localhost"] = []matrix.RoomMember{
+		{UserID: "@admin:localhost", Membership: "join"},
+		{UserID: "@manager:localhost", Membership: "join"},
+		{UserID: "@lead:localhost", Membership: "join"},
+		{UserID: "@dev:localhost", Membership: "join"},
+	}
+	creds := fakeCredentialStore{
+		"dev": {
+			MatrixPassword: "matrix-password",
+			MatrixToken:    "matrix-token",
+			GatewayKey:     "gateway-key",
+			MinIOPassword:  "minio-password",
+		},
+	}
+	p := NewProvisioner(ProvisionerConfig{
+		Matrix:         matrixClient,
+		Gateway:        fakeGateway{},
+		Creds:          creds,
+		MatrixDomain:   "localhost",
+		AdminUser:      "admin",
+		ManagerEnabled: true,
+	})
+
+	_, err := p.ProvisionWorker(context.Background(), WorkerProvisionRequest{
+		Name:           "dev",
+		Role:           "worker",
+		TeamName:       "alpha",
+		TeamLeaderName: "lead",
+	})
+	if err != nil {
+		t.Fatalf("ProvisionWorker: %v", err)
+	}
+	for _, kick := range matrixClient.kicks {
+		if kick.userID == "@manager:localhost" {
+			t.Fatalf("Manager must remain in team Worker room, kicks=%v", matrixClient.kicks)
+		}
 	}
 }
 

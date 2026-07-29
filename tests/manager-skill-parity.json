@@ -33,7 +33,7 @@
     {
       "name": "file-sync-management",
       "skillFile": "manager/agent/skills/file-sync-management/SKILL.md",
-      "tools": ["sync_files", "read_host_file", "write_host_file"],
+      "tools": ["sync_files", "read_task_file", "read_host_file", "write_host_file"],
       "evidence": [
         "manager-agentscope/tests/integration/test_file_sync.py",
         "manager-agentscope/tests/contract/test_task_skill_parity.py"

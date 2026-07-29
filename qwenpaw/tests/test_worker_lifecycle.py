@@ -862,10 +862,18 @@ async def test_start_reads_runtime_config_installs_adapter_and_starts_loops(
 
     monkeypatch.setattr("qwenpaw_worker.sync.FileSync.mirror_all", lambda _self: calls.append("mirror"))
     monkeypatch.setattr("qwenpaw_worker.sync.FileSync.pull_runtime_config", lambda _self, _path: calls.append("pull"))
+    monkeypatch.setattr("qwenpaw_worker.worker.Worker._link_workspace_shared", lambda _self: None)
     monkeypatch.setattr("qwenpaw_worker.worker.Worker._configure_qwenpaw_runtime", lambda self: calls.append("runtime"))
     monkeypatch.setattr("qwenpaw_worker.worker.Worker._prepare_default_plugins", lambda self: calls.append("plugins"))
     monkeypatch.setattr("qwenpaw_worker.worker.Worker._apply_teamharness_assets", lambda self: calls.append("teamharness-sync"))
     monkeypatch.setattr("qwenpaw_worker.worker.Worker._apply_workerflow_assets", lambda self: calls.append("workerflow-sync"))
+    monkeypatch.setattr(
+        "qwenpaw_worker.update.RuntimeUpdater.refresh_team_context",
+        lambda self, runtime_config: calls.append(
+            f"context-refresh:{runtime_config.generation}"
+        ),
+        raising=False,
+    )
 
     def fake_apply_once(self, runtime_config=None, force=False, reapply_adapter=True):
         runtime_config = runtime_config or self.load()
@@ -890,13 +898,14 @@ async def test_start_reads_runtime_config_installs_adapter_and_starts_loops(
     assert await worker.start() is True
     await asyncio.sleep(0)
 
-    assert calls[:7] == [
+    assert calls[:8] == [
         "mirror",
         "pull",
         "runtime",
         "plugins",
         "update:1:True:False",
         "teamharness-sync",
+        "context-refresh:1",
         "workerflow-sync",
     ]
     assert "push:5" in calls

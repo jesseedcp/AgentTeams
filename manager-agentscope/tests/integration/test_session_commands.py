@@ -106,7 +106,12 @@ def _policy() -> RoomPolicy:
     )
 
 
-async def _runner(tmp_path: Path):
+async def _runner(
+    tmp_path: Path,
+    *,
+    default_model_provider=None,
+    known_models_provider=None,
+):
     database = Database(tmp_path / "manager.db")
     await database.open()
     repository = SessionRepository(database)
@@ -134,6 +139,9 @@ async def _runner(tmp_path: Path):
             "qwen-fast": False,
             "openrouter/example/model": True,
         },
+        default_model="qwen-special",
+        default_model_provider=default_model_provider,
+        known_models_provider=known_models_provider,
         now=lambda: datetime(2026, 7, 26, 12, 0, tzinfo=UTC),
     )
     return runner, sessions, repository, factory, matrix, history, memory
@@ -238,6 +246,48 @@ async def test_help_models_and_unknown_commands_never_reach_agent(
         assert command in replies
     assert "qwen-special" in replies
     assert "未知命令" in replies
+
+
+@pytest.mark.asyncio
+async def test_status_and_model_catalog_identify_effective_default_model(
+    tmp_path: Path,
+) -> None:
+    runner, _, _, _, matrix, _, _ = await _runner(tmp_path)
+
+    await runner.handle(_event("/model status", "$model-status"), _policy())
+    await runner.handle(_event("/models", "$models"), _policy())
+    await runner.handle(_event("/status", "$status"), _policy())
+
+    replies = "\n".join(item.text for item in matrix.sent)
+    assert "运行时默认模型" not in replies
+    assert "当前会话模型：qwen-special" in replies
+    assert "qwen-special（当前默认）" in replies
+    assert "- 模型：qwen-special" in replies
+
+
+@pytest.mark.asyncio
+async def test_model_commands_follow_runtime_model_hot_reload(
+    tmp_path: Path,
+) -> None:
+    runtime = {"model": "qwen-special", "reasoning": True}
+    runner, _, _, _, matrix, _, _ = await _runner(
+        tmp_path,
+        default_model_provider=lambda: runtime["model"],
+        known_models_provider=lambda: {
+            runtime["model"]: runtime["reasoning"],
+        },
+    )
+
+    runtime.update(model="qwen-runtime-next", reasoning=False)
+    await runner.handle(_event("/model status", "$hot-status"), _policy())
+    await runner.handle(_event("/models", "$hot-models"), _policy())
+    await runner.handle(_event("/think high", "$hot-think"), _policy())
+
+    replies = "\n".join(item.text for item in matrix.sent)
+    assert "当前会话模型：qwen-runtime-next" in replies
+    assert "qwen-runtime-next（当前默认）" in replies
+    assert "qwen-special" not in replies
+    assert "模型 qwen-runtime-next 不支持思考模式" in replies
 
 
 @pytest.mark.asyncio

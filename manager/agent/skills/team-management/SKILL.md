@@ -30,6 +30,8 @@ Create or update all required Workers first. Then compose the Team with
 `leader_name` and `worker_names`; never embed Worker runtime configuration in
 the Team request. Deleting a Team preserves its referenced Workers and returns
 their names in `preservedWorkers`.
+A successful `delete_team` receipt is terminal. Do not submit the same Team
+deletion again or create a second approval after Controller absence is proven.
 
 Preserve the hierarchy: admin → Manager → Team Leader → Team Workers.
 

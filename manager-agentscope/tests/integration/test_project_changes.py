@@ -159,10 +159,18 @@ async def test_revision_creates_a_linked_task_and_holds_dependents(
 
     original = await harness.tasks.get(design.task_id)
     released = await harness.tasks.get(publish.task_id)
+    stored_project = await harness.projects.get(project.project_id)
     assert original is not None
     assert original.status == "completed"
     assert released is not None
     assert released.status == "dispatched"
+    assert stored_project is not None
+    assert stored_project.metadata["task_statuses"][design.task_id] == (
+        "completed"
+    )
+    assert stored_project.metadata["task_statuses"][revision.task_id] == (
+        "completed"
+    )
 
 
 @pytest.mark.asyncio
@@ -390,6 +398,97 @@ async def test_revision_retry_reuses_the_linked_task(
     assert second.task_id == first.task_id
     project_tasks = await harness.tasks.list_by_project(project.project_id)
     assert len(project_tasks) == 2
+
+
+@pytest.mark.asyncio
+async def test_revision_returns_durable_receipt_when_announcement_is_ambiguous(
+    tmp_path: Path,
+) -> None:
+    harness = await _harness(tmp_path)
+    project = await harness.service.create(
+        title="Website",
+        description="Build a website",
+        plan="Build it",
+        participants=("alice", "bob"),
+        context=harness.context("create"),
+    )
+    task = await harness.service.add_task(
+        project_id=project.project_id,
+        title="Build page",
+        specification="Implement the page",
+        assigned_to="alice",
+        context=harness.context("task", room_id=project.room_id),
+    )
+    harness.matrix.fail_once_for_text_prefix = "[Project Task Assigned]"
+    context = harness.context("revision", room_id=project.room_id)
+
+    revision = await harness.service.request_revision(
+        project_id=project.project_id,
+        task_id=task.task_id,
+        feedback="Use blue",
+        assigned_to="bob",
+        triggered_by_task_id=None,
+        context=context,
+    )
+
+    stored = await harness.tasks.get(revision.task_id)
+    assert stored is not None
+    assert stored.metadata["is_revision_for"] == task.task_id
+    assert (
+        harness.supervisor.operations[context.operation_id].status
+        is OperationStatus.SUCCEEDED
+    )
+
+
+@pytest.mark.asyncio
+async def test_task_transition_rebuilds_stale_project_task_index(
+    tmp_path: Path,
+) -> None:
+    harness = await _harness(tmp_path)
+    project = await harness.service.create(
+        title="Website",
+        description="Build a website",
+        plan="Build it",
+        participants=("alice",),
+        context=harness.context("create"),
+    )
+    task = await harness.service.add_task(
+        project_id=project.project_id,
+        title="Build page",
+        specification="Implement the page",
+        assigned_to="alice",
+        context=harness.context("task", room_id=project.room_id),
+    )
+    stored_project = await harness.projects.get(project.project_id)
+    assert stored_project is not None
+    changed = await harness.projects.update(
+        project.project_id,
+        expected={"active"},
+        status="active",
+        metadata={
+            **stored_project.metadata,
+            "task_ids": [*stored_project.metadata["task_ids"], "task-missing"],
+            "task_statuses": {
+                **stored_project.metadata["task_statuses"],
+                "task-missing": "dispatched",
+            },
+        },
+    )
+    assert changed is not None
+
+    await harness.service.reassign_task(
+        project_id=project.project_id,
+        task_id=task.task_id,
+        assigned_to="alice",
+        reason="Refresh task projection",
+        context=harness.context("reassign", room_id=project.room_id),
+    )
+
+    rebuilt = await harness.projects.get(project.project_id)
+    assert rebuilt is not None
+    assert rebuilt.metadata["task_ids"] == [task.task_id]
+    assert "task-missing" not in rebuilt.metadata["task_statuses"]
+    assert "task-missing" not in rebuilt.metadata["task_assignments"]
 
 
 @pytest.mark.asyncio

@@ -15,12 +15,16 @@ Optional host-file access is a separate, disabled-by-default boundary:
 
 MinIO is authoritative. Local sync directories are only caches.
 
-Use `sync_files` with `direction="pull"` before reading Worker output. Use
-`sync_files` with `direction="push"` after writing Worker-owned task files.
+Use `sync_files` with `direction="pull"` before reading Worker output, then
+use `read_task_file` with the task ID and relative path to inspect bounded
+UTF-8 content from that verified cache. Use `sync_files` with
+`direction="push"` after writing Worker-owned task files.
 Choose `root="task_artifacts"` with `task_id`,
 `root="worker_workspace"` with `worker_name`, or
 `root="shared_knowledge"` with no target. The tool verifies object metadata,
 checksums, room scope, symlinks, and path containment.
+`read_task_file` repeats the task-scope and path-containment checks, rejects
+symlinks and traversal, and enforces a caller-visible size limit.
 
 A task push and the resulting Worker mention share one durable `FILE_SYNC`
 operation. A retry reuses the same MinIO versions and Matrix transaction.

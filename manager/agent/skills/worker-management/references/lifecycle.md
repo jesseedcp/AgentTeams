@@ -46,6 +46,8 @@ than issuing a second independent delete.
 Use `delete_worker` only when permanent removal is intended. State the exact
 Worker name and wait for the confirmation gate. The receipt is successful
 only after Controller absence is proven.
+That receipt is terminal: deletion has no sleep prerequisite or post-delete
+sleep step, and the same deletion must not be submitted for another approval.
 
 If a mutation is interrupted, let heartbeat resume its journaled operation.
 Do not issue an unrelated create request to force recovery.

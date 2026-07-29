@@ -28,3 +28,5 @@ Deletion is complete only when the Controller no longer reports the Team and
 the topology refresh removes its Leader and private-room bindings. All
 referenced Worker resources remain running and the receipt lists them under
 `preservedWorkers`.
+After this receipt, report success once. Do not call `delete_team` again for
+the same operation and do not ask the administrator for another approval.

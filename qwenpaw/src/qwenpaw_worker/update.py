@@ -404,7 +404,62 @@ class MemberRuntimeConfig:
         )
         if member:
             facts["member"] = member
+        runtime: Dict[str, Any] = {}
+        model = _string_fields(
+            self.model,
+            ("providerId", "provider_id", "provider", "model", "name"),
+        )
+        provider_id = _string(
+            model.get("providerId")
+            or model.get("provider_id")
+            or model.get("provider"),
+        )
+        model_name = _string(model.get("model") or model.get("name"))
+        if provider_id or model_name:
+            runtime["model"] = {
+                key: value
+                for key, value in (
+                    ("providerId", provider_id),
+                    ("name", model_name),
+                )
+                if value
+            }
+        coordinator = self.coordinator_matrix_user_id
+        if coordinator:
+            runtime["coordinator"] = {"matrixUserId": coordinator}
+        if runtime:
+            facts["runtime"] = runtime
         return facts
+
+    @property
+    def coordinator_matrix_user_id(self) -> str:
+        role = self.member_role.casefold()
+        member_id = _string(self.member.get("matrixUserId"))
+        domain = member_id.split(":", 1)[1] if ":" in member_id else ""
+        if self.team_name and role not in {
+            "leader",
+            "team_leader",
+            "team-leader",
+        }:
+            leader_name = _string(
+                self.team.get("leaderRuntimeName")
+                or self.team.get("leaderName"),
+            )
+            for item in self.team_members:
+                if (
+                    _string(item.get("runtimeName")) == leader_name
+                    or _string(item.get("name")) == leader_name
+                    or _string(item.get("role")).casefold()
+                    in {"leader", "team_leader", "team-leader"}
+                ):
+                    leader_id = _string(item.get("matrixUserId"))
+                    if leader_id:
+                        return leader_id
+            if leader_name and domain:
+                return f"@{leader_name}:{domain}"
+        if domain:
+            return f"@manager:{domain}"
+        return ""
 
     @property
     def team_context_identity(self) -> str:
@@ -1554,6 +1609,10 @@ class RuntimeUpdater:
             self.runtime_config_pull()
         return MemberRuntimeConfig.load(self.config.runtime_config_path)
 
+    def refresh_team_context(self, config: MemberRuntimeConfig) -> None:
+        """Reconcile the runtime-owned TEAMS.md block after asset writers run."""
+        self._apply_team_context_prompt(config)
+
     def apply_once(
         self,
         runtime_config: Optional[MemberRuntimeConfig] = None,
@@ -1606,7 +1665,6 @@ class RuntimeUpdater:
         self._apply_matrix_channel(config)
         self._apply_dingtalk_channel(config)
         self._apply_channel_policy(config)
-        self._apply_team_context_prompt(config)
 
         applied_package = self.package_manager.apply(config)
 
@@ -1615,6 +1673,7 @@ class RuntimeUpdater:
             self.adapter_apply()
             adapter_applied = True
 
+        self.refresh_team_context(config)
         self._sync_model_runtime_if_needed(previous, config)
         self.current_config = config
         logger.info(
@@ -1735,6 +1794,7 @@ class RuntimeUpdater:
             return ""
         team = _section(facts, "team")
         member = _section(facts, "member")
+        runtime = _section(facts, "runtime")
         lines = [
             TEAMS_CONTEXT_START,
             "## Runtime Team Context",
@@ -1754,6 +1814,18 @@ class RuntimeUpdater:
             ("member.runtime", member.get("runtime")),
             ("member.matrixUserId", member.get("matrixUserId")),
             ("member.personalRoomId", member.get("personalRoomId")),
+            (
+                "runtime.model.providerId",
+                _section(runtime, "model").get("providerId"),
+            ),
+            (
+                "runtime.model.name",
+                _section(runtime, "model").get("name"),
+            ),
+            (
+                "runtime.coordinator.matrixUserId",
+                _section(runtime, "coordinator").get("matrixUserId"),
+            ),
         ):
             text = _string(value)
             if text:
@@ -1922,11 +1994,27 @@ class RuntimeUpdater:
                 changed = True
 
         groups = dict(getattr(matrix_config, "groups", None) or {})
-        if self._ensure_require_mention_group(groups, "*"):
+        if self._ensure_group_mention_policy(
+            groups,
+            "*",
+            require_mention=True,
+        ):
             changed = True
-        room_id = desired["room_id"]
-        if room_id:
-            if self._ensure_require_mention_group(groups, room_id):
+        personal_room_id = desired["personal_room_id"]
+        if personal_room_id:
+            if self._ensure_group_mention_policy(
+                groups,
+                personal_room_id,
+                require_mention=False,
+            ):
+                changed = True
+        team_room_id = desired["team_room_id"]
+        if team_room_id:
+            if self._ensure_group_mention_policy(
+                groups,
+                team_room_id,
+                require_mention=True,
+            ):
                 changed = True
         if getattr(matrix_config, "groups", None) != groups:
             matrix_config.groups = groups
@@ -2056,23 +2144,31 @@ class RuntimeUpdater:
         access_token = _string(os.getenv(token_env)) if token_env else ""
         if not access_token:
             access_token = _string(os.getenv("AGENTTEAMS_MATRIX_TOKEN"))
-        room_id = _string(config.team.get("teamRoomId") or config.member.get("personalRoomId"))
+        team_room_id = _string(config.team.get("teamRoomId"))
+        personal_room_id = _string(config.member.get("personalRoomId"))
         if not (homeserver and user_id and access_token):
             return None
         return {
             "homeserver": homeserver,
             "user_id": user_id,
             "access_token": access_token,
-            "room_id": room_id,
+            "team_room_id": team_room_id,
+            "personal_room_id": personal_room_id,
         }
 
-    def _ensure_require_mention_group(self, groups: Dict[str, Any], room_id: str) -> bool:
+    def _ensure_group_mention_policy(
+        self,
+        groups: Dict[str, Any],
+        room_id: str,
+        *,
+        require_mention: bool,
+    ) -> bool:
         room_cfg = dict(groups.get(room_id) or {})
         changed = False
         if room_cfg.pop("autoReply", None) is not None:
             changed = True
-        if room_cfg.get("requireMention") is not True:
-            room_cfg["requireMention"] = True
+        if room_cfg.get("requireMention") is not require_mention:
+            room_cfg["requireMention"] = require_mention
             changed = True
         if changed:
             groups[room_id] = room_cfg

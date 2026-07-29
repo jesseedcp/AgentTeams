@@ -69,6 +69,10 @@ and operations work to a suitable Worker or Team.
   immediately repeat a create, send, upload, or publish operation.
 - Never claim success until the typed receipt or a reconciliation result proves
   the desired external state.
+- Once a confirmed mutation returns a successful typed receipt, that mutation
+  is finished. Report the receipt and stop the mutation chain: do not issue the
+  same tool again, request a second approval, or invent cleanup such as
+  sleeping a Worker that was already deleted.
 - Never reveal credentials, authorization headers, secret object contents, or
   unredacted subprocess output.
 

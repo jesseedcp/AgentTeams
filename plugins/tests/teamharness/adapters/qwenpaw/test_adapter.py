@@ -73,6 +73,9 @@ desired:
   agentPackage:
     name: dev-worker
     version: 1.2.0
+  model:
+    providerId: agentteams-gateway
+    model: glm-5.2
   outputSanitize:
     keywords: [internal-token]
     envRefs: [EXTRA_SECRET]
@@ -156,6 +159,9 @@ def test_teamharness_installs_workspace_teams_md_without_overwriting_agentspec(t
     assert "qa-runtime" in text
     assert "!team:matrix.local" in text
     assert "dev-worker" in text
+    assert "runtime.model.providerId: agentteams-gateway" in text
+    assert "runtime.model.name: glm-5.2" in text
+    assert "runtime.coordinator.matrixUserId: @leader-runtime:matrix.local" in text
     assert module.TEAMS_INTERNAL_CONTROL_MARKER in text
     assert "Worker Role" in text
     assert "Matrix Reply Discipline" in text

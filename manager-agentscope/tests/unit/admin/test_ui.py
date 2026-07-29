@@ -14,3 +14,10 @@ def test_admin_ui_supports_safe_resource_mutations() -> None:
     assert "<dialog" in ADMIN_HTML
     assert "sessionStorage" not in ADMIN_HTML
     assert "localStorage" not in ADMIN_HTML
+
+
+def test_admin_ui_uses_project_id_and_requires_manual_confirmation() -> None:
+    assert "function resourceIdentifier(resource,item)" in ADMIN_HTML
+    assert 'resource==="projects"?item.project_id:item.name' in ADMIN_HTML
+    assert 'document.querySelector("#confirmed").checked=false' in ADMIN_HTML
+    assert 'item.name||item.project_id' not in ADMIN_HTML

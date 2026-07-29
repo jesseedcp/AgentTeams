@@ -11,6 +11,7 @@ class ProjectMatrix:
         self.timeout_after_create = False
         self.hide_joined_once = False
         self.hide_after_timeout = False
+        self.fail_once_for_text_prefix: str | None = None
 
     async def create_private_room(
         self,
@@ -79,6 +80,12 @@ class ProjectMatrix:
         thread_id: str | None = None,
         mentions: tuple[str, ...] = (),
     ) -> str:
+        if (
+            self.fail_once_for_text_prefix
+            and text.startswith(self.fail_once_for_text_prefix)
+        ):
+            self.fail_once_for_text_prefix = None
+            raise TimeoutError("Matrix acknowledgement was lost")
         self.messages.append(
             {
                 "room_id": room_id,

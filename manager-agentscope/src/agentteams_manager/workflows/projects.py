@@ -499,27 +499,12 @@ class ProjectService:
                 "task_id": task.task_id,
             },
         )
-        task_ids = tuple(
-            dict.fromkeys(
-                (
-                    *project.metadata.get("task_ids", ()),
-                    task.task_id,
-                ),
-            ),
-        )
-        task_statuses = {
-            **dict(project.metadata.get("task_statuses", {})),
-            task.task_id: task.status,
-        }
+        indexed_metadata = await self._project_task_index(project)
         changed = await self._projects.update(
             project_id,
             expected={"active"},
             status="active",
-            metadata={
-                **project.metadata,
-                "task_ids": list(task_ids),
-                "task_statuses": task_statuses,
-            },
+            metadata=indexed_metadata,
         )
         project = changed or await self._require_project(project_id)
         await self._replace_project_metadata(
@@ -648,26 +633,47 @@ class ProjectService:
                 actor_id=self._admin_user_id,
                 reason=feedback,
             )
-        receipt = await self.add_task(
-            project_id=project_id,
-            title=f"Revision: {original.title}",
-            specification=(
-                f"Revise task {task_id} using this feedback:\n\n"
-                f"{feedback.strip()}"
-            ),
-            assigned_to=revision_assignee,
-            context=MutationContext(
-                room_id=context.room_id,
-                event_id=context.event_id,
-                tool_call_id=f"{context.tool_call_id}:revision-task",
-            ),
-            metadata={
-                "is_revision_for": task_id,
-                "triggered_by_task_id": triggered_by_task_id,
-                "revision_feedback": feedback.strip(),
-                "revision_request_operation_id": operation.operation_id,
-            },
-        )
+        try:
+            receipt = await self.add_task(
+                project_id=project_id,
+                title=f"Revision: {original.title}",
+                specification=(
+                    f"Revise task {task_id} using this feedback:\n\n"
+                    f"{feedback.strip()}"
+                ),
+                assigned_to=revision_assignee,
+                context=MutationContext(
+                    room_id=context.room_id,
+                    event_id=context.event_id,
+                    tool_call_id=f"{context.tool_call_id}:revision-task",
+                ),
+                metadata={
+                    "is_revision_for": task_id,
+                    "triggered_by_task_id": triggered_by_task_id,
+                    "revision_feedback": feedback.strip(),
+                    "revision_request_operation_id": operation.operation_id,
+                },
+            )
+        except Exception:
+            revision = next(
+                (
+                    item
+                    for item in await self._tasks.list_by_project(project_id)
+                    if item.metadata.get("revision_request_operation_id")
+                    == operation.operation_id
+                ),
+                None,
+            )
+            current_project = await self._require_project(project_id)
+            indexed_ids = set(
+                current_project.metadata.get("task_ids", ()),
+            )
+            if revision is None or revision.task_id not in indexed_ids:
+                raise
+            receipt = _task_receipt_from_record(
+                operation.operation_id,
+                revision,
+            )
         await self._supervisor.effect_succeeded(
             operation.operation_id,
             ExternalEffect.STORAGE,
@@ -786,23 +792,12 @@ class ProjectService:
             ),
         )
         operation_id = operation.operation_id
-        task_statuses = {
-            **dict(project.metadata.get("task_statuses", {})),
-            task_id: receipt.status,
-        }
-        assignments = {
-            **dict(project.metadata.get("task_assignments", {})),
-            task_id: assigned_to,
-        }
+        indexed_metadata = await self._project_task_index(project)
         updated = await self._projects.update(
             project_id,
             expected={"active"},
             status="active",
-            metadata={
-                **project.metadata,
-                "task_statuses": task_statuses,
-                "task_assignments": assignments,
-            },
+            metadata=indexed_metadata,
         )
         project = updated or await self._require_project(project_id)
         await self._replace_project_metadata(
@@ -1163,18 +1158,12 @@ class ProjectService:
         )
         if operation.status is OperationStatus.SUCCEEDED:
             return task
-        task_statuses = {
-            **dict(project.metadata.get("task_statuses", {})),
-            task_id: task.status,
-        }
+        indexed_metadata = await self._project_task_index(project)
         changed = await self._projects.update(
             project_id,
             expected={"active"},
             status="active",
-            metadata={
-                **project.metadata,
-                "task_statuses": task_statuses,
-            },
+            metadata=indexed_metadata,
         )
         project = changed or await self._require_project(project_id)
         await self._replace_project_metadata(
@@ -1299,6 +1288,37 @@ class ProjectService:
                 f"sender {sender_id} is not task/{task_id} assignee",
             )
         return task_record
+
+    async def _project_task_index(
+        self,
+        project: ProjectRecord,
+    ) -> dict[str, Any]:
+        """Derive the project task index from durable task rows.
+
+        Project metadata is a projection, not a second source of truth.  A
+        full rebuild prevents revision transitions, dependency promotion, or
+        generic task delegation from leaving stale or invisible entries.
+        """
+
+        tasks = await self._tasks.list_by_project(project.project_id)
+        task_ids = tuple(dict.fromkeys(task.task_id for task in tasks))
+        tasks_by_id = {task.task_id: task for task in tasks}
+        task_statuses = {
+            task_id: tasks_by_id[task_id].status
+            for task_id in task_ids
+            if task_id in tasks_by_id
+        }
+        task_assignments = {
+            task_id: tasks_by_id[task_id].assigned_to
+            for task_id in task_ids
+            if task_id in tasks_by_id
+        }
+        return {
+            **project.metadata,
+            "task_ids": list(task_ids),
+            "task_statuses": task_statuses,
+            "task_assignments": task_assignments,
+        }
 
     async def close(
         self,
@@ -1452,24 +1472,12 @@ class ProjectService:
             )
         if operation.status is OperationStatus.SUCCEEDED:
             return task
-        task_ids = tuple(
-            dict.fromkeys(
-                (*project.metadata.get("task_ids", ()), task_id),
-            ),
-        )
-        statuses = {
-            **dict(project.metadata.get("task_statuses", {})),
-            task_id: task.status,
-        }
+        indexed_metadata = await self._project_task_index(project)
         changed = await self._projects.update(
             project_id,
             expected={"active"},
             status="active",
-            metadata={
-                **project.metadata,
-                "task_ids": list(task_ids),
-                "task_statuses": statuses,
-            },
+            metadata=indexed_metadata,
         )
         project = changed or await self._require_project(project_id)
         await self._replace_project_metadata(

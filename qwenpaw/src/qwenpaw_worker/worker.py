@@ -174,6 +174,7 @@ class Worker:
         try:
             stage_started = self._log_worker_stage_begin("sync_teamharness_assets")
             self._apply_teamharness_assets()
+            self.updater.refresh_team_context(runtime_config)
         except Exception as exc:
             self._log_worker_stage_failed("sync_teamharness_assets", stage_started, exc)
             self.heartbeat.update("not_ready", str(exc))

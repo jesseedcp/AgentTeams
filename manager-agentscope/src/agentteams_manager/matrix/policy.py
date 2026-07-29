@@ -60,6 +60,7 @@ ALL_MANAGER_TOOLS = frozenset(
         "update_project_participants",
         "delete_project",
         "sync_files",
+        "read_task_file",
         "inspect_git_request",
         "git_delegate",
         "git_delegate_high_risk",
@@ -121,6 +122,7 @@ WORKER_TOOLS = frozenset(
         "delegate_task",
         "complete_task",
         "sync_files",
+        "read_task_file",
         "inspect_git_request",
         "git_delegate",
         "git_delegate_high_risk",
@@ -131,6 +133,7 @@ LEADER_TOOLS = frozenset(
         "delegate_team_task",
         "complete_task",
         "sync_files",
+        "read_task_file",
         "switch_worker_model",
     },
 )
@@ -151,6 +154,7 @@ PROJECT_TOOLS = frozenset(
         "update_project_participants",
         "delete_project",
         "sync_files",
+        "read_task_file",
     },
 )
 PROJECT_PARTICIPANT_TOOLS = frozenset(
@@ -161,9 +165,12 @@ PROJECT_PARTICIPANT_TOOLS = frozenset(
         "get_project",
         "report_project_blocked",
         "sync_files",
+        "read_task_file",
     },
 )
-HUMAN_TOOLS = frozenset({"list_workers", "list_tasks", "sync_files"})
+HUMAN_TOOLS = frozenset(
+    {"list_workers", "list_tasks", "sync_files", "read_task_file"},
+)
 TEAM_SCOPED_HUMAN_TOOLS = frozenset(
     {
         "list_workers",
@@ -173,6 +180,7 @@ TEAM_SCOPED_HUMAN_TOOLS = frozenset(
         "list_tasks",
         "get_task",
         "sync_files",
+        "read_task_file",
         "send_notification",
     },
 )
@@ -183,6 +191,7 @@ WORKER_SCOPED_HUMAN_TOOLS = frozenset(
         "list_tasks",
         "get_task",
         "sync_files",
+        "read_task_file",
         "send_notification",
     },
 )

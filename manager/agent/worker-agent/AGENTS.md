@@ -16,9 +16,17 @@ Don't ask permission. Just do it.
 
 ## Gotchas
 
-- **@mention must use full Matrix ID** (with domain) — run `echo $AGENTTEAMS_MATRIX_DOMAIN` to get it. Never write `${AGENTTEAMS_MATRIX_DOMAIN}` literally in a message
+- **@mention must use a full Matrix ID** (with domain). For your coordinator,
+  copy `runtime.coordinator.matrixUserId` from `TEAMS.md` exactly; never write a
+  placeholder or shell variable literally in a message.
 - **History context: only act on the Current message section** — do not @mention anyone based on history senders
-- **Task completion and progress replies MUST @mention your coordinator** — without @mention the message is silently dropped and workflow stalls
+- **Task completion and actionable escalation MUST @mention your coordinator**
+  using the exact `runtime.coordinator.matrixUserId` shown in `TEAMS.md`.
+  Copy that value directly; do not reason about, search for, or reconstruct the
+  Matrix domain.
+- **Your exact configured model is in `TEAMS.md`** as
+  `runtime.model.providerId` and `runtime.model.name`. When asked which model
+  you use, report those values exactly instead of guessing from behavior.
 - **NO_REPLY is a standalone complete response** — never append it to a message with content, or the content is silently dropped
 - **Noisy @mentions cause infinite loops** — if your message doesn't require the recipient to *do* something, don't @mention them (no thanks, confirmations, farewells)
 - **Never @mention your coordinator for acknowledgments or mid-task progress** — "Got it", "standing by", "working on it", intermediate steps, tool output logs — post these in the room WITHOUT @mention. Only @mention your coordinator when: (1) task is complete, (2) you hit a blocker, (3) you have a question that requires a decision. Every unnecessary @mention wastes tokens and may stall other workflows.
@@ -71,13 +79,16 @@ Both can see everything you say in either room.
 
 ### @Mention Protocol
 
-OpenClaw only wakes an agent when explicitly @mentioned with the full Matrix user ID. A message without a valid @mention is silently dropped.
+Your private Worker Room accepts ordinary messages and slash commands without
+an @mention. Team and Project group rooms still require a full Matrix mention.
+Your outgoing completion, blocker, or decision request must mention the exact
+coordinator ID from `TEAMS.md`.
 
 When to @mention your coordinator:
-- Task completed: `@{coordinator}:{domain} TASK_COMPLETED: <summary>`
-- Blocked: `@{coordinator}:{domain} BLOCKED: <what's blocking you>`
-- Need clarification: `@{coordinator}:{domain} QUESTION: <your question>`
-- Replying to coordinator: `@{coordinator}:{domain} <your reply>`
+- Task completed: `<runtime.coordinator.matrixUserId> TASK_COMPLETED: <summary>`
+- Blocked: `<runtime.coordinator.matrixUserId> BLOCKED: <what's blocking you>`
+- Need clarification: `<runtime.coordinator.matrixUserId> QUESTION: <your question>`
+- Replying to coordinator in a group room: `<runtime.coordinator.matrixUserId> <your reply>`
 - Critical info for another Worker: `@worker-name:{domain} <info>`
 
 Unsolicited mid-task progress updates (no action needed) do not need @mention — just post in the room.
@@ -126,7 +137,9 @@ When you receive a task from your coordinator:
    ```bash
    mc mirror /root/agentteams-fs/shared/tasks/{task-id}/ ${AGENTTEAMS_STORAGE_PREFIX}/shared/tasks/{task-id}/ --overwrite --exclude "spec.md" --exclude "base/"
    ```
-6. @mention your coordinator with a completion report
+6. @mention the exact coordinator ID from `TEAMS.md` with one concise
+   completion report. Send it once; do not keep discussing how to mention the
+   coordinator.
 7. Log key decisions and outcomes to `memory/YYYY-MM-DD.md`
 
 **For infinite (recurring) tasks**: Execute and report with `@{coordinator}:{domain} executed: {task-id} — <summary>`. Write timestamped artifact files (e.g., `run-YYYYMMDD-HHMMSS.md`) instead of `result.md`.

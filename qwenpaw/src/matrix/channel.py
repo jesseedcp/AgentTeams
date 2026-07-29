@@ -163,6 +163,7 @@ _TOOL_OUTPUT_MESSAGE_TYPE_NAMES = frozenset(
 _MATRIX_STREAMING_REASONING_EVENT_ID_KEY = "matrix_streaming_reasoning_event_id"
 _MATRIX_STREAMING_REASONING_LAST_EDIT_KEY = "matrix_streaming_reasoning_last_edit_at"
 _MATRIX_STREAMING_REASONING_STREAM_ID_KEY = "matrix_streaming_reasoning_stream_id"
+_MATRIX_CONTROL_EPOCH_KEY = "matrix_control_epoch"
 
 
 def _clean_control_response_text(text: str) -> str:
@@ -425,6 +426,7 @@ class MatrixChannel(BaseChannel):
         # Thread tracking (ported from CoPaw overlay)
         self._active_thread_roots: Dict[str, str] = {}
         self._proactive_send_state: Dict[str, Dict[str, Any]] = {}
+        self._control_epochs: Dict[str, int] = {}
 
     # ------------------------------------------------------------------
     # Debounce key — serialize by room_id (avoid concurrent session access)
@@ -438,6 +440,34 @@ class MatrixChannel(BaseChannel):
                 return f"matrix:{room_id}"
             return payload.get("sender_id") or ""
         return getattr(payload, "session_id", "") or ""
+
+    def _room_control_epoch(self, room_id: str) -> int:
+        epochs = getattr(self, "_control_epochs", None)
+        if epochs is None:
+            epochs = {}
+            self._control_epochs = epochs
+        return int(epochs.get(room_id, 0))
+
+    def _advance_room_control_epoch(self, room_id: str) -> int:
+        epoch = self._room_control_epoch(room_id) + 1
+        self._control_epochs[room_id] = epoch
+        return epoch
+
+    def _response_is_stale(
+        self,
+        room_id: str,
+        meta: Optional[Dict[str, Any]],
+    ) -> bool:
+        if not isinstance(meta, dict):
+            return False
+        raw_epoch = meta.get(_MATRIX_CONTROL_EPOCH_KEY)
+        if raw_epoch is None:
+            return False
+        try:
+            request_epoch = int(raw_epoch)
+        except (TypeError, ValueError):
+            return True
+        return request_epoch < self._room_control_epoch(room_id)
 
     # ------------------------------------------------------------------
     # Factory — from_config / from_env
@@ -2396,6 +2426,7 @@ class MatrixChannel(BaseChannel):
                 "worker_name": worker_name,
                 "event_id": event.event_id,
                 "sender_id": sender_id,
+                _MATRIX_CONTROL_EPOCH_KEY: self._room_control_epoch(room_id),
             },
         }
 
@@ -2764,6 +2795,8 @@ class MatrixChannel(BaseChannel):
                     text,
                     command_text,
                 )
+        if command_text.strip().casefold().split(None, 1)[0] == "/stop":
+            self._advance_room_control_epoch(room_id)
 
         # Build content parts, prepending accumulated history for group rooms.
         # Skip history prepend for slash commands — QwenPaw's command parser
@@ -2799,6 +2832,7 @@ class MatrixChannel(BaseChannel):
                 "event_id": event.event_id,
                 "thread_root_event_id": event.event_id,
                 "sender_id": sender_id,
+                _MATRIX_CONTROL_EPOCH_KEY: self._room_control_epoch(room_id),
             },
         }
         if teamharness_self_trigger is not None:
@@ -2971,6 +3005,7 @@ class MatrixChannel(BaseChannel):
                 "event_id": event.event_id,
                 "thread_root_event_id": event.event_id,
                 "sender_id": sender_id,
+                _MATRIX_CONTROL_EPOCH_KEY: self._room_control_epoch(room_id),
             },
         }
 
@@ -3431,6 +3466,8 @@ class MatrixChannel(BaseChannel):
     ) -> bool:
         """Send follow-up parts in the current thread, or queue until rooted."""
         meta_dict = meta if isinstance(meta, dict) else {}
+        if self._response_is_stale(room_id, meta_dict):
+            return True
         thread_root = (
             meta_dict.get(_MATRIX_THREAD_META_KEY)
             or meta_dict.get(_MATRIX_OWN_THREAD_ROOT_KEY)
@@ -3489,6 +3526,8 @@ class MatrixChannel(BaseChannel):
         send_meta: Dict[str, Any],
     ) -> None:
         """Create a placeholder thread-root message if none exists yet."""
+        if self._response_is_stale(to_handle, send_meta):
+            return
         if send_meta.get(_MATRIX_OWN_THREAD_ROOT_KEY):
             return
         if not self._client:
@@ -3523,6 +3562,8 @@ class MatrixChannel(BaseChannel):
         send_meta: Dict[str, Any],
         text: str,
     ) -> Optional[str]:
+        if self._response_is_stale(to_handle, send_meta):
+            return None
         thread_root = (
             send_meta.get(_MATRIX_THREAD_META_KEY)
             or send_meta.get(_MATRIX_OWN_THREAD_ROOT_KEY)
@@ -4011,6 +4052,8 @@ class MatrixChannel(BaseChannel):
     ) -> bool:
         """Consume streaming tool progress without sending Matrix noise."""
         del request
+        if self._response_is_stale(to_handle, send_meta):
+            return True
         if getattr(event, "type", None) != ContentType.DATA:
             return False
         if not self._is_in_progress_status(getattr(event, "status", None)):
@@ -4032,6 +4075,8 @@ class MatrixChannel(BaseChannel):
     ) -> None:
         """Route completed messages behind a processing root."""
         del request
+        if self._response_is_stale(to_handle, send_meta):
+            return
         message_type = getattr(event, "type", None)
         if self._is_reasoning_message(
             message_type,
@@ -4084,6 +4129,8 @@ class MatrixChannel(BaseChannel):
         accumulated_text: str = "",
     ) -> None:
         del request, accumulated_text
+        if self._response_is_stale(to_handle, send_meta):
+            return
         if stream_type == "reasoning":
             send_meta.pop(_MATRIX_STREAMING_REASONING_EVENT_ID_KEY, None)
             send_meta.pop(_MATRIX_STREAMING_REASONING_LAST_EDIT_KEY, None)
@@ -4117,6 +4164,8 @@ class MatrixChannel(BaseChannel):
         accumulated_text: str = "",
     ) -> None:
         del request
+        if self._response_is_stale(to_handle, send_meta):
+            return
         text = (accumulated_text or "").strip()
         if stream_type == "reasoning":
             await self._ensure_thread_root(to_handle, send_meta)
@@ -4184,6 +4233,13 @@ class MatrixChannel(BaseChannel):
         send_meta: Dict[str, Any],
     ) -> None:
         """Edit thread root with final reply, or send directly if no thread."""
+        if self._response_is_stale(to_handle, send_meta):
+            self._active_thread_roots.pop(to_handle, None)
+            await self._send_typing(to_handle, False)
+            base_completed = getattr(super(), "_on_process_completed", None)
+            if base_completed:
+                await base_completed(request, to_handle, send_meta)
+            return
         pending = send_meta.pop(_MATRIX_PENDING_FINAL_MESSAGE_KEY, None)
         streaming_final_text = send_meta.pop(
             _MATRIX_STREAMING_FINAL_TEXT_KEY,
@@ -4454,6 +4510,14 @@ class MatrixChannel(BaseChannel):
             return
 
         room_id = (meta or {}).get("room_id") or to_handle
+        if self._response_is_stale(room_id, meta):
+            logger.info(
+                "MatrixChannel: suppressing stale response after /stop "
+                "component=matrix room_id=%s",
+                room_id,
+            )
+            await self._send_typing(room_id, False)
+            return
 
         # NO_REPLY protocol: agent decided it has nothing to say.
         if _ends_with_no_reply_control(text):
@@ -4537,6 +4601,9 @@ class MatrixChannel(BaseChannel):
             return None
 
         room_id = (meta or {}).get("room_id") or to_handle
+        if self._response_is_stale(room_id, meta):
+            await self._send_typing(room_id, False)
+            return None
         t = getattr(part, "type", None)
 
         # Extract the local file reference from the content part

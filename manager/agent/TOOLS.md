@@ -63,6 +63,7 @@ so optional MCP tools and room-specific restrictions remain truthful.
 - `lookup_matrix_user`
 - `publish_service`
 - `read_host_file`
+- `read_task_file`
 - `reassign_project_task`
 - `register_matrix_user`
 - `remove_mcp`

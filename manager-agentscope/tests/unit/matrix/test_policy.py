@@ -158,6 +158,7 @@ async def test_worker_identity_gets_only_worker_room_tools() -> None:
             "delegate_task",
             "complete_task",
             "sync_files",
+            "read_task_file",
             "inspect_git_request",
             "git_delegate",
             "git_delegate_high_risk",
@@ -308,10 +309,11 @@ async def test_project_worker_mention_wakes_with_reporting_tools_only() -> None:
         {
             "list_tasks",
             "get_task",
-                "complete_task",
-                "get_project",
-                "report_project_blocked",
-                "sync_files",
+            "complete_task",
+            "get_project",
+            "report_project_blocked",
+            "sync_files",
+            "read_task_file",
         },
     )
     assert "create_worker" not in policy.allowed_tools

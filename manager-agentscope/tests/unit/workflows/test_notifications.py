@@ -105,7 +105,10 @@ async def test_resume_notification_reuses_recorded_matrix_transaction(
     matrix = Matrix()
     clock = FixedClock()
     supervisor = TaskSupervisor(clock)
-    source_operation_id = "b" * 32
+    source_operation_id = (
+        "supervision:task_overdue:"
+        "e00b6f2eb056f78c1a4be9a5"
+    )
     notification_id = hashlib.sha256(
         f"notification\0{source_operation_id}".encode(),
     ).hexdigest()[:32]
@@ -149,6 +152,9 @@ async def test_resume_notification_reuses_recorded_matrix_transaction(
     receipt = await service.resume_operation(operation)
 
     assert receipt.event_id == "$notification"
+    assert receipt.source_operation_id == hashlib.sha256(
+        f"notification-source\0{source_operation_id}".encode(),
+    ).hexdigest()[:32]
     assert matrix.attempts == [txn_id]
     assert (
         supervisor.operations[notification_id].status

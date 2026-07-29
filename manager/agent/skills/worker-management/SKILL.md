@@ -44,6 +44,9 @@ For a registry search or `nacos://` package import, use the
   Explain that ephemeral in-container state can be lost before
   `update_worker`.
 - `delete_worker` is permanent and requires the normal confirmation gate.
+- A successful `delete_worker` receipt already proves permanent absence.
+  Never call `sleep_worker` afterward and never request a second deletion
+  approval for the same completed operation.
 - After a mutation, use the returned receipt. Do not repeat the same
   operation merely because provisioning takes time; recovery is handled by
   the durable operation journal and heartbeat.

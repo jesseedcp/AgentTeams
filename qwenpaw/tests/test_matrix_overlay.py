@@ -912,6 +912,7 @@ def _make_inbound_channel(command_registry=True):
     channel.groups = {}
     channel.history_limit = 50
     channel._room_histories = {}
+    channel._control_epochs = {}
     if command_registry:
         channel._command_registry = _FakeCommandRegistry()
     channel._is_dm_room = _false_dm
@@ -1262,6 +1263,44 @@ def test_matrix_stop_command_passes_through_without_registry() -> None:
 
     assert len(channel.enqueued) == 1
     assert _first_text(channel.enqueued[0]) == "/stop"
+
+
+def test_matrix_stop_advances_room_epoch_before_enqueue() -> None:
+    channel = _make_inbound_channel()
+
+    asyncio.run(
+        channel._on_room_event(
+            _FakeInboundRoom(),
+            _matrix_event("copywriting-assistant: hello", mentioned=True),
+        ),
+    )
+    asyncio.run(
+        channel._on_room_event(
+            _FakeInboundRoom(),
+            _matrix_event("copywriting-assistant: /stop", mentioned=True),
+        ),
+    )
+
+    assert channel.enqueued[0]["meta"]["matrix_control_epoch"] == 0
+    assert channel.enqueued[1]["meta"]["matrix_control_epoch"] == 1
+
+
+def test_matrix_suppresses_output_from_request_cancelled_by_stop() -> None:
+    channel = _make_inbound_channel()
+    channel._control_epochs["!room:hs.local"] = 1
+
+    asyncio.run(
+        channel.send(
+            "!room:hs.local",
+            "late result from cancelled request",
+            {
+                "room_id": "!room:hs.local",
+                "matrix_control_epoch": 0,
+            },
+        ),
+    )
+
+    assert channel._client.sent == []
 
 
 def test_matrix_bare_stop_not_recognized_without_slash() -> None:

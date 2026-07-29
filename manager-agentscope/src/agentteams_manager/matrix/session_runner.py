@@ -122,6 +122,11 @@ class MatrixSessionRunner:
         edit_interval_seconds: float = 0.5,
         metrics: Any | None = None,
         known_models: Mapping[str, bool] | None = None,
+        default_model: str | None = None,
+        known_models_provider: (
+            Callable[[], Mapping[str, bool]] | None
+        ) = None,
+        default_model_provider: Callable[[], str | None] | None = None,
     ) -> None:
         self._sessions = sessions
         self._matrix = matrix
@@ -138,6 +143,9 @@ class MatrixSessionRunner:
         self._edit_interval = edit_interval_seconds
         self._metrics = metrics
         self._known_models = dict(known_models or {})
+        self._default_model = (default_model or "").strip() or None
+        self._known_models_provider = known_models_provider
+        self._default_model_provider = default_model_provider
 
     async def handle(
         self,
@@ -406,7 +414,7 @@ class MatrixSessionRunner:
                 model_override=argument,
                 now=self._now(),
             )
-            model = status.model_override or "运行时默认模型"
+            model = self._effective_model(status.model_override)
             await self._send_session_command_result(
                 event,
                 f"已创建全新会话。模型：{model}",
@@ -477,7 +485,7 @@ class MatrixSessionRunner:
             await self._send_session_command_result(
                 event,
                 "当前会话模型："
-                f"{status.model_override or '运行时默认模型'}",
+                f"{self._effective_model(status.model_override)}",
                 action="model-status",
             )
             return
@@ -498,7 +506,7 @@ class MatrixSessionRunner:
         await self._send_session_command_result(
             event,
             "已切换当前房间模型，原会话上下文已保留。模型："
-            f"{status.model_override or '运行时默认模型'}",
+            f"{self._effective_model(status.model_override)}",
             action="model",
         )
 
@@ -529,11 +537,12 @@ class MatrixSessionRunner:
                 action="think-error",
             )
             return
-        model = settings.model_override
+        model = self._effective_model(settings.model_override)
+        known_models = self._current_known_models()
         if (
             selected not in {None, "off"}
-            and model in self._known_models
-            and not self._known_models[model]
+            and model in known_models
+            and not known_models[model]
         ):
             await self._send_session_command_result(
                 event,
@@ -687,25 +696,33 @@ class MatrixSessionRunner:
         normalized = argument.lower()
         if normalized == "default":
             return None
+        known_models = self._current_known_models()
         if argument.isdigit():
             index = int(argument)
-            models = tuple(self._known_models)
+            models = tuple(known_models)
             if not 1 <= index <= len(models):
                 raise ValueError("model number is outside the list")
             return models[index - 1]
-        if argument in self._known_models or "/" in argument:
+        if argument in known_models or "/" in argument:
             return argument
         raise ValueError(
             "model is not in the configured list; use /models",
         )
 
     def _model_catalog(self) -> str:
-        if not self._known_models:
+        known_models = self._current_known_models()
+        if not known_models:
             return "当前没有已配置的已知模型。"
+        default_model = self._effective_default_model()
         lines = ["可用模型："]
         lines.extend(
             f"{index}. {model}"
-            for index, model in enumerate(self._known_models, start=1)
+            + (
+                "（当前默认）"
+                if model == default_model
+                else ""
+            )
+            for index, model in enumerate(known_models, start=1)
         )
         lines.append("使用 /model <序号|provider/model> 切换。")
         return "\n".join(lines)
@@ -717,7 +734,7 @@ class MatrixSessionRunner:
         pending: tuple[ConfirmationRequest, ...],
     ) -> None:
         status = await self._sessions.status(event.room_id)
-        model = status.model_override or "运行时默认模型"
+        model = self._effective_model(status.model_override)
         lines = [
             "会话状态：",
             f"- 房间类型：{policy.kind.value}",
@@ -746,6 +763,31 @@ class MatrixSessionRunner:
             "\n".join(lines),
             action="status",
         )
+
+    def _effective_model(self, override: str | None) -> str:
+        return (
+            override
+            or self._effective_default_model()
+            or "运行时默认模型"
+        )
+
+    def _effective_default_model(self) -> str | None:
+        if self._default_model_provider is not None:
+            model = (self._default_model_provider() or "").strip()
+            if model:
+                return model
+        return self._default_model
+
+    def _current_known_models(self) -> dict[str, bool]:
+        if self._known_models_provider is not None:
+            models = {
+                model.strip(): reasoning
+                for model, reasoning in self._known_models_provider().items()
+                if model.strip()
+            }
+            if models:
+                return models
+        return dict(self._known_models)
 
     async def _send_session_command_result(
         self,
