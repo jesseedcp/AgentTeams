@@ -58,6 +58,32 @@ class ConfirmationAgent:
         )
 
 
+class ConcurrentConfirmationAgent(ConfirmationAgent):
+    async def reply_stream(self, *, inputs: object):
+        self.inputs.append(inputs)
+        if isinstance(inputs, UserConfirmResultEvent):
+            self.confirmation_results.append(inputs)
+            yield TextBlockDeltaEvent(
+                reply_id=inputs.reply_id,
+                block_id="text",
+                delta="Listed all resources.",
+            )
+            return
+        for index, name in enumerate(
+            ("list_workers", "list_teams", "list_projects"),
+        ):
+            yield RequireUserConfirmEvent(
+                reply_id="reply-list",
+                tool_calls=[
+                    ToolCallBlock(
+                        id=f"call-list-{index}",
+                        name=name,
+                        input="{}",
+                    ),
+                ],
+            )
+
+
 class Factory:
     runtime_revision = 1
 
@@ -72,6 +98,25 @@ class Factory:
     ) -> ConfirmationAgent:
         del policy
         self.agent = ConfirmationAgent(room_id)
+        if state is not None:
+            self.agent.state = state
+        return self.agent
+
+
+class ConcurrentFactory:
+    runtime_revision = 1
+
+    def __init__(self) -> None:
+        self.agent: ConcurrentConfirmationAgent | None = None
+
+    async def create(
+        self,
+        room_id: str,
+        policy: RoomPolicy,
+        state: AgentState | None = None,
+    ) -> ConcurrentConfirmationAgent:
+        del policy
+        self.agent = ConcurrentConfirmationAgent(room_id)
         if state is not None:
             self.agent.state = state
         return self.agent
@@ -450,6 +495,53 @@ async def test_confirmation_continues_same_reply(tmp_path: Path) -> None:
     assert result.reply_id == "reply-delete"
     assert result.confirm_results[0].confirmed
     assert any(item.text == "Deleted alice." for item in matrix.sent)
+
+
+@pytest.mark.asyncio
+async def test_parallel_confirmation_items_are_approved_together(
+    tmp_path: Path,
+) -> None:
+    database = Database(tmp_path / "manager.db")
+    await database.open()
+    factory = ConcurrentFactory()
+    matrix = RecordingMatrix()
+    confirmations = ConfirmationService(
+        ConfirmationRepository(database),
+    )
+    runner = MatrixSessionRunner(
+        sessions=RoomSessionManager(
+            factory=factory,
+            sessions=SessionRepository(database),
+        ),
+        matrix=matrix,
+        admin_user_id="@admin:local",
+        admin_room_id="!admin:local",
+        confirmations=confirmations,
+    )
+
+    await runner.handle(
+        _event("list workers, teams, and projects", "$list"),
+        _policy(),
+    )
+
+    pending = await confirmations.pending()
+    assert len(pending) == 1
+    assert {
+        call.name for call in pending[0].tool_calls
+    } == {"list_workers", "list_teams", "list_projects"}
+
+    await runner.handle(
+        _event(
+            f"/confirm {pending[0].confirmation_id}",
+            "$confirm-list",
+        ),
+        _policy(),
+    )
+
+    assert factory.agent is not None
+    result = factory.agent.confirmation_results[0]
+    assert len(result.confirm_results) == 3
+    assert any(item.text == "Listed all resources." for item in matrix.sent)
 
 
 @pytest.mark.asyncio

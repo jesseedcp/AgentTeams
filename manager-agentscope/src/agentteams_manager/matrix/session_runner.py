@@ -996,7 +996,27 @@ class MatrixSessionRunner:
             del state
             if not isinstance(agent_event, RequireUserConfirmEvent):
                 return
-            pending = agent_event
+            if pending is None:
+                pending = agent_event
+                return
+            if pending.reply_id != agent_event.reply_id:
+                raise RuntimeError(
+                    "one AgentScope run requested confirmation for "
+                    "multiple replies",
+                )
+            tool_calls = {
+                tool_call.id: tool_call
+                for tool_call in pending.tool_calls
+            }
+            tool_calls.update(
+                {
+                    tool_call.id: tool_call
+                    for tool_call in agent_event.tool_calls
+                },
+            )
+            pending = pending.model_copy(
+                update={"tool_calls": list(tool_calls.values())},
+            )
 
         async for agent_event in self._sessions.run_input(
             event,
