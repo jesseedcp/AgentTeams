@@ -41,7 +41,7 @@ from .config import (
     PromptSources,
     RuntimeDocument,
 )
-from .domain.ids import matrix_transaction_id
+from .domain.ids import matrix_transaction_id, operation_id_for
 from .domain.models import (
     InboundEvent,
     OperationKind,
@@ -82,6 +82,7 @@ from .state.operations import OperationRepository
 from .state.projects import ProjectRepository
 from .state.recovery import RecoveryCoordinator
 from .state.sessions import SessionRepository
+from .state.supervision import SupervisionStateRepository
 from .state.tasks import ProjectGraphRepository, TaskRepository
 from .state.topology import TopologyRepository
 from .tools.channels import ChannelToolkitFactory
@@ -90,6 +91,7 @@ from .tools.configuration import ConfigurationToolkitFactory
 from .tools.gateway import GatewayToolkitFactory
 from .tools.host_files import HostFileAccess, HostFileToolkitFactory
 from .tools.integrations import IntegrationToolkitFactory
+from .tools.memory import MemoryToolkitFactory
 from .tools.resources import ResourceToolkitFactory
 from .tools.storage import FileSyncService
 from .tools.tasks import TaskToolkitFactory
@@ -113,6 +115,7 @@ from .workflows.matrix_resources import (
     ChannelResolver,
     MatrixResourceService,
 )
+from .workflows.memory import ManagerMemoryService
 from .workflows.notifications import DailyMemory, NotificationService
 from .workflows.projects import ProjectService
 from .workflows.resources import (
@@ -286,12 +289,11 @@ class HeartbeatRuntime:
     async def start(self) -> None:
         if self._task is not None:
             return
-        await self._run_once()
-        self.ready = True
         self._task = asyncio.create_task(
             self._run(),
             name="manager-heartbeat",
         )
+        self.ready = True
 
     async def stop(self) -> None:
         task, self._task = self._task, None
@@ -305,7 +307,6 @@ class HeartbeatRuntime:
 
     async def _run(self) -> None:
         while True:
-            await asyncio.sleep(max(1, float(self._interval())))
             try:
                 await self._run_once()
             except asyncio.CancelledError:
@@ -315,6 +316,7 @@ class HeartbeatRuntime:
                     "agentteams_manager_errors_total",
                 )
                 logger.exception("Manager heartbeat failed")
+            await asyncio.sleep(max(1, float(self._interval())))
 
     async def _run_once(self) -> None:
         with _span(self._tracer, "manager.heartbeat"):
@@ -418,6 +420,7 @@ def build_application(
     database = Database(config.session_database)
     operations = OperationRepository(database)
     tasks = TaskRepository(database)
+    supervision_state = SupervisionStateRepository(database)
     project_graph = ProjectGraphRepository(database)
     projects = ProjectRepository(database)
     topology = TopologyRepository(
@@ -428,6 +431,10 @@ def build_application(
     leases = LeaseRepository(database)
     session_repository = SessionRepository(database)
     memory_repository = MemoryRepository(database)
+    memory_service = ManagerMemoryService(
+        memory_repository,
+        now=clock.now,
+    )
     confirmations = ConfirmationService(
         ConfirmationRepository(database),
         now=clock.now,
@@ -539,12 +546,14 @@ def build_application(
         memory=DailyMemory(storage=storage, clock=clock),
         clock=clock,
         admin_user_id=config.admin_user_id,
+        curated_memory=memory_repository,
     )
     resource_service = ResourceService(
         controller=agt,
         supervisor=supervisor,
         topology=topology_resolver,
         matrix=matrix,
+        admin_room_id=config.manager_admin_room_id,
         nacos=nacos,
     )
     lease_service = ProcessingLeaseService(
@@ -569,6 +578,7 @@ def build_application(
         clock=clock,
         cache_root=config.workspace,
         matrix_domain=config.matrix_domain,
+        manager_user_id=config.manager_user_id,
         notifications=notification_service,
         project_graph=project_graph,
     )
@@ -585,6 +595,7 @@ def build_application(
         clock=clock,
         admin_user_id=config.admin_user_id,
         manager_user_id=config.manager_user_id,
+        memory=memory_service,
     )
     git_service = GitDelegationService(
         storage=storage,
@@ -677,6 +688,10 @@ def build_application(
     tool_provider = CompositeToolProvider(
         resource_tools,
         task_tools,
+        MemoryToolkitFactory(
+            service=memory_service,
+            yolo=config.yolo,
+        ),
         ChannelToolkitFactory(
             service=channel_service,
             yolo=config.yolo,
@@ -741,7 +756,10 @@ def build_application(
         history=matrix.history,
         media=MatrixMedia(matrix),
         memory=memory_repository,
+        memory_service=memory_service,
         metrics=metrics,
+        task_reader=tasks,
+        project_workflow=project_service,
         known_models={
             config.default_model: (
                 known_models[config.default_model].reasoning
@@ -766,6 +784,28 @@ def build_application(
         manager_user_id=config.manager_user_id,
         revision=topology.revision,
     )
+
+    async def report_matrix_dead_letter(
+        event: InboundEvent,
+        error: str,
+    ) -> None:
+        metrics.increment(
+            "agentteams_manager_matrix_dead_letters_total",
+        )
+        operation_id = operation_id_for(
+            event.room_id,
+            event.event_id,
+            "matrix-dead-letter",
+        )
+        await matrix.send_text(
+            config.manager_admin_room_id,
+            "Matrix 消息处理连续失败，已进入死信队列。\n"
+            f"来源房间：{event.room_id}\n"
+            f"事件 ID：{event.event_id}\n"
+            f"错误：{error[:1_000]}",
+            txn_id=matrix_transaction_id(operation_id, 0),
+        )
+
     router = EventRouter(
         claims=operations,
         resolver=policy,
@@ -773,6 +813,7 @@ def build_application(
         control_handler=runner.handle_control,
         queue_settings=sessions.queue_settings,
         interrupt_handler=sessions.cancel,
+        dead_letter_handler=report_matrix_dead_letter,
     )
     matrix_runtime = MatrixRuntime(
         matrix=matrix,
@@ -828,6 +869,9 @@ def build_application(
             tasks=tasks,
             workers=resource_service,
             notifications=notification_service,
+            state=supervision_state,
+            lifecycle=resource_service,
+            matrix=matrix,
         ),
     )
     heartbeat_runtime = HeartbeatRuntime(
@@ -918,6 +962,7 @@ def build_application(
             higress,
             mcp_registry,
             channel_service,
+            resource_service,
         )
         if dependency is not None
     )

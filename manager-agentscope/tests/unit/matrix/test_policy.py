@@ -19,13 +19,14 @@ def _event(
     room_id: str,
     sender_id: str,
     is_direct: bool,
+    body: str = "hello",
     mentions: tuple[str, ...] = (),
 ) -> InboundEvent:
     return InboundEvent(
         room_id=room_id,
         event_id="$event",
         sender=sender_id,
-        body="hello",
+        body=body,
         timestamp=datetime.now(UTC),
         is_direct=is_direct,
         mentions=mentions,
@@ -95,6 +96,9 @@ async def test_admin_dm_gets_management_tools() -> None:
 
     assert policy.kind is RoomKind.ADMIN_DM
     assert "create_worker" in policy.allowed_tools
+    assert "create_worker" not in policy.confirm_tools
+    assert "delete_worker" in policy.confirm_tools
+    assert "write_host_file" in policy.confirm_tools
     assert policy.resource_scope_all
 
 
@@ -156,6 +160,7 @@ async def test_worker_identity_gets_only_worker_room_tools() -> None:
     assert policy.allowed_tools == frozenset(
         {
             "delegate_task",
+            "inspect_task_result",
             "complete_task",
             "sync_files",
             "read_task_file",
@@ -309,6 +314,7 @@ async def test_project_worker_mention_wakes_with_reporting_tools_only() -> None:
         {
             "list_tasks",
             "get_task",
+            "inspect_task_result",
             "complete_task",
             "get_project",
             "report_project_blocked",
@@ -353,6 +359,86 @@ async def test_project_worker_without_manager_mention_stays_silent() -> None:
     )
 
     assert policy.silent
+
+
+@pytest.mark.asyncio
+async def test_project_completion_marker_wakes_without_structured_mention() -> None:
+    binding = SimpleNamespace(
+        room_kind=RoomKind.PROJECT_ROOM,
+        room_id="!project:local",
+        resource_name="project-20260723-120000-abc123",
+        matrix_user_id=None,
+        payload={"participants": ["alpha-dev"]},
+    )
+    actor = Actor(
+        matrix_user_id="@alpha-dev:local",
+        kind=ActorKind.TEAM_WORKER,
+        resource_name="alpha-dev",
+        team_name="alpha",
+    )
+    resolver = RoomPolicyResolver(
+        topology=FakeTopology(
+            {"!project:local": binding},
+            actors={"@alpha-dev:local": actor},
+        ),
+        admin_user_id="@admin:local",
+        manager_user_id="@manager:local",
+    )
+
+    policy = await resolver.resolve(
+        _event(
+            room_id="!project:local",
+            sender_id="@alpha-dev:local",
+            is_direct=False,
+            body=(
+                "@manager:local TASK_COMPLETED: "
+                "task-20260730-120000-abc123"
+            ),
+        ),
+    )
+
+    assert not policy.silent
+    assert "complete_task" in policy.allowed_tools
+
+
+@pytest.mark.asyncio
+async def test_leader_completion_marker_wakes_without_structured_mention() -> None:
+    binding = SimpleNamespace(
+        room_kind=RoomKind.LEADER_ROOM,
+        room_id="!leader:local",
+        resource_name="alpha",
+        matrix_user_id="@alpha-lead:local",
+        payload={},
+    )
+    actor = Actor(
+        matrix_user_id="@alpha-lead:local",
+        kind=ActorKind.TEAM_LEADER,
+        resource_name="alpha-lead",
+        team_name="alpha",
+    )
+    resolver = RoomPolicyResolver(
+        topology=FakeTopology(
+            {"!leader:local": binding},
+            actors={"@alpha-lead:local": actor},
+        ),
+        admin_user_id="@admin:local",
+        manager_user_id="@manager:local",
+    )
+
+    policy = await resolver.resolve(
+        _event(
+            room_id="!leader:local",
+            sender_id="@alpha-lead:local",
+            is_direct=False,
+            body=(
+                "@manager:local TASK_COMPLETED: "
+                "task-20260730-120000-abc123"
+            ),
+        ),
+    )
+
+    assert not policy.silent
+    assert "complete_task" in policy.allowed_tools
 
 
 @pytest.mark.asyncio

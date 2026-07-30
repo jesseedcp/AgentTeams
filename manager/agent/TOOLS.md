@@ -18,6 +18,7 @@ so optional MCP tools and room-specific restrictions remain truthful.
 - `coding_cli_status`
 - `complete_task`
 - `configure_mcp`
+- `confirm_project_plan`
 - `create_channel`
 - `create_human`
 - `create_project`
@@ -47,6 +48,7 @@ so optional MCP tools and room-specific restrictions remain truthful.
 - `git_delegate_high_risk`
 - `import_worker`
 - `inspect_git_request`
+- `inspect_task_result`
 - `invite_matrix_user`
 - `kick_matrix_user`
 - `list_channels`
@@ -65,7 +67,11 @@ so optional MCP tools and room-specific restrictions remain truthful.
 - `read_host_file`
 - `read_task_file`
 - `reassign_project_task`
+- `recall_manager_memory`
+- `record_project_decision`
+- `record_worker_assessment`
 - `register_matrix_user`
+- `remember_manager_memory`
 - `remove_mcp`
 - `report_project_blocked`
 - `request_project_revision`
@@ -119,14 +125,15 @@ allowed:
 8. `matrix-server-management`
 9. `mcp-server-management`
 10. `mcporter`
-11. `model-switch`
-12. `project-management`
-13. `service-publishing`
-14. `task-coordination`
-15. `task-management`
-16. `team-management`
-17. `worker-management`
-18. `worker-model-switch`
+11. `memory-management`
+12. `model-switch`
+13. `project-management`
+14. `service-publishing`
+15. `task-coordination`
+16. `task-management`
+17. `team-management`
+18. `worker-management`
+19. `worker-model-switch`
 
 The `mcporter` name is retained for capability compatibility. Its execution
 path is native AgentScope Toolkit discovery and calls.
@@ -141,6 +148,8 @@ path is native AgentScope Toolkit discovery and calls.
 - Finite or recurring work: `task-management`; use `task-coordination` for
   completion and processing-lease coordination.
 - Project DAG or Project Room: `project-management`.
+- Durable preferences, decisions, and Worker evidence: `memory-management`
+  in the administrator DM.
 - Manager model versus Worker model: use the matching model-switch skill.
 - MCP definition or permissions: `mcp-server-management`; MCP discovery/call:
   `mcporter`.

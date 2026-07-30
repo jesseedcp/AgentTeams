@@ -171,6 +171,45 @@ class TaskRepository:
 
         return await self._database.write(write)
 
+    async def update_routing(
+        self,
+        task_id: str,
+        *,
+        room_id: str,
+        metadata: dict[str, object],
+    ) -> TaskRecord:
+        """Move a task to its authoritative room without changing status."""
+
+        def write(connection: sqlite3.Connection) -> TaskRecord:
+            now = datetime.now(UTC)
+            cursor = connection.execute(
+                """
+                UPDATE tasks
+                   SET room_id=?, metadata_json=?, updated_at=?
+                 WHERE task_id=?
+                """,
+                (
+                    room_id,
+                    json.dumps(
+                        metadata,
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                        sort_keys=True,
+                    ),
+                    now.isoformat(),
+                    task_id,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise NotFoundError(f"task/{task_id} does not exist")
+            row = connection.execute(
+                "SELECT * FROM tasks WHERE task_id=?",
+                (task_id,),
+            ).fetchone()
+            return _task_from_row(row)
+
+        return await self._database.write(write)
+
     async def due_schedules(self, now: datetime) -> tuple[TaskRecord, ...]:
         def read(connection: sqlite3.Connection) -> tuple[TaskRecord, ...]:
             rows = connection.execute(
@@ -389,6 +428,7 @@ class ProjectGraphRepository:
         assigned_to: str,
         room_id: str,
         matrix_user_id: str,
+        storage_team_name: str | None,
         actor_id: str,
         reason: str,
         operation_id: str,
@@ -430,13 +470,18 @@ class ProjectGraphRepository:
                     "reassignment_operation_id": operation_id,
                 },
             )
+            if storage_team_name is None:
+                metadata.pop("storage_team_name", None)
+            else:
+                metadata["storage_team_name"] = storage_team_name
             metadata.pop("assignment_event_id", None)
             metadata.pop("assignment_txn_id", None)
             now = datetime.now(UTC)
             connection.execute(
                 """
                 UPDATE tasks
-                   SET assigned_to=?, room_id=?, status=?,
+                   SET assigned_to=?, room_id=?, delegated_to_team=NULL,
+                       status=?,
                        metadata_json=?, updated_at=?
                  WHERE task_id=?
                 """,
@@ -923,6 +968,7 @@ _PROJECT_TRANSITIONS: dict[
         {
             ProjectTaskState.READY,
             ProjectTaskState.IN_PROGRESS,
+            ProjectTaskState.COMPLETED,
             ProjectTaskState.CANCELLED,
         },
     ),

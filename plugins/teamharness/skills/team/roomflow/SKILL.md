@@ -36,5 +36,10 @@ projects from the same DingTalk group or same person still get different task
 rooms.
 
 Pass the complete Matrix user IDs for Workers who must receive or observe work
-in the task room. Use the returned Matrix room as the task room for the
-handoff, project state, task delegation, and Worker completion reports.
+in the task room through `invite`. This field is mandatory for Quick Task and
+Project Work: select the Worker owners first, then call `create_task_room`.
+Never rely on the Team Admin default invite. As a last-resort safety net, the
+tool invites all current Team Workers when `invite` is omitted, but an explicit
+participant list is the authoritative choice. Use the returned Matrix room as
+the task room for the handoff, project state, task delegation, and Worker
+completion reports.

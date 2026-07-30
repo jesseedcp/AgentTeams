@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import suppress
 import json
 import logging
+from contextlib import suppress
 from typing import Any, Awaitable, Callable
 
 logger = logging.getLogger(__name__)

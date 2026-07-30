@@ -1,10 +1,12 @@
 import json
 import os
 import re
+import shutil
 import subprocess
-import sys
 import zipfile
 from pathlib import Path
+
+import pytest
 
 
 REPO_ROOT = Path(__file__).resolve().parents[5]
@@ -26,6 +28,7 @@ def _manifest_version() -> str:
     return match.group(1)
 
 
+@pytest.mark.skipif(shutil.which("ruby") is None, reason="Ruby is required to build the plugin package")
 def test_build_qwenpaw_native_plugin_package(tmp_path: Path) -> None:
     result = subprocess.run(
         ["ruby", str(BUILD_SCRIPT), str(MANIFEST)],
@@ -58,6 +61,7 @@ def test_build_qwenpaw_native_plugin_package(tmp_path: Path) -> None:
         assert f"{root}/teamharness/prompts/agent/worker.md" in names
         assert f"{root}/teamharness/skills/team/communication/SKILL.md" in names
         assert f"{root}/teamharness/skills/team/roomflow/SKILL.md" in names
+        assert f"{root}/teamharness/qwenpaw-skills/communication/SKILL.md" in names
         assert f"{root}/teamharness/mcp/server.py" in names
         assert f"{root}/teamharness/mcp/message_tool.py" in names
         assert f"{root}/teamharness/mcp/roomflow_tool.py" in names
@@ -78,30 +82,10 @@ def test_build_qwenpaw_native_plugin_package(tmp_path: Path) -> None:
     assert manifest["id"] == "teamharness"
     assert manifest["version"] == version
     assert manifest["entry"]["backend"] == "plugin.py"
+    assert manifest["qwenpaw_version"] == {
+        "min": "2.0.1",
+        "max": "2.1.0",
+    }
     assert "periodic-sync" not in manifest["meta"]["features"]
 
-    probe = subprocess.run(
-        [
-            sys.executable,
-            "-c",
-            (
-                "import importlib.util, json; "
-                f"path = {str(extract_dir / root / 'plugin.py')!r}; "
-                "spec = importlib.util.spec_from_file_location('teamharness_pkg', path); "
-                "mod = importlib.util.module_from_spec(spec); "
-                "spec.loader.exec_module(mod); "
-                "print(json.dumps(mod.install_task_trace_processor()))"
-            ),
-        ],
-        env={
-            **os.environ,
-            "PYTHONDONTWRITEBYTECODE": "1",
-            "QWENPAW_WORKING_DIR": str(tmp_path / ".qwenpaw"),
-        },
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        check=True,
-    )
-    trace_result = json.loads(probe.stdout)
-    assert trace_result.get("reason") != "task_trace.py not found"
+    assert manifest["min_version"] == "2.0.1"

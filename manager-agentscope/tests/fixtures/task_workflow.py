@@ -149,6 +149,9 @@ class OrderedTaskRepository:
     async def transition(self, task_id: str, **kwargs: Any):
         return await self.repository.transition(task_id, **kwargs)
 
+    async def update_routing(self, task_id: str, **kwargs: Any):
+        return await self.repository.update_routing(task_id, **kwargs)
+
 
 class TaskSupervisor:
     def __init__(self, clock: FixedClock) -> None:

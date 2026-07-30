@@ -6,10 +6,12 @@ from __future__ import annotations
 import html
 import ipaddress
 import json
+import logging
 import os
 from pathlib import Path
 import re
 import shutil
+import subprocess
 import sys
 import time
 from typing import Any
@@ -17,6 +19,9 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+
+
+logger = logging.getLogger(__name__)
 
 
 TOOL_NAMES = ["worker_agentflow"]
@@ -252,18 +257,49 @@ def _shared_plan(agent_id: str, workspace_dir: Path, shared_dir: Path) -> dict[s
     }
 
 
+def _is_directory_link(path: Path) -> bool:
+    if path.is_symlink():
+        return True
+    is_junction = getattr(os.path, "isjunction", None)
+    return bool(is_junction and is_junction(path))
+
+
+def _remove_directory_link(path: Path) -> None:
+    if path.is_symlink():
+        path.unlink()
+    else:
+        os.rmdir(path)
+
+
 def _replace_shared_link(link_path: Path, shared_dir: Path) -> dict[str, Any]:
-    if link_path.is_symlink():
-        current = Path(os.readlink(link_path))
-        if not current.is_absolute():
-            current = (link_path.parent / current).resolve()
-        if current.resolve() == shared_dir.resolve():
+    if _is_directory_link(link_path):
+        try:
+            same_target = os.path.samefile(link_path, shared_dir)
+        except OSError:
+            same_target = False
+        if same_target:
             return {"created": False, "path": str(link_path), "target": str(shared_dir), "reason": "already_linked"}
-        link_path.unlink()
+        _remove_directory_link(link_path)
     elif link_path.exists():
         return {"created": False, "path": str(link_path), "target": str(shared_dir), "reason": "path_exists_not_symlink"}
 
-    os.symlink(shared_dir, link_path)
+    try:
+        os.symlink(shared_dir, link_path, target_is_directory=True)
+    except OSError as exc:
+        if os.name != "nt" or getattr(exc, "winerror", None) != 1314:
+            raise
+        subprocess.check_output(
+            [
+                "cmd.exe",
+                "/d",
+                "/c",
+                "mklink",
+                "/J",
+                str(link_path),
+                str(shared_dir),
+            ],
+            stderr=subprocess.STDOUT,
+        )
     return {"created": True, "path": str(link_path), "target": str(shared_dir)}
 
 

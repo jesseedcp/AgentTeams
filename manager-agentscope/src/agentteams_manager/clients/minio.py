@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import inspect
 import json
+import re
 import shutil
 import tempfile
 import uuid
@@ -202,7 +203,24 @@ class MinioClient:
             if _is_missing(exc):
                 return None
             raise MinioError(f"failed to inspect {normalized}") from exc
-        return _receipt(normalized, response)
+        recorded_digest = _recorded_sha256(normalized, response)
+        if recorded_digest is not None:
+            return _receipt(
+                normalized,
+                response,
+                sha256=recorded_digest,
+            )
+
+        # TeamHarness and other S3-compatible clients may upload objects
+        # without AgentTeams' custom ``x-amz-meta-sha256`` field. Download
+        # those legacy objects once so their standard single-part ETag can be
+        # verified before exposing a SHA-256 receipt to the rest of Manager.
+        data = await self.get_bytes(normalized)
+        return _receipt(
+            normalized,
+            response,
+            sha256=hashlib.sha256(data).hexdigest(),
+        )
 
     async def get_bytes(self, key: str) -> bytes:
         normalized = _object_key(key)
@@ -226,12 +244,20 @@ class MinioClient:
                 if inspect.isawaitable(result):
                     await result
 
-        receipt = _receipt(normalized, response)
         digest = hashlib.sha256(data).hexdigest()
-        if receipt.sha256 != digest or receipt.size != len(data):
+        recorded_digest = _recorded_sha256(normalized, response)
+        expected_size = int(response.get("ContentLength", 0))
+        if expected_size != len(data):
             raise ObjectIntegrityError(
                 f"object checksum or length mismatch: {normalized}",
             )
+        if recorded_digest is not None:
+            if recorded_digest != digest:
+                raise ObjectIntegrityError(
+                    f"object checksum or length mismatch: {normalized}",
+                )
+        else:
+            _verify_single_part_etag(normalized, response, data)
         return data
 
     async def get_json(self, key: str) -> Any:
@@ -445,15 +471,20 @@ def _object_prefix(prefix: str) -> str:
     return f"{normalized}/"
 
 
-def _receipt(key: str, response: Mapping[str, Any]) -> ObjectReceipt:
+def _recorded_sha256(
+    key: str,
+    response: Mapping[str, Any],
+) -> str | None:
     metadata = {
         str(name).lower(): str(value)
         for name, value in dict(response.get("Metadata", {})).items()
     }
-    digest = metadata.get("sha256", "")
+    if "sha256" not in metadata:
+        return None
+    digest = metadata["sha256"]
     if len(digest) != 64:
         raise ObjectIntegrityError(
-            f"object has no valid checksum metadata: {key}",
+            f"object has invalid checksum metadata: {key}",
         )
     try:
         int(digest, 16)
@@ -461,10 +492,35 @@ def _receipt(key: str, response: Mapping[str, Any]) -> ObjectReceipt:
         raise ObjectIntegrityError(
             f"object has invalid checksum metadata: {key}",
         ) from exc
+    return digest.lower()
+
+
+def _verify_single_part_etag(
+    key: str,
+    response: Mapping[str, Any],
+    data: bytes,
+) -> None:
+    etag = str(response.get("ETag", "")).strip().strip('"')
+    if re.fullmatch(r"[0-9a-fA-F]{32}", etag) is None:
+        raise ObjectIntegrityError(
+            f"object has no verifiable checksum metadata or ETag: {key}",
+        )
+    if hashlib.md5(data).hexdigest() != etag.lower():
+        raise ObjectIntegrityError(
+            f"object ETag checksum mismatch: {key}",
+        )
+
+
+def _receipt(
+    key: str,
+    response: Mapping[str, Any],
+    *,
+    sha256: str,
+) -> ObjectReceipt:
     return ObjectReceipt(
         key=key,
         etag=str(response.get("ETag", "")),
-        sha256=digest,
+        sha256=sha256,
         size=int(response.get("ContentLength", 0)),
         content_type=(
             str(response["ContentType"])

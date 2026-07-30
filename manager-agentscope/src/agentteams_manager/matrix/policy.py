@@ -46,9 +46,11 @@ ALL_MANAGER_TOOLS = frozenset(
         "delete_task",
         "delegate_task",
         "delegate_team_task",
+        "inspect_task_result",
         "complete_task",
         "schedule_task",
         "create_project",
+        "confirm_project_plan",
         "list_projects",
         "get_project",
         "update_project",
@@ -100,6 +102,10 @@ ALL_MANAGER_TOOLS = frozenset(
         "send_external_message",
         "read_host_file",
         "write_host_file",
+        "recall_manager_memory",
+        "remember_manager_memory",
+        "record_project_decision",
+        "record_worker_assessment",
     },
 )
 ADMIN_ONLY_TOOLS = frozenset(
@@ -114,12 +120,17 @@ ADMIN_ONLY_TOOLS = frozenset(
         "write_host_file",
         "coding_cli_status",
         "delegate_coding_cli",
+        "recall_manager_memory",
+        "remember_manager_memory",
+        "record_project_decision",
+        "record_worker_assessment",
     },
 )
 
 WORKER_TOOLS = frozenset(
     {
         "delegate_task",
+        "inspect_task_result",
         "complete_task",
         "sync_files",
         "read_task_file",
@@ -131,6 +142,7 @@ WORKER_TOOLS = frozenset(
 LEADER_TOOLS = frozenset(
     {
         "delegate_team_task",
+        "inspect_task_result",
         "complete_task",
         "sync_files",
         "read_task_file",
@@ -141,6 +153,7 @@ PROJECT_TOOLS = frozenset(
     {
         "list_tasks",
         "get_task",
+        "inspect_task_result",
         "complete_task",
         "list_projects",
         "get_project",
@@ -161,6 +174,7 @@ PROJECT_PARTICIPANT_TOOLS = frozenset(
     {
         "list_tasks",
         "get_task",
+        "inspect_task_result",
         "complete_task",
         "get_project",
         "report_project_blocked",
@@ -198,35 +212,50 @@ WORKER_SCOPED_HUMAN_TOOLS = frozenset(
 TRUSTED_TOOLS = frozenset({"list_workers", "list_tasks"})
 UNKNOWN_TOOLS: frozenset[str] = frozenset()
 
+# Normal creation, assignment, notification, and file-transfer operations are
+# already authorized by the user's request and the room policy. Requiring a
+# second approval for every typed mutation makes the Manager stall on ordinary
+# work. Keep the default gate for destructive, access-changing, externally
+# exposing, or host-affecting operations. ``/elevated ask`` expands this to all
+# tools and ``/elevated full`` removes it for the current admin DM.
 CONFIRM_TOOLS = frozenset(
-    tool
-    for tool in ALL_MANAGER_TOOLS
-    if tool.startswith(
-        (
-            "create_",
-            "update_",
-            "delete_",
-            "configure_",
-            "remove_",
-            "switch_",
-            "publish_",
-            "kick_",
-            "ban_",
-            "unban_",
-            "invite_",
-        ),
-    )
-) | frozenset(
     {
         "import_worker",
+        "update_worker",
         "sleep_worker",
-        "wake_worker",
         "reset_worker",
-        "send_notification",
-        "upload_matrix_media",
-        "git_delegate_high_risk",
+        "delete_worker",
+        "update_team",
+        "delete_team",
+        "create_human",
+        "update_human",
+        "delete_human",
+        "delete_task",
         "revise_project_plan_major",
+        "update_project_participants",
+        "delete_project",
+        "git_delegate_high_risk",
         "delegate_coding_cli",
+        "delete_channel",
+        "register_matrix_user",
+        "invite_matrix_user",
+        "kick_matrix_user",
+        "ban_matrix_user",
+        "unban_matrix_user",
+        "configure_mcp",
+        "remove_mcp",
+        "switch_model",
+        "switch_worker_model",
+        "update_manager_identity",
+        "publish_service",
+        "upsert_gateway_resource",
+        "delete_gateway_resource",
+        "approve_external_contact",
+        "block_external_contact",
+        "set_primary_external_contact",
+        "send_external_message",
+        "read_host_file",
+        "write_host_file",
     },
 )
 READ_ONLY_RESOURCE_TOOLS = frozenset(
@@ -442,6 +471,14 @@ class RoomPolicyResolver:
             RoomKind.LEADER_ROOM,
             RoomKind.PROJECT_ROOM,
         }:
+            if (
+                self._manager_user_id in event.body
+                and any(
+                    marker in event.body.upper()
+                    for marker in ("TASK_COMPLETED:", "TASK_BLOCKED:")
+                )
+            ):
+                return True
             return self._manager_user_id in event.mentions
         if event.is_direct:
             return True

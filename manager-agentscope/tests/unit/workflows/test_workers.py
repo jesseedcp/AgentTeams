@@ -235,7 +235,7 @@ async def _no_sleep(delay: float) -> None:
 
 
 @pytest.mark.asyncio
-async def test_create_worker_waits_for_room_then_greets() -> None:
+async def test_create_worker_returns_pending_then_greets_in_background() -> None:
     controller = Controller()
     controller.get_sequences["alice"] = [
         None,
@@ -264,11 +264,75 @@ async def test_create_worker_waits_for_room_then_greets() -> None:
         context=context(),
     )
 
-    assert worker.room_id == "!alice:example"
+    assert worker.phase == "Pending"
+    assert worker.room_id is None
     assert len(controller.create_calls) == 1
+
+    await workflow.wait_for_background_worker_creates()
+
     assert topology.refreshes == 1
     assert matrix.sent[-1].room_id == "!alice:example"
     assert matrix.sent[-1].txn_id.startswith("agentteams:")
+    assert supervisor.status is OperationStatus.SUCCEEDED
+
+
+@pytest.mark.asyncio
+async def test_create_worker_default_window_covers_k8s_room_startup() -> None:
+    controller = Controller()
+    pending = WorkerResource(
+        name="alice",
+        runtime="qwenpaw",
+        model="qwen3.6-plus",
+        phase="Starting",
+    )
+    ready = pending.model_copy(
+        update={
+            "phase": "Running",
+            "room_id": "!alice:example",
+            "status": {"containerState": "running"},
+        },
+    )
+    controller.get_sequences["alice"] = [
+        None,
+        pending,
+        pending,
+        pending,
+        pending,
+        pending,
+        pending,
+        ready,
+    ]
+    supervisor = Supervisor()
+    matrix = Matrix()
+    topology = Topology()
+    workflow = ResourceService(
+        controller=controller,
+        supervisor=supervisor,
+        topology=topology,
+        matrix=matrix,
+        sleeper=_no_sleep,
+    )
+
+    worker = await workflow.create_worker(
+        WorkerCreateRequest(
+            name="alice",
+            runtime="qwenpaw",
+            model="qwen3.6-plus",
+        ),
+        context=context("slow-k8s-room"),
+    )
+
+    assert worker.phase == "Pending"
+    assert worker.room_id is None
+    await workflow.wait_for_background_worker_creates()
+    assert controller.create_calls == [
+        WorkerCreateRequest(
+            name="alice",
+            runtime="qwenpaw",
+            model="qwen3.6-plus",
+        ),
+    ]
+    assert topology.refreshes == 1
     assert supervisor.status is OperationStatus.SUCCEEDED
 
 
@@ -305,6 +369,8 @@ async def test_all_four_worker_runtimes_are_accepted() -> None:
         )
 
         assert worker.runtime == runtime
+        assert worker.phase == "Pending"
+        await workflow.wait_for_background_worker_creates()
 
 
 @pytest.mark.asyncio
@@ -364,6 +430,36 @@ async def test_delete_worker_retry_succeeds_after_worker_disappears() -> None:
 
     await workflow.delete_worker("alice", context=mutation)
     await workflow.delete_worker("alice", context=mutation)
+
+    assert controller.delete_calls == ["alice"]
+    assert topology.refreshes == 1
+
+
+@pytest.mark.asyncio
+async def test_delete_worker_waits_for_controller_absence_to_converge() -> None:
+    controller = Controller()
+    current = WorkerResource(
+        name="alice",
+        runtime="qwenpaw",
+        model="qwen3.6-plus",
+        phase="Running",
+        room_id="!alice:example",
+    )
+    controller.workers["alice"] = current
+    controller.get_sequences["alice"] = [
+        current,
+        current,
+        current,
+        current,
+        current,
+        None,
+    ]
+    workflow, _, _, topology = service(controller)
+
+    await workflow.delete_worker(
+        "alice",
+        context=context("delete-delayed"),
+    )
 
     assert controller.delete_calls == ["alice"]
     assert topology.refreshes == 1

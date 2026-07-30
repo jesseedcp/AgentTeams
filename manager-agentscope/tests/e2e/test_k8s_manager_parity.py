@@ -251,7 +251,7 @@ def _assert_static_k8s_contract() -> None:
         ROOT
         / "docs"
         / "parity"
-        / "upstream-agentteams-8de237d.md"
+        / "upstream-agentteams-fb3a40b.md"
     ).is_file()
 
 

@@ -97,7 +97,7 @@ class WorkerFlowSharedDirTest(unittest.TestCase):
         self.assertEqual(metadata["outputPath"], str((shared / "outputs" / agent_id).resolve()))
 
         link = workspace / "shared"
-        self.assertTrue(link.is_symlink())
+        self.assertTrue(os.path.samefile(link, shared))
         self.assertEqual(link.resolve(), shared.resolve())
 
         cleanup = self.server._safe_cleanup_workspace(agent_id, str(workspace))

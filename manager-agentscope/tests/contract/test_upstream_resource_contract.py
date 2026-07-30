@@ -12,7 +12,7 @@ FIXTURE = Path(__file__).parent / "fixtures" / "upstream-agentteams.json"
 def test_pinned_upstream_resource_contract_matches_local_sources() -> None:
     contract = json.loads(FIXTURE.read_text(encoding="utf-8"))
     assert contract["commit"] == (
-        "8de237da736a542766e132836b29c0a2a9c48740"
+        "fb3a40be1f005bd584f45544fc73bd4601d5c52a"
     )
 
     crd = (
@@ -106,7 +106,7 @@ def test_intentional_replacements_are_explicit() -> None:
     assert "OpenHuman" in differences["removedWorker"]
 
 
-def test_latest_dashboard_delta_is_classified_as_replaced() -> None:
+def test_latest_upstream_delta_is_fully_classified() -> None:
     contract = json.loads(FIXTURE.read_text(encoding="utf-8"))
     delta = contract["latestUpstreamDelta"]
     assert delta["commit"] == contract["commit"]
@@ -117,6 +117,48 @@ def test_latest_dashboard_delta_is_classified_as_replaced() -> None:
     assert "Worker CRDs and Kubernetes Secrets" in (
         delta["localDisposition"]["legacyWorkerCredentialExtraction"]
     )
+    assert "Bash and PowerShell" in (
+        delta["localDisposition"]["legacyStoragePrefix"]
+    )
+    assert "successful-push watermarks" in (
+        delta["localDisposition"]["workerStorageSyncIOAmplification"]
+    )
+    assert "fork-specific" in delta["localDisposition"]["releaseMetadata"]
+    assert "QwenPaw 2.0.1" in (
+        delta["localDisposition"]["qwenpaw2Runtime"]
+    )
+    assert "two-attempt bound" in (
+        delta["localDisposition"]["managerDiagnosticConvergence"]
+    )
+
+
+def test_v120_worker_storage_sync_fix_is_present() -> None:
+    helper = (ROOT / "shared" / "lib" / "worker-file-sync.sh").read_text(
+        encoding="utf-8",
+    )
+    entrypoint = (
+        ROOT / "worker" / "scripts" / "worker-entrypoint.sh"
+    ).read_text(encoding="utf-8")
+    config_merge = (
+        ROOT / "shared" / "lib" / "merge-openclaw-config.sh"
+    ).read_text(encoding="utf-8")
+    controller_image = (
+        ROOT / "agentteams-controller" / "Dockerfile.embedded"
+    ).read_text(encoding="utf-8")
+
+    assert "last-successful-push" in helper
+    assert "worker_sync_push_once" in helper
+    assert 'source /opt/agentteams/scripts/lib/worker-file-sync.sh' in (
+        entrypoint
+    )
+    assert "--slurpfile remote" in config_merge
+    assert "AGENTTEAMS_MC_MIRROR_SCOPE=controller" in controller_image
+    for script in (
+        "test-mc-mirror-scope.sh",
+        "test-merge-openclaw-config.sh",
+        "test-worker-file-sync.sh",
+    ):
+        assert (ROOT / "shared" / "tests" / script).is_file()
 
 
 def _team_spec_schema(crd: str) -> str:

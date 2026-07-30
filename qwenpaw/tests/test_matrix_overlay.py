@@ -8,19 +8,21 @@ import types
 from types import SimpleNamespace
 
 
-ROOT = Path(__file__).resolve().parents[1]
-OVERLAY = ROOT / "src" / "matrix" / "channel.py"
+ROOT = Path(__file__).resolve().parents[2]
+OVERLAY = (
+    ROOT / "plugins" / "agentteams-matrix-channel" / "agentteams_matrix" / "channel.py"
+)
 
 
 def _overlay_source() -> str:
     return OVERLAY.read_text(encoding="utf-8")
 
 
-def test_matrix_overlay_is_installed_by_worker_image() -> None:
-    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+def test_matrix_plugin_is_installed_by_worker_image() -> None:
+    dockerfile = (ROOT / "qwenpaw" / "Dockerfile").read_text(encoding="utf-8")
 
-    assert "qwenpaw/src/matrix/" in dockerfile
-    assert "qwenpaw/app/channels/matrix/channel.py" in dockerfile
+    assert "agentteams-matrix-channel" in dockerfile
+    assert "qwenpaw/app/channels/matrix/channel.py" not in dockerfile
 
 
 def test_matrix_overlay_preserves_invite_join_and_marks_ready() -> None:
@@ -46,6 +48,13 @@ def test_matrix_overlay_is_valid_python() -> None:
     ast.parse(_overlay_source(), filename=str(OVERLAY))
 
 
+def test_matrix_overlay_uses_qwenpaw_2_streaming_schema() -> None:
+    source = _overlay_source()
+
+    assert "from qwenpaw.schemas import" in source
+    assert "agentscope_runtime.engine.schemas.agent_schemas" not in source
+
+
 def test_matrix_overlay_supports_streaming_reasoning_hooks() -> None:
     source = _overlay_source()
 
@@ -64,7 +73,7 @@ def _install_module(name: str, **attrs):
 
 
 def _load_overlay_module():
-    root = "_qwenpaw_overlay_test"
+    root = "_qwenpaw_matrix_plugin_test"
 
     class _Dummy:
         pass
@@ -95,16 +104,15 @@ def _load_overlay_module():
 
     content_class = type("_Content", (), {"__init__": _content_init})
 
-    _install_module(root)
-    _install_module(f"{root}.app")
-    _install_module(f"{root}.app.channels")
-    _install_module(f"{root}.app.channels.matrix")
-    _install_module(f"{root}.app.channels.base", BaseChannel=_BaseChannel)
+    _install_module("qwenpaw")
+    _install_module("qwenpaw.app")
+    _install_module("qwenpaw.app.channels")
+    _install_module("qwenpaw.app.channels.base", BaseChannel=_BaseChannel)
     _install_module(
-        f"{root}.app.channels.utils",
+        "qwenpaw.app.channels.utils",
         file_url_to_local_path=lambda value: value,
     )
-    _install_module(f"{root}.constant", WORKING_DIR="/tmp")
+    _install_module("qwenpaw.constant", WORKING_DIR="/tmp")
 
     _install_module(
         "nio",
@@ -155,11 +163,8 @@ def _load_overlay_module():
         SyncError=_Dummy,
         WhoamiResponse=_Dummy,
     )
-    _install_module("agentscope_runtime")
-    _install_module("agentscope_runtime.engine")
-    _install_module("agentscope_runtime.engine.schemas")
     _install_module(
-        "agentscope_runtime.engine.schemas.agent_schemas",
+        "qwenpaw.schemas",
         AudioContent=content_class,
         ContentType=_ContentType,
         FileContent=content_class,
@@ -170,7 +175,7 @@ def _load_overlay_module():
         VideoContent=content_class,
     )
 
-    module_name = f"{root}.app.channels.matrix.channel"
+    module_name = f"{root}.channel"
     spec = importlib.util.spec_from_file_location(module_name, OVERLAY)
     module = importlib.util.module_from_spec(spec)
     sys.modules[module_name] = module
@@ -199,7 +204,7 @@ async def _noop_prepare(_room_id):
 
 def _make_thread_channel():
     module = _load_overlay_module()
-    channel = module.MatrixChannel.__new__(module.MatrixChannel)
+    channel = module.AgentTeamsMatrixChannel.__new__(module.AgentTeamsMatrixChannel)
     channel._client = _FakeClient()
     channel._user_id = "@bot:hs.local"
     channel._active_thread_roots = {}
@@ -324,7 +329,9 @@ def test_matrix_thread_message_only_response_edits_processing_root() -> None:
         channel._client.sent[1][2]["m.new_content"]["format"]
         == "org.matrix.custom.html"
     )
-    assert "final answer" in channel._client.sent[1][2]["m.new_content"]["formatted_body"]
+    assert (
+        "final answer" in channel._client.sent[1][2]["m.new_content"]["formatted_body"]
+    )
 
 
 def test_matrix_edit_fallback_html_does_not_embed_markdown_block_html() -> None:
@@ -389,9 +396,7 @@ def test_matrix_thread_parts_prefer_own_processing_root_over_incoming_root() -> 
         "first note",
         "tool call",
     ]
-    assert {
-        event["m.relates_to"]["event_id"] for event in thread_events
-    } == {"$sent1"}
+    assert {event["m.relates_to"]["event_id"] for event in thread_events} == {"$sent1"}
 
 
 def test_matrix_streaming_reasoning_waits_for_end_before_thread_item() -> None:
@@ -458,6 +463,7 @@ def test_matrix_streaming_reasoning_waits_for_end_before_thread_item() -> None:
     assert meta.get(module._MATRIX_STREAMING_REASONING_STREAM_ID_KEY) is None
     thinking = channel._client.sent[1][2]
     assert thinking["msgtype"] == "m.notice"
+    assert thinking["io.agentteams.transient"] is True
     assert thinking["body"] == (
         "Thinking:\n\npartial thinking and updated thinking final tail"
     )
@@ -524,6 +530,7 @@ def test_matrix_streaming_reasoning_waits_for_end_before_thread_item() -> None:
     assert channel._client.sent[0][2]["body"] == "处理中..."
     tool_call = channel._client.sent[2][2]
     assert tool_call["body"] == "tool call"
+    assert tool_call["io.agentteams.transient"] is True
     assert tool_call["m.relates_to"] == {
         "rel_type": "m.thread",
         "event_id": "$sent1",
@@ -531,6 +538,7 @@ def test_matrix_streaming_reasoning_waits_for_end_before_thread_item() -> None:
     }
     second_thinking = channel._client.sent[3][2]
     assert second_thinking["body"] == "Thinking:\n\nsecond step thinking"
+    assert second_thinking["io.agentteams.transient"] is True
     assert second_thinking["m.relates_to"] == {
         "rel_type": "m.thread",
         "event_id": "$sent1",
@@ -620,6 +628,51 @@ def test_matrix_streaming_message_only_edits_processing_root_on_completion() -> 
         "event_id": "$sent1",
     }
     assert final["m.new_content"]["body"] == "final answer"
+
+
+def test_matrix_completion_marker_emits_hidden_final_signal() -> None:
+    _module, channel = _make_thread_channel()
+    meta = {"thread_root_event_id": "$incoming"}
+    final_text = "@manager:hs.local TASK_COMPLETED: task-20260730-120000-abc123"
+
+    asyncio.run(
+        channel.on_streaming_start(
+            SimpleNamespace(),
+            "!room:hs.local",
+            SimpleNamespace(type="message"),
+            meta,
+            "message",
+        ),
+    )
+    asyncio.run(
+        channel.on_streaming_end(
+            SimpleNamespace(),
+            "!room:hs.local",
+            SimpleNamespace(type="message", text=final_text),
+            meta,
+            "message",
+            accumulated_text=final_text,
+        ),
+    )
+    asyncio.run(
+        channel._on_process_completed(
+            SimpleNamespace(),
+            "!room:hs.local",
+            meta,
+        ),
+    )
+
+    assert channel._client.sent[0][2]["io.agentteams.transient"] is True
+    assert channel._client.sent[1][1] == "m.room.message"
+    signal = channel._client.sent[2]
+    assert signal[1] == "io.agentteams.response.final"
+    assert signal[2]["io.agentteams.final"] is True
+    assert signal[2]["m.mentions"]["user_ids"] == ["@manager:hs.local"]
+    assert signal[2]["m.relates_to"] == {
+        "rel_type": "m.thread",
+        "event_id": "$sent1",
+        "is_falling_back": False,
+    }
 
 
 def test_matrix_no_reply_final_closes_processing_root_as_processed() -> None:
@@ -717,7 +770,9 @@ def test_matrix_long_text_uses_media_fallback(tmp_path: Path) -> None:
     )
 
 
-def test_matrix_long_text_fallback_summary_stays_under_threshold(tmp_path: Path) -> None:
+def test_matrix_long_text_fallback_summary_stays_under_threshold(
+    tmp_path: Path,
+) -> None:
     module, channel = _make_thread_channel()
     channel._workspace_dir = tmp_path
 
@@ -778,7 +833,9 @@ def test_matrix_long_edit_uses_media_fallback(tmp_path: Path) -> None:
     assert edit["m.new_content"]["body"].startswith("final\n")
     assert "单条 Matrix 消息已按安全长度截断" in edit["m.new_content"]["body"]
     assert "完整内容已缓存为 Matrix 附件" in edit["m.new_content"]["body"]
-    assert "附件地址：mxc://hs.local/edited-full-content" in edit["m.new_content"]["body"]
+    assert (
+        "附件地址：mxc://hs.local/edited-full-content" in edit["m.new_content"]["body"]
+    )
     assert long_text not in edit["m.new_content"]["body"]
     expected_metadata = {
         "version": 1,
@@ -904,7 +961,7 @@ async def _noop_read_receipt(_room_id, _event_id):
 
 def _make_inbound_channel(command_registry=True):
     module = _load_overlay_module()
-    channel = module.MatrixChannel.__new__(module.MatrixChannel)
+    channel = module.AgentTeamsMatrixChannel.__new__(module.AgentTeamsMatrixChannel)
     channel._user_id = "@copywriting-assistant:hs.local"
     channel._client = _FakeClient()
     channel.dm_disabled = False
@@ -926,11 +983,7 @@ def _make_inbound_channel(command_registry=True):
 
 
 def _matrix_event(body: str, mentioned: bool = False):
-    mentions = (
-        {"user_ids": ["@copywriting-assistant:hs.local"]}
-        if mentioned
-        else {}
-    )
+    mentions = {"user_ids": ["@copywriting-assistant:hs.local"]} if mentioned else {}
     return SimpleNamespace(
         sender="@alice:hs.local",
         body=body,

@@ -144,6 +144,13 @@ a shortcut for:
 create_project + plan single-node DAG + assigned task spec
 ```
 
+Never use this shortcut for a Manager parent task. If the handoff includes a
+`ParentTaskId` or the task spec contains the
+`AgentTeams parent-task completion protocol`, use Project Work instead:
+`create_project` with the parent task id, `plan_dag` with a distinct child task
+id, then delegate that child task. This exception wins even for a single
+Worker and a single expected result.
+
 Do not call this in the requester/source session. If the current session is
 still a DingTalk group, Matrix DM, Team room, or other source room, return to
 `TEAMS.md`: create or reuse the task room with `teamharness-roomflow`, hand the
@@ -529,6 +536,18 @@ When `notificationNeeded` is present in the tool result:
 5. Do not send duplicate notifications for the same event within a single
    Leader turn — one notification per state change is sufficient.
 
+For a Project whose id matches a Manager parent task carrying the
+`AgentTeams parent-task completion protocol`, write the final report to
+`shared/projects/{project-id}/result.md` before calling `complete_project`.
+The tool then mirrors that report to `shared/tasks/{project-id}/result.md`,
+updates the parent `meta.json` to submitted state, syncs both files, and sends
+the Manager completion mention. Inspect the returned
+`parentTaskCompletion`: when `synced` is true and
+`notification.status` is `sent`, the parent completion has already been
+delivered. Do not hand-edit or re-push the parent metadata and do not send the
+completion again. A missing project report or failed file sync leaves the
+project active and returns `ok: false`; correct the reported problem and retry.
+
 The `notificationNeeded` field contains:
 
 ```json
@@ -552,6 +571,8 @@ TeamHarness v0.1 supports project creation, quick single-task project creation,
 project context resolution, DAG planning, DAG ready-node resolution, Loop
 planning, Loop ready-node resolution, Loop iteration recording, explicit result
 acceptance, requester report clearing, `pause_project`, `resume_project`, and
-`complete_project`. DAG and Loop task plans reject duplicate task ids, unknown
-dependencies, and dependency cycles. Do not call unsupported `projectflow`
-actions.
+`complete_project`. Manager-linked project completion also performs the
+parent-result mirror, submitted-metadata update, file sync, and Manager Matrix
+wake-up described above.
+DAG and Loop task plans reject duplicate task ids, unknown dependencies, and
+dependency cycles. Do not call unsupported `projectflow` actions.

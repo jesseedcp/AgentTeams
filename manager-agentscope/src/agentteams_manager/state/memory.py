@@ -6,6 +6,7 @@ import hashlib
 import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
+from typing import Literal
 
 from .database import Database
 
@@ -37,6 +38,7 @@ class ProjectDecision:
     project_id: str
     decision: str
     rationale: str
+    visibility: Literal["private", "project"]
     created_at: datetime
 
 
@@ -125,6 +127,53 @@ class MemoryRepository:
                 ORDER BY created_at DESC, memory_id
                 """,
                 (room_id, day.isoformat()),
+            ).fetchall()
+            return tuple(
+                DailyMemory(
+                    memory_id=row["memory_id"],
+                    room_id=row["room_id"],
+                    memory_day=date.fromisoformat(row["memory_day"]),
+                    content=row["content"],
+                    source_event_id=row["source_event_id"],
+                    created_at=datetime.fromisoformat(row["created_at"]),
+                )
+                for row in rows
+            )
+
+        return await self._database.read(read)
+
+    async def recent_daily(
+        self,
+        room_id: str,
+        *,
+        through: date,
+        days: int = 2,
+        limit: int = 50,
+    ) -> tuple[DailyMemory, ...]:
+        if days <= 0:
+            raise ValueError("memory day window must be positive")
+        if limit <= 0:
+            raise ValueError("memory result limit must be positive")
+
+        def read(
+            connection: sqlite3.Connection,
+        ) -> tuple[DailyMemory, ...]:
+            rows = connection.execute(
+                """
+                SELECT * FROM daily_memories
+                WHERE room_id=?
+                  AND memory_day <= ?
+                  AND memory_day >= date(?, ?)
+                ORDER BY created_at DESC, memory_id
+                LIMIT ?
+                """,
+                (
+                    room_id,
+                    through.isoformat(),
+                    through.isoformat(),
+                    f"-{days - 1} day",
+                    limit,
+                ),
             ).fetchall()
             return tuple(
                 DailyMemory(
@@ -244,23 +293,28 @@ class MemoryRepository:
         decision: str,
         rationale: str,
         now: datetime,
+        visibility: Literal["private", "project"] = "private",
     ) -> ProjectDecision:
         decision_text = _required(decision, "project decision")
         rationale_text = _required(rationale, "decision rationale")
+        if visibility not in {"private", "project"}:
+            raise ValueError("project decision visibility is invalid")
         created = now.astimezone(UTC)
         decision_id = _stable_id(
             "project-decision",
             project_id,
             decision_text,
             rationale_text,
+            visibility,
         )
 
         def write(connection: sqlite3.Connection) -> None:
             connection.execute(
                 """
                 INSERT INTO project_decisions(
-                    decision_id, project_id, decision, rationale, created_at
-                ) VALUES (?, ?, ?, ?, ?)
+                    decision_id, project_id, decision, rationale,
+                    visibility, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT(decision_id) DO NOTHING
                 """,
                 (
@@ -268,6 +322,7 @@ class MemoryRepository:
                     project_id,
                     decision_text,
                     rationale_text,
+                    visibility,
                     created.isoformat(),
                 ),
             )
@@ -294,17 +349,63 @@ class MemoryRepository:
     async def project_decisions(
         self,
         project_id: str,
+        *,
+        include_private: bool = True,
     ) -> tuple[ProjectDecision, ...]:
+        def read(
+            connection: sqlite3.Connection,
+        ) -> tuple[ProjectDecision, ...]:
+            if include_private:
+                rows = connection.execute(
+                    """
+                    SELECT * FROM project_decisions WHERE project_id=?
+                    ORDER BY created_at DESC, decision_id
+                    LIMIT ?
+                    """,
+                    (project_id, self._limit),
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    """
+                    SELECT * FROM project_decisions
+                    WHERE project_id=? AND visibility='project'
+                    ORDER BY created_at DESC, decision_id
+                    LIMIT ?
+                    """,
+                    (project_id, self._limit),
+                ).fetchall()
+            return tuple(
+                ProjectDecision(
+                    decision_id=row["decision_id"],
+                    project_id=row["project_id"],
+                    decision=row["decision"],
+                    rationale=row["rationale"],
+                    visibility=row["visibility"],
+                    created_at=datetime.fromisoformat(row["created_at"]),
+                )
+                for row in rows
+            )
+
+        return await self._database.read(read)
+
+    async def recent_project_decisions(
+        self,
+        *,
+        limit: int = 50,
+    ) -> tuple[ProjectDecision, ...]:
+        if limit <= 0:
+            raise ValueError("memory result limit must be positive")
+
         def read(
             connection: sqlite3.Connection,
         ) -> tuple[ProjectDecision, ...]:
             rows = connection.execute(
                 """
-                SELECT * FROM project_decisions WHERE project_id=?
+                SELECT * FROM project_decisions
                 ORDER BY created_at DESC, decision_id
                 LIMIT ?
                 """,
-                (project_id, self._limit),
+                (limit,),
             ).fetchall()
             return tuple(
                 ProjectDecision(
@@ -312,6 +413,7 @@ class MemoryRepository:
                     project_id=row["project_id"],
                     decision=row["decision"],
                     rationale=row["rationale"],
+                    visibility=row["visibility"],
                     created_at=datetime.fromisoformat(row["created_at"]),
                 )
                 for row in rows
@@ -388,6 +490,38 @@ class MemoryRepository:
                 LIMIT ?
                 """,
                 (worker_name, self._limit),
+            ).fetchall()
+            return tuple(
+                WorkerAssessment(
+                    worker_name=row["worker_name"],
+                    capability=row["capability"],
+                    score=float(row["score"]),
+                    evidence=row["evidence"],
+                    updated_at=datetime.fromisoformat(row["updated_at"]),
+                )
+                for row in rows
+            )
+
+        return await self._database.read(read)
+
+    async def recent_worker_assessments(
+        self,
+        *,
+        limit: int = 50,
+    ) -> tuple[WorkerAssessment, ...]:
+        if limit <= 0:
+            raise ValueError("memory result limit must be positive")
+
+        def read(
+            connection: sqlite3.Connection,
+        ) -> tuple[WorkerAssessment, ...]:
+            rows = connection.execute(
+                """
+                SELECT * FROM worker_capability_assessments
+                ORDER BY updated_at DESC, worker_name, capability
+                LIMIT ?
+                """,
+                (limit,),
             ).fetchall()
             return tuple(
                 WorkerAssessment(

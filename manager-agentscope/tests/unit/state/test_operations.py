@@ -1,8 +1,10 @@
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
 from agentteams_manager.domain.models import (
+    InboundEvent,
     OperationRecord,
     OperationStatus,
 )
@@ -49,6 +51,62 @@ async def test_matrix_event_is_claimed_once(tmp_path: Path) -> None:
 
     assert await repository.claim_matrix_event("!room:a", "$event")
     assert not await repository.claim_matrix_event("!room:a", "$event")
+
+
+@pytest.mark.asyncio
+async def test_failed_matrix_event_is_durable_and_recoverable(
+    tmp_path: Path,
+) -> None:
+    database = Database(tmp_path / "manager.db")
+    await database.open()
+    repository = OperationRepository(database)
+    event = InboundEvent(
+        room_id="!room:a",
+        event_id="$retry",
+        sender="@admin:local",
+        body="retry me",
+        timestamp=datetime(2026, 7, 30, 8, 0, tzinfo=UTC),
+        is_direct=True,
+    )
+
+    assert await repository.claim_inbound_event(event)
+    assert not await repository.claim_inbound_event(event)
+    assert not await repository.fail_matrix_event(
+        event.room_id,
+        event.event_id,
+        error="temporary failure",
+        max_attempts=3,
+    )
+
+    assert await repository.recoverable_matrix_events() == (event,)
+    await repository.complete_matrix_event(event.room_id, event.event_id)
+    assert await repository.recoverable_matrix_events() == ()
+
+
+@pytest.mark.asyncio
+async def test_matrix_event_moves_to_dead_letter_after_attempt_limit(
+    tmp_path: Path,
+) -> None:
+    database = Database(tmp_path / "manager.db")
+    await database.open()
+    repository = OperationRepository(database)
+    event = InboundEvent(
+        room_id="!room:a",
+        event_id="$dead",
+        sender="@admin:local",
+        body="always fails",
+        timestamp=datetime(2026, 7, 30, 8, 0, tzinfo=UTC),
+        is_direct=True,
+    )
+
+    assert await repository.claim_inbound_event(event)
+    assert await repository.fail_matrix_event(
+        event.room_id,
+        event.event_id,
+        error="permanent failure",
+        max_attempts=1,
+    )
+    assert await repository.recoverable_matrix_events() == ()
 
 
 @pytest.mark.asyncio

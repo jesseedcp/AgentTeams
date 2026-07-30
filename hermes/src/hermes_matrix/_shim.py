@@ -10,7 +10,7 @@ from __future__ import annotations
 from gateway.platforms import _matrix_native as _native
 from gateway.platforms._matrix_native import *  # noqa: F401,F403
 
-from hermes_matrix.adapter import MatrixAdapter
+from hermes_matrix.adapter import MatrixAdapter as MatrixAdapter
 
 check_matrix_requirements = _native.check_matrix_requirements
 

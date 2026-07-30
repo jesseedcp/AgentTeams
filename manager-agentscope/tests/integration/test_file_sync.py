@@ -80,6 +80,62 @@ async def test_worker_uploaded_result_is_pulled_before_read(
 
 
 @pytest.mark.asyncio
+async def test_team_task_sync_uses_team_remote_prefix_and_shared_local_path(
+    tmp_path: Path,
+) -> None:
+    database = Database(tmp_path / "manager.db")
+    await database.open()
+    task_id = "task-20260723-120000-team12"
+    now = datetime(2026, 7, 23, 12, tzinfo=UTC)
+    tasks = TaskRepository(database)
+    await tasks.create(
+        TaskRecord(
+            task_id=task_id,
+            task_type="finite",
+            status="assigned",
+            title="Team task",
+            assigned_to="lead",
+            room_id="!lead:example",
+            metadata={"storage_team_name": "alpha"},
+            created_at=now,
+            updated_at=now,
+        ),
+    )
+    storage = MinioClient(FakeS3(), bucket="agentteams")
+    remote_prefix = f"teams/alpha/shared/tasks/{task_id}/"
+    await storage.put_bytes(
+        f"{remote_prefix}result.md",
+        b"team result",
+        content_type="text/markdown",
+    )
+    cache_root = tmp_path / "cache"
+    service = FileSyncService(
+        storage=storage,
+        leases=ProcessingLeaseService(
+            leases=LeaseRepository(database),
+            storage=storage,
+            clock=FixedClock(),
+        ),
+        tasks=tasks,
+        cache_root=cache_root,
+    )
+
+    local_root = await service.pull_task(task_id)
+    assert local_root == cache_root / "shared" / "tasks" / task_id
+    assert (local_root / "result.md").read_text(encoding="utf-8") == (
+        "team result"
+    )
+
+    (local_root / "worker-note.md").write_text("published", encoding="utf-8")
+    receipt = await service.push_task(task_id, processor="manager")
+
+    assert receipt.prefix == remote_prefix
+    assert await storage.get_bytes(
+        f"{remote_prefix}worker-note.md",
+    ) == b"published"
+
+
+@pytest.mark.asyncio
 async def test_task_file_read_rejects_symlinks_and_oversized_content(
     tmp_path: Path,
 ) -> None:

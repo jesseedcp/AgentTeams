@@ -129,6 +129,7 @@ type TeamResponse struct {
 	WorkerMembers      []v1beta1.TeamWorkerRef      `json:"workerMembers"`
 	LeaderName         string                       `json:"leaderName"`
 	HeartbeatEvery     string                       `json:"heartbeatEvery,omitempty"`
+	PeerMentions       *bool                        `json:"peerMentions,omitempty"`
 	TeamRoomID         string                       `json:"teamRoomID,omitempty"`
 	LeaderDMRoomID     string                       `json:"leaderDMRoomID,omitempty"`
 	LeaderReady        bool                         `json:"leaderReady"`

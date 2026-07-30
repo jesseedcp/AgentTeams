@@ -11,6 +11,10 @@ from agentteams_manager.domain.errors import (
     AmbiguousEffectError,
     RecoveryError,
 )
+from agentteams_manager.domain.ids import (
+    matrix_transaction_id,
+    operation_id_for,
+)
 from agentteams_manager.domain.models import (
     OperationKind,
     OperationRecord,
@@ -19,7 +23,7 @@ from agentteams_manager.domain.models import (
     WorkerResource,
 )
 
-from .resources import ResourceRecoveryReport
+from .resources import MutationContext, ResourceRecoveryReport
 from .tasks import TaskService
 
 
@@ -397,6 +401,37 @@ class SupervisionNotifications(Protocol):
     ) -> object: ...
 
 
+class SupervisionState(Protocol):
+    async def record_ping(
+        self,
+        *,
+        subject_key: str,
+        observed_token: str,
+        pinged_at: datetime,
+    ) -> int: ...
+
+
+class SupervisionLifecycle(Protocol):
+    async def wake_worker(
+        self,
+        name: str,
+        *,
+        context: MutationContext,
+    ) -> WorkerResource: ...
+
+
+class SupervisionMatrix(Protocol):
+    async def send_text(
+        self,
+        room_id: str,
+        text: str,
+        *,
+        txn_id: str,
+        thread_id: str | None = None,
+        mentions: tuple[str, ...] = (),
+    ) -> str: ...
+
+
 class SupervisionAlert(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -413,6 +448,8 @@ class SupervisionReport(BaseModel):
     inspected_workers: int = Field(ge=0)
     alerts: tuple[SupervisionAlert, ...] = ()
     notified: int = Field(ge=0)
+    pinged: int = Field(default=0, ge=0)
+    woken: int = Field(default=0, ge=0)
 
 
 class SemanticSupervisor:
@@ -428,6 +465,9 @@ class SemanticSupervisor:
         tasks: SupervisionTaskReader,
         workers: SupervisionWorkerReader,
         notifications: SupervisionNotifications,
+        state: SupervisionState | None = None,
+        lifecycle: SupervisionLifecycle | None = None,
+        matrix: SupervisionMatrix | None = None,
         overdue_after: timedelta = timedelta(hours=2),
         blocked_after: timedelta = timedelta(minutes=30),
         worker_silence_after: timedelta = timedelta(minutes=45),
@@ -442,6 +482,9 @@ class SemanticSupervisor:
         self._tasks = tasks
         self._workers = workers
         self._notifications = notifications
+        self._state = state
+        self._lifecycle = lifecycle
+        self._matrix = matrix
         self._overdue_after = overdue_after
         self._blocked_after = blocked_after
         self._worker_silence_after = worker_silence_after
@@ -452,6 +495,7 @@ class SemanticSupervisor:
         utc_now = now.astimezone(UTC)
         tasks = await self._tasks.list_all()
         workers = await self._workers.list_workers()
+        workers_by_name = {worker.name: worker for worker in workers}
         alerts: list[SupervisionAlert] = []
         for task in tasks:
             deadline = _task_deadline(task, self._overdue_after)
@@ -485,13 +529,7 @@ class SemanticSupervisor:
         responsive: set[str] = set()
         for worker in workers:
             heartbeat = _worker_heartbeat(worker)
-            is_running = (
-                (worker.phase or "").casefold() in {"ready", "running"}
-                and str(
-                    worker.status.get("containerState", "running"),
-                ).casefold()
-                in {"ready", "running"}
-            )
+            is_running = _worker_is_running(worker)
             stale = (
                 heartbeat is not None
                 and utc_now > heartbeat + self._worker_silence_after
@@ -532,6 +570,31 @@ class SemanticSupervisor:
                     f"{len(responsive)} responsive Workers.",
                 ),
             )
+        pinged = 0
+        woken = 0
+        if (
+            self._state is not None
+            and self._lifecycle is not None
+            and self._matrix is not None
+        ):
+            for task in tasks:
+                if (
+                    task.status not in self._ACTIVE_TASK_STATES
+                    or utc_now
+                    <= _task_deadline(task, self._overdue_after)
+                ):
+                    continue
+                task_pinged, task_woken, task_alert = (
+                    await self._supervise_overdue_task(
+                        task,
+                        workers_by_name.get(task.assigned_to),
+                        utc_now,
+                    )
+                )
+                pinged += task_pinged
+                woken += task_woken
+                if task_alert is not None:
+                    alerts.append(task_alert)
         for alert in alerts:
             await self._notifications.send_once(
                 source_operation_id=alert.source_operation_id,
@@ -542,6 +605,151 @@ class SemanticSupervisor:
             inspected_workers=len(workers),
             alerts=tuple(alerts),
             notified=len(alerts),
+            pinged=pinged,
+            woken=woken,
+        )
+
+    async def _supervise_overdue_task(
+        self,
+        task: TaskRecord,
+        worker: WorkerResource | None,
+        now: datetime,
+    ) -> tuple[int, int, SupervisionAlert | None]:
+        assert self._state is not None
+        assert self._lifecycle is not None
+        assert self._matrix is not None
+        if worker is None:
+            return (
+                0,
+                0,
+                _supervision_alert(
+                    "worker_unavailable",
+                    task.task_id,
+                    task.updated_at.isoformat(),
+                    f"[Worker Unavailable] {task.assigned_to} is missing "
+                    f"while {task.task_id} is active; 请重新分配该任务。",
+                ),
+            )
+        heartbeat = _worker_heartbeat(worker)
+        observed_token = "|".join(
+            (
+                task.updated_at.isoformat(),
+                heartbeat.isoformat() if heartbeat is not None else "none",
+            ),
+        )
+        room_id = str(
+            task.metadata.get("project_room_id") or task.room_id,
+        )
+        matrix_user_id = str(
+            task.metadata.get("matrix_user_id")
+            or worker.matrix_user_id
+            or "",
+        )
+        woken = 0
+        phase = (worker.phase or "").casefold()
+        if phase in {"failed", "error", "deleting"}:
+            return (
+                0,
+                0,
+                _supervision_alert(
+                    "worker_unavailable",
+                    task.task_id,
+                    observed_token,
+                    f"[Worker Unavailable] {worker.name} is {phase}; "
+                    f"{task.task_id} 需要重新分配。",
+                ),
+            )
+        if not _worker_is_running(worker):
+            context = MutationContext(
+                room_id=room_id,
+                event_id=f"heartbeat:{task.task_id}:{observed_token}",
+                tool_call_id=f"wake:{worker.name}",
+            )
+            try:
+                worker = await self._lifecycle.wake_worker(
+                    worker.name,
+                    context=context,
+                )
+            except Exception as exc:
+                return (
+                    0,
+                    0,
+                    _supervision_alert(
+                        "worker_wake_failed",
+                        task.task_id,
+                        observed_token,
+                        f"[Worker Wake Failed] {worker.name}; "
+                        f"task={task.task_id}; error={type(exc).__name__}; "
+                        "请重新分配或人工介入。",
+                    ),
+                )
+            woken = 1
+        message = (
+            f"{matrix_user_id} "
+            if matrix_user_id
+            else ""
+        )
+        if task.delegated_to_team:
+            message += (
+                f"团队任务 {task.task_id} 进展如何？"
+                "请汇报当前阶段和阻塞项。"
+            )
+        else:
+            message += (
+                f"任务 {task.task_id}「{task.title}」进展如何？"
+                "如有阻塞请立即说明。"
+            )
+        ping_operation_id = operation_id_for(
+            room_id,
+            f"heartbeat:{now.isoformat()}",
+            f"progress:{task.task_id}",
+        )
+        try:
+            await self._matrix.send_text(
+                room_id,
+                message,
+                txn_id=matrix_transaction_id(ping_operation_id, 0),
+                mentions=(
+                    (matrix_user_id,)
+                    if matrix_user_id
+                    else ()
+                ),
+            )
+        except Exception as exc:
+            return (
+                0,
+                woken,
+                _supervision_alert(
+                    "worker_ping_failed",
+                    task.task_id,
+                    observed_token,
+                    f"[Worker Ping Failed] task={task.task_id}; "
+                    f"error={type(exc).__name__}",
+                ),
+            )
+        missed_cycles = await self._state.record_ping(
+            subject_key=f"task:{task.task_id}",
+            observed_token=observed_token,
+            pinged_at=now,
+        )
+        if missed_cycles < 1:
+            return 1, woken, None
+        recommendation = (
+            "请使用 reassign_project_task 重新分配。"
+            if task.project_id
+            else "请重新分配该任务给可用 Worker。"
+        )
+        return (
+            1,
+            woken,
+            _supervision_alert(
+                "task_unresponsive",
+                task.task_id,
+                observed_token,
+                f"[Task Unresponsive] {task.task_id} 已连续 "
+                f"{missed_cycles + 1} 个心跳周期无可观察进展；"
+                f"assignee={task.assigned_to}。{recommendation}",
+            ),
         )
 
 
@@ -587,6 +795,8 @@ class HeartbeatReport(BaseModel):
     supervision_alerts: int = Field(default=0, ge=0)
     supervision_tasks: int = Field(default=0, ge=0)
     supervision_workers: int = Field(default=0, ge=0)
+    supervision_pinged: int = Field(default=0, ge=0)
+    supervision_woken: int = Field(default=0, ge=0)
 
 
 class Heartbeat:
@@ -738,6 +948,8 @@ class Heartbeat:
             supervision_alerts=supervision_report.notified,
             supervision_tasks=supervision_report.inspected_tasks,
             supervision_workers=supervision_report.inspected_workers,
+            supervision_pinged=supervision_report.pinged,
+            supervision_woken=supervision_report.woken,
         )
 
 
@@ -826,6 +1038,16 @@ def _worker_heartbeat(worker: WorkerResource) -> datetime | None:
         if parsed is not None:
             return parsed
     return None
+
+
+def _worker_is_running(worker: WorkerResource) -> bool:
+    return (
+        (worker.phase or "").casefold() in {"ready", "running"}
+        and str(
+            worker.status.get("containerState", "running"),
+        ).casefold()
+        in {"ready", "running"}
+    )
 
 
 def _parse_timestamp(value: object) -> datetime | None:

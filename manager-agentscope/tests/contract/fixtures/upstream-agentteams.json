@@ -1,6 +1,6 @@
 {
   "repository": "https://github.com/agentscope-ai/AgentTeams.git",
-  "commit": "8de237da736a542766e132836b29c0a2a9c48740",
+  "commit": "fb3a40be1f005bd584f45544fc73bd4601d5c52a",
   "team": {
     "requiredSpecFields": ["workerMembers"],
     "legacyEmbeddedFields": ["leader", "workers", "runtime"],
@@ -32,18 +32,40 @@
     "removedWorker": "OpenHuman is intentionally not distributed"
   },
   "latestUpstreamDelta": {
-    "commit": "8de237da736a542766e132836b29c0a2a9c48740",
+    "commit": "fb3a40be1f005bd584f45544fc73bd4601d5c52a",
     "scope": [
       "dashboardQuickStart",
       "legacyWorkerCredentialExtraction",
       "dashboardVolumeCleanup",
-      "dashboardVerificationSkipAccounting"
+      "dashboardVerificationSkipAccounting",
+      "legacyStoragePrefix",
+      "copawDefaultWorkspaceProjection",
+      "teamDagReconcileWait",
+      "workerStorageSyncIOAmplification",
+      "agentLoopDocumentation",
+      "releaseMetadata",
+      "qwenpaw2Runtime",
+      "qwenpawNativePlugins",
+      "qwenpawStartupConvergence",
+      "qwenpawTeamContext",
+      "managerDiagnosticConvergence"
     ],
     "localDisposition": {
       "dashboardQuickStart": "replaced by the always-available built-in Manager admin console",
       "legacyWorkerCredentialExtraction": "replaced by Worker CRDs and Kubernetes Secrets",
       "dashboardVolumeCleanup": "not applicable because no standalone dashboard volume is created",
-      "dashboardVerificationSkipAccounting": "not applicable because the standalone dashboard verifier is not shipped"
+      "dashboardVerificationSkipAccounting": "not applicable because the standalone dashboard verifier is not shipped",
+      "legacyStoragePrefix": "ported to both Bash and PowerShell installers with current and legacy contract tests",
+      "copawDefaultWorkspaceProjection": "ported and extended for the supported CoPaw runtime generations",
+      "teamDagReconcileWait": "ported as bounded convergence handling in the Team DAG acceptance test",
+      "workerStorageSyncIOAmplification": "ported with successful-push watermarks, bounded incremental uploads, jq 1.7-safe config merge, and controller-only mirrors",
+      "agentLoopDocumentation": "not imported because AgentLoop is an optional external project and is not a runtime dependency",
+      "releaseMetadata": "kept fork-specific; the installer follows jesseedcp releases and retains the latest source-build fallback until this fork publishes a release",
+      "qwenpaw2Runtime": "ported with QwenPaw 2.0.1 and local API configuration for models, Matrix, MCP, policies, agents, and skills",
+      "qwenpawNativePlugins": "ported as image-bundled QwenPaw plugins for Matrix, TeamHarness, and Workerflow while preserving stale-response suppression",
+      "qwenpawStartupConvergence": "ported by applying desired state only after the QwenPaw local API becomes ready",
+      "qwenpawTeamContext": "ported with effective Team storage preservation and active-workspace context projection",
+      "managerDiagnosticConvergence": "ported to the AgentScope Manager prompts and skills with a two-attempt bound and authoritative deletion handling"
     }
   }
 }

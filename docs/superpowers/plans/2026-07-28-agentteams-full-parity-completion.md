@@ -505,7 +505,7 @@ Commit intent: `Delegate coding work without exposing an arbitrary shell`
 - Modify: `tests/run-all-tests.sh`
 - Modify: `tests/README.md`
 - Modify: `docs/superpowers/plans/2026-07-26-agentteams-manager-full-parity-repair.md`
-- Create: `docs/parity/upstream-agentteams-8de237d.md`
+- Create: `docs/parity/upstream-agentteams-fb3a40b.md`
 - Modify: `README.md`
 
 ### Step 1: Replace structural-only checks with behaviors

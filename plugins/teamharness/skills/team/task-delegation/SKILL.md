@@ -71,7 +71,7 @@ Call `taskflow` with `role: "leader"` and pass `payload` as an object:
     "projectId": "demo-project-001",
     "taskId": "demo-project-001-01",
     "roomId": "room:!task-room:matrix.local",
-    "spec": "# Task demo-project-001-01\n\n## Context\nExplain why this task exists.\n\n## Expected Result\nCreate deliverables under shared/tasks/demo-project-001-01/ and submit a result with STATUS, SUMMARY, and DELIVERABLES.\n\n## Acceptance Criteria\n- The result addresses the task scope.\n- Deliverables are listed in result.md.\n\n## Completion Report\nAfter `taskflow submit_task` returns `ok: true`, reply in the current Task room and mention the exact Leader Matrix user from this task context:\n\n<Leader Matrix user> TASK_COMPLETED: demo-project-001-01 - Result: shared/tasks/demo-project-001-01/result.md\n\nDo not use `NO_REPLY` after a successful task submission.\n"
+    "spec": "# Task demo-project-001-01\n\n## Context\nExplain why this task exists.\n\n## Expected Result\nCreate deliverables under shared/tasks/demo-project-001-01/ and submit a result with STATUS, SUMMARY, and DELIVERABLES.\n\n## Acceptance Criteria\n- The result addresses the task scope.\n- Deliverables are listed in result.md.\n\n## Completion Report\n`taskflow submit_task` automatically mentions the exact Leader Matrix user stored in task metadata. If `completionNotification.status` is `sent`, do not send a duplicate. If it is `skipped` or `failed`, reply in the current Task room with:\n\n<Leader Matrix user> TASK_COMPLETED: demo-project-001-01 - Result: shared/tasks/demo-project-001-01/result.md\n"
   }
 }
 ```
@@ -93,12 +93,13 @@ and result path adjusted for the actual task:
 ```text
 ## Completion Report
 
-After `taskflow submit_task` returns `ok: true`, reply in the current assignment
-room and mention the exact Leader Matrix user from this task context:
+`taskflow submit_task` automatically replies in the current assignment room
+and mentions the exact Leader Matrix user stored by `delegate_task`:
 
 <Leader Matrix user> TASK_COMPLETED: demo-project-001-01 - Result: shared/tasks/demo-project-001-01/result.md
 
-Do not use `NO_REPLY` after a successful task submission.
+If `completionNotification.status` is `sent`, do not send the line again. If it
+is `skipped` or `failed`, send the line manually as the fallback.
 ```
 
 If the project node already contains a custom completion line, preserve it and
@@ -171,17 +172,18 @@ project node and delegate a new task.
 ## Post-Action Notification
 
 `delegate_task` and `submit_task` return a `notificationNeeded` field when they
-succeed. This field is a structured hint — the tool does not send any message
-automatically.
+succeed. For delegation this remains a structured hint. For submission,
+`completionNotification` records the automatic Matrix delivery result.
 
 For `delegate_task`: the assignment message in the Task room (see Assignment
 Message above) already serves as the notification. No additional cross-room
 notification is needed unless the `notificationNeeded.targetRoom` differs from
 the current Task room.
 
-For `submit_task`: the Worker completion message in the Task room already serves
-as the notification to the Leader. The `notificationNeeded` field confirms the
-target room for this report.
+For `submit_task`: TeamHarness sends the Worker completion message in the Task
+room after task state has synced. Do not send a duplicate when
+`completionNotification.status` is `sent`. Use `notificationNeeded` only to
+understand the intended target or recover a failed legacy notification.
 
 The Leader should check `notificationNeeded` after accepting a task result to
 determine whether a requester report or downstream notification is due. See

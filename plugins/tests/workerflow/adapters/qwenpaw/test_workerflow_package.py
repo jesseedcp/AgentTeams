@@ -1,9 +1,12 @@
 import json
 import os
 import re
+import shutil
 import subprocess
 import zipfile
 from pathlib import Path
+
+import pytest
 
 
 REPO_ROOT = Path(__file__).resolve().parents[5]
@@ -25,6 +28,7 @@ def _manifest_version() -> str:
     return match.group(1)
 
 
+@pytest.mark.skipif(shutil.which("ruby") is None, reason="Ruby is required to build the plugin package")
 def test_build_qwenpaw_native_workerflow_plugin_package(tmp_path: Path) -> None:
     result = subprocess.run(
         ["ruby", str(BUILD_SCRIPT), str(MANIFEST)],
@@ -62,4 +66,8 @@ def test_build_qwenpaw_native_workerflow_plugin_package(tmp_path: Path) -> None:
     assert manifest["id"] == "workerflow"
     assert manifest["version"] == version
     assert manifest["entry"]["backend"] == "plugin.py"
+    assert manifest["qwenpaw_version"] == {
+        "min": "2.0.1",
+        "max": "2.1.0",
+    }
     assert "workerflow-mcp" in manifest["meta"]["features"]

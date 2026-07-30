@@ -64,6 +64,75 @@ async def test_get_rejects_object_whose_checksum_metadata_is_wrong() -> None:
 
 
 @pytest.mark.asyncio
+async def test_get_accepts_standard_single_part_object_without_sha256() -> None:
+    s3 = FakeS3()
+    client = MinioClient(s3, bucket="agentteams")
+    data = b"published by TeamHarness"
+    receipt = await client.put_bytes(
+        "teams/manual-qa/shared/tasks/task-1/result.md",
+        data,
+        content_type="text/markdown",
+    )
+    s3.objects[receipt.key].metadata.clear()
+
+    assert await client.get_bytes(receipt.key) == data
+    legacy_receipt = await client.head(receipt.key)
+
+    assert legacy_receipt is not None
+    assert legacy_receipt.sha256 == hashlib.sha256(data).hexdigest()
+    assert legacy_receipt.size == len(data)
+
+
+@pytest.mark.asyncio
+async def test_get_rejects_legacy_object_with_wrong_etag() -> None:
+    s3 = FakeS3()
+    client = MinioClient(s3, bucket="agentteams")
+    receipt = await client.put_bytes(
+        "teams/manual-qa/shared/tasks/task-1/result.md",
+        b"published by TeamHarness",
+        content_type="text/markdown",
+    )
+    item = s3.objects[receipt.key]
+    item.metadata.clear()
+    item.etag = '"' + ("0" * 32) + '"'
+
+    with pytest.raises(ObjectIntegrityError, match="ETag checksum"):
+        await client.get_bytes(receipt.key)
+
+
+@pytest.mark.asyncio
+async def test_get_rejects_unverifiable_legacy_multipart_object() -> None:
+    s3 = FakeS3()
+    client = MinioClient(s3, bucket="agentteams")
+    receipt = await client.put_bytes(
+        "teams/manual-qa/shared/tasks/task-1/result.md",
+        b"published by TeamHarness",
+        content_type="text/markdown",
+    )
+    item = s3.objects[receipt.key]
+    item.metadata.clear()
+    item.etag = '"' + ("0" * 32) + '-2"'
+
+    with pytest.raises(ObjectIntegrityError, match="no verifiable checksum"):
+        await client.get_bytes(receipt.key)
+
+
+@pytest.mark.asyncio
+async def test_get_rejects_invalid_sha256_even_when_etag_is_valid() -> None:
+    s3 = FakeS3()
+    client = MinioClient(s3, bucket="agentteams")
+    receipt = await client.put_bytes(
+        "teams/manual-qa/shared/tasks/task-1/result.md",
+        b"published by TeamHarness",
+        content_type="text/markdown",
+    )
+    s3.objects[receipt.key].metadata["sha256"] = "invalid"
+
+    with pytest.raises(ObjectIntegrityError, match="invalid checksum metadata"):
+        await client.get_bytes(receipt.key)
+
+
+@pytest.mark.asyncio
 async def test_mirror_down_replaces_only_requested_cache_directory(
     tmp_path: Path,
 ) -> None:
@@ -112,4 +181,3 @@ async def test_mirror_up_skips_unchanged_objects(tmp_path: Path) -> None:
     assert second.files == 1
     assert second.bytes_transferred == 0
     assert s3.puts == ["shared/tasks/task-1/workspace/result.md"]
-

@@ -1,6 +1,13 @@
 import os
-from pathlib import Path
 import subprocess
+from pathlib import Path
+
+import pytest
+
+pytestmark = pytest.mark.skipif(
+    os.name == "nt",
+    reason="the container entrypoint requires a POSIX shell",
+)
 
 
 def _render_entrypoint(tmp_path: Path, *, mc_host: bool) -> Path:

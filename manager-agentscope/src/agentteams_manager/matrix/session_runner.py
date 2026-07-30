@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
@@ -16,7 +17,11 @@ from agentscope.event import (
 from agentscope.message import TextBlock, UserMsg
 from agentscope.state import AgentState
 
-from agentteams_manager.domain.errors import ConflictError, NotFoundError
+from agentteams_manager.domain.errors import (
+    ConflictError,
+    ManagerError,
+    NotFoundError,
+)
 from agentteams_manager.domain.ids import (
     matrix_transaction_id,
     operation_id_for,
@@ -101,6 +106,41 @@ class SessionMemory(Protocol):
     ) -> object: ...
 
 
+class SessionMemoryProjection(Protocol):
+    async def projection(
+        self,
+        *,
+        room_id: str,
+        include_private: bool,
+        project_id: str | None = None,
+    ) -> str: ...
+
+
+class TaskProtocolReader(Protocol):
+    async def get(self, task_id: str) -> Any | None: ...
+
+
+class ProjectProtocolWorkflow(Protocol):
+    async def complete_task(
+        self,
+        *,
+        project_id: str,
+        task_id: str,
+        worker_event_id: str,
+        sender_id: str,
+        structured_result: dict[str, Any] | None = None,
+    ) -> Any: ...
+
+    async def report_blocked(
+        self,
+        *,
+        project_id: str,
+        task_id: str,
+        sender_id: str,
+        reason: str,
+    ) -> Any: ...
+
+
 class MatrixSessionRunner:
     """Drive one room-scoped Agent through its native streaming API."""
 
@@ -116,6 +156,7 @@ class MatrixSessionRunner:
         history: RoomHistory | None = None,
         media: SessionMedia | None = None,
         memory: SessionMemory | None = None,
+        memory_service: SessionMemoryProjection | None = None,
         monotonic: Callable[[], float] = time.monotonic,
         now: Callable[[], datetime] | None = None,
         confirmation_ttl: timedelta = timedelta(minutes=15),
@@ -127,6 +168,8 @@ class MatrixSessionRunner:
             Callable[[], Mapping[str, bool]] | None
         ) = None,
         default_model_provider: Callable[[], str | None] | None = None,
+        task_reader: TaskProtocolReader | None = None,
+        project_workflow: ProjectProtocolWorkflow | None = None,
     ) -> None:
         self._sessions = sessions
         self._matrix = matrix
@@ -137,6 +180,7 @@ class MatrixSessionRunner:
         self._history = history or RoomHistory(limit=0)
         self._media = media
         self._memory = memory
+        self._memory_service = memory_service
         self._monotonic = monotonic
         self._now = now or (lambda: datetime.now(UTC))
         self._confirmation_ttl = confirmation_ttl
@@ -146,6 +190,8 @@ class MatrixSessionRunner:
         self._default_model = (default_model or "").strip() or None
         self._known_models_provider = known_models_provider
         self._default_model_provider = default_model_provider
+        self._task_reader = task_reader
+        self._project_workflow = project_workflow
 
     async def handle(
         self,
@@ -174,9 +220,84 @@ class MatrixSessionRunner:
                 return
             if await self._handle_global_confirmation(event, policy):
                 return
+            if await self._handle_task_protocol(event):
+                return
             await self._run_user_turn(event, policy)
         finally:
             await self._set_typing(event.room_id, False)
+
+    async def _handle_task_protocol(
+        self,
+        event: InboundEvent,
+    ) -> bool:
+        completed = _parse_task_completed(event.body)
+        if completed is not None:
+            # A completion mention is a wake-up signal, not proof that the
+            # result satisfies the task. Let the Agent inspect the durable
+            # result and explicitly accept, revise, or block it with tools.
+            return False
+
+        blocked = _parse_task_blocked(event.body)
+        if blocked is None:
+            return False
+        if (
+            self._task_reader is None
+            or self._project_workflow is None
+        ):
+            return False
+        task_id, reason = blocked
+        task = await self._task_reader.get(task_id)
+        if task is None or not task.project_id:
+            await self._send_task_protocol_result(
+                event,
+                f"无法记录任务 {task_id} 的 BLOCKED："
+                "任务不存在或不属于 Project。",
+                task_id=task_id,
+            )
+            return True
+        project_id = str(task.project_id)
+        if str(task.status) != "blocked":
+            try:
+                await self._project_workflow.report_blocked(
+                    project_id=project_id,
+                    task_id=task_id,
+                    sender_id=event.sender_id,
+                    reason=reason,
+                )
+            except ManagerError as error:
+                await self._send_task_protocol_result(
+                    event,
+                    f"无法记录任务 {task_id} 的 BLOCKED：{error}",
+                    task_id=task_id,
+                )
+                return True
+        await self._send_task_protocol_result(
+            event,
+            f"已记录任务 {task_id} 为 blocked。\n"
+            f"阻塞原因：{reason}",
+            task_id=task_id,
+        )
+        return True
+
+    async def _send_task_protocol_result(
+        self,
+        event: InboundEvent,
+        text: str,
+        *,
+        task_id: str,
+    ) -> None:
+        operation_id = operation_id_for(
+            event.room_id,
+            event.event_id,
+            f"task-protocol:{task_id}",
+        )
+        await self._matrix.send_text(
+            event.room_id,
+            text,
+            txn_id=matrix_transaction_id(operation_id, 0),
+            thread_id=event.thread_id,
+            mentions=(event.sender_id,),
+        )
 
     async def handle_control(
         self,
@@ -212,6 +333,23 @@ class MatrixSessionRunner:
             event.room_id,
             exclude_event_id=event.event_id,
         )
+        memory_projection = (
+            await self._memory_service.projection(
+                room_id=event.room_id,
+                include_private=(
+                    policy.kind is RoomKind.ADMIN_DM
+                    and event.sender_id == self._admin_user_id
+                ),
+                project_id=policy.project_id,
+            )
+            if self._memory_service is not None
+            else ""
+        )
+        transient_context = "\n\n".join(
+            part
+            for part in (memory_projection, history_projection)
+            if part.strip()
+        )
         message = UserMsg(
             name=event.sender_id,
             content=[
@@ -231,7 +369,7 @@ class MatrixSessionRunner:
             event,
             policy,
             message,
-            transient_context=history_projection,
+            transient_context=transient_context,
         )
 
     async def _handle_global_confirmation(
@@ -607,10 +745,11 @@ class MatrixSessionRunner:
         if (
             event.sender_id != self._admin_user_id
             or event.sender_id not in policy.allowed_senders
+            or policy.kind is not RoomKind.ADMIN_DM
         ):
             await self._send_session_command_result(
                 event,
-                "仅管理员可以修改 elevated 确认策略。",
+                "仅管理员可以在管理员私聊修改 elevated 确认策略。",
                 action="elevated-denied",
             )
             return
@@ -949,12 +1088,31 @@ class MatrixSessionRunner:
         )
         await self._set_typing(request.source_room_id, True)
         try:
-            await self._run_and_project(
-                source_event,
-                request.source_policy,
-                continuation,
-                tool_event_id=request.source_event_id,
-            )
+            try:
+                await self._run_and_project(
+                    source_event,
+                    request.source_policy,
+                    continuation,
+                    tool_event_id=request.source_event_id,
+                )
+            except ValueError as error:
+                if "not waiting for user confirmation" not in str(error):
+                    raise
+                await self._confirmations.cancel(
+                    confirmation_id,
+                    admin_id=event.sender_id,
+                )
+                await self._sessions.reset(request.source_room_id)
+                await self._send_confirmation_notice(
+                    request.source_room_id,
+                    confirmation_id,
+                    "审批续跑状态在 Manager 重启后无法安全恢复；"
+                    "系统已取消悬挂审批并重置原房间会话。"
+                    "已执行的幂等操作不会回滚，请先查询资源实际状态；"
+                    "如操作尚未完成，请重新发起。",
+                    sequence=2,
+                )
+                return
         finally:
             await self._set_typing(request.source_room_id, False)
         completed = await self._confirmations.complete(confirmation_id)
@@ -1210,6 +1368,56 @@ class MatrixSessionRunner:
             return
 
 
+def _parse_task_completed(body: str) -> tuple[str, str] | None:
+    for raw_line in body.splitlines():
+        line = raw_line.strip().replace("**", "").replace("`", "")
+        line = re.sub(r"^[*-]\s+", "", line)
+        task_match = re.fullmatch(
+            r"(?:@[^\s]+\s+)?TASK_COMPLETED\s*[:：]\s*"
+            r"(task-[A-Za-z0-9][A-Za-z0-9_-]*)"
+            r"(?:\s*(?:[-—–]\s*)?(.+))?",
+            line,
+            flags=re.IGNORECASE,
+        )
+        if task_match is None:
+            continue
+        task_id = task_match.group(1)
+        summary = (task_match.group(2) or "").strip(" *_`-—–")
+        return task_id, summary or "Worker reported TASK_COMPLETED"
+    return None
+
+
+def _parse_task_blocked(body: str) -> tuple[str, str] | None:
+    task_id: str | None = None
+    reason: str | None = None
+    for raw_line in body.splitlines():
+        line = raw_line.strip().replace("**", "").replace("`", "")
+        line = re.sub(r"^[*-]\s+", "", line)
+        task_match = re.fullmatch(
+            r"(?:@[^\s]+\s+)?(?:TASK_)?BLOCKED\s*[:：]\s*"
+            r"(task-[A-Za-z0-9][A-Za-z0-9_-]*)"
+            r"(?:\s*(?:[-—–]\s*)?(.+))?",
+            line,
+            flags=re.IGNORECASE,
+        )
+        if task_match is not None:
+            task_id = task_match.group(1)
+            inline_reason = (task_match.group(2) or "").strip(" *_`-—–")
+            if inline_reason:
+                reason = inline_reason
+            continue
+        reason_match = re.match(
+            r"(?:阻塞原因|reason)\s*[:：]\s*(.+)",
+            line,
+            flags=re.IGNORECASE,
+        )
+        if reason_match is not None:
+            reason = reason_match.group(1).strip(" *_`")
+    if task_id is None:
+        return None
+    return task_id, reason or "Worker reported TASK_BLOCKED"
+
+
 def _global_confirmation_command(
     body: str,
 ) -> tuple[str, str | None] | None:
@@ -1257,7 +1465,8 @@ def _command_catalog() -> str:
         "- /think <default|off|minimal|low|medium|high|xhigh>\n"
         "- /reasoning <off|on|stream>：只显示安全推理状态\n"
         "- /verbose <off|on|full>：控制工具执行摘要\n"
-        "- /elevated <off|ask|full>：管理员确认策略\n"
+        "- /elevated <off|ask|full>：off 仅高风险操作审批；"
+        "ask 所有工具审批；full 完全免审批（仅管理员私聊）\n"
         "- /queue <followup|collect|interrupt> [1-100]\n"
         "- /help：简要帮助\n"
         "- /commands：本目录"

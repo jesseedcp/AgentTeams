@@ -321,6 +321,53 @@ func TestRefreshWorkerCredentialsRestoresMinIOAccess(t *testing.T) {
 	}
 }
 
+func TestRefreshManagerCredentialsRestoresAllManagerMinIOAccess(t *testing.T) {
+	admin := &fakeStorageAdmin{}
+	creds := fakeCredentialStore{
+		"default": {
+			MatrixToken:   "manager-token",
+			MinIOPassword: "manager-minio-secret",
+			GatewayKey:    "manager-gateway-key",
+		},
+	}
+	p := NewProvisioner(ProvisionerConfig{
+		Matrix:   newFakeTeamMatrix(),
+		Creds:    creds,
+		OSSAdmin: admin,
+	})
+
+	result, err := p.RefreshManagerCredentials(context.Background(), "default")
+	if err != nil {
+		t.Fatalf("RefreshManagerCredentials: %v", err)
+	}
+	if result.MinIOPassword != "manager-minio-secret" {
+		t.Fatalf(
+			"MinIOPassword=%q, want manager-minio-secret",
+			result.MinIOPassword,
+		)
+	}
+	if len(admin.users) != 1 {
+		t.Fatalf("EnsureUser calls=%d, want 1", len(admin.users))
+	}
+	if got := admin.users[0]; got.name != "default" ||
+		got.password != "manager-minio-secret" {
+		t.Fatalf(
+			"EnsureUser=%+v, want default/manager-minio-secret",
+			got,
+		)
+	}
+	if len(admin.policies) != 1 {
+		t.Fatalf("EnsurePolicy calls=%d, want 1", len(admin.policies))
+	}
+	if got := admin.policies[0]; got.WorkerName != "default" ||
+		!got.IsManager || got.TeamName != "" {
+		t.Fatalf(
+			"EnsurePolicy=%+v, want Manager policy for default",
+			got,
+		)
+	}
+}
+
 func TestProvisionWorkerFreshCredentialsRecreatesStaleRoomAlias(t *testing.T) {
 	matrixClient := newFakeTeamMatrix()
 	matrixClient.created = false
@@ -388,7 +435,6 @@ func TestProvisionWorkerTeamMemberRoomMeta(t *testing.T) {
 	}
 	if got, want := matrixClient.createRooms[0].Invite, []string{
 		"@admin:localhost",
-		"@manager:localhost",
 		"@lead:localhost",
 		"@dev:localhost",
 	}; !reflect.DeepEqual(got, want) {
@@ -410,7 +456,7 @@ func TestProvisionWorkerTeamMemberRoomMeta(t *testing.T) {
 	}
 }
 
-func TestProvisionWorkerExistingTeamRoomKeepsManagerMembership(t *testing.T) {
+func TestProvisionWorkerExistingTeamRoomRemovesManagerMembership(t *testing.T) {
 	matrixClient := newFakeTeamMatrix()
 	matrixClient.created = false
 	matrixClient.members["!worker-old:localhost"] = []matrix.RoomMember{
@@ -447,9 +493,10 @@ func TestProvisionWorkerExistingTeamRoomKeepsManagerMembership(t *testing.T) {
 	}
 	for _, kick := range matrixClient.kicks {
 		if kick.userID == "@manager:localhost" {
-			t.Fatalf("Manager must remain in team Worker room, kicks=%v", matrixClient.kicks)
+			return
 		}
 	}
+	t.Fatalf("Manager must be removed from team Worker room, kicks=%v", matrixClient.kicks)
 }
 
 func TestProvisionManagerWritesDirectRoomMeta(t *testing.T) {
@@ -702,6 +749,35 @@ func TestProvisionTeamRoomsKeepsFallbackGlobalAdmin(t *testing.T) {
 	}
 	if len(matrixClient.leaves) != 0 {
 		t.Fatalf("admin should not leave fallback rooms, got %v", matrixClient.leaves)
+	}
+}
+
+func TestProvisionTeamRoomsKeepsEnabledManagerOutOfTeamAdminRooms(t *testing.T) {
+	matrixClient := newFakeTeamMatrix()
+	p := NewProvisioner(ProvisionerConfig{
+		Matrix:         matrixClient,
+		AdminUser:      "admin",
+		ManagerEnabled: true,
+	})
+
+	_, err := p.ProvisionTeamRooms(context.Background(), TeamRoomRequest{
+		TeamName:   "alpha",
+		LeaderName: "lead",
+	})
+	if err != nil {
+		t.Fatalf("ProvisionTeamRooms: %v", err)
+	}
+	if got, want := matrixClient.createRooms[0].Invite, []string{
+		"@admin:localhost",
+		"@lead:localhost",
+	}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("team room invites=%v, want %v", got, want)
+	}
+	if got, want := matrixClient.createRooms[1].Invite, []string{
+		"@lead:localhost",
+		"@admin:localhost",
+	}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("leader DM invites=%v, want %v", got, want)
 	}
 }
 

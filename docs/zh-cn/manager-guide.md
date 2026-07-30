@@ -72,7 +72,7 @@ Manager 展示完整方案并得到确认后，调用 `update_manager_identity`�
 
 ## 功能范围
 
-保留的 16 项 Manager skill 覆盖 Worker 发现/导入和生命周期、Team、Human、
+保留的 19 项 Manager skill 覆盖 Worker 发现/导入和生命周期、Team、Human、
 任务与周期调度、项目、频道、Matrix 管理、文件同步、Git 委派、模型切换、
 MCP 管理、服务发布和任务协调。
 

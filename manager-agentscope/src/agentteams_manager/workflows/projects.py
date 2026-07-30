@@ -157,10 +157,24 @@ class ProjectGraphPort(Protocol):
         assigned_to: str,
         room_id: str,
         matrix_user_id: str,
+        storage_team_name: str | None,
         actor_id: str,
         reason: str,
         operation_id: str,
     ) -> TaskRecord: ...
+
+
+class ProjectMemoryPort(Protocol):
+    async def record_project_decision(
+        self,
+        *,
+        room_id: str,
+        source_event_id: str,
+        project_id: str,
+        decision: str,
+        rationale: str,
+        visibility: Literal["private", "project"] = "private",
+    ) -> object: ...
 
 
 class ProjectCreateRequest(BaseModel):
@@ -183,6 +197,8 @@ class ProjectReceipt(BaseModel):
     room_id: str
     participants: tuple[str, ...]
     task_ids: tuple[str, ...] = ()
+    confirmed_at: datetime | None = None
+    confirmed_by: str | None = None
 
 
 class ProjectService:
@@ -203,6 +219,7 @@ class ProjectService:
         clock: Clock,
         admin_user_id: str,
         manager_user_id: str,
+        memory: ProjectMemoryPort | None = None,
     ) -> None:
         if not admin_user_id or not manager_user_id:
             raise ValueError("admin and Manager Matrix IDs are required")
@@ -218,6 +235,7 @@ class ProjectService:
         self._clock = clock
         self._admin_user_id = admin_user_id
         self._manager_user_id = manager_user_id
+        self._memory = memory
 
     async def create(
         self,
@@ -280,6 +298,8 @@ class ProjectService:
                     "worker_users": worker_users,
                     "requester_room_id": request.requester_room_id,
                     "task_ids": [],
+                    "plan_revision": 1,
+                    "plan_confirmation_status": "pending",
                 },
                 created_at=now,
                 updated_at=now,
@@ -306,9 +326,9 @@ class ProjectService:
             now=project.created_at,
         )
         if operation.status is OperationStatus.SUCCEEDED:
-            if project.status != "active" or not project.room_id:
+            if project.status not in {"planning", "active"} or not project.room_id:
                 raise ConflictError(
-                    f"succeeded project {project_id} lacks active state",
+                    f"succeeded project {project_id} lacks prepared state",
                 )
             return _project_receipt(operation.operation_id, project)
 
@@ -349,18 +369,15 @@ class ProjectService:
                 {
                     "operation": "create_project_room",
                     "project_id": project_id,
-                    "invite": list(expected_members),
+                    "invite": [],
+                    "ensure_members": list(expected_members),
                 },
             )
             try:
                 room_id = await self._matrix.create_private_room(
                     name=request.title,
                     topic=f"AgentTeams project {project_id}",
-                    invite=tuple(
-                        user_id
-                        for user_id in expected_members
-                        if user_id != self._manager_user_id
-                    ),
+                    invite=(),
                     creation_marker={
                         "kind": "project",
                         "operation_id": operation.operation_id,
@@ -391,22 +408,30 @@ class ProjectService:
             room_id,
             expected_members,
         )
-        active_metadata_values = {
+        prepared_metadata_values = {
             **project.metadata,
             "room_id": room_id,
+            "plan_confirmation_status": (
+                "confirmed"
+                if project.status == "active"
+                else "pending"
+            ),
         }
-        if project.status == "planning" or project.room_id != room_id:
+        if project.room_id != room_id:
             changed = await self._projects.update(
                 project_id,
                 expected={"planning", "active"},
-                status="active",
+                status=project.status,
                 room_id=room_id,
-                metadata=active_metadata_values,
+                metadata=prepared_metadata_values,
             )
             project = changed or await self._require_project(project_id)
-        if project.status != "active" or project.room_id != room_id:
+        if (
+            project.status not in {"planning", "active"}
+            or project.room_id != room_id
+        ):
             raise ConflictError(
-                f"project {project_id} did not converge to active",
+                f"project {project_id} did not converge to prepared",
             )
 
         await self._topology.upsert_project(
@@ -418,12 +443,12 @@ class ProjectService:
         metadata_receipt = await self._replace_project_metadata(
             operation,
             _project_metadata(project),
-            operation_name="publish_active_project",
+            operation_name="publish_prepared_project",
         )
         await self._replace_project_plan(
             operation,
             project,
-            operation_name="publish_active_project_plan",
+            operation_name="publish_prepared_project_plan",
         )
         await self._supervisor.effect_succeeded(
             operation.operation_id,
@@ -431,9 +456,161 @@ class ProjectService:
             {
                 "project_id": project_id,
                 "room_id": room_id,
-                "status": "active",
+                "status": project.status,
                 "metadata_etag": metadata_receipt.etag,
             },
+        )
+        return _project_receipt(operation.operation_id, project)
+
+    async def confirm_plan(
+        self,
+        *,
+        project_id: str,
+        confirmed_by: str,
+        context: MutationContext,
+        auto_confirmed: bool = False,
+    ) -> ProjectReceipt:
+        """Activate a prepared project after the plan decision is explicit."""
+
+        project = await self._require_project(project_id)
+        if confirmed_by != self._admin_user_id:
+            raise ConflictError("only the administrator may confirm a plan")
+        if not project.room_id:
+            raise ConflictError(
+                f"project {project_id} has no prepared Matrix room",
+            )
+        operation = await self._supervisor.begin(
+            operation_id=context.operation_id,
+            kind=OperationKind.UPDATE_PROJECT,
+            target_key=f"project/{project_id}/plan-confirmation",
+            request={
+                "action": "confirm_project_plan",
+                "project_id": project_id,
+                "confirmed_by": confirmed_by,
+                "auto_confirmed": auto_confirmed,
+                "source_room_id": context.room_id,
+                "source_event_id": context.event_id,
+                "source_tool_call_id": context.tool_call_id,
+            },
+        )
+        if project.status == "active":
+            if (
+                project.metadata.get("plan_confirmation_operation_id")
+                != operation.operation_id
+                and operation.status is not OperationStatus.SUCCEEDED
+            ):
+                raise ConflictError(
+                    f"project {project_id} was confirmed by another request",
+                )
+        elif project.status != "planning":
+            raise ConflictError(
+                f"project {project_id} cannot be confirmed from "
+                f"{project.status}",
+            )
+
+        if operation.status is OperationStatus.SUCCEEDED:
+            await self._remember_project_decision(
+                operation,
+                project,
+                decision=(
+                    "Confirmed project plan revision "
+                    f"{project.metadata.get('plan_revision', 1)}"
+                ),
+                rationale=(
+                    "Automatically confirmed under full authority."
+                    if auto_confirmed
+                    else "Explicitly confirmed by the administrator."
+                ),
+            )
+            return _project_receipt(operation.operation_id, project)
+
+        if project.status == "planning":
+            confirmed_at = self._clock.now().astimezone(UTC)
+            changed = await self._projects.update(
+                project_id,
+                expected={"planning"},
+                status="active",
+                room_id=project.room_id,
+                metadata={
+                    **project.metadata,
+                    "confirmed_at": confirmed_at.isoformat(),
+                    "confirmed_by": confirmed_by,
+                    "plan_confirmation_status": "confirmed",
+                    "plan_confirmation_operation_id": operation.operation_id,
+                    "plan_auto_confirmed": auto_confirmed,
+                },
+            )
+            project = changed or await self._require_project(project_id)
+        if project.status != "active":
+            raise ConflictError(
+                f"project {project_id} did not converge to active",
+            )
+
+        metadata_receipt = await self._replace_project_metadata(
+            operation,
+            _project_metadata(project),
+            operation_name="confirm_project_plan",
+        )
+        await self._replace_project_plan(
+            operation,
+            project,
+            operation_name="confirm_project_plan_document",
+        )
+        await self._topology.upsert_project(
+            project_id=project_id,
+            room_id=project.room_id,
+            payload=_project_metadata(project).model_dump(mode="json"),
+            refreshed_at=self._clock.now().astimezone(UTC),
+        )
+        txn_id = matrix_transaction_id(operation.operation_id, 0)
+        await self._supervisor.before_effect(
+            operation.operation_id,
+            ExternalEffect.MATRIX,
+            {
+                "operation": "announce_project_plan_confirmation",
+                "project_id": project_id,
+                "room_id": project.room_id,
+                "txn_id": txn_id,
+            },
+        )
+        try:
+            event_id = await self._matrix.send_text(
+                project.room_id,
+                "[Project Plan Confirmed]\n\n"
+                f"{_project_plan(project).render()}",
+                txn_id=txn_id,
+                mentions=(self._admin_user_id,),
+            )
+        except Exception as exc:
+            await self._record_external_failure(
+                operation.operation_id,
+                ExternalEffect.MATRIX,
+                exc,
+            )
+            raise
+        await self._supervisor.effect_succeeded(
+            operation.operation_id,
+            ExternalEffect.MATRIX,
+            {
+                "project_id": project_id,
+                "room_id": project.room_id,
+                "status": "active",
+                "metadata_etag": metadata_receipt.etag,
+                "event_id": event_id,
+            },
+        )
+        await self._remember_project_decision(
+            operation,
+            project,
+            decision=(
+                "Confirmed project plan revision "
+                f"{project.metadata.get('plan_revision', 1)}"
+            ),
+            rationale=(
+                "Automatically confirmed under full authority."
+                if auto_confirmed
+                else "Explicitly confirmed by the administrator."
+            ),
         )
         return _project_receipt(operation.operation_id, project)
 
@@ -587,10 +764,11 @@ class ProjectService:
                 "source_tool_call_id": context.tool_call_id,
             },
         )
+        project_tasks = await self._tasks.list_by_project(project_id)
         original = next(
             (
                 task
-                for task in await self._tasks.list_by_project(project_id)
+                for task in project_tasks
                 if task.task_id == task_id
             ),
             None,
@@ -601,7 +779,7 @@ class ProjectService:
             revision = next(
                 (
                     item
-                    for item in await self._tasks.list_by_project(project_id)
+                    for item in project_tasks
                     if item.metadata.get("revision_request_operation_id")
                     == operation.operation_id
                 ),
@@ -620,6 +798,51 @@ class ProjectService:
         if revision_assignee not in participants:
             raise ConflictError(
                 f"worker/{revision_assignee} is not a project participant",
+            )
+        await self._supervisor.before_effect(
+            operation.operation_id,
+            ExternalEffect.STORAGE,
+            {
+                "operation": "request_project_task_revision",
+                "project_id": project_id,
+                "task_id": task_id,
+                "assigned_to": revision_assignee,
+            },
+        )
+        revision = next(
+            (
+                item
+                for item in project_tasks
+                if (
+                    item.metadata.get("revision_request_operation_id")
+                    == operation.operation_id
+                    or (
+                        item.metadata.get("is_revision_for")
+                        == task_id
+                        and item.metadata.get("revision_feedback")
+                        == feedback.strip()
+                        and item.assigned_to == revision_assignee
+                    )
+                )
+                and item.status
+                not in {"completed", "cancelled", "failed"}
+            ),
+            None,
+        )
+        if revision is not None:
+            await self._supervisor.effect_succeeded(
+                operation.operation_id,
+                ExternalEffect.STORAGE,
+                {
+                    "project_id": project_id,
+                    "task_id": task_id,
+                    "revision_task_id": revision.task_id,
+                    "reused": True,
+                },
+            )
+            return _task_receipt_from_record(
+                operation.operation_id,
+                revision,
             )
         if original.status != ProjectTaskState.REVISION_NEEDED:
             await self._graph.transition(
@@ -652,6 +875,7 @@ class ProjectService:
                     "triggered_by_task_id": triggered_by_task_id,
                     "revision_feedback": feedback.strip(),
                     "revision_request_operation_id": operation.operation_id,
+                    "revision_source_event_id": context.event_id,
                 },
             )
         except Exception:
@@ -717,12 +941,12 @@ class ProjectService:
         worker = await self._controller.get_worker(assigned_to)
         if worker is None:
             raise NotFoundError(f"worker/{assigned_to} does not exist")
-        room_id = worker.room_id
-        matrix_user_id = worker.matrix_user_id or _fallback_worker_user(worker)
-        if not room_id:
+        if not worker.room_id:
             raise ConflictError(
-                f"worker/{assigned_to} has no assignment room",
+                f"worker/{assigned_to} has no authoritative room",
             )
+        room_id = project.room_id
+        matrix_user_id = worker.matrix_user_id or _fallback_worker_user(worker)
         operation = await self._supervisor.begin(
             operation_id=context.operation_id,
             kind=OperationKind.UPDATE_PROJECT,
@@ -733,6 +957,7 @@ class ProjectService:
                 "task_id": task_id,
                 "assigned_to": assigned_to,
                 "previous_assigned_to": task.assigned_to,
+                "storage_team_name": worker.team,
                 "reason": reason.strip(),
                 "source_room_id": context.room_id,
                 "source_event_id": context.event_id,
@@ -756,6 +981,15 @@ class ProjectService:
                 operation.operation_id,
                 current,
             )
+        storage_team_name = (
+            str(operation.request.get("storage_team_name") or "").strip()
+            or None
+        )
+        await self._task_service.prepare_reassignment_storage(
+            task_id=task_id,
+            storage_team_name=storage_team_name,
+            operation=operation,
+        )
         if (
             task.assigned_to == assigned_to
             and task.metadata.get("reassignment_operation_id")
@@ -769,6 +1003,7 @@ class ProjectService:
                 assigned_to=assigned_to,
                 room_id=room_id,
                 matrix_user_id=matrix_user_id,
+                storage_team_name=storage_team_name,
                 actor_id=self._admin_user_id,
                 reason=reason.strip(),
                 operation_id=operation.operation_id,
@@ -828,7 +1063,6 @@ class ProjectService:
             f"{operation.request.get('previous_assigned_to')} -> "
             f"{assigned_to}. {reason.strip()}",
             txn_id=txn_id,
-            mentions=(matrix_user_id,),
         )
         await self._supervisor.effect_succeeded(
             operation_id,
@@ -867,8 +1101,11 @@ class ProjectService:
         if not additions and not removals:
             raise ValueError("participant change must add or remove a worker")
         project = await self._require_project(project_id)
-        if project.status != "active":
-            raise ConflictError(f"project {project_id} is not active")
+        if project.status not in {"planning", "active"}:
+            raise ConflictError(
+                f"project {project_id} cannot update participants from "
+                f"{project.status}",
+            )
         current = tuple(project.metadata.get("participants", ()))
         worker_users = dict(project.metadata.get("worker_users", {}))
         worker_users.update(_recovery_worker_users or {})
@@ -897,6 +1134,15 @@ class ProjectService:
         )
         if operation.status is OperationStatus.SUCCEEDED:
             current_project = await self._require_project(project_id)
+            await self._remember_project_decision(
+                operation,
+                current_project,
+                decision=(
+                    "Changed project participants: "
+                    f"added={list(additions)}, removed={list(removals)}"
+                ),
+                rationale=reason.strip(),
+            )
             return _project_receipt(
                 operation.operation_id,
                 current_project,
@@ -924,7 +1170,7 @@ class ProjectService:
             created_by=self._admin_user_id,
             now=self._clock.now().astimezone(UTC),
         )
-        members = set(await self._matrix.members(project.room_id))
+        members = await self._known_room_members(project.room_id)
         for worker_name in additions:
             user_id = worker_users[worker_name]
             if user_id not in members:
@@ -938,7 +1184,23 @@ class ProjectService:
                         "user_id": user_id,
                     },
                 )
-                await self._matrix.invite_user(project.room_id, user_id)
+                try:
+                    await self._matrix.invite_user(
+                        project.room_id,
+                        user_id,
+                    )
+                except Exception as exc:
+                    refreshed = await self._known_room_members(
+                        project.room_id,
+                    )
+                    if user_id not in refreshed:
+                        await self._record_external_failure(
+                            operation.operation_id,
+                            ExternalEffect.MATRIX,
+                            exc,
+                        )
+                        raise
+                    members.update(refreshed)
                 await self._supervisor.effect_acknowledged(
                     operation.operation_id,
                     ExternalEffect.MATRIX,
@@ -1007,6 +1269,15 @@ class ProjectService:
                 "event_id": event_id,
             },
         )
+        await self._remember_project_decision(
+            operation,
+            project,
+            decision=(
+                "Changed project participants: "
+                f"added={list(additions)}, removed={list(removals)}"
+            ),
+            rationale=reason.strip(),
+        )
         return _project_receipt(operation.operation_id, project)
 
     async def revise_plan(
@@ -1025,8 +1296,11 @@ class ProjectService:
         if not plan.strip() or not reason.strip():
             raise ValueError("plan and revision reason must not be empty")
         project = await self._require_project(project_id)
-        if project.status != "active":
-            raise ConflictError(f"project {project_id} is not active")
+        if project.status not in {"planning", "active"}:
+            raise ConflictError(
+                f"project {project_id} cannot revise its plan from "
+                f"{project.status}",
+            )
         operation = await self._supervisor.begin(
             operation_id=context.operation_id,
             kind=OperationKind.UPDATE_PROJECT,
@@ -1044,6 +1318,16 @@ class ProjectService:
         )
         if operation.status is OperationStatus.SUCCEEDED:
             current_project = await self._require_project(project_id)
+            await self._remember_project_decision(
+                operation,
+                current_project,
+                decision=(
+                    "Revised project plan to revision "
+                    f"{current_project.metadata.get('plan_revision', 1)} "
+                    f"({change_kind})"
+                ),
+                rationale=reason.strip(),
+            )
             return _project_receipt(
                 operation.operation_id,
                 current_project,
@@ -1085,6 +1369,15 @@ class ProjectService:
                 "event_id": event_id,
             },
         )
+        await self._remember_project_decision(
+            operation,
+            project,
+            decision=(
+                "Revised project plan to revision "
+                f"{revision.revision} ({change_kind})"
+            ),
+            rationale=reason.strip(),
+        )
         return _project_receipt(operation.operation_id, project)
 
     async def complete_task(
@@ -1095,6 +1388,8 @@ class ProjectService:
         worker_event_id: str,
         sender_id: str,
         structured_result: dict[str, Any] | None = None,
+        accepted: bool = False,
+        result_digest: str | None = None,
     ) -> TaskReceipt:
         project = await self._require_project(project_id)
         await self._require_task_assignee(
@@ -1107,7 +1402,26 @@ class ProjectService:
             worker_event_id=worker_event_id,
             structured_result=structured_result,
             actor_id=sender_id,
+            accepted=accepted,
+            result_digest=result_digest,
         )
+        result_status = str(task.result_status or "")
+        completed_result = task.status == "completed"
+        revision_receipt: TaskReceipt | None = None
+        if result_status == "REVISION_NEEDED":
+            revision_receipt = await self.request_revision(
+                project_id=project_id,
+                task_id=task_id,
+                feedback=task.summary or "Worker requested revision.",
+                assigned_to=None,
+                triggered_by_task_id=None,
+                context=MutationContext(
+                    room_id=project.room_id,
+                    event_id=worker_event_id,
+                    tool_call_id=f"result-revision:{task_id}",
+                ),
+            )
+
         completed_record = next(
             (
                 item
@@ -1118,72 +1432,132 @@ class ProjectService:
         )
         revision_target = (
             completed_record.metadata.get("is_revision_for")
-            if completed_record is not None
+            if completed_result and completed_record is not None
             else None
         )
         if revision_target:
             from agentteams_manager.state.tasks import ProjectTaskState
 
-            await self._graph.transition(
-                str(revision_target),
-                expected={ProjectTaskState.REVISION_NEEDED},
-                target=ProjectTaskState.COMPLETED,
-                actor_id=sender_id,
-                reason=f"revision task {task_id} completed",
-            )
-        for ready in await self._graph.promote_ready(project_id):
-            await self._task_service.dispatch_ready(
-                task_id=ready.task_id,
-                context=MutationContext(
-                    room_id=project.room_id,
-                    event_id=worker_event_id,
-                    tool_call_id=f"dependency-ready:{ready.task_id}",
+            original = next(
+                (
+                    item
+                    for item in await self._tasks.list_by_project(project_id)
+                    if item.task_id == str(revision_target)
                 ),
+                None,
             )
+            if original is None:
+                raise NotFoundError(
+                    f"task/{revision_target} does not exist",
+                )
+            if original.status == ProjectTaskState.REVISION_NEEDED:
+                await self._graph.transition(
+                    str(revision_target),
+                    expected={ProjectTaskState.REVISION_NEEDED},
+                    target=ProjectTaskState.COMPLETED,
+                    actor_id=sender_id,
+                    reason=f"revision task {task_id} completed",
+                )
+            elif original.status != ProjectTaskState.COMPLETED:
+                raise ConflictError(
+                    f"revision target task/{revision_target} cannot be "
+                    f"completed from {original.status}",
+                )
+        if completed_result:
+            await self._graph.promote_ready(project_id)
+            for ready in await self._tasks.list_by_project(project_id):
+                if ready.status != "ready":
+                    continue
+                await self._task_service.dispatch_ready(
+                    task_id=ready.task_id,
+                    context=MutationContext(
+                        room_id=project.room_id,
+                        event_id=worker_event_id,
+                        tool_call_id=f"dependency-ready:{ready.task_id}",
+                    ),
+                )
         operation_id = operation_id_for(
             project.room_id,
             worker_event_id,
-            f"project-completion:{task_id}",
+            f"project-result-decision:{task_id}",
         )
         operation = await self._supervisor.begin(
             operation_id=operation_id,
             kind=OperationKind.UPDATE_PROJECT,
             target_key=f"project/{project_id}",
             request={
-                "action": "complete_task",
+                "action": "process_task_result",
                 "project_id": project_id,
                 "task_id": task_id,
                 "worker_event_id": worker_event_id,
+                "result_status": result_status,
+                "result_digest": result_digest,
+                "accepted": accepted,
+                "revision_task_id": (
+                    revision_receipt.task_id
+                    if revision_receipt is not None
+                    else None
+                ),
             },
         )
         if operation.status is OperationStatus.SUCCEEDED:
+            await self._synchronize_project_task_index(project_id)
+            await self._remember_project_decision(
+                operation,
+                project,
+                decision=(
+                    f"Applied task result decision for {task_id}: "
+                    f"{result_status or task.status}"
+                ),
+                rationale=(
+                    task.summary
+                    or (
+                        "Result accepted."
+                        if accepted
+                        else "Result did not satisfy completion."
+                    )
+                ),
+            )
+            if completed_result:
+                await self._close_project_if_terminal(
+                    project_id=project_id,
+                    worker_event_id=worker_event_id,
+                    task_id=task_id,
+                )
             return task
-        indexed_metadata = await self._project_task_index(project)
-        changed = await self._projects.update(
-            project_id,
-            expected={"active"},
-            status="active",
-            metadata=indexed_metadata,
-        )
-        project = changed or await self._require_project(project_id)
+        project = await self._synchronize_project_task_index(project_id)
         await self._replace_project_metadata(
             operation,
             _project_metadata(project),
-            operation_name="complete_project_task",
+            operation_name="process_project_task_result",
         )
         await self._replace_project_plan(
             operation,
             project,
-            operation_name="complete_project_task_plan",
+            operation_name="process_project_task_result_plan",
         )
+        if completed_result:
+            label = "Project Task Completed"
+            detail = task.summary or "Completed."
+        elif result_status == "REVISION_NEEDED":
+            label = "Project Task Revision Requested"
+            detail = (
+                f"{task.summary or 'Revision required.'} "
+                f"Replacement task: "
+                f"{revision_receipt.task_id if revision_receipt else 'pending'}"
+            )
+        else:
+            label = "Project Task Blocked"
+            detail = task.summary or result_status or "Blocked."
         txn_id = matrix_transaction_id(operation_id, 0)
         await self._supervisor.before_effect(
             operation_id,
             ExternalEffect.MATRIX,
             {
-                "operation": "announce_project_task_completion",
+                "operation": "announce_project_task_result",
                 "project_id": project_id,
                 "task_id": task_id,
+                "result_status": result_status,
                 "room_id": project.room_id,
                 "txn_id": txn_id,
             },
@@ -1191,8 +1565,7 @@ class ProjectService:
         try:
             event_id = await self._matrix.send_text(
                 project.room_id,
-                f"[Project Task Completed] {task_id}: "
-                f"{task.summary or 'Completed.'}",
+                f"[{label}] {task_id}: {detail}",
                 txn_id=txn_id,
             )
         except Exception as exc:
@@ -1208,23 +1581,32 @@ class ProjectService:
             {
                 "project_id": project_id,
                 "task_id": task_id,
+                "result_status": result_status,
                 "event_id": event_id,
             },
         )
-        remaining = tuple(
-            item
-            for item in await self._tasks.list_by_project(project_id)
-            if item.status not in {"completed", "failed", "cancelled"}
+        await self._remember_project_decision(
+            operation,
+            project,
+            decision=(
+                f"Applied task result decision for {task_id}: "
+                f"{result_status or task.status}"
+            ),
+            rationale=(
+                task.summary
+                or (
+                    "Result accepted."
+                    if accepted
+                    else "Result did not satisfy completion."
+                )
+            ),
         )
-        if not remaining:
-            await self.close(
+        await self._synchronize_project_task_index(project_id)
+        if completed_result:
+            await self._close_project_if_terminal(
                 project_id=project_id,
-                force=False,
-                context=MutationContext(
-                    room_id=project.room_id,
-                    event_id=worker_event_id,
-                    tool_call_id=f"auto-close:{task_id}",
-                ),
+                worker_event_id=worker_event_id,
+                task_id=task_id,
             )
         return task
 
@@ -1320,6 +1702,51 @@ class ProjectService:
             "task_assignments": task_assignments,
         }
 
+    async def _synchronize_project_task_index(
+        self,
+        project_id: str,
+    ) -> ProjectRecord:
+        """Refresh the project task projection from authoritative task rows."""
+
+        project = await self._require_project(project_id)
+        indexed_metadata = await self._project_task_index(project)
+        if indexed_metadata == project.metadata:
+            return project
+        changed = await self._projects.update(
+            project_id,
+            expected={project.status},
+            status=project.status,
+            metadata=indexed_metadata,
+        )
+        return changed or await self._require_project(project_id)
+
+    async def _close_project_if_terminal(
+        self,
+        *,
+        project_id: str,
+        worker_event_id: str,
+        task_id: str,
+    ) -> None:
+        remaining = tuple(
+            item
+            for item in await self._tasks.list_by_project(project_id)
+            if item.status not in {"completed", "failed", "cancelled"}
+        )
+        if remaining:
+            return
+        project = await self._require_project(project_id)
+        if project.status != "active":
+            return
+        await self.close(
+            project_id=project_id,
+            force=False,
+            context=MutationContext(
+                room_id=project.room_id,
+                event_id=worker_event_id,
+                tool_call_id=f"auto-close:{task_id}",
+            ),
+        )
+
     async def close(
         self,
         *,
@@ -1328,7 +1755,7 @@ class ProjectService:
         context: MutationContext,
     ) -> ProjectReceipt:
         project = await self._require_project(project_id)
-        if project.status == "completed":
+        if project.status in {"completed", "cancelled"}:
             return _project_receipt(context.operation_id, project)
         tasks = await self._tasks.list_by_project(project_id)
         nonterminal = tuple(
@@ -1348,6 +1775,9 @@ class ProjectService:
                 "project_id": project_id,
                 "force": force,
                 "nonterminal_tasks": list(nonterminal),
+                "source_room_id": context.room_id,
+                "source_event_id": context.event_id,
+                "source_tool_call_id": context.tool_call_id,
             },
         )
         return await self._resume_close(operation)
@@ -1361,10 +1791,27 @@ class ProjectService:
         project_id = str(operation.request.get("project_id", ""))
         if not project_id:
             raise RecoveryError("project closure has no project ID")
-        project = await self._require_project(project_id)
+        project = await self._synchronize_project_task_index(project_id)
         if operation.status is OperationStatus.SUCCEEDED:
+            await self._remember_project_decision(
+                operation,
+                project,
+                decision=f"Project {project.status}",
+                rationale=(
+                    "Project was force-closed."
+                    if bool(operation.request.get("force", False))
+                    else "All project tasks reached terminal state."
+                ),
+            )
             return _project_receipt(operation.operation_id, project)
         force = bool(operation.request.get("force", False))
+        nonterminal = tuple(
+            str(task_id)
+            for task_id in operation.request.get(
+                "nonterminal_tasks",
+                (),
+            )
+        )
         if project.status == "active":
             completed_at = self._clock.now().astimezone(UTC)
             changed = await self._projects.update(
@@ -1378,7 +1825,20 @@ class ProjectService:
                 },
             )
             project = changed or await self._require_project(project_id)
-        if project.status != "completed":
+        elif project.status == "planning" and force and not nonterminal:
+            cancelled_at = self._clock.now().astimezone(UTC)
+            changed = await self._projects.update(
+                project_id,
+                expected={"planning"},
+                status="cancelled",
+                metadata={
+                    **project.metadata,
+                    "cancelled_at": cancelled_at.isoformat(),
+                    "forced_close": True,
+                },
+            )
+            project = changed or await self._require_project(project_id)
+        if project.status not in {"completed", "cancelled"}:
             raise ConflictError(
                 f"project {project_id} cannot close from {project.status}",
             )
@@ -1403,6 +1863,11 @@ class ProjectService:
             ),
         )
         event_ids: dict[str, str] = {}
+        lifecycle_label = (
+            "Cancelled"
+            if project.status == "cancelled"
+            else "Completed"
+        )
         for sequence, room_id in enumerate(completion_rooms):
             txn_id = matrix_transaction_id(
                 operation.operation_id,
@@ -1420,7 +1885,7 @@ class ProjectService:
             try:
                 event_ids[room_id] = await self._matrix.send_text(
                     room_id,
-                    f"[Project Completed] {project.project_id}: "
+                    f"[Project {lifecycle_label}] {project.project_id}: "
                     f"{project.name}.",
                     txn_id=txn_id,
                     mentions=(self._admin_user_id,),
@@ -1437,10 +1902,20 @@ class ProjectService:
             ExternalEffect.MATRIX,
             {
                 "project_id": project_id,
-                "status": "completed",
+                "status": project.status,
                 "metadata_etag": receipt.etag,
                 "event_ids": event_ids,
             },
+        )
+        await self._remember_project_decision(
+            operation,
+            project,
+            decision=f"Project {project.status}",
+            rationale=(
+                "Project was force-closed."
+                if force
+                else "All project tasks reached terminal state."
+            ),
         )
         return _project_receipt(operation.operation_id, project)
 
@@ -1472,14 +1947,7 @@ class ProjectService:
             )
         if operation.status is OperationStatus.SUCCEEDED:
             return task
-        indexed_metadata = await self._project_task_index(project)
-        changed = await self._projects.update(
-            project_id,
-            expected={"active"},
-            status="active",
-            metadata=indexed_metadata,
-        )
-        project = changed or await self._require_project(project_id)
+        project = await self._synchronize_project_task_index(project_id)
         await self._replace_project_metadata(
             operation,
             _project_metadata(project),
@@ -1543,6 +2011,15 @@ class ProjectService:
                 "recovered": True,
             },
         )
+        if action == "complete_task":
+            await self._synchronize_project_task_index(project_id)
+            await self._close_project_if_terminal(
+                project_id=project_id,
+                worker_event_id=str(
+                    request.get("worker_event_id") or operation.operation_id,
+                ),
+                task_id=task_id,
+            )
         return task
 
     async def resume_operation(
@@ -1624,7 +2101,7 @@ class ProjectService:
         room_id: str,
         expected: tuple[str, ...],
     ) -> None:
-        current = set(await self._matrix.members(room_id))
+        current = await self._known_room_members(room_id)
         for user_id in expected:
             if user_id in current:
                 continue
@@ -1640,18 +2117,38 @@ class ProjectService:
             try:
                 await self._matrix.invite_user(room_id, user_id)
             except Exception as exc:
-                await self._record_external_failure(
-                    operation.operation_id,
-                    ExternalEffect.MATRIX,
-                    exc,
-                )
-                raise
+                refreshed = await self._known_room_members(room_id)
+                if user_id not in refreshed:
+                    await self._record_external_failure(
+                        operation.operation_id,
+                        ExternalEffect.MATRIX,
+                        exc,
+                    )
+                    raise
+                current.update(refreshed)
             await self._supervisor.effect_acknowledged(
                 operation.operation_id,
                 ExternalEffect.MATRIX,
                 {"room_id": room_id, "user_id": user_id, "invited": True},
             )
             current.add(user_id)
+
+    async def _known_room_members(self, room_id: str) -> set[str]:
+        """Return joined and invited Matrix users for idempotent membership."""
+        known = set(await self._matrix.members(room_id))
+        for event in await self._matrix.room_state(room_id):
+            if event.get("type") != "m.room.member":
+                continue
+            content = event.get("content")
+            user_id = event.get("state_key")
+            if (
+                isinstance(content, dict)
+                and content.get("membership") in {"invite", "join"}
+                and isinstance(user_id, str)
+                and user_id
+            ):
+                known.add(user_id)
+        return known
 
     async def _find_project_room(self, project_id: str) -> str | None:
         matches: list[str] = []
@@ -1836,6 +2333,32 @@ class ProjectService:
         )
         return receipt
 
+    async def _remember_project_decision(
+        self,
+        operation: OperationRecord,
+        project: ProjectRecord,
+        *,
+        decision: str,
+        rationale: str,
+    ) -> None:
+        if self._memory is None:
+            return
+        room_id = str(
+            operation.request.get("source_room_id")
+            or project.metadata.get("requester_room_id")
+            or project.room_id,
+        )
+        if not room_id:
+            return
+        await self._memory.record_project_decision(
+            room_id=room_id,
+            source_event_id=f"operation:{operation.operation_id}",
+            project_id=project.project_id,
+            decision=decision,
+            rationale=rationale,
+            visibility="project",
+        )
+
     async def _record_external_failure(
         self,
         operation_id: str,
@@ -1891,6 +2414,15 @@ def _project_id_for(operation: OperationRecord) -> str:
 
 def _project_metadata(project: ProjectRecord) -> ProjectMetadata:
     completed_at = project.metadata.get("completed_at")
+    confirmed_at = project.metadata.get("confirmed_at")
+    confirmed_by = project.metadata.get("confirmed_by")
+    if project.status in {"active", "completed"} and not confirmed_at:
+        # Compatibility for projects created before the explicit plan gate.
+        confirmed_at = project.created_at.isoformat()
+        confirmed_by = str(
+            project.metadata.get("requester_user_id")
+            or "legacy-migration"
+        )
     return ProjectMetadata(
         project_id=project.project_id,
         title=project.name,
@@ -1901,6 +2433,17 @@ def _project_metadata(project: ProjectRecord) -> ProjectMetadata:
         task_ids=tuple(project.metadata.get("task_ids", ())),
         created_at=project.created_at,
         updated_at=project.updated_at,
+        confirmed_at=(
+            datetime.fromisoformat(str(confirmed_at))
+            if confirmed_at
+            else None
+        ),
+        confirmed_by=(
+            str(confirmed_by)
+            if confirmed_by
+            else None
+        ),
+        plan_revision=int(project.metadata.get("plan_revision", 1)),
         completed_at=(
             datetime.fromisoformat(str(completed_at))
             if completed_at
@@ -1948,6 +2491,16 @@ def _project_receipt(
         room_id=project.room_id,
         participants=tuple(project.metadata.get("participants", ())),
         task_ids=tuple(project.metadata.get("task_ids", ())),
+        confirmed_at=(
+            datetime.fromisoformat(str(project.metadata["confirmed_at"]))
+            if project.metadata.get("confirmed_at")
+            else None
+        ),
+        confirmed_by=(
+            str(project.metadata["confirmed_by"])
+            if project.metadata.get("confirmed_by")
+            else None
+        ),
     )
 
 

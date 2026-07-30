@@ -15,13 +15,23 @@ A finite task has a clear terminal deliverable.
 
 ## Complete
 
-When the assigned Worker reports completion, call `complete_task` with the
-task ID and optional structured result. The tool takes the Worker event ID
-from the bound Matrix turn; callers cannot forge it.
+When the assigned Worker reports completion, first call
+`inspect_task_result`. Review the submitted status, summary, deliverables, and
+artifact paths. For `SUCCESS` or `SUCCESS_WITH_NOTES`, call `complete_task`
+with `accepted=true` and the exact `result_digest` returned by the inspection.
+The digest binds acceptance to the version that was reviewed, so a changed
+submission must be inspected again.
 
-Completion pulls the full task prefix, requires `result.md` or a structured
-result, updates remote metadata before SQLite, appends daily memory, and sends
-one terminal notification. A replay returns the canonical receipt.
+For `REVISION_NEEDED`, reject the candidate and let the Project workflow
+create linked rework without releasing dependent tasks. Treat `BLOCKED`,
+`INTERRUPTED`, `FAILED`, and `PARTIAL` as non-success terminal reports.
+`complete_task` takes the Worker event ID from the bound Matrix turn; callers
+cannot forge it.
+
+Accepted completion pulls the full task prefix, validates `result.md` and
+declared deliverables, checks the reviewed digest again, updates remote
+metadata before SQLite, appends daily memory, and sends one terminal
+notification. A replay returns the canonical receipt.
 
 Use `get_task` to inspect status. Use `update_task` only for a deliberate
 transition. Use `delete_task` to cancel; cancellation does not erase artifacts.

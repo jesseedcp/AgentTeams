@@ -13,7 +13,12 @@ assignment only in an admin room.
   `delegate_task`.
 - Send Team work only through `delegate_team_task`.
 - Create recurring work with `schedule_task`.
-- Record a Worker event with `complete_task`.
+- Inspect a submitted Worker result with `inspect_task_result`, review its
+  summary and deliverables, then pass the returned digest to `complete_task`
+  only when the result is accepted.
+- Record blocked, interrupted, failed, partial, or revision-needed Worker
+  events directly with `complete_task`; these statuses are never accepted as
+  successful completion.
 - Use `update_task` for an explicit complete, recurring execution, or cancel
   transition.
 - Use `delete_task` as the confirmed cancellation surface.

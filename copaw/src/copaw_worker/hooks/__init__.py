@@ -69,6 +69,7 @@ def install_tool_hooks() -> None:
         return
 
     from copaw.agents.react_agent import CoPawAgent
+
     from copaw_worker.hooks.credential_guard import install_credential_guard_hook
     from copaw_worker.hooks.output_sanitizer import create_sanitizer_middleware
     from copaw_worker.hooks.tools.filesync import filesync

@@ -12,6 +12,7 @@ from agentteams_manager.domain.models import (
     OperationStatus,
 )
 from agentteams_manager.state.database import Database
+from agentteams_manager.state.memory import MemoryRepository
 from agentteams_manager.state.notifications import NotificationRepository
 from agentteams_manager.workflows.matrix_resources import ChannelResolver
 from agentteams_manager.workflows.notifications import (
@@ -67,6 +68,7 @@ async def test_send_once_resolves_primary_and_deduplicates(
     storage = MinioClient(FakeS3(), bucket="agentteams")
     matrix = Matrix()
     clock = FixedClock()
+    curated_memory = MemoryRepository(database)
     service = NotificationService(
         notifications=NotificationRepository(database),
         resolver=ChannelResolver(
@@ -79,6 +81,7 @@ async def test_send_once_resolves_primary_and_deduplicates(
         memory=DailyMemory(storage=storage, clock=clock),
         clock=clock,
         admin_user_id="@admin:example",
+        curated_memory=curated_memory,
     )
 
     first = await service.send_once(
@@ -93,6 +96,11 @@ async def test_send_once_resolves_primary_and_deduplicates(
     assert first == second
     assert first.room_id == "!primary:example"
     assert len(matrix.visible) == 1
+    remembered = await curated_memory.daily(
+        "!primary:example",
+        clock.now().date(),
+    )
+    assert [item.content for item in remembered] == ["Task finished"]
 
 
 @pytest.mark.asyncio

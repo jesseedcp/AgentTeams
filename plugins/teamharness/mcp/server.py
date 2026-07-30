@@ -3,29 +3,38 @@
 
 from __future__ import annotations
 
-import html
-import hashlib
 import datetime
+import hashlib
+import html
 import json
 import mimetypes
 import os
-from pathlib import Path
 import re
 import subprocess
 import sys
 import threading
 import time
-from typing import Any
 import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+from pathlib import Path
+from typing import Any
 
-from message_tool import MessageToolDeps, message as _message_impl
-from roomflow_tool import RoomDescribeDeps, describe_room as _describe_room_impl
+from message_tool import MessageToolDeps
+from message_tool import message as _message_impl
+from roomflow_tool import RoomDescribeDeps
+from roomflow_tool import describe_room as _describe_room_impl
 
-
-TOOL_NAMES = ["health", "message", "roomflow", "filesync", "artifact", "projectflow", "taskflow"]
+TOOL_NAMES = [
+    "health",
+    "message",
+    "roomflow",
+    "filesync",
+    "artifact",
+    "projectflow",
+    "taskflow",
+]
 MESSAGE_TOOL_BLOCKED_ROLES = {"worker", "remote-member"}
 MATRIX_USER_RE = re.compile(r"@[a-zA-Z0-9._=+/\-]+:[a-zA-Z0-9.\-]+(?::\d+)?")
 MENTION_LOCAL_CHARS = r"a-zA-Z0-9._=+/\-"
@@ -33,7 +42,17 @@ SHORT_MATRIX_MENTION_RE = re.compile(
     rf"(?<![{MENTION_LOCAL_CHARS}])@([{MENTION_LOCAL_CHARS}]+)(?![{MENTION_LOCAL_CHARS}])(?!:[a-zA-Z0-9.\-])"
 )
 MATRIX_ROOM_RE = re.compile(r"^![^:\s]+:[^\s]+$")
-LOW_INFORMATION_ACKS = {"ack", "acknowledged", "ok", "okay", "done", "received", "收到", "好的", "好"}
+LOW_INFORMATION_ACKS = {
+    "ack",
+    "acknowledged",
+    "ok",
+    "okay",
+    "done",
+    "received",
+    "收到",
+    "好的",
+    "好",
+}
 MC_ALIAS = "agentteams"
 UNSAFE_SESSION_FILENAME_RE = re.compile(r'[\\/:*?"<>|]')
 SESSION_WRITE_LOCKS: dict[str, threading.Lock] = {}
@@ -62,6 +81,9 @@ ATTACHMENT_PARENT_EVENT_KEYS = (
     "matrix_attachment_parent_event_id",
 )
 TEXT_ARTIFACT_SAMPLE_BYTES = 256 * 1024
+MANAGER_PARENT_TASK_PROTOCOL_HEADING = (
+    "## AgentTeams parent-task completion protocol (required)"
+)
 
 TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     "health": {
@@ -232,7 +254,12 @@ TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["create_task_room", "list_rooms", "describe_room", "archive_room"],
+                    "enum": [
+                        "create_task_room",
+                        "list_rooms",
+                        "describe_room",
+                        "archive_room",
+                    ],
                     "description": "Room operation to perform.",
                 },
                 "taskId": {
@@ -475,7 +502,13 @@ TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
                 },
                 "action": {
                     "type": "string",
-                    "enum": ["delegate_task", "ack_task", "submit_task", "check_task", "cancel_task"],
+                    "enum": [
+                        "delegate_task",
+                        "ack_task",
+                        "submit_task",
+                        "check_task",
+                        "cancel_task",
+                    ],
                     "description": "Task lifecycle operation.",
                 },
                 "projectId": {
@@ -723,7 +756,11 @@ def _md_to_html(text: str) -> str:
             index += 1
             continue
 
-        if index + 1 < len(lines) and "|" in line and _is_table_separator(lines[index + 1]):
+        if (
+            index + 1 < len(lines)
+            and "|" in line
+            and _is_table_separator(lines[index + 1])
+        ):
             table_lines = [line, lines[index + 1]]
             index += 2
             while index < len(lines) and "|" in lines[index] and lines[index].strip():
@@ -740,7 +777,9 @@ def _md_to_html(text: str) -> str:
         heading = re.match(r"^(#{1,6})\s+(.+?)\s*$", line)
         if heading:
             level = len(heading.group(1))
-            blocks.append(f"<h{level}>{_render_inline_matrix_html(heading.group(2))}</h{level}>")
+            blocks.append(
+                f"<h{level}>{_render_inline_matrix_html(heading.group(2))}</h{level}>"
+            )
             index += 1
             continue
 
@@ -752,7 +791,13 @@ def _md_to_html(text: str) -> str:
                     break
                 items.append(item.group(1))
                 index += 1
-            blocks.append("<ul>" + "".join(f"<li>{_render_inline_matrix_html(item)}</li>" for item in items) + "</ul>")
+            blocks.append(
+                "<ul>"
+                + "".join(
+                    f"<li>{_render_inline_matrix_html(item)}</li>" for item in items
+                )
+                + "</ul>"
+            )
             continue
 
         if re.match(r"^\s*\d+[.)]\s+\S", line):
@@ -763,7 +808,13 @@ def _md_to_html(text: str) -> str:
                     break
                 items.append(item.group(1))
                 index += 1
-            blocks.append("<ol>" + "".join(f"<li>{_render_inline_matrix_html(item)}</li>" for item in items) + "</ol>")
+            blocks.append(
+                "<ol>"
+                + "".join(
+                    f"<li>{_render_inline_matrix_html(item)}</li>" for item in items
+                )
+                + "</ol>"
+            )
             continue
 
         if line.strip():
@@ -818,6 +869,53 @@ def _matrix_content(text: str, mentions: list[str]) -> dict[str, Any]:
     return content
 
 
+def _matrix_send_text_event(room_id: str, text: str) -> dict[str, Any]:
+    canonical_room_id = _canonical_room_id(room_id)
+    if not canonical_room_id:
+        return {"status": "skipped", "error": "Matrix room is unavailable"}
+    mentions = _mentions(text, canonical_room_id)
+    content = _matrix_content(text, mentions)
+    try:
+        homeserver, token = _matrix_env("task completion notification")
+    except ValueError as exc:
+        return {"status": "skipped", "error": str(exc)}
+
+    encoded_room_id = urllib.parse.quote(canonical_room_id, safe="")
+    txn_id = f"teamharness-task-notify-{os.getpid()}-{int(time.time() * 1000)}-{uuid.uuid4().hex}"
+    url = f"{homeserver}/_matrix/client/v3/rooms/{encoded_room_id}/send/m.room.message/{txn_id}"
+    request = urllib.request.Request(
+        url,
+        data=json.dumps(content).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        },
+        method="PUT",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            data = json.loads(response.read().decode("utf-8") or "{}")
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")[:200]
+        return {
+            "status": "failed",
+            "error": f"Matrix API error: HTTP {exc.code}: {body}",
+        }
+    except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
+        return {"status": "failed", "error": f"Matrix API error: {exc}"}
+
+    event_id = str(data.get("event_id") or "").strip()
+    if not event_id:
+        return {"status": "failed", "error": "Matrix send response missing event_id"}
+    return {
+        "status": "sent",
+        "eventId": event_id,
+        "roomId": canonical_room_id,
+        "mentions": mentions,
+        "text": text,
+    }
+
+
 def _reply_route(arguments: dict[str, Any]) -> dict[str, Any]:
     route = arguments.get("replyRoute") or arguments.get("reply_route")
     return route if isinstance(route, dict) else {}
@@ -833,7 +931,9 @@ def _route_value(arguments: dict[str, Any], route: dict[str, Any], *names: str) 
     return ""
 
 
-def _route_bool(arguments: dict[str, Any], route: dict[str, Any], *names: str, default: bool = False) -> bool:
+def _route_bool(
+    arguments: dict[str, Any], route: dict[str, Any], *names: str, default: bool = False
+) -> bool:
     for name in names:
         if name in route:
             return _payload_bool(route.get(name), default)
@@ -842,11 +942,24 @@ def _route_bool(arguments: dict[str, Any], route: dict[str, Any], *names: str, d
     return default
 
 
-def _qwenpaw_message(arguments: dict[str, Any], route: dict[str, Any], channel: str, message: str) -> dict[str, Any]:
-    target_user = _route_value(arguments, route, "targetUser", "target_user", "userId", "user_id")
-    target_session = _route_value(arguments, route, "targetSession", "target_session", "sessionId", "session_id")
-    agent_id = str(arguments.get("agentId") or arguments.get("agent_id") or arguments.get("accountId") or "default").strip()
-    mention_sender = _route_bool(arguments, route, "mentionSender", "mention_sender", "atSender", "at_sender")
+def _qwenpaw_message(
+    arguments: dict[str, Any], route: dict[str, Any], channel: str, message: str
+) -> dict[str, Any]:
+    target_user = _route_value(
+        arguments, route, "targetUser", "target_user", "userId", "user_id"
+    )
+    target_session = _route_value(
+        arguments, route, "targetSession", "target_session", "sessionId", "session_id"
+    )
+    agent_id = str(
+        arguments.get("agentId")
+        or arguments.get("agent_id")
+        or arguments.get("accountId")
+        or "default"
+    ).strip()
+    mention_sender = _route_bool(
+        arguments, route, "mentionSender", "mention_sender", "atSender", "at_sender"
+    )
     base: dict[str, Any] = {
         "ok": True,
         "tool": "message",
@@ -861,11 +974,26 @@ def _qwenpaw_message(arguments: dict[str, Any], route: dict[str, Any], channel: 
     if mention_sender:
         base["mentionSender"] = True
     if not target_user:
-        return {"ok": False, "tool": "message", "channel": channel, "error": "targetUser is required for non-Matrix channel sends"}
+        return {
+            "ok": False,
+            "tool": "message",
+            "channel": channel,
+            "error": "targetUser is required for non-Matrix channel sends",
+        }
     if not target_session:
-        return {"ok": False, "tool": "message", "channel": channel, "error": "targetSession is required for non-Matrix channel sends"}
+        return {
+            "ok": False,
+            "tool": "message",
+            "channel": channel,
+            "error": "targetSession is required for non-Matrix channel sends",
+        }
     if not message:
-        return {"ok": False, "tool": "message", "channel": channel, "error": "message text is required"}
+        return {
+            "ok": False,
+            "tool": "message",
+            "channel": channel,
+            "error": "message text is required",
+        }
     if arguments.get("dryRun"):
         base["dryRun"] = True
         return base
@@ -902,14 +1030,22 @@ def _qwenpaw_message(arguments: dict[str, Any], route: dict[str, Any], channel: 
                 base["sessionRecorded"] = False
                 base["warning"] = "message sent, but local session record failed"
             return base
-        warning = str(mention_result.get("warning") or mention_result.get("error") or "DingTalk sender mention unavailable")
+        warning = str(
+            mention_result.get("warning")
+            or mention_result.get("error")
+            or "DingTalk sender mention unavailable"
+        )
         base["ok"] = False
         base["error"] = warning
         base["delivery"] = {"failed": "dingtalk_sender_mention_required"}
         base["senderMentionWarning"] = warning
         return base
 
-    api_base = (os.getenv("QWENPAW_API_BASE") or os.getenv("COPAW_API_BASE") or "http://127.0.0.1:8088").rstrip("/")
+    api_base = (
+        os.getenv("QWENPAW_API_BASE")
+        or os.getenv("COPAW_API_BASE")
+        or "http://127.0.0.1:8088"
+    ).rstrip("/")
     api_path = "/messages/send" if api_base.endswith("/api") else "/api/messages/send"
     body = {
         "channel": channel,
@@ -932,9 +1068,19 @@ def _qwenpaw_message(arguments: dict[str, Any], route: dict[str, Any], channel: 
         base["response"] = data
     except urllib.error.HTTPError as exc:
         body_text = exc.read().decode("utf-8", errors="replace")[:200]
-        return {"ok": False, "tool": "message", "channel": channel, "error": f"QwenPaw message API error: HTTP {exc.code}: {body_text}"}
+        return {
+            "ok": False,
+            "tool": "message",
+            "channel": channel,
+            "error": f"QwenPaw message API error: HTTP {exc.code}: {body_text}",
+        }
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        return {"ok": False, "tool": "message", "channel": channel, "error": f"QwenPaw message API error: {exc}"}
+        return {
+            "ok": False,
+            "tool": "message",
+            "channel": channel,
+            "error": f"QwenPaw message API error: {exc}",
+        }
     try:
         base["sessionRecorded"] = _record_outbound_to_session(
             channel=channel,
@@ -962,17 +1108,36 @@ def _send_dingtalk_sender_mention(
     entry = _dingtalk_session_webhook_entry(target_user, target_session, account_id)
     webhook = str(entry.get("webhook") or "").strip()
     sender_staff_id = str(entry.get("sender_staff_id") or "").strip()
-    explicit_sender = _route_value(arguments, route, "senderStaffId", "sender_staff_id", "senderUserId", "sender_user_id")
+    explicit_sender = _route_value(
+        arguments,
+        route,
+        "senderStaffId",
+        "sender_staff_id",
+        "senderUserId",
+        "sender_user_id",
+    )
     conversation_type = str(entry.get("conversation_type") or "").strip().lower()
 
     if not webhook:
-        return {"ok": False, "warning": "DingTalk session webhook not found; sent without sender mention"}
+        return {
+            "ok": False,
+            "warning": "DingTalk session webhook not found; sent without sender mention",
+        }
     if not sender_staff_id:
-        return {"ok": False, "warning": "DingTalk sender_staff_id not found; sent without sender mention"}
+        return {
+            "ok": False,
+            "warning": "DingTalk sender_staff_id not found; sent without sender mention",
+        }
     if explicit_sender and explicit_sender != sender_staff_id:
-        return {"ok": False, "warning": "DingTalk senderStaffId does not match recorded sender; sent without sender mention"}
+        return {
+            "ok": False,
+            "warning": "DingTalk senderStaffId does not match recorded sender; sent without sender mention",
+        }
     if conversation_type and conversation_type != "group":
-        return {"ok": False, "warning": "DingTalk sender mention is only applied to group conversations"}
+        return {
+            "ok": False,
+            "warning": "DingTalk sender mention is only applied to group conversations",
+        }
 
     text = f"@{sender_staff_id}\n{message}"
     body: dict[str, Any]
@@ -1003,15 +1168,24 @@ def _send_dingtalk_sender_mention(
         data = json.loads(response_text or "{}")
     except urllib.error.HTTPError as exc:
         body_text = exc.read().decode("utf-8", errors="replace")[:200]
-        return {"ok": False, "error": f"DingTalk session webhook error: HTTP {exc.code}: {body_text}"}
+        return {
+            "ok": False,
+            "error": f"DingTalk session webhook error: HTTP {exc.code}: {body_text}",
+        }
     except (json.JSONDecodeError, urllib.error.URLError, TimeoutError, OSError) as exc:
         return {"ok": False, "error": f"DingTalk session webhook error: {exc}"}
 
     if not isinstance(data, dict):
-        return {"ok": False, "error": "DingTalk session webhook returned a non-object response"}
+        return {
+            "ok": False,
+            "error": "DingTalk session webhook returned a non-object response",
+        }
     errcode = data.get("errcode")
     if errcode not in (None, 0, "0"):
-        return {"ok": False, "error": f"DingTalk session webhook rejected message: {data}"}
+        return {
+            "ok": False,
+            "error": f"DingTalk session webhook rejected message: {data}",
+        }
     return {
         "ok": True,
         "response": data,
@@ -1033,7 +1207,9 @@ def _qwenpaw_workspace_dir(account_id: str) -> Path | None:
     return workspace_dir
 
 
-def _dingtalk_session_webhook_entry(target_user: str, target_session: str, account_id: str) -> dict[str, Any]:
+def _dingtalk_session_webhook_entry(
+    target_user: str, target_session: str, account_id: str
+) -> dict[str, Any]:
     workspace_dir = _qwenpaw_workspace_dir(account_id)
     if workspace_dir is None:
         return {}
@@ -1077,12 +1253,18 @@ def _qwenpaw_working_dir() -> Path | None:
     return None
 
 
-def _channel_session_path(channel: str, user_id: str, session_id: str, account_id: str) -> Path | None:
+def _channel_session_path(
+    channel: str, user_id: str, session_id: str, account_id: str
+) -> Path | None:
     workspace_dir = _qwenpaw_workspace_dir(account_id)
     if workspace_dir is None:
         return None
 
-    filename = f"{_session_safe(user_id)}_{_session_safe(session_id)}.json" if user_id else f"{_session_safe(session_id)}.json"
+    filename = (
+        f"{_session_safe(user_id)}_{_session_safe(session_id)}.json"
+        if user_id
+        else f"{_session_safe(session_id)}.json"
+    )
     channel_dir = _session_safe(channel.strip().lower() or "default")
     current_path = workspace_dir / "sessions" / channel_dir / filename
     legacy_path = workspace_dir / "sessions" / filename
@@ -1092,7 +1274,13 @@ def _channel_session_path(channel: str, user_id: str, session_id: str, account_i
     return current_path
 
 
-def _outbound_message_dict(channel: str, text: str, message_id: str | None, account_id: str, metadata: dict[str, Any]) -> dict[str, Any]:
+def _outbound_message_dict(
+    channel: str,
+    text: str,
+    message_id: str | None,
+    account_id: str,
+    metadata: dict[str, Any],
+) -> dict[str, Any]:
     now = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
     millis = int((time.time() % 1) * 1000)
     msg_metadata = {
@@ -1148,19 +1336,22 @@ def _record_outbound_to_session(
         if not isinstance(content, list):
             return False
 
-        content.append([
-            _outbound_message_dict(
-                channel_key,
-                text,
-                message_id,
-                account_id,
-                metadata or {
-                    "user_id": user_id,
-                    "session_id": session_id,
-                },
-            ),
-            [],
-        ])
+        content.append(
+            [
+                _outbound_message_dict(
+                    channel_key,
+                    text,
+                    message_id,
+                    account_id,
+                    metadata
+                    or {
+                        "user_id": user_id,
+                        "session_id": session_id,
+                    },
+                ),
+                [],
+            ]
+        )
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_name(f".{path.name}.tmp")
         tmp.write_text(json.dumps(states, ensure_ascii=False), encoding="utf-8")
@@ -1168,7 +1359,9 @@ def _record_outbound_to_session(
     return True
 
 
-def _record_matrix_outbound_to_session(room_id: str, text: str, message_id: str | None, account_id: str) -> bool:
+def _record_matrix_outbound_to_session(
+    room_id: str, text: str, message_id: str | None, account_id: str
+) -> bool:
     recorded = _record_outbound_to_session(
         channel="matrix",
         user_id=room_id,
@@ -1201,7 +1394,9 @@ def _matrix_env(tool: str) -> tuple[str, str]:
     homeserver = os.getenv("AGENTTEAMS_MATRIX_URL", "").rstrip("/")
     token = os.getenv("AGENTTEAMS_WORKER_MATRIX_TOKEN", "")
     if not homeserver or not token:
-        raise ValueError("AGENTTEAMS_MATRIX_URL and AGENTTEAMS_WORKER_MATRIX_TOKEN are required")
+        raise ValueError(
+            "AGENTTEAMS_MATRIX_URL and AGENTTEAMS_WORKER_MATRIX_TOKEN are required"
+        )
     return homeserver, token
 
 
@@ -1255,7 +1450,9 @@ def _matrix_attachment_context_parent_event_id(room_id: str) -> str:
     return ""
 
 
-def _write_matrix_attachment_context_parent_event_id(room_id: str, event_id: str | None) -> bool:
+def _write_matrix_attachment_context_parent_event_id(
+    room_id: str, event_id: str | None
+) -> bool:
     parent_event_id = str(event_id or "").strip()
     if not parent_event_id:
         return False
@@ -1282,14 +1479,18 @@ def _write_matrix_attachment_context_parent_event_id(room_id: str, event_id: str
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
-        tmp.write_text(json.dumps(data, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+        tmp.write_text(
+            json.dumps(data, ensure_ascii=False, sort_keys=True), encoding="utf-8"
+        )
         tmp.replace(path)
     except OSError:
         return False
     return True
 
 
-def _artifact_publish_result(source_path: str, filename: str = "", parent_event_id: str = "") -> dict[str, Any]:
+def _artifact_publish_result(
+    source_path: str, filename: str = "", parent_event_id: str = ""
+) -> dict[str, Any]:
     return {
         "sourcePath": source_path,
         "filename": filename,
@@ -1316,7 +1517,9 @@ def _shared_dir_candidates() -> list[Path]:
     return candidates
 
 
-def _artifact_is_under_runtime_shared(workspace: Path, local_path: Path, normalized: str) -> bool:
+def _artifact_is_under_runtime_shared(
+    workspace: Path, local_path: Path, normalized: str
+) -> bool:
     if not _path_is_under(normalized, "shared"):
         return False
     candidates = _shared_dir_candidates()
@@ -1344,7 +1547,9 @@ def _normalize_workspace_artifact_path(raw_path: str) -> tuple[str, bool]:
         raise ValueError("artifact path must be a relative workspace path")
     parts = raw.strip("/").split("/")
     if any(part in {"", ".", ".."} for part in parts):
-        raise ValueError("artifact path must be a relative workspace path without '.', '..', or empty segments")
+        raise ValueError(
+            "artifact path must be a relative workspace path without '.', '..', or empty segments"
+        )
     is_directory = raw.endswith("/")
     normalized = "/".join(parts)
     if is_directory:
@@ -1352,7 +1557,9 @@ def _normalize_workspace_artifact_path(raw_path: str) -> tuple[str, bool]:
     return normalized, is_directory
 
 
-def _resolve_workspace_artifact_path(arguments: dict[str, Any], source_path: str, expected_prefix: str) -> tuple[str, Path]:
+def _resolve_workspace_artifact_path(
+    arguments: dict[str, Any], source_path: str, expected_prefix: str
+) -> tuple[str, Path]:
     normalized, is_directory = _normalize_workspace_artifact_path(source_path)
     if is_directory:
         raise ValueError("artifact path must be a file")
@@ -1422,8 +1629,12 @@ def _artifact_text_has_sensitive_content(path: Path, mimetype: str) -> bool:
     return any(pattern.search(text) for pattern in SENSITIVE_ARTIFACT_TEXT_RE)
 
 
-def _matrix_upload_artifact(homeserver: str, token: str, path: Path, filename: str, mimetype: str) -> str:
-    url = f"{homeserver}/_matrix/media/v3/upload?filename={urllib.parse.quote(filename)}"
+def _matrix_upload_artifact(
+    homeserver: str, token: str, path: Path, filename: str, mimetype: str
+) -> str:
+    url = (
+        f"{homeserver}/_matrix/media/v3/upload?filename={urllib.parse.quote(filename)}"
+    )
     request = urllib.request.Request(
         url,
         data=path.read_bytes(),
@@ -1466,7 +1677,9 @@ def _matrix_send_file_event(
             "event_id": parent_event_id,
         }
     encoded_room_id = urllib.parse.quote(_canonical_room_id(room_id), safe="")
-    txn_id = f"teamharness-file-{os.getpid()}-{int(time.time() * 1000)}-{uuid.uuid4().hex}"
+    txn_id = (
+        f"teamharness-file-{os.getpid()}-{int(time.time() * 1000)}-{uuid.uuid4().hex}"
+    )
     url = f"{homeserver}/_matrix/client/v3/rooms/{encoded_room_id}/send/m.room.message/{txn_id}"
     request = urllib.request.Request(
         url,
@@ -1497,7 +1710,9 @@ def _publish_workspace_artifact(
     parent_event_id = str(parent_event_id or "").strip()
     result = _artifact_publish_result(str(source_path), filename, parent_event_id)
     try:
-        normalized, path = _resolve_workspace_artifact_path(arguments, str(source_path), expected_prefix)
+        normalized, path = _resolve_workspace_artifact_path(
+            arguments, str(source_path), expected_prefix
+        )
         result["sourcePath"] = normalized
     except ValueError as exc:
         result["status"] = "failed"
@@ -1513,7 +1728,9 @@ def _publish_workspace_artifact(
         result["error"] = "artifact path must be a file"
         return result
 
-    if SENSITIVE_ARTIFACT_NAME_RE.search(result["sourcePath"]) or SENSITIVE_ARTIFACT_NAME_RE.search(filename):
+    if SENSITIVE_ARTIFACT_NAME_RE.search(
+        result["sourcePath"]
+    ) or SENSITIVE_ARTIFACT_NAME_RE.search(filename):
         result["status"] = "failed"
         result["error"] = "artifact appears sensitive and was not published"
         return result
@@ -1600,7 +1817,12 @@ def _artifact_room_id(arguments: dict[str, Any]) -> str:
 def _artifact(arguments: dict[str, Any]) -> dict[str, Any]:
     action = str(arguments.get("action") or "publish_file").strip()
     if action != "publish_file":
-        return {"ok": False, "tool": "artifact", "action": action, "error": f"unsupported action: {action}"}
+        return {
+            "ok": False,
+            "tool": "artifact",
+            "action": action,
+            "error": f"unsupported action: {action}",
+        }
     source_path = str(
         arguments.get("path")
         or arguments.get("sourcePath")
@@ -1609,18 +1831,27 @@ def _artifact(arguments: dict[str, Any]) -> dict[str, Any]:
         or ""
     ).strip()
     if not source_path:
-        return {"ok": False, "tool": "artifact", "action": action, "error": "path is required"}
-    filename = str(arguments.get("filename") or arguments.get("displayName") or arguments.get("display_name") or "").strip()
+        return {
+            "ok": False,
+            "tool": "artifact",
+            "action": action,
+            "error": "path is required",
+        }
+    filename = str(
+        arguments.get("filename")
+        or arguments.get("displayName")
+        or arguments.get("display_name")
+        or ""
+    ).strip()
     if not filename:
         filename = Path(source_path.rstrip("/")).name or "artifact"
     try:
         room_id = _artifact_room_id(arguments)
     except ValueError as exc:
         return {"ok": False, "tool": "artifact", "action": action, "error": str(exc)}
-    parent_event_id = (
-        _attachment_parent_event_id(arguments)
-        or _matrix_attachment_context_parent_event_id(room_id)
-    )
+    parent_event_id = _attachment_parent_event_id(
+        arguments
+    ) or _matrix_attachment_context_parent_event_id(room_id)
     artifact = _publish_workspace_artifact(
         arguments,
         room_id=room_id,
@@ -1638,7 +1869,9 @@ def _artifact(arguments: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _task_artifact_filename(task_id: str, source_path: str, result_artifact: bool = False) -> str:
+def _task_artifact_filename(
+    task_id: str, source_path: str, result_artifact: bool = False
+) -> str:
     if result_artifact:
         suffix = Path(source_path).suffix or ".md"
         return f"{task_id}-result{suffix}"
@@ -1658,9 +1891,16 @@ def _publish_task_artifacts(
     result_source = f"{expected_prefix}/result.md"
     artifacts: list[tuple[str, str]] = []
     try:
-        _normalized_result, result_path = _resolve_workspace_artifact_path(arguments, result_source, expected_prefix)
+        _normalized_result, result_path = _resolve_workspace_artifact_path(
+            arguments, result_source, expected_prefix
+        )
         if result_path.is_file():
-            artifacts.append((result_source, _task_artifact_filename(task_id, "result.md", result_artifact=True)))
+            artifacts.append(
+                (
+                    result_source,
+                    _task_artifact_filename(task_id, "result.md", result_artifact=True),
+                )
+            )
     except ValueError:
         pass
     seen = {source for source, _filename in artifacts}
@@ -1691,7 +1931,11 @@ def _publish_task_artifacts(
 
 
 def _project_artifact_room(project: dict[str, Any], task: dict[str, Any]) -> str:
-    reply_route = project.get("reply_route") if isinstance(project.get("reply_route"), dict) else {}
+    reply_route = (
+        project.get("reply_route")
+        if isinstance(project.get("reply_route"), dict)
+        else {}
+    )
     if str(reply_route.get("channel") or "").strip().lower() == "matrix":
         target_session = str(reply_route.get("target_session") or "").strip()
         if target_session:
@@ -1731,7 +1975,9 @@ def _matrix_user_id() -> str:
     if explicit:
         return explicit
     member = _section(_load_runtime_config(), "member")
-    matrix_user_id = str(member.get("matrixUserId") or member.get("matrix_user_id") or "").strip()
+    matrix_user_id = str(
+        member.get("matrixUserId") or member.get("matrix_user_id") or ""
+    ).strip()
     if matrix_user_id:
         return matrix_user_id
     name = os.getenv("AGENTTEAMS_WORKER_NAME", "").strip()
@@ -1772,10 +2018,17 @@ def _roomflow_room_meta() -> dict[str, Any]:
         meta["teamName"] = team_name
 
     admin = _section(team, "admin")
-    admin_user_id = str(admin.get("matrixUserId") or admin.get("matrix_user_id") or "").strip()
+    admin_user_id = str(
+        admin.get("matrixUserId") or admin.get("matrix_user_id") or ""
+    ).strip()
     if admin_user_id:
         admin_meta: dict[str, Any] = {"userId": admin_user_id}
-        admin_name = str(admin.get("name") or admin.get("runtimeName") or admin.get("runtime_name") or "").strip()
+        admin_name = str(
+            admin.get("name")
+            or admin.get("runtimeName")
+            or admin.get("runtime_name")
+            or ""
+        ).strip()
         if admin_name:
             admin_meta["name"] = admin_name
         meta["teamAdmin"] = admin_meta
@@ -1787,11 +2040,18 @@ def _roomflow_room_meta() -> dict[str, Any]:
         for member in members:
             if not isinstance(member, dict):
                 continue
-            user_id = str(member.get("matrixUserId") or member.get("matrix_user_id") or "").strip()
+            user_id = str(
+                member.get("matrixUserId") or member.get("matrix_user_id") or ""
+            ).strip()
             if not user_id:
                 continue
             role = str(member.get("role") or "").strip().lower().replace("_", "-")
-            display_name = str(member.get("name") or member.get("runtimeName") or member.get("runtime_name") or "").strip()
+            display_name = str(
+                member.get("name")
+                or member.get("runtimeName")
+                or member.get("runtime_name")
+                or ""
+            ).strip()
             if role in {"team-leader", "teamleader", "leader"}:
                 if "leaderWorker" not in meta:
                     leader_meta: dict[str, Any] = {"userId": user_id}
@@ -1851,7 +2111,12 @@ def _roomflow(arguments: dict[str, Any]) -> dict[str, Any]:
         )
     if action == "archive_room":
         return _archive_room(arguments, payload)
-    return {"ok": False, "tool": "roomflow", "action": action, "error": f"unsupported action: {action}"}
+    return {
+        "ok": False,
+        "tool": "roomflow",
+        "action": action,
+        "error": f"unsupported action: {action}",
+    }
 
 
 def _task_room_name(value: Any) -> str:
@@ -1864,23 +2129,50 @@ def _task_room_name(value: Any) -> str:
     return f"TASK\uff1a{name}" if name else ""
 
 
-def _create_task_room(arguments: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+def _create_task_room(
+    arguments: dict[str, Any], payload: dict[str, Any]
+) -> dict[str, Any]:
     try:
-        raw_project_id = payload.get("projectId") or payload.get("project_id") or payload.get("taskId")
+        raw_project_id = (
+            payload.get("projectId")
+            or payload.get("project_id")
+            or payload.get("taskId")
+        )
         project_id = _safe_id(raw_project_id, "projectId")
     except ValueError as exc:
-        return {"ok": False, "tool": "roomflow", "action": "create_task_room", "error": str(exc)}
+        return {
+            "ok": False,
+            "tool": "roomflow",
+            "action": "create_task_room",
+            "error": str(exc),
+        }
     task_id = project_id
     name = _task_room_name(project_id)
     if not name:
-        return {"ok": False, "tool": "roomflow", "action": "create_task_room", "error": "projectId is required"}
+        return {
+            "ok": False,
+            "tool": "roomflow",
+            "action": "create_task_room",
+            "error": "projectId is required",
+        }
     source = str(payload.get("source") or "").strip()
     topic = str(payload.get("topic") or "").strip()
     if not topic:
         suffix = f" [source: {source}]" if source else ""
         topic = f"Task room for {task_id}{suffix}"
-    invite = _string_list(payload.get("invite") if "invite" in payload else arguments.get("invite"))
-    admin = str(payload.get("admin") or payload.get("adminUser") or payload.get("admin_user") or _runtime_team_admin_user_id()).strip()
+    invite = _string_list(
+        payload.get("invite") if "invite" in payload else arguments.get("invite")
+    )
+    auto_invited_workers: list[str] = []
+    if not invite:
+        auto_invited_workers = _runtime_team_worker_user_ids()
+        invite.extend(auto_invited_workers)
+    admin = str(
+        payload.get("admin")
+        or payload.get("adminUser")
+        or payload.get("admin_user")
+        or _runtime_team_admin_user_id()
+    ).strip()
     if admin and admin not in invite:
         invite.append(admin)
 
@@ -1901,7 +2193,12 @@ def _create_task_room(arguments: dict[str, Any], payload: dict[str, Any]) -> dic
         body["power_level_content_override"] = {"users": power_users}
     binding = _roomflow_project_room_binding(arguments, payload, project_id)
     if binding.get("error"):
-        return {"ok": False, "tool": "roomflow", "action": "create_task_room", "error": binding["error"]}
+        return {
+            "ok": False,
+            "tool": "roomflow",
+            "action": "create_task_room",
+            "error": binding["error"],
+        }
     room_meta = _roomflow_room_meta()
 
     base: dict[str, Any] = {
@@ -1922,6 +2219,8 @@ def _create_task_room(arguments: dict[str, Any], payload: dict[str, Any]) -> dic
         base["sourceRoomId"] = binding["sourceRoomId"]
     if binding.get("sender"):
         base["sender"] = binding["sender"]
+    if auto_invited_workers:
+        base["autoInvitedTeamWorkers"] = auto_invited_workers
     existing_room_id = _bound_room_id(binding)
     if existing_room_id:
         base["roomId"] = existing_room_id
@@ -1934,12 +2233,27 @@ def _create_task_room(arguments: dict[str, Any], payload: dict[str, Any]) -> dic
             _ensure_matrix_room_members(existing_room_id, invite)
             _write_matrix_room_meta(existing_room_id, room_meta)
         except ValueError as exc:
-            return {"ok": False, "tool": "roomflow", "action": "create_task_room", "error": str(exc)}
+            return {
+                "ok": False,
+                "tool": "roomflow",
+                "action": "create_task_room",
+                "error": str(exc),
+            }
         except urllib.error.HTTPError as exc:
             error = exc.read().decode("utf-8", errors="replace")[:200]
-            return {"ok": False, "tool": "roomflow", "action": "create_task_room", "error": f"Matrix API error: HTTP {exc.code}: {error}"}
+            return {
+                "ok": False,
+                "tool": "roomflow",
+                "action": "create_task_room",
+                "error": f"Matrix API error: HTTP {exc.code}: {error}",
+            }
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
-            return {"ok": False, "tool": "roomflow", "action": "create_task_room", "error": f"Matrix API error: {exc}"}
+            return {
+                "ok": False,
+                "tool": "roomflow",
+                "action": "create_task_room",
+                "error": f"Matrix API error: {exc}",
+            }
         return base
 
     if arguments.get("dryRun"):
@@ -1949,7 +2263,12 @@ def _create_task_room(arguments: dict[str, Any], payload: dict[str, Any]) -> dic
     try:
         homeserver, token = _matrix_env("roomflow")
     except ValueError as exc:
-        return {"ok": False, "tool": "roomflow", "action": "create_task_room", "error": str(exc)}
+        return {
+            "ok": False,
+            "tool": "roomflow",
+            "action": "create_task_room",
+            "error": str(exc),
+        }
     request = urllib.request.Request(
         f"{homeserver}/_matrix/client/v3/createRoom",
         data=json.dumps(body).encode("utf-8"),
@@ -1964,26 +2283,54 @@ def _create_task_room(arguments: dict[str, Any], payload: dict[str, Any]) -> dic
             data = json.loads(response.read().decode("utf-8") or "{}")
     except urllib.error.HTTPError as exc:
         error = exc.read().decode("utf-8", errors="replace")[:200]
-        return {"ok": False, "tool": "roomflow", "action": "create_task_room", "error": f"Matrix API error: HTTP {exc.code}: {error}"}
+        return {
+            "ok": False,
+            "tool": "roomflow",
+            "action": "create_task_room",
+            "error": f"Matrix API error: HTTP {exc.code}: {error}",
+        }
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        return {"ok": False, "tool": "roomflow", "action": "create_task_room", "error": f"Matrix API error: {exc}"}
+        return {
+            "ok": False,
+            "tool": "roomflow",
+            "action": "create_task_room",
+            "error": f"Matrix API error: {exc}",
+        }
     room_id = str(data.get("room_id") or "")
     if not room_id:
-        return {"ok": False, "tool": "roomflow", "action": "create_task_room", "error": "Matrix createRoom response missing room_id", "response": data}
+        return {
+            "ok": False,
+            "tool": "roomflow",
+            "action": "create_task_room",
+            "error": "Matrix createRoom response missing room_id",
+            "response": data,
+        }
     base["roomId"] = room_id
     base["target"] = f"room:{room_id}"
     try:
         _write_matrix_room_meta(room_id, room_meta)
     except urllib.error.HTTPError as exc:
         error = exc.read().decode("utf-8", errors="replace")[:200]
-        return {"ok": False, "tool": "roomflow", "action": "create_task_room", "error": f"Matrix API error: HTTP {exc.code}: {error}"}
+        return {
+            "ok": False,
+            "tool": "roomflow",
+            "action": "create_task_room",
+            "error": f"Matrix API error: HTTP {exc.code}: {error}",
+        }
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        return {"ok": False, "tool": "roomflow", "action": "create_task_room", "error": f"Matrix API error: {exc}"}
+        return {
+            "ok": False,
+            "tool": "roomflow",
+            "action": "create_task_room",
+            "error": f"Matrix API error: {exc}",
+        }
     _write_roomflow_project_room_binding(binding, room_id, base)
     return base
 
 
-def _roomflow_project_room_binding(arguments: dict[str, Any], payload: dict[str, Any], project_id: str) -> dict[str, Any]:
+def _roomflow_project_room_binding(
+    arguments: dict[str, Any], payload: dict[str, Any], project_id: str
+) -> dict[str, Any]:
     source, source_room_id = _external_source_room_ref(payload)
     sender = _external_sender_ref(payload)
     project_room_key = f"project:{project_id}"
@@ -1999,7 +2346,13 @@ def _roomflow_project_room_binding(arguments: dict[str, Any], payload: dict[str,
     if not workspace_dir:
         return binding
     digest = hashlib.sha256(project_room_key.encode("utf-8")).hexdigest()[:16]
-    path = workspace_dir / "shared" / "roomflow" / "project-rooms" / f"{project_id}-{digest}.json"
+    path = (
+        workspace_dir
+        / "shared"
+        / "roomflow"
+        / "project-rooms"
+        / f"{project_id}-{digest}.json"
+    )
     record = _read_json(path)
     binding["path"] = path
     binding["record"] = record
@@ -2010,7 +2363,9 @@ def _external_source_room_ref(payload: dict[str, Any]) -> tuple[str, str]:
     source = str(payload.get("source") or "").strip().lower()
     if not source or source == "matrix":
         return "", ""
-    return source, str(payload.get("sourceRoomId") or payload.get("source_room_id") or "").strip()
+    return source, str(
+        payload.get("sourceRoomId") or payload.get("source_room_id") or ""
+    ).strip()
 
 
 def _external_sender_ref(payload: dict[str, Any]) -> str:
@@ -2045,11 +2400,15 @@ def _bound_room_id(binding: dict[str, Any]) -> str:
     return str(record.get("roomId") or record.get("room_id") or "").strip()
 
 
-def _write_roomflow_project_room_binding(binding: dict[str, Any], room_id: str, base: dict[str, Any]) -> None:
+def _write_roomflow_project_room_binding(
+    binding: dict[str, Any], room_id: str, base: dict[str, Any]
+) -> None:
     path = binding.get("path")
     if not isinstance(path, Path):
         return
-    record = dict(binding.get("record") if isinstance(binding.get("record"), dict) else {})
+    record = dict(
+        binding.get("record") if isinstance(binding.get("record"), dict) else {}
+    )
     record.update(
         {
             "projectId": binding.get("projectId"),
@@ -2099,7 +2458,12 @@ def _list_rooms(arguments: dict[str, Any]) -> dict[str, Any]:
     try:
         homeserver, token = _matrix_env("roomflow")
     except ValueError as exc:
-        return {"ok": False, "tool": "roomflow", "action": "list_rooms", "error": str(exc)}
+        return {
+            "ok": False,
+            "tool": "roomflow",
+            "action": "list_rooms",
+            "error": str(exc),
+        }
     request = urllib.request.Request(
         f"{homeserver}/_matrix/client/v3/joined_rooms",
         headers={"Authorization": f"Bearer {token}"},
@@ -2110,29 +2474,70 @@ def _list_rooms(arguments: dict[str, Any]) -> dict[str, Any]:
             data = json.loads(response.read().decode("utf-8") or "{}")
     except urllib.error.HTTPError as exc:
         error = exc.read().decode("utf-8", errors="replace")[:200]
-        return {"ok": False, "tool": "roomflow", "action": "list_rooms", "error": f"Matrix API error: HTTP {exc.code}: {error}"}
+        return {
+            "ok": False,
+            "tool": "roomflow",
+            "action": "list_rooms",
+            "error": f"Matrix API error: HTTP {exc.code}: {error}",
+        }
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        return {"ok": False, "tool": "roomflow", "action": "list_rooms", "error": f"Matrix API error: {exc}"}
-    rooms = data.get("joined_rooms") if isinstance(data.get("joined_rooms"), list) else []
-    return {"ok": True, "tool": "roomflow", "action": "list_rooms", "rooms": rooms, "count": len(rooms)}
+        return {
+            "ok": False,
+            "tool": "roomflow",
+            "action": "list_rooms",
+            "error": f"Matrix API error: {exc}",
+        }
+    rooms = (
+        data.get("joined_rooms") if isinstance(data.get("joined_rooms"), list) else []
+    )
+    return {
+        "ok": True,
+        "tool": "roomflow",
+        "action": "list_rooms",
+        "rooms": rooms,
+        "count": len(rooms),
+    }
 
 
 def _archive_room(arguments: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
-    target = str(payload.get("roomId") or payload.get("room_id") or arguments.get("target") or "").strip()
+    target = str(
+        payload.get("roomId") or payload.get("room_id") or arguments.get("target") or ""
+    ).strip()
     try:
         target_kind, room_id = _matrix_target(target)
     except ValueError as exc:
-        return {"ok": False, "tool": "roomflow", "action": "archive_room", "error": str(exc)}
+        return {
+            "ok": False,
+            "tool": "roomflow",
+            "action": "archive_room",
+            "error": str(exc),
+        }
     if target_kind != "room":
-        return {"ok": False, "tool": "roomflow", "action": "archive_room", "error": "archive_room requires a Matrix room target"}
-    base = {"ok": True, "tool": "roomflow", "action": "archive_room", "roomId": room_id, "target": f"room:{room_id}"}
+        return {
+            "ok": False,
+            "tool": "roomflow",
+            "action": "archive_room",
+            "error": "archive_room requires a Matrix room target",
+        }
+    base = {
+        "ok": True,
+        "tool": "roomflow",
+        "action": "archive_room",
+        "roomId": room_id,
+        "target": f"room:{room_id}",
+    }
     if arguments.get("dryRun"):
         base["dryRun"] = True
         return base
     try:
         homeserver, token = _matrix_env("roomflow")
     except ValueError as exc:
-        return {"ok": False, "tool": "roomflow", "action": "archive_room", "error": str(exc)}
+        return {
+            "ok": False,
+            "tool": "roomflow",
+            "action": "archive_room",
+            "error": str(exc),
+        }
     encoded_room = urllib.parse.quote(room_id, safe="")
     request = urllib.request.Request(
         f"{homeserver}/_matrix/client/v3/rooms/{encoded_room}/leave",
@@ -2151,9 +2556,19 @@ def _archive_room(arguments: dict[str, Any], payload: dict[str, Any]) -> dict[st
         if "M_NOT_FOUND" in error:
             base["note"] = "already left"
             return base
-        return {"ok": False, "tool": "roomflow", "action": "archive_room", "error": f"Matrix API error: HTTP {exc.code}: {error}"}
+        return {
+            "ok": False,
+            "tool": "roomflow",
+            "action": "archive_room",
+            "error": f"Matrix API error: HTTP {exc.code}: {error}",
+        }
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        return {"ok": False, "tool": "roomflow", "action": "archive_room", "error": f"Matrix API error: {exc}"}
+        return {
+            "ok": False,
+            "tool": "roomflow",
+            "action": "archive_room",
+            "error": f"Matrix API error: {exc}",
+        }
     base["archived"] = True
     return base
 
@@ -2232,7 +2647,9 @@ def _yaml_scalar(value: str) -> Any:
         return True
     if value in {"false", "False", "FALSE"}:
         return False
-    if (value.startswith("'") and value.endswith("'")) or (value.startswith('"') and value.endswith('"')):
+    if (value.startswith("'") and value.endswith("'")) or (
+        value.startswith('"') and value.endswith('"')
+    ):
         return value[1:-1]
     return value
 
@@ -2246,21 +2663,55 @@ def _runtime_team_admin_user_id() -> str:
     config = _load_runtime_config()
     team = _section(config, "team")
     admin = _section(team, "admin")
-    matrix_user_id = str(admin.get("matrixUserId") or admin.get("matrix_user_id") or "").strip()
+    matrix_user_id = str(
+        admin.get("matrixUserId") or admin.get("matrix_user_id") or ""
+    ).strip()
     if matrix_user_id:
         return matrix_user_id
     return _runtime_leader_dm_admin_user_id(config)
 
 
+def _runtime_team_worker_user_ids() -> list[str]:
+    """Return the current Team's Worker Matrix IDs as a safe invite fallback."""
+    team = _section(_load_runtime_config(), "team")
+    members = team.get("members")
+    if not isinstance(members, list):
+        return []
+    worker_ids: list[str] = []
+    for member in members:
+        if not isinstance(member, dict):
+            continue
+        role = str(member.get("role") or "").strip().lower().replace("_", "-")
+        if role != "worker":
+            continue
+        user_id = str(
+            member.get("matrixUserId") or member.get("matrix_user_id") or "",
+        ).strip()
+        if user_id and user_id not in worker_ids:
+            worker_ids.append(user_id)
+    return worker_ids
+
+
 def _runtime_leader_dm_admin_user_id(config: dict[str, Any]) -> str:
     team = _section(config, "team")
-    room_id = str(team.get("leaderDmRoomId") or team.get("leader_dm_room_id") or "").strip()
+    room_id = str(
+        team.get("leaderDmRoomId") or team.get("leader_dm_room_id") or ""
+    ).strip()
     if not room_id:
         return ""
-    leader_id = str(_section(config, "member").get("matrixUserId") or _matrix_user_id()).strip()
+    leader_id = str(
+        _section(config, "member").get("matrixUserId") or _matrix_user_id()
+    ).strip()
     try:
         members = _matrix_room_member_user_ids(room_id)
-    except (ValueError, urllib.error.HTTPError, urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError):
+    except (
+        ValueError,
+        urllib.error.HTTPError,
+        urllib.error.URLError,
+        TimeoutError,
+        OSError,
+        json.JSONDecodeError,
+    ):
         return ""
     for user_id in members:
         if user_id and user_id != leader_id:
@@ -2333,6 +2784,69 @@ def _mc_alias_configured(env: dict[str, str]) -> bool:
     return completed.returncode == 0 and f"{MC_ALIAS}" in output
 
 
+def _controller_sts_mc_host(
+    env: dict[str, str],
+) -> tuple[str | None, str | None]:
+    controller_url = env.get("AGENTTEAMS_CONTROLLER_URL", "").strip()
+    if not controller_url:
+        return None, None
+
+    bearer = env.get("AGENTTEAMS_AUTH_TOKEN", "").strip()
+    token_file = env.get("AGENTTEAMS_AUTH_TOKEN_FILE", "").strip()
+    if not bearer and token_file:
+        try:
+            bearer = Path(token_file).read_text(encoding="utf-8").strip()
+        except OSError as exc:
+            return None, (
+                f"controller STS token file is unavailable: {type(exc).__name__}"
+            )
+    if not bearer:
+        return None, "controller STS bearer token is unavailable"
+
+    request = urllib.request.Request(
+        f"{controller_url.rstrip('/')}/api/v1/credentials/sts",
+        method="POST",
+        headers={"Authorization": f"Bearer {bearer}"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            payload = json.loads(response.read().decode("utf-8") or "{}")
+    except urllib.error.HTTPError as exc:
+        return None, f"controller STS request failed with HTTP {exc.code}"
+    except (
+        urllib.error.URLError,
+        TimeoutError,
+        OSError,
+        json.JSONDecodeError,
+    ) as exc:
+        return None, f"controller STS request failed: {type(exc).__name__}"
+
+    if not isinstance(payload, dict):
+        return None, "controller STS response is not an object"
+    access_key = str(payload.get("access_key_id") or "").strip()
+    secret_key = str(payload.get("access_key_secret") or "").strip()
+    security_token = str(payload.get("security_token") or "").strip()
+    endpoint = str(payload.get("oss_endpoint") or "").strip()
+    if not access_key or not secret_key or not endpoint:
+        return None, "controller STS response is incomplete"
+
+    if not endpoint.startswith(("http://", "https://")):
+        endpoint = f"https://{endpoint}"
+    parsed = urllib.parse.urlsplit(endpoint)
+    credentials = f"{access_key}:{secret_key}"
+    if security_token:
+        credentials = f"{credentials}:{security_token}"
+    return urllib.parse.urlunsplit(
+        (
+            parsed.scheme,
+            f"{credentials}@{parsed.netloc}",
+            parsed.path,
+            parsed.query,
+            parsed.fragment,
+        ),
+    ), None
+
+
 def _filesync_mc_env(remote: str) -> tuple[dict[str, str], str | None]:
     env = dict(os.environ)
     if not _remote_uses_mc_alias(remote):
@@ -2349,12 +2863,20 @@ def _filesync_mc_env(remote: str) -> tuple[dict[str, str], str | None]:
         env[alias_env] = _mc_host_url(endpoint, access_key, secret_key)
         return env, None
 
+    sts_host, sts_error = _controller_sts_mc_host(env)
+    if sts_host:
+        env[alias_env] = sts_host
+        return env, None
+
     if _mc_alias_configured(env):
         return env, None
-    return env, (
+    error = (
         f"storage alias {MC_ALIAS} is not configured; missing "
         "AGENTTEAMS_FS_ENDPOINT/AGENTTEAMS_FS_ACCESS_KEY/AGENTTEAMS_FS_SECRET_KEY"
     )
+    if sts_error:
+        error = f"{error}; {sts_error}"
+    return env, error
 
 
 def _with_storage_root(prefix: str) -> str:
@@ -2371,13 +2893,16 @@ def _with_storage_root(prefix: str) -> str:
 
 def _default_workspace_dir() -> str:
     """Derive workspace dir from environment (set by qwenpaw-worker / copaw-worker)."""
+    shared_dir = (
+        os.getenv("TEAMHARNESS_SHARED_DIR", "").strip()
+        or os.getenv("AGENTTEAMS_SHARED_DIR", "").strip()
+    )
+    if shared_dir:
+        return str(Path(shared_dir).parent)
     for env_key in ("QWENPAW_WORKING_DIR", "COPAW_WORKING_DIR"):
         working_dir = os.getenv(env_key, "").strip()
         if working_dir:
             return str(Path(working_dir) / "workspaces" / "default")
-    shared_dir = os.getenv("TEAMHARNESS_SHARED_DIR", "").strip() or os.getenv("AGENTTEAMS_SHARED_DIR", "").strip()
-    if shared_dir:
-        return str(Path(shared_dir).parent)
     return ""
 
 
@@ -2448,7 +2973,9 @@ def _normalize_shared_path(raw_path: str, action: str) -> tuple[str, bool]:
         raise ValueError("path must be a relative shared path")
     parts = raw.strip("/").split("/")
     if any(part in {"", ".", ".."} for part in parts):
-        raise ValueError("path must be a relative shared path without '.', '..', or empty segments")
+        raise ValueError(
+            "path must be a relative shared path without '.', '..', or empty segments"
+        )
     if parts[0] not in {"shared", "global-shared"}:
         raise ValueError("path must start with shared/ or global-shared/")
     if parts[0] == "shared" and action in {"push", "pull"} and len(parts) < 3:
@@ -2470,18 +2997,27 @@ def _resolve_filesync(arguments: dict[str, Any]) -> tuple[str, str, Path, str, b
     action = str(arguments.get("action") or "").strip()
     if action not in {"pull", "push", "list", "stat"}:
         raise ValueError("action is required; use pull, push, stat, or list")
-    normalized, is_directory = _normalize_shared_path(str(arguments.get("path") or ""), action)
+    normalized, is_directory = _normalize_shared_path(
+        str(arguments.get("path") or ""), action
+    )
     parts = normalized.strip("/").split("/")
     kind = parts[0]
     if kind == "global-shared" and action == "push":
         raise ValueError("global-shared is read-only for TeamHarness filesync")
 
-    storage = arguments.get("storage") if isinstance(arguments.get("storage"), dict) else {}
-    shared_prefix = str(storage.get("sharedPrefix") or "").strip() or _default_shared_prefix()
+    storage = (
+        arguments.get("storage") if isinstance(arguments.get("storage"), dict) else {}
+    )
+    shared_prefix = (
+        str(storage.get("sharedPrefix") or "").strip() or _default_shared_prefix()
+    )
     shared_root = _remote_root(shared_prefix)
     global_root = ""
     if kind == "global-shared":
-        global_shared_prefix = str(storage.get("globalSharedPrefix") or "").strip() or _default_global_shared_prefix()
+        global_shared_prefix = (
+            str(storage.get("globalSharedPrefix") or "").strip()
+            or _default_global_shared_prefix()
+        )
         global_root = _remote_root(global_shared_prefix)
     workspace = _workspace_dir(arguments)
     local = workspace / Path(*parts)
@@ -2564,14 +3100,18 @@ def _filesync(arguments: dict[str, Any]) -> dict[str, Any]:
             "returncode": completed.returncode,
         }
     if action == "list":
-        base["entries"] = [line for line in completed.stdout.splitlines() if line.strip()]
+        base["entries"] = [
+            line for line in completed.stdout.splitlines() if line.strip()
+        ]
     if action == "stat":
         base["exists"] = True
     return base
 
 
 def _filesync_command_error(completed: subprocess.CompletedProcess[str]) -> str:
-    output = "\n".join(part.strip() for part in (completed.stderr, completed.stdout) if part.strip())
+    output = "\n".join(
+        part.strip() for part in (completed.stderr, completed.stdout) if part.strip()
+    )
     if completed.returncode != 0:
         return output or "filesync command failed"
     if "<ERROR>" in output or "Access Denied" in output:
@@ -2598,7 +3138,15 @@ def _payload(arguments: dict[str, Any]) -> dict[str, Any]:
         "taskId": ("taskId", "task_id"),
         "roomId": ("roomId", "room_id"),
         "sourceRoomId": ("sourceRoomId", "source_room_id"),
-        "sender": ("sender", "senderId", "sender_id", "senderUserId", "sender_user_id", "sourceUserId", "source_user_id"),
+        "sender": (
+            "sender",
+            "senderId",
+            "sender_id",
+            "senderUserId",
+            "sender_user_id",
+            "sourceUserId",
+            "source_user_id",
+        ),
         "assignedTo": ("assignedTo", "assigned_to"),
         "dependsOn": ("dependsOn", "depends_on"),
         "replacementTaskId": ("replacementTaskId", "replacement_task_id"),
@@ -2613,10 +3161,27 @@ def _payload(arguments: dict[str, Any]) -> dict[str, Any]:
                 break
 
     for key in (
-        "title", "name", "source", "requester", "spec", "status", "summary", "notes", "topic", "admin",
-        "invite", "replyRoute", "reply_route", "accepted", "resultStatus", "result_status", "reason",
-        "cancelReason", "cancel_reason",
-        "targetUser", "target_user",
+        "title",
+        "name",
+        "source",
+        "requester",
+        "spec",
+        "status",
+        "summary",
+        "notes",
+        "topic",
+        "admin",
+        "invite",
+        "replyRoute",
+        "reply_route",
+        "accepted",
+        "resultStatus",
+        "result_status",
+        "reason",
+        "cancelReason",
+        "cancel_reason",
+        "targetUser",
+        "target_user",
     ):
         if key not in data and arguments.get(key) is not None:
             data[key] = arguments[key]
@@ -2673,8 +3238,20 @@ def _project_id_from_payload(arguments: dict[str, Any], payload: dict[str, Any])
 def _normalize_reply_route(raw: Any) -> dict[str, str]:
     route = raw if isinstance(raw, dict) else {}
     channel = str(route.get("channel") or "").strip()
-    target_user = str(route.get("targetUser") or route.get("target_user") or route.get("userId") or route.get("user_id") or "").strip()
-    target_session = str(route.get("targetSession") or route.get("target_session") or route.get("sessionId") or route.get("session_id") or "").strip()
+    target_user = str(
+        route.get("targetUser")
+        or route.get("target_user")
+        or route.get("userId")
+        or route.get("user_id")
+        or ""
+    ).strip()
+    target_session = str(
+        route.get("targetSession")
+        or route.get("target_session")
+        or route.get("sessionId")
+        or route.get("session_id")
+        or ""
+    ).strip()
     if channel.lower() == "matrix":
         target = str(
             route.get("target")
@@ -2734,8 +3311,12 @@ def _reply_route_from_requester(requester: Any) -> dict[str, str]:
     }
 
 
-def _source_room_id_from_payload(payload: dict[str, Any], reply_route: dict[str, str] | None = None) -> str:
-    source_room_id = str(payload.get("sourceRoomId") or payload.get("source_room_id") or "").strip()
+def _source_room_id_from_payload(
+    payload: dict[str, Any], reply_route: dict[str, str] | None = None
+) -> str:
+    source_room_id = str(
+        payload.get("sourceRoomId") or payload.get("source_room_id") or ""
+    ).strip()
     if source_room_id:
         return source_room_id
 
@@ -2759,8 +3340,14 @@ def _canonical_room_id(value: Any) -> str:
 
 
 def _external_requester_channel(project: dict[str, Any]) -> str:
-    reply_route = project.get("reply_route") if isinstance(project.get("reply_route"), dict) else {}
-    channel = str(reply_route.get("channel") or project.get("source") or "").strip().lower()
+    reply_route = (
+        project.get("reply_route")
+        if isinstance(project.get("reply_route"), dict)
+        else {}
+    )
+    channel = (
+        str(reply_route.get("channel") or project.get("source") or "").strip().lower()
+    )
     if channel and channel != "matrix":
         return channel
     requester_route = _reply_route_from_requester(project.get("requester"))
@@ -2782,7 +3369,9 @@ def _validate_assignment_room(project: dict[str, Any], room_id: str) -> None:
         )
 
 
-def _validate_task_redelegation(arguments: dict[str, Any], project: dict[str, Any], task_id: str, room_id: str) -> None:
+def _validate_task_redelegation(
+    arguments: dict[str, Any], project: dict[str, Any], task_id: str, room_id: str
+) -> None:
     if not _external_requester_channel(project):
         return
     existing = _read_json(_task_state_path(arguments, task_id))
@@ -2805,7 +3394,10 @@ def _read_json(path: Path, default: dict[str, Any] | None = None) -> dict[str, A
 
 def _write_json(path: Path, data: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    path.write_text(
+        json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
 
 
 def _project_dir(arguments: dict[str, Any], project_id: str) -> Path:
@@ -2824,7 +3416,176 @@ def _task_state_path(arguments: dict[str, Any], task_id: str) -> Path:
     return _task_dir(arguments, task_id) / "meta.json"
 
 
-def _normalize_task(raw: dict[str, Any], previous: dict[str, Any] | None = None) -> dict[str, Any]:
+def _manager_parent_task_context(
+    arguments: dict[str, Any],
+    project_id: str,
+    project: dict[str, Any] | None = None,
+) -> dict[str, str]:
+    """Resolve a Manager-owned parent task linked to a Team project.
+
+    Manager delegates a Team task into the Team workspace before the Leader
+    creates its internal project.  The parent task and internal project share
+    the same id, while the generated task specification carries the exact
+    completion protocol and Manager Matrix id.  A Leader may initially pull
+    only ``spec.md`` into its shared workspace, so the project request is an
+    authoritative fallback for the Manager user and reply room until the
+    parent ``meta.json`` is pulled.  Requiring the signed protocol text plus
+    matching project routing avoids treating an unrelated same-named task as a
+    Manager parent.
+    """
+    task = _read_json(_task_state_path(arguments, project_id))
+    task_id = str(task.get("task_id") or task.get("taskId") or "").strip()
+    if task and task_id != project_id:
+        return {}
+    spec_path = _task_dir(arguments, project_id) / "spec.md"
+    if not spec_path.is_file():
+        return {}
+    specification = spec_path.read_text(encoding="utf-8")
+    result_path = f"shared/tasks/{project_id}/result.md"
+    if (
+        MANAGER_PARENT_TASK_PROTOCOL_HEADING not in specification
+        or result_path not in specification
+        or f"TASK_COMPLETED: {project_id}" not in specification
+    ):
+        return {}
+    completion_match = re.search(
+        rf"({MATRIX_USER_RE.pattern})\s+TASK_COMPLETED:\s+{re.escape(project_id)}",
+        specification,
+    )
+    if completion_match is None:
+        return {}
+    manager_user_id = completion_match.group(1)
+    room_id = _canonical_room_id(task.get("room_id") or task.get("roomId"))
+    if not MATRIX_ROOM_RE.fullmatch(room_id):
+        project = project if isinstance(project, dict) else {}
+        reply_route = (
+            project.get("reply_route")
+            if isinstance(project.get("reply_route"), dict)
+            else {}
+        )
+        requester = str(project.get("requester") or "").strip()
+        target_user = str(reply_route.get("target_user") or "").strip()
+        if manager_user_id not in {requester, target_user}:
+            return {}
+        room_id = _canonical_room_id(
+            project.get("source_room_id") or reply_route.get("target_session")
+        )
+    if not MATRIX_ROOM_RE.fullmatch(room_id):
+        return {}
+    return {
+        "task_id": project_id,
+        "result_path": result_path,
+        "room_id": room_id,
+        "manager_user_id": manager_user_id,
+    }
+
+
+def _prepare_manager_parent_task_completion(
+    arguments: dict[str, Any],
+    project: dict[str, Any],
+    summary: str,
+) -> dict[str, Any] | None:
+    project_id = str(project.get("project_id") or "").strip()
+    context = _manager_parent_task_context(arguments, project_id, project)
+    if not context:
+        return None
+
+    project_result = _project_dir(arguments, project_id) / "result.md"
+    if not project_result.is_file():
+        raise ValueError(
+            "Manager parent task completion requires "
+            f"shared/projects/{project_id}/result.md"
+        )
+    task = _read_json(_task_state_path(arguments, project_id))
+    if not task:
+        pull_arguments = dict(arguments)
+        pull_arguments.update(
+            {
+                "action": "pull",
+                "path": f"shared/tasks/{project_id}",
+            }
+        )
+        pull_result = _filesync(pull_arguments)
+        if not pull_result.get("ok"):
+            raise ValueError(
+                "Manager parent task metadata pull failed: "
+                f"{pull_result.get('error') or 'unknown filesync error'}"
+            )
+        task = _read_json(_task_state_path(arguments, project_id))
+    if not task:
+        task = {
+            "task_id": project_id,
+            "room_id": context["room_id"],
+            "status": "assigned",
+        }
+    parent_result = _task_dir(arguments, project_id) / "result.md"
+    parent_result.parent.mkdir(parents=True, exist_ok=True)
+    parent_result.write_bytes(project_result.read_bytes())
+    completion_summary = summary.strip()
+    if not completion_summary:
+        for line in project_result.read_text(
+            encoding="utf-8",
+            errors="replace",
+        ).splitlines():
+            match = re.match(r"^\s*SUMMARY\s*:\s*(\S.*)\s*$", line, re.IGNORECASE)
+            if match:
+                completion_summary = match.group(1).strip()
+                break
+    if not completion_summary:
+        completion_summary = f"{project.get('title') or project_id} completed"
+    task.update(
+        {
+            "status": "submitted",
+            "result_status": "SUCCESS",
+            "summary": completion_summary,
+            "deliverables": [context["result_path"]],
+            "result_path": context["result_path"],
+            "submitted_by_role": "team_leader",
+        }
+    )
+    _write_task(arguments, task)
+
+    for path, label in (
+        (context["result_path"], "result"),
+        (f"shared/tasks/{project_id}/meta.json", "metadata"),
+    ):
+        sync_arguments = dict(arguments)
+        sync_arguments.update({"action": "push", "path": path})
+        sync_result = _filesync(sync_arguments)
+        if not sync_result.get("ok"):
+            raise ValueError(
+                f"Manager parent task {label} sync failed: "
+                f"{sync_result.get('error') or 'unknown filesync error'}"
+            )
+    return {
+        **context,
+        "source_path": f"shared/projects/{project_id}/result.md",
+        "summary": completion_summary,
+        "synced": True,
+    }
+
+
+def _notify_manager_parent_task_completion(
+    completion: dict[str, Any],
+    project: dict[str, Any],
+    summary: str,
+) -> dict[str, Any]:
+    task_id = str(completion["task_id"])
+    outcome = (
+        summary.strip()
+        or str(completion.get("summary") or "").strip()
+        or f"{project.get('title') or task_id} completed"
+    )
+    text = (
+        f"{completion['manager_user_id']} TASK_COMPLETED: {task_id} - "
+        f"{outcome}. Result: {completion['result_path']}"
+    )
+    return _matrix_send_text_event(str(completion["room_id"]), text)
+
+
+def _normalize_task(
+    raw: dict[str, Any], previous: dict[str, Any] | None = None
+) -> dict[str, Any]:
     task_id = _safe_id(raw.get("taskId") or raw.get("task_id"), "taskId")
     previous = previous or {}
     status = str(raw.get("status") or previous.get("status") or "planned")
@@ -2833,8 +3594,21 @@ def _normalize_task(raw: dict[str, Any], previous: dict[str, Any] | None = None)
     return {
         "task_id": task_id,
         "title": str(raw.get("title") or previous.get("title") or task_id),
-        "assigned_to": str(raw.get("assignedTo") or raw.get("assigned_to") or previous.get("assigned_to") or ""),
-        "depends_on": [str(item) for item in (raw.get("dependsOn") or raw.get("depends_on") or previous.get("depends_on") or [])],
+        "assigned_to": str(
+            raw.get("assignedTo")
+            or raw.get("assigned_to")
+            or previous.get("assigned_to")
+            or ""
+        ),
+        "depends_on": [
+            str(item)
+            for item in (
+                raw.get("dependsOn")
+                or raw.get("depends_on")
+                or previous.get("depends_on")
+                or []
+            )
+        ],
         "status": status,
     }
 
@@ -2866,7 +3640,9 @@ def _validate_task_graph(tasks: list[dict[str, Any]]) -> None:
         if task_id in visited:
             return
         if task_id in visiting:
-            raise ValueError(f"task dependency cycle detected: {' -> '.join(path + [task_id])}")
+            raise ValueError(
+                f"task dependency cycle detected: {' -> '.join(path + [task_id])}"
+            )
         visiting.add(task_id)
         for dep in deps_by_id.get(task_id, []):
             visit(dep, path + [task_id])
@@ -2935,32 +3711,42 @@ def _write_project_plan(project_dir: Path, project: dict[str, Any]) -> None:
         target_user = str(reply_route.get("target_user") or "").strip()
         target_session = str(reply_route.get("target_session") or "").strip()
         if channel == "matrix" and target_session:
-            target = f"{target_user}/{target_session}" if target_user else target_session
+            target = (
+                f"{target_user}/{target_session}" if target_user else target_session
+            )
             lines.append(f"- Reply Route: `{channel}/{target}`")
         elif channel and target_user and target_session:
             lines.append(f"- Reply Route: `{channel}/{target_user}/{target_session}`")
     loop = project.get("loop") if isinstance(project.get("loop"), dict) else {}
     if plan_type == "loop":
-        lines.extend([
-            f"- Loop Goal: {loop.get('goal') or ''}",
-            f"- Stop Condition: {loop.get('stop_condition') or ''}",
-            f"- Current Iteration: `{loop.get('current_iteration', 0)}` / `{loop.get('max_iterations', 0)}`",
-            f"- Loop Status: `{loop.get('status') or 'running'}`",
-            "",
-            "## Iteration Template",
-            "",
-            str(loop.get("iteration_template") or ""),
-        ])
+        lines.extend(
+            [
+                f"- Loop Goal: {loop.get('goal') or ''}",
+                f"- Stop Condition: {loop.get('stop_condition') or ''}",
+                f"- Current Iteration: `{loop.get('current_iteration', 0)}` / `{loop.get('max_iterations', 0)}`",
+                f"- Loop Status: `{loop.get('status') or 'running'}`",
+                "",
+                "## Iteration Template",
+                "",
+                str(loop.get("iteration_template") or ""),
+            ]
+        )
         tasks = loop.get("tasks", []) if isinstance(loop.get("tasks"), list) else []
     else:
-        tasks = project.get("tasks", []) if isinstance(project.get("tasks"), list) else []
+        tasks = (
+            project.get("tasks", []) if isinstance(project.get("tasks"), list) else []
+        )
     lines.extend(["", "## Tasks"])
     for task in tasks:
         deps = ", ".join(task.get("depends_on", [])) or "none"
         owner = task.get("assigned_to") or "unassigned"
-        lines.append(f"- `{task['task_id']}` {task.get('title')} -> {owner}; deps: {deps}; status: {task.get('status')}")
+        lines.append(
+            f"- `{task['task_id']}` {task.get('title')} -> {owner}; deps: {deps}; status: {task.get('status')}"
+        )
     if plan_type == "loop":
-        history = loop.get("history", []) if isinstance(loop.get("history"), list) else []
+        history = (
+            loop.get("history", []) if isinstance(loop.get("history"), list) else []
+        )
         if history:
             lines.extend(["", "## Loop History"])
             for item in history:
@@ -2990,7 +3776,9 @@ def _ready_nodes(project: dict[str, Any]) -> list[dict[str, Any]]:
     for task in tasks:
         if task.get("status") not in {"planned", "assigned"}:
             continue
-        if all(status_by_id.get(dep) == "completed" for dep in task.get("depends_on", [])):
+        if all(
+            status_by_id.get(dep) == "completed" for dep in task.get("depends_on", [])
+        ):
             ready.append(task)
     return ready
 
@@ -3009,12 +3797,16 @@ def _ready_loop_nodes(project: dict[str, Any]) -> list[dict[str, Any]]:
     for task in tasks:
         if task.get("status") not in {"planned", "assigned"}:
             continue
-        if all(status_by_id.get(dep) == "completed" for dep in task.get("depends_on", [])):
+        if all(
+            status_by_id.get(dep) == "completed" for dep in task.get("depends_on", [])
+        ):
             ready.append(task)
     return ready
 
 
-def _resolve_project(arguments: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+def _resolve_project(
+    arguments: dict[str, Any], payload: dict[str, Any]
+) -> dict[str, Any]:
     task: dict[str, Any] = {}
     project_id_value = payload.get("projectId") or payload.get("project_id")
     task_id_value = payload.get("taskId") or payload.get("task_id")
@@ -3039,7 +3831,8 @@ def _resolve_project(arguments: dict[str, Any], payload: dict[str, Any]) -> dict
         "project": project,
         "planType": plan_type,
         "replyRoute": project.get("reply_route"),
-        "sourceRoomId": project.get("source_room_id") or (task.get("source_room_id") if task else None),
+        "sourceRoomId": project.get("source_room_id")
+        or (task.get("source_room_id") if task else None),
         "readyNodes": ready,
     }
     if task:
@@ -3071,15 +3864,21 @@ def _payload_bool(value: Any, default: bool) -> bool:
     return default
 
 
-def _payload_bool_field(payload: dict[str, Any], names: tuple[str, ...], default: bool) -> bool:
+def _payload_bool_field(
+    payload: dict[str, Any], names: tuple[str, ...], default: bool
+) -> bool:
     for name in names:
         if name in payload:
             return _payload_bool(payload.get(name), default)
     return default
 
 
-def _accept_task_result(arguments: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
-    project_id = _safe_id(payload.get("projectId") or payload.get("project_id"), "projectId")
+def _accept_task_result(
+    arguments: dict[str, Any], payload: dict[str, Any]
+) -> dict[str, Any]:
+    project_id = _safe_id(
+        payload.get("projectId") or payload.get("project_id"), "projectId"
+    )
     task_id = _safe_id(payload.get("taskId") or payload.get("task_id"), "taskId")
     project = _read_json(_project_state_path(arguments, project_id))
     if not project:
@@ -3117,14 +3916,20 @@ def _accept_task_result(arguments: dict[str, Any], payload: dict[str, Any]) -> d
             "report_path": f"shared/projects/{project_id}/result.md",
         }
     else:
-        requester_report = project.get("requester_report") if isinstance(project.get("requester_report"), dict) else {}
+        requester_report = (
+            project.get("requester_report")
+            if isinstance(project.get("requester_report"), dict)
+            else {}
+        )
         if requester_report.get("task_id") == task_id:
             requester_report["pending"] = False
             requester_report["reason"] = f"task_result_{node_status}"
             project["requester_report"] = requester_report
     _write_json(_project_state_path(arguments, project_id), project)
     _write_project_plan(_project_dir(arguments, project_id), project)
-    publish_artifacts = _payload_bool_field(payload, ("publishArtifacts", "publish_artifacts"), False)
+    publish_artifacts = _payload_bool_field(
+        payload, ("publishArtifacts", "publish_artifacts"), False
+    )
     published_artifacts = (
         _publish_project_artifacts(
             arguments,
@@ -3133,10 +3938,18 @@ def _accept_task_result(arguments: dict[str, Any], payload: dict[str, Any]) -> d
             task_id,
             _attachment_parent_event_id(payload, arguments),
         )
-        if node_status == "completed" and publish_artifacts else []
+        if node_status == "completed" and publish_artifacts
+        else []
     )
-    requester_report = project.get("requester_report") if isinstance(project.get("requester_report"), dict) else {}
-    requester_report_pending = requester_report.get("pending") is True and requester_report.get("task_id") == task_id
+    requester_report = (
+        project.get("requester_report")
+        if isinstance(project.get("requester_report"), dict)
+        else {}
+    )
+    requester_report_pending = (
+        requester_report.get("pending") is True
+        and requester_report.get("task_id") == task_id
+    )
     return {
         "ok": True,
         "tool": "projectflow",
@@ -3155,14 +3968,26 @@ def _accept_task_result(arguments: dict[str, Any], payload: dict[str, Any]) -> d
     }
 
 
-def _mark_requester_report_sent(arguments: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
-    project_id = _safe_id(payload.get("projectId") or payload.get("project_id"), "projectId")
+def _mark_requester_report_sent(
+    arguments: dict[str, Any], payload: dict[str, Any]
+) -> dict[str, Any]:
+    project_id = _safe_id(
+        payload.get("projectId") or payload.get("project_id"), "projectId"
+    )
     project = _read_json(_project_state_path(arguments, project_id))
     if not project:
         raise ValueError("project not found")
-    requester_report = project.get("requester_report") if isinstance(project.get("requester_report"), dict) else {}
+    requester_report = (
+        project.get("requester_report")
+        if isinstance(project.get("requester_report"), dict)
+        else {}
+    )
     requester_report["pending"] = False
-    requester_report["sent_at"] = str(payload.get("sentAt") or payload.get("sent_at") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+    requester_report["sent_at"] = str(
+        payload.get("sentAt")
+        or payload.get("sent_at")
+        or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    )
     project["requester_report"] = requester_report
     _write_json(_project_state_path(arguments, project_id), project)
     return {
@@ -3194,7 +4019,11 @@ def _notification_needed(
         target_room = str(task["room_id"])
     elif str(project.get("source_room_id") or ""):
         target_room = str(project["source_room_id"])
-    reply_route = project.get("reply_route") if include_reply_route and isinstance(project.get("reply_route"), dict) else {}
+    reply_route = (
+        project.get("reply_route")
+        if include_reply_route and isinstance(project.get("reply_route"), dict)
+        else {}
+    )
     if not target_room and reply_route:
         target_session = str(reply_route.get("target_session") or "").strip()
         if target_session:
@@ -3227,7 +4056,9 @@ def _projectflow(arguments: dict[str, Any]) -> dict[str, Any]:
                 "status": "active",
                 "tasks": [],
             }
-            reply_route = _normalize_reply_route(payload.get("replyRoute") or payload.get("reply_route"))
+            reply_route = _normalize_reply_route(
+                payload.get("replyRoute") or payload.get("reply_route")
+            )
             if not reply_route:
                 reply_route = _reply_route_from_requester(project["requester"])
             if reply_route:
@@ -3235,6 +4066,11 @@ def _projectflow(arguments: dict[str, Any]) -> dict[str, Any]:
             source_room_id = _source_room_id_from_payload(payload, reply_route)
             if source_room_id:
                 project["source_room_id"] = source_room_id
+            parent_task = _manager_parent_task_context(arguments, project_id, project)
+            if parent_task:
+                project["parent_task"] = parent_task
+                if not source_room_id:
+                    project["source_room_id"] = parent_task["room_id"]
             project_dir = _project_dir(arguments, project_id)
             _write_json(_project_state_path(arguments, project_id), project)
             _write_project_plan(project_dir, project)
@@ -3249,7 +4085,9 @@ def _projectflow(arguments: dict[str, Any]) -> dict[str, Any]:
         if action == "create_quick_project":
             project_id = _project_id_from_payload(arguments, payload)
             title = str(payload.get("title") or project_id)
-            assigned_to = str(payload.get("assignedTo") or payload.get("assigned_to") or "").strip()
+            assigned_to = str(
+                payload.get("assignedTo") or payload.get("assigned_to") or ""
+            ).strip()
             if not assigned_to:
                 raise ValueError("assignedTo is required")
             room_id = str(payload.get("roomId") or payload.get("room_id") or "").strip()
@@ -3258,7 +4096,10 @@ def _projectflow(arguments: dict[str, Any]) -> dict[str, Any]:
             spec = str(payload.get("spec") or "").strip()
             if not spec:
                 raise ValueError("spec is required")
-            task_id = _safe_id(payload.get("taskId") or payload.get("task_id") or f"{project_id}-01", "taskId")
+            task_id = _safe_id(
+                payload.get("taskId") or payload.get("task_id") or f"{project_id}-01",
+                "taskId",
+            )
             if not task_id.startswith(f"{project_id}-"):
                 raise ValueError("taskId must belong to projectId")
             if _task_state_path(arguments, task_id).exists():
@@ -3280,7 +4121,9 @@ def _projectflow(arguments: dict[str, Any]) -> dict[str, Any]:
                 "plan_type": "dag",
                 "tasks": [task_node],
             }
-            reply_route = _normalize_reply_route(payload.get("replyRoute") or payload.get("reply_route"))
+            reply_route = _normalize_reply_route(
+                payload.get("replyRoute") or payload.get("reply_route")
+            )
             if not reply_route:
                 reply_route = _reply_route_from_requester(project["requester"])
             if reply_route:
@@ -3289,6 +4132,12 @@ def _projectflow(arguments: dict[str, Any]) -> dict[str, Any]:
             if source_room_id:
                 project["source_room_id"] = source_room_id
                 task_node["source_room_id"] = source_room_id
+            parent_task = _manager_parent_task_context(arguments, project_id, project)
+            if parent_task:
+                project["parent_task"] = parent_task
+                if not source_room_id:
+                    project["source_room_id"] = parent_task["room_id"]
+                    task_node["source_room_id"] = parent_task["room_id"]
             _validate_assignment_room(project, room_id)
             project_dir = _project_dir(arguments, project_id)
             _write_json(_project_state_path(arguments, project_id), project)
@@ -3328,15 +4177,27 @@ def _projectflow(arguments: dict[str, Any]) -> dict[str, Any]:
             return _mark_requester_report_sent(arguments, payload)
 
         if action == "plan_dag":
-            project_id = _safe_id(payload.get("projectId") or payload.get("project_id"), "projectId")
+            project_id = _safe_id(
+                payload.get("projectId") or payload.get("project_id"), "projectId"
+            )
             state_path = _project_state_path(arguments, project_id)
-            project = _read_json(state_path, {"project_id": project_id, "title": project_id, "status": "active", "tasks": []})
+            project = _read_json(
+                state_path,
+                {
+                    "project_id": project_id,
+                    "title": project_id,
+                    "status": "active",
+                    "tasks": [],
+                },
+            )
             previous = {task.get("task_id"): task for task in project.get("tasks", [])}
             raw_tasks = payload.get("tasks")
             if not isinstance(raw_tasks, list):
                 raise ValueError("tasks must be a list")
             planned_tasks = [
-                _normalize_task(task, previous.get(str(task.get("taskId") or task.get("task_id"))))
+                _normalize_task(
+                    task, previous.get(str(task.get("taskId") or task.get("task_id")))
+                )
                 for task in raw_tasks
                 if isinstance(task, dict)
             ]
@@ -3356,39 +4217,80 @@ def _projectflow(arguments: dict[str, Any]) -> dict[str, Any]:
             }
 
         if action == "plan_loop":
-            project_id = _safe_id(payload.get("projectId") or payload.get("project_id"), "projectId")
+            project_id = _safe_id(
+                payload.get("projectId") or payload.get("project_id"), "projectId"
+            )
             state_path = _project_state_path(arguments, project_id)
-            project = _read_json(state_path, {"project_id": project_id, "title": project_id, "status": "active", "tasks": []})
-            previous_loop = project.get("loop") if isinstance(project.get("loop"), dict) else {}
+            project = _read_json(
+                state_path,
+                {
+                    "project_id": project_id,
+                    "title": project_id,
+                    "status": "active",
+                    "tasks": [],
+                },
+            )
+            previous_loop = (
+                project.get("loop") if isinstance(project.get("loop"), dict) else {}
+            )
             previous_tasks = {
                 task.get("task_id"): task
-                for task in (previous_loop.get("tasks", []) if isinstance(previous_loop.get("tasks"), list) else [])
+                for task in (
+                    previous_loop.get("tasks", [])
+                    if isinstance(previous_loop.get("tasks"), list)
+                    else []
+                )
             }
             raw_tasks = payload.get("tasks") or []
             if not isinstance(raw_tasks, list):
                 raise ValueError("tasks must be a list")
-            max_iterations = _positive_int(payload.get("maxIterations") or payload.get("max_iterations"), "maxIterations")
+            max_iterations = _positive_int(
+                payload.get("maxIterations") or payload.get("max_iterations"),
+                "maxIterations",
+            )
             current_iteration = _non_negative_int(
-                payload.get("currentIteration") or payload.get("current_iteration") or previous_loop.get("current_iteration") or 0,
+                payload.get("currentIteration")
+                or payload.get("current_iteration")
+                or previous_loop.get("current_iteration")
+                or 0,
                 "currentIteration",
             )
             if current_iteration > max_iterations:
                 raise ValueError("currentIteration cannot exceed maxIterations")
             planned_tasks = [
-                _normalize_task(task, previous_tasks.get(str(task.get("taskId") or task.get("task_id"))))
+                _normalize_task(
+                    task,
+                    previous_tasks.get(str(task.get("taskId") or task.get("task_id"))),
+                )
                 for task in raw_tasks
                 if isinstance(task, dict)
             ]
             _validate_task_graph(planned_tasks)
             loop = {
-                "goal": str(payload.get("goal") or previous_loop.get("goal") or "").strip(),
-                "stop_condition": str(payload.get("stopCondition") or payload.get("stop_condition") or previous_loop.get("stop_condition") or "").strip(),
-                "iteration_template": str(payload.get("iterationTemplate") or payload.get("iteration_template") or previous_loop.get("iteration_template") or "").strip(),
+                "goal": str(
+                    payload.get("goal") or previous_loop.get("goal") or ""
+                ).strip(),
+                "stop_condition": str(
+                    payload.get("stopCondition")
+                    or payload.get("stop_condition")
+                    or previous_loop.get("stop_condition")
+                    or ""
+                ).strip(),
+                "iteration_template": str(
+                    payload.get("iterationTemplate")
+                    or payload.get("iteration_template")
+                    or previous_loop.get("iteration_template")
+                    or ""
+                ).strip(),
                 "max_iterations": max_iterations,
                 "current_iteration": current_iteration,
-                "status": _safe_loop_status(payload.get("status") or previous_loop.get("status") or "running"),
+                "status": _safe_loop_status(
+                    payload.get("status") or previous_loop.get("status") or "running"
+                ),
                 "tasks": planned_tasks,
-                "history": previous_loop.get("history", []) if isinstance(previous_loop.get("history"), list) else [],
+                "history": previous_loop.get("history", [])
+                if isinstance(previous_loop.get("history"), list)
+                else [],
             }
             if not loop["goal"]:
                 raise ValueError("goal is required")
@@ -3412,7 +4314,9 @@ def _projectflow(arguments: dict[str, Any]) -> dict[str, Any]:
             }
 
         if action == "ready_nodes":
-            project_id = _safe_id(payload.get("projectId") or payload.get("project_id"), "projectId")
+            project_id = _safe_id(
+                payload.get("projectId") or payload.get("project_id"), "projectId"
+            )
             project = _read_json(_project_state_path(arguments, project_id))
             if not project:
                 raise ValueError("project not found")
@@ -3425,7 +4329,9 @@ def _projectflow(arguments: dict[str, Any]) -> dict[str, Any]:
             }
 
         if action == "ready_loop_nodes":
-            project_id = _safe_id(payload.get("projectId") or payload.get("project_id"), "projectId")
+            project_id = _safe_id(
+                payload.get("projectId") or payload.get("project_id"), "projectId"
+            )
             project = _read_json(_project_state_path(arguments, project_id))
             if not project:
                 raise ValueError("project not found")
@@ -3439,7 +4345,9 @@ def _projectflow(arguments: dict[str, Any]) -> dict[str, Any]:
             }
 
         if action == "record_loop_iteration":
-            project_id = _safe_id(payload.get("projectId") or payload.get("project_id"), "projectId")
+            project_id = _safe_id(
+                payload.get("projectId") or payload.get("project_id"), "projectId"
+            )
             project = _read_json(_project_state_path(arguments, project_id))
             if not project:
                 raise ValueError("project not found")
@@ -3458,14 +4366,25 @@ def _projectflow(arguments: dict[str, Any]) -> dict[str, Any]:
                 "stop_success": "completed",
                 "stop_blocked": "blocked",
             }[decision]
-            loop["current_iteration"] = max(_non_negative_int(loop.get("current_iteration") or 0, "currentIteration"), iteration)
-            history = loop.get("history", []) if isinstance(loop.get("history"), list) else []
-            history.append({
-                "iteration": iteration,
-                "decision": decision,
-                "summary": str(payload.get("summary") or "").strip(),
-                "next_action": str(payload.get("nextAction") or payload.get("next_action") or "").strip(),
-            })
+            loop["current_iteration"] = max(
+                _non_negative_int(
+                    loop.get("current_iteration") or 0, "currentIteration"
+                ),
+                iteration,
+            )
+            history = (
+                loop.get("history", []) if isinstance(loop.get("history"), list) else []
+            )
+            history.append(
+                {
+                    "iteration": iteration,
+                    "decision": decision,
+                    "summary": str(payload.get("summary") or "").strip(),
+                    "next_action": str(
+                        payload.get("nextAction") or payload.get("next_action") or ""
+                    ).strip(),
+                }
+            )
             loop["history"] = history
             project["plan_type"] = "loop"
             project["loop"] = loop
@@ -3480,23 +4399,38 @@ def _projectflow(arguments: dict[str, Any]) -> dict[str, Any]:
                 "loop": loop,
                 "readyLoopNodes": _ready_loop_nodes(project),
                 "notificationNeeded": _notification_needed(
-                    action, project, summary=f"record_loop_iteration: iteration {iteration} -> {decision}",
+                    action,
+                    project,
+                    summary=f"record_loop_iteration: iteration {iteration} -> {decision}",
                 ),
             }
 
         if action in {"pause_project", "resume_project", "complete_project"}:
-            project_id = _safe_id(payload.get("projectId") or payload.get("project_id"), "projectId")
+            project_id = _safe_id(
+                payload.get("projectId") or payload.get("project_id"), "projectId"
+            )
             state_path = _project_state_path(arguments, project_id)
             project = _read_json(state_path)
             if not project:
                 raise ValueError("project not found")
+            parent_completion = (
+                _prepare_manager_parent_task_completion(
+                    arguments,
+                    project,
+                    str(payload.get("summary") or ""),
+                )
+                if action == "complete_project"
+                else None
+            )
             if action == "pause_project":
                 project["status"] = "paused"
             elif action == "resume_project":
                 project["status"] = "active"
             else:
                 project["status"] = "completed"
-                loop = project.get("loop") if isinstance(project.get("loop"), dict) else {}
+                loop = (
+                    project.get("loop") if isinstance(project.get("loop"), dict) else {}
+                )
                 if loop:
                     loop["status"] = "completed"
                     project["loop"] = loop
@@ -3509,8 +4443,14 @@ def _projectflow(arguments: dict[str, Any]) -> dict[str, Any]:
                 "action": action,
                 "project": project,
             }
-            publish_artifacts = _payload_bool_field(payload, ("publishArtifacts", "publish_artifacts"), False)
-            if action == "complete_project" and publish_artifacts and (project_dir / "result.md").is_file():
+            publish_artifacts = _payload_bool_field(
+                payload, ("publishArtifacts", "publish_artifacts"), False
+            )
+            if (
+                action == "complete_project"
+                and publish_artifacts
+                and (project_dir / "result.md").is_file()
+            ):
                 result["publishedArtifacts"] = _publish_project_artifacts(
                     arguments,
                     project,
@@ -3518,12 +4458,26 @@ def _projectflow(arguments: dict[str, Any]) -> dict[str, Any]:
                     "",
                     _attachment_parent_event_id(payload, arguments),
                 )
+            if parent_completion is not None:
+                parent_completion["notification"] = (
+                    _notify_manager_parent_task_completion(
+                        parent_completion,
+                        project,
+                        str(payload.get("summary") or ""),
+                    )
+                )
+                result["parentTaskCompletion"] = parent_completion
             result["notificationNeeded"] = _notification_needed(action, project)
             return result
     except ValueError as exc:
         return {"ok": False, "tool": "projectflow", "action": action, "error": str(exc)}
 
-    return {"ok": False, "tool": "projectflow", "action": action, "error": f"unsupported action: {action}"}
+    return {
+        "ok": False,
+        "tool": "projectflow",
+        "action": action,
+        "error": f"unsupported action: {action}",
+    }
 
 
 def _normalize_role(role: str) -> str:
@@ -3538,7 +4492,10 @@ def _normalize_role(role: str) -> str:
 
 
 def _runtime_role() -> str:
-    role = os.getenv("AGENTTEAMS_AGENT_ROLE", "").strip() or os.getenv("AGENTTEAMS_WORKER_ROLE", "").strip()
+    role = (
+        os.getenv("AGENTTEAMS_AGENT_ROLE", "").strip()
+        or os.getenv("AGENTTEAMS_WORKER_ROLE", "").strip()
+    )
     if not role:
         role = str(_section(_load_runtime_config(), "member").get("role") or "").strip()
     return _normalize_role(role)
@@ -3587,18 +4544,25 @@ def _utc_timestamp() -> str:
     )
 
 
-def _project_task_for_meta(arguments: dict[str, Any], task: dict[str, Any]) -> dict[str, Any]:
+def _project_task_for_meta(
+    arguments: dict[str, Any], task: dict[str, Any]
+) -> dict[str, Any]:
     project_id = _first_text(task.get("project_id"), task.get("projectId"))
     task_id = _first_text(task.get("task_id"), task.get("taskId"))
     if not project_id or not task_id:
         return {}
     project = _read_json(_project_state_path(arguments, project_id))
-    tasks = list(project.get("tasks", []) if isinstance(project.get("tasks"), list) else [])
+    tasks = list(
+        project.get("tasks", []) if isinstance(project.get("tasks"), list) else []
+    )
     loop = project.get("loop") if isinstance(project.get("loop"), dict) else {}
     if isinstance(loop.get("tasks"), list):
         tasks.extend(loop["tasks"])
     for item in tasks:
-        if isinstance(item, dict) and _first_text(item.get("task_id"), item.get("taskId")) == task_id:
+        if (
+            isinstance(item, dict)
+            and _first_text(item.get("task_id"), item.get("taskId")) == task_id
+        ):
             return item
     return {}
 
@@ -3618,6 +4582,7 @@ def _preserve_task_meta_fields(arguments: dict[str, Any], task: dict[str, Any]) 
     for snake, camel in (
         ("room_id", "roomId"),
         ("assigned_to", "assignedTo"),
+        ("coordinator_matrix_user_id", "coordinatorMatrixUserId"),
         ("project_id", "projectId"),
     ):
         if _first_text(task.get(snake), task.get(camel)):
@@ -3639,7 +4604,11 @@ def _ensure_console_task_meta(arguments: dict[str, Any], task: dict[str, Any]) -
     task["project_id"] = _first_text(task.get("project_id"), task.get("projectId"))
     task["room_id"] = _first_text(task.get("room_id"), task.get("roomId"))
     task["spec_path"] = _first_text(task.get("spec_path"), task.get("specPath"))
-    source_room_id = _first_text(task.get("source_room_id"), task.get("sourceRoomId"), project_task.get("source_room_id"))
+    source_room_id = _first_text(
+        task.get("source_room_id"),
+        task.get("sourceRoomId"),
+        project_task.get("source_room_id"),
+    )
     if source_room_id:
         task["source_room_id"] = source_room_id
     task["task_title"] = _first_text(
@@ -3655,12 +4624,21 @@ def _ensure_console_task_meta(arguments: dict[str, Any], task: dict[str, Any]) -
         project_task.get("assigned_to"),
         project_task.get("assignedTo"),
     )
-    task["assigned_at"] = _first_text(
-        task.get("assigned_at"),
-        task.get("assignedAt"),
-        task.get("created_at"),
-        task.get("createdAt"),
-    ) or _utc_timestamp()
+    task["coordinator_matrix_user_id"] = _first_text(
+        task.get("coordinator_matrix_user_id"),
+        task.get("coordinatorMatrixUserId"),
+        project_task.get("coordinator_matrix_user_id"),
+        project_task.get("coordinatorMatrixUserId"),
+    )
+    task["assigned_at"] = (
+        _first_text(
+            task.get("assigned_at"),
+            task.get("assignedAt"),
+            task.get("created_at"),
+            task.get("createdAt"),
+        )
+        or _utc_timestamp()
+    )
     for snake_key, camel_key in (
         ("acknowledged_by_role", "acknowledgedByRole"),
         ("result_status", "resultStatus"),
@@ -3678,6 +4656,7 @@ def _ensure_console_task_meta(arguments: dict[str, Any], task: dict[str, Any]) -
         "sourceRoomId",
         "taskTitle",
         "assignedTo",
+        "coordinatorMatrixUserId",
         "assignedAt",
         "createdAt",
         "acknowledgedByRole",
@@ -3693,7 +4672,14 @@ def _write_task(arguments: dict[str, Any], task: dict[str, Any]) -> None:
     _write_json(_task_state_path(arguments, task["task_id"]), task)
 
 
-ALLOWED_TASK_RESULT_STATUSES = {"SUCCESS", "SUCCESS_WITH_NOTES", "REVISION_NEEDED", "BLOCKED", "FAILED", "PARTIAL"}
+ALLOWED_TASK_RESULT_STATUSES = {
+    "SUCCESS",
+    "SUCCESS_WITH_NOTES",
+    "REVISION_NEEDED",
+    "BLOCKED",
+    "FAILED",
+    "PARTIAL",
+}
 
 
 def _validate_task_deliverables(task_id: str, deliverables: list[Any]) -> list[str]:
@@ -3706,11 +4692,46 @@ def _validate_task_deliverables(task_id: str, deliverables: list[Any]) -> list[s
         try:
             normalized, _is_directory = _normalize_workspace_artifact_path(source)
         except ValueError as exc:
-            raise ValueError(f"deliverables must be workspace-relative paths under {expected_prefix}/") from exc
+            raise ValueError(
+                f"deliverables must be workspace-relative paths under {expected_prefix}/"
+            ) from exc
         if not _path_is_under(normalized.rstrip("/"), expected_prefix):
             raise ValueError(f"deliverables must stay under {expected_prefix}/")
         normalized_deliverables.append(normalized)
     return normalized_deliverables
+
+
+def _notify_task_submission(
+    task: dict[str, Any], task_id: str, status: str, summary: str
+) -> dict[str, Any]:
+    room_id = _canonical_room_id(task.get("room_id"))
+    coordinator = str(task.get("coordinator_matrix_user_id") or "").strip()
+    if not room_id:
+        return {"status": "skipped", "error": "task room_id is unavailable"}
+    if not MATRIX_USER_RE.fullmatch(coordinator):
+        return {
+            "status": "skipped",
+            "error": "task coordinator_matrix_user_id is unavailable",
+            "roomId": room_id,
+        }
+
+    normalized_status = str(status or "").strip().upper()
+    marker = (
+        "TASK_BLOCKED"
+        if normalized_status in {"BLOCKED", "FAILED"}
+        else "TASK_COMPLETED"
+    )
+    outcome = str(summary or normalized_status or "Task submitted").strip()
+    deliverables = (
+        task.get("deliverables") if isinstance(task.get("deliverables"), list) else []
+    )
+    result_path = str(
+        task.get("result_path")
+        or next((item for item in deliverables if str(item or "").strip()), "")
+        or f"shared/tasks/{task_id}/meta.json"
+    ).strip()
+    text = f"{coordinator} {marker}: {task_id} - {outcome}. Result: {result_path}"
+    return _matrix_send_text_event(room_id, text)
 
 
 def _task_result_from_meta(task: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
@@ -3731,18 +4752,24 @@ def _task_result_from_meta(task: dict[str, Any]) -> tuple[dict[str, Any], list[s
     if not result["summary"]:
         errors.append("missing result summary")
     try:
-        _validate_task_deliverables(str(task.get("task_id") or ""), result["deliverables"])
+        _validate_task_deliverables(
+            str(task.get("task_id") or ""), result["deliverables"]
+        )
     except ValueError as exc:
         errors.append(str(exc))
     return result, errors
 
 
-def _sync_task(arguments: dict[str, Any], task_id: str, exclude: list[str] | None = None) -> bool:
+def _sync_task(
+    arguments: dict[str, Any], task_id: str, exclude: list[str] | None = None
+) -> bool:
     sync_args = dict(arguments)
-    sync_args.update({
-        "action": "push",
-        "path": f"shared/tasks/{task_id}",
-    })
+    sync_args.update(
+        {
+            "action": "push",
+            "path": f"shared/tasks/{task_id}",
+        }
+    )
     if exclude is not None:
         sync_args["exclude"] = exclude
     result = _filesync(sync_args)
@@ -3752,10 +4779,12 @@ def _sync_task(arguments: dict[str, Any], task_id: str, exclude: list[str] | Non
 def _pull_task(arguments: dict[str, Any], task_id: str) -> bool:
     existing = _read_json(_task_state_path(arguments, task_id))
     sync_args = dict(arguments)
-    sync_args.update({
-        "action": "pull",
-        "path": f"shared/tasks/{task_id}",
-    })
+    sync_args.update(
+        {
+            "action": "pull",
+            "path": f"shared/tasks/{task_id}",
+        }
+    )
     result = _filesync(sync_args)
     if not result.get("ok"):
         return False
@@ -3779,10 +4808,16 @@ def _pull_task(arguments: dict[str, Any], task_id: str) -> bool:
 TERMINAL_TASK_STATUSES = {"completed", "revision", "blocked", "cancelled"}
 
 
-def _terminal_task_status(arguments: dict[str, Any], task: dict[str, Any], task_id: str) -> str:
+def _terminal_task_status(
+    arguments: dict[str, Any], task: dict[str, Any], task_id: str
+) -> str:
     project_id = str(task.get("project_id") or "")
-    project = _read_json(_project_state_path(arguments, project_id)) if project_id else {}
-    project_tasks = project.get("tasks", []) if isinstance(project.get("tasks"), list) else []
+    project = (
+        _read_json(_project_state_path(arguments, project_id)) if project_id else {}
+    )
+    project_tasks = (
+        project.get("tasks", []) if isinstance(project.get("tasks"), list) else []
+    )
     loop = project.get("loop") if isinstance(project.get("loop"), dict) else {}
     loop_tasks = loop.get("tasks", []) if isinstance(loop.get("tasks"), list) else []
     for node in project_tasks + loop_tasks:
@@ -3794,13 +4829,17 @@ def _terminal_task_status(arguments: dict[str, Any], task: dict[str, Any], task_
     return task_status if task_status in TERMINAL_TASK_STATUSES else ""
 
 
-def _require_task_mutable(arguments: dict[str, Any], task: dict[str, Any], task_id: str, action: str) -> None:
+def _require_task_mutable(
+    arguments: dict[str, Any], task: dict[str, Any], task_id: str, action: str
+) -> None:
     terminal_status = _terminal_task_status(arguments, task, task_id)
     if terminal_status:
         raise ValueError(f"{action} cannot update terminal task: {terminal_status}")
 
 
-def _update_project_task(arguments: dict[str, Any], project_id: str, task_id: str, **updates: Any) -> None:
+def _update_project_task(
+    arguments: dict[str, Any], project_id: str, task_id: str, **updates: Any
+) -> None:
     path = _project_state_path(arguments, project_id)
     project = _read_json(path)
     if not project:
@@ -3831,9 +4870,15 @@ def _taskflow(arguments: dict[str, Any]) -> dict[str, Any]:
         if action == "delegate_task":
             if role != "leader":
                 raise ValueError("delegate_task requires leader role")
-            project_id = _safe_id(payload.get("projectId") or payload.get("project_id"), "projectId")
-            task_id = _safe_id(payload.get("taskId") or payload.get("task_id"), "taskId")
-            assigned_to = str(payload.get("assignedTo") or payload.get("assigned_to") or "").strip()
+            project_id = _safe_id(
+                payload.get("projectId") or payload.get("project_id"), "projectId"
+            )
+            task_id = _safe_id(
+                payload.get("taskId") or payload.get("task_id"), "taskId"
+            )
+            assigned_to = str(
+                payload.get("assignedTo") or payload.get("assigned_to") or ""
+            ).strip()
             room_id = str(payload.get("roomId") or payload.get("room_id") or "")
             if not room_id:
                 raise ValueError("roomId is required")
@@ -3841,16 +4886,28 @@ def _taskflow(arguments: dict[str, Any]) -> dict[str, Any]:
             if not assigned_to:
                 for item in project.get("tasks", []):
                     if isinstance(item, dict) and item.get("task_id") == task_id:
-                        assigned_to = str(item.get("assigned_to") or item.get("assignedTo") or "").strip()
+                        assigned_to = str(
+                            item.get("assigned_to") or item.get("assignedTo") or ""
+                        ).strip()
                         break
             _validate_assignment_room(project, room_id)
             _validate_task_redelegation(arguments, project, task_id, room_id)
-            existing_task = _read_json(_task_state_path(arguments, task_id), {"project_id": project_id})
+            existing_task = _read_json(
+                _task_state_path(arguments, task_id), {"project_id": project_id}
+            )
             _require_task_mutable(arguments, existing_task, task_id, action)
-            assigned_to = str(payload.get("assignedTo") or payload.get("assigned_to") or "").strip()
+            assigned_to = str(
+                payload.get("assignedTo") or payload.get("assigned_to") or ""
+            ).strip()
             if not assigned_to:
-                tasks = project.get("tasks", []) if isinstance(project.get("tasks"), list) else []
-                loop = project.get("loop") if isinstance(project.get("loop"), dict) else {}
+                tasks = (
+                    project.get("tasks", [])
+                    if isinstance(project.get("tasks"), list)
+                    else []
+                )
+                loop = (
+                    project.get("loop") if isinstance(project.get("loop"), dict) else {}
+                )
                 if isinstance(loop.get("tasks"), list):
                     tasks = tasks + loop["tasks"]
                 for item in tasks:
@@ -3860,8 +4917,19 @@ def _taskflow(arguments: dict[str, Any]) -> dict[str, Any]:
             task_dir = _task_dir(arguments, task_id)
             task_dir.mkdir(parents=True, exist_ok=True)
             spec = str(payload.get("spec") or "")
-            (task_dir / "spec.md").write_text(spec + ("\n" if spec else ""), encoding="utf-8")
-            source_room_id = _source_room_id_from_payload(payload) or str(project.get("source_room_id") or "").strip()
+            (task_dir / "spec.md").write_text(
+                spec + ("\n" if spec else ""), encoding="utf-8"
+            )
+            source_room_id = (
+                _source_room_id_from_payload(payload)
+                or str(project.get("source_room_id") or "").strip()
+            )
+            coordinator_matrix_user_id = str(
+                payload.get("coordinatorMatrixUserId")
+                or payload.get("coordinator_matrix_user_id")
+                or _matrix_user_id()
+                or ""
+            ).strip()
             task = {
                 "task_id": task_id,
                 "project_id": project_id,
@@ -3873,6 +4941,8 @@ def _taskflow(arguments: dict[str, Any]) -> dict[str, Any]:
                 task["assigned_to"] = assigned_to
             if source_room_id:
                 task["source_room_id"] = source_room_id
+            if MATRIX_USER_RE.fullmatch(coordinator_matrix_user_id):
+                task["coordinator_matrix_user_id"] = coordinator_matrix_user_id
             if assigned_to:
                 task["assigned_to"] = assigned_to
             _write_task(arguments, task)
@@ -3881,6 +4951,10 @@ def _taskflow(arguments: dict[str, Any]) -> dict[str, Any]:
                 project_task_updates["assigned_to"] = assigned_to
             if source_room_id:
                 project_task_updates["source_room_id"] = source_room_id
+            if MATRIX_USER_RE.fullmatch(coordinator_matrix_user_id):
+                project_task_updates["coordinator_matrix_user_id"] = (
+                    coordinator_matrix_user_id
+                )
             if assigned_to:
                 project_task_updates["assigned_to"] = assigned_to
             _update_project_task(arguments, project_id, task_id, **project_task_updates)
@@ -3901,14 +4975,19 @@ def _taskflow(arguments: dict[str, Any]) -> dict[str, Any]:
         if action == "ack_task":
             if role not in {"worker", "remote-member"}:
                 raise ValueError("ack_task requires worker or remote-member role")
-            task_id = _safe_id(payload.get("taskId") or payload.get("task_id"), "taskId")
+            task_id = _safe_id(
+                payload.get("taskId") or payload.get("task_id"), "taskId"
+            )
             pulled = _pull_task(arguments, task_id)
             task = _load_task(arguments, task_id)
             _require_task_mutable(arguments, task, task_id, action)
-            task["status"] = "in_progress"
-            task["acknowledged_by_role"] = role
-            _write_task(arguments, task)
-            _update_project_task(arguments, task.get("project_id", ""), task_id, status="in_progress")
+            if task.get("status") != "submitted":
+                task["status"] = "in_progress"
+                task["acknowledged_by_role"] = role
+                _write_task(arguments, task)
+                _update_project_task(
+                    arguments, task.get("project_id", ""), task_id, status="in_progress"
+                )
             spec_path = _task_dir(arguments, task_id) / "spec.md"
             spec = spec_path.read_text(encoding="utf-8") if spec_path.exists() else ""
             return {
@@ -3924,7 +5003,9 @@ def _taskflow(arguments: dict[str, Any]) -> dict[str, Any]:
         if action == "submit_task":
             if role not in {"worker", "remote-member"}:
                 raise ValueError("submit_task requires worker or remote-member role")
-            task_id = _safe_id(payload.get("taskId") or payload.get("task_id"), "taskId")
+            task_id = _safe_id(
+                payload.get("taskId") or payload.get("task_id"), "taskId"
+            )
             task = _load_task(arguments, task_id)
             _require_task_mutable(arguments, task, task_id, action)
             summary = str(payload.get("summary") or "")
@@ -3935,19 +5016,23 @@ def _taskflow(arguments: dict[str, Any]) -> dict[str, Any]:
             deliverables = _validate_task_deliverables(task_id, deliverables)
             task_dir = _task_dir(arguments, task_id)
             task_dir.mkdir(parents=True, exist_ok=True)
-            task.update({
-                "status": "submitted",
-                "result_status": status,
-                "summary": summary,
-                "deliverables": deliverables,
-                "submitted_by_role": role,
-            })
+            task.update(
+                {
+                    "status": "submitted",
+                    "result_status": status,
+                    "summary": summary,
+                    "deliverables": deliverables,
+                    "submitted_by_role": role,
+                }
+            )
             if (task_dir / "result.md").is_file():
                 task["result_path"] = f"shared/tasks/{task_id}/result.md"
             else:
                 task.pop("result_path", None)
             _write_task(arguments, task)
-            _update_project_task(arguments, task.get("project_id", ""), task_id, status="submitted")
+            _update_project_task(
+                arguments, task.get("project_id", ""), task_id, status="submitted"
+            )
             published_artifacts = _publish_task_artifacts(
                 arguments,
                 task,
@@ -3955,13 +5040,18 @@ def _taskflow(arguments: dict[str, Any]) -> dict[str, Any]:
                 deliverables,
                 _attachment_parent_event_id(payload, arguments),
             )
+            synced = _sync_task(arguments, task_id, exclude=["spec.md", "base/"])
+            completion_notification = _notify_task_submission(
+                task, task_id, status, summary
+            )
             return {
                 "ok": True,
                 "tool": "taskflow",
                 "action": action,
                 "task": task,
                 "publishedArtifacts": published_artifacts,
-                "synced": _sync_task(arguments, task_id, exclude=["spec.md", "base/"]),
+                "synced": synced,
+                "completionNotification": completion_notification,
                 "notificationNeeded": _notification_needed(
                     "submit_task",
                     {"project_id": task.get("project_id", "")},
@@ -3973,21 +5063,32 @@ def _taskflow(arguments: dict[str, Any]) -> dict[str, Any]:
         if action == "cancel_task":
             if role != "leader":
                 raise ValueError("cancel_task requires leader role")
-            task_id = _safe_id(payload.get("taskId") or payload.get("task_id"), "taskId")
+            task_id = _safe_id(
+                payload.get("taskId") or payload.get("task_id"), "taskId"
+            )
             task = _load_task(arguments, task_id)
             project_id = str(task.get("project_id") or "")
             terminal_status = _terminal_task_status(arguments, task, task_id)
             if terminal_status:
                 raise ValueError(f"cannot cancel terminal task: {terminal_status}")
-            reason = str(payload.get("reason") or payload.get("cancelReason") or payload.get("cancel_reason") or "").strip()
+            reason = str(
+                payload.get("reason")
+                or payload.get("cancelReason")
+                or payload.get("cancel_reason")
+                or ""
+            ).strip()
             if not reason:
                 raise ValueError("reason is required")
-            replacement_task_id = payload.get("replacementTaskId") or payload.get("replacement_task_id")
+            replacement_task_id = payload.get("replacementTaskId") or payload.get(
+                "replacement_task_id"
+            )
 
             task["status"] = "cancelled"
             task["cancel_reason"] = reason
             if replacement_task_id:
-                task["replacement_task_id"] = _safe_id(replacement_task_id, "replacementTaskId")
+                task["replacement_task_id"] = _safe_id(
+                    replacement_task_id, "replacementTaskId"
+                )
             else:
                 task.pop("replacement_task_id", None)
             _write_task(arguments, task)
@@ -3998,14 +5099,18 @@ def _taskflow(arguments: dict[str, Any]) -> dict[str, Any]:
                 "tool": "taskflow",
                 "action": action,
                 "task": task,
-                "project": _read_json(_project_state_path(arguments, project_id)) if project_id else {},
+                "project": _read_json(_project_state_path(arguments, project_id))
+                if project_id
+                else {},
                 "synced": _sync_task(arguments, task_id, exclude=["spec.md", "base/"]),
             }
 
         if action == "check_task":
             if role != "leader":
                 raise ValueError("check_task requires leader role")
-            task_id = _safe_id(payload.get("taskId") or payload.get("task_id"), "taskId")
+            task_id = _safe_id(
+                payload.get("taskId") or payload.get("task_id"), "taskId"
+            )
             pulled = _pull_task(arguments, task_id)
             task = _load_task(arguments, task_id)
             result, validation_errors = _task_result_from_meta(task)
@@ -4023,13 +5128,22 @@ def _taskflow(arguments: dict[str, Any]) -> dict[str, Any]:
     except ValueError as exc:
         return {"ok": False, "tool": "taskflow", "action": action, "error": str(exc)}
 
-    return {"ok": False, "tool": "taskflow", "action": action, "error": f"unsupported action: {action}"}
+    return {
+        "ok": False,
+        "tool": "taskflow",
+        "action": action,
+        "error": f"unsupported action: {action}",
+    }
 
 
 def handle_request(request: dict[str, Any]) -> dict[str, Any] | None:
     method = request.get("method")
     request_id = request.get("id")
-    if request_id is None and isinstance(method, str) and method.startswith("notifications/"):
+    if (
+        request_id is None
+        and isinstance(method, str)
+        and method.startswith("notifications/")
+    ):
         return None
     if method == "initialize":
         result = {
@@ -4041,13 +5155,18 @@ def handle_request(request: dict[str, Any]) -> dict[str, Any] | None:
         result = {"tools": list_tools()}
     elif method == "tools/call":
         params = request.get("params", {}) or {}
-        result = call_tool(str(params.get("name", "")), params.get("arguments", {}) or {})
+        result = call_tool(
+            str(params.get("name", "")), params.get("arguments", {}) or {}
+        )
     else:
         result = {
             "content": [
                 {
                     "type": "text",
-                    "text": json.dumps({"ok": False, "error": "unknown_method", "method": method}, ensure_ascii=False),
+                    "text": json.dumps(
+                        {"ok": False, "error": "unknown_method", "method": method},
+                        ensure_ascii=False,
+                    ),
                 }
             ]
         }

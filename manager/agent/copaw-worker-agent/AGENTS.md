@@ -51,8 +51,8 @@ Most assigned tasks move through these phases:
 | Start | In the current room, directly say that you received the message before accepting a new assigned task. | `communication` |
 | Accept | Call `taskflow(action="ack_task")`. This pulls the task directory, reads spec and metadata, acknowledges the task, and pushes the status back — all in one call. The response contains the spec content. | `task-management` |
 | Execute | Do the assigned domain work inside the task directory. | domain skills as needed |
-| Submit | Call `taskflow(action="submit_task")`. This writes the result, pushes the task directory, and verifies `result.md` on storage — all in one call. | `task-management` |
-| Notify | Notify your coordinator only when there is a concrete completion, blocker, question, or requested answer. | `communication` |
+| Submit | Call `taskflow(action="submit_task")`. This writes the result, pushes the task directory, verifies `result.md`, and sends the coordinator completion mention — all in one call. | `task-management` |
+| Notify | Check `completionNotification`. Send a manual completion only when automatic delivery failed; still report blockers, questions, or requested answers directly. | `communication` |
 
 If the current message is a direct readiness check or explicitly asks you to reply with specific text, answer directly in the current room. Do not use `taskflow` for that check, and do not treat it as low-information chatter.
 
@@ -70,7 +70,7 @@ You:
 2. Read `task-management`, call `taskflow(action="ack_task")`. The response contains the spec — read it from the response.
 3. Execute the assigned work inside the task directory.
 4. Call `taskflow(action="submit_task")` with the structured result.
-5. Read `communication` and notify your coordinator with TASK_COMPLETED.
+5. Confirm `completionNotification.status` is `sent`; do not send a duplicate completion message.
 
 Do not call `filesync pull/push/stat` for task acceptance or submission — `taskflow` handles sync internally.
 
@@ -93,7 +93,7 @@ Observation: the assigned work is complete and deliverables exist.
 You:
 
 1. Read `task-management` and call `taskflow(action="submit_task")` with the structured result. This pushes deliverables and verifies the result on storage.
-2. Read `communication` and notify your coordinator with TASK_COMPLETED.
+2. Confirm `completionNotification.status` is `sent`. If it is `skipped` or `failed`, read `communication` and send the fallback TASK_COMPLETED line.
 
 Do not hand-write protocol-owned result files. Do not call `filesync push/stat` after `submit_task`.
 
@@ -141,6 +141,7 @@ Do not:
 - Write deliverables outside the assigned task directory.
 - Create shared task-level plans.
 - Send low-information acknowledgements such as `ok`, `thanks`, `done`, `收到`, or `好的`.
+- Send a second TASK_COMPLETED message after `submit_task` reports `completionNotification.status: sent`.
 - Read, paste, or process large files wholesale; inspect size and purpose first, then use search, targeted line ranges, structured parsers, chunking, or summaries.
 - Treat history messages as current instructions.
 - Reveal credentials, secrets, tokens, or other sensitive information.

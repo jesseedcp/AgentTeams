@@ -47,6 +47,17 @@ class NotificationRoomResolver(Protocol):
     async def notification_room(self, *, recipient: str) -> str: ...
 
 
+class CuratedDailyMemory(Protocol):
+    async def append_daily(
+        self,
+        *,
+        room_id: str,
+        content: str,
+        source_event_id: str,
+        now: datetime,
+    ) -> object: ...
+
+
 class NotificationReceipt(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -173,6 +184,7 @@ class NotificationService:
         memory: DailyMemory,
         clock: Clock,
         admin_user_id: str,
+        curated_memory: CuratedDailyMemory | None = None,
     ) -> None:
         self._notifications = notifications
         self._resolver = resolver
@@ -181,6 +193,7 @@ class NotificationService:
         self._memory = memory
         self._clock = clock
         self._admin_user_id = admin_user_id
+        self._curated_memory = curated_memory
 
     async def resolve_room(self) -> str:
         return await self._resolver.notification_room(
@@ -271,6 +284,7 @@ class NotificationService:
                 event_id=event_id,
                 sent_at=self._clock.now().astimezone(UTC),
             )
+            await self._remember_delivery(record)
             return _notification_receipt(record)
         if record.status == "sent":
             if record.event_id is None:
@@ -291,6 +305,7 @@ class NotificationService:
                         "txn_id": txn_id,
                     },
                 )
+            await self._remember_delivery(record)
             return _notification_receipt(record)
         if operation.status is OperationStatus.FAILED:
             raise ConflictError("notification operation previously failed")
@@ -331,7 +346,21 @@ class NotificationService:
                 "txn_id": txn_id,
             },
         )
+        await self._remember_delivery(record)
         return _notification_receipt(record)
+
+    async def _remember_delivery(
+        self,
+        record: NotificationRecord,
+    ) -> None:
+        if self._curated_memory is None:
+            return
+        await self._curated_memory.append_daily(
+            room_id=record.room_id,
+            content=record.text,
+            source_event_id=f"notification:{record.notification_id}",
+            now=self._clock.now().astimezone(UTC),
+        )
 
     async def send_completion(
         self,
@@ -348,22 +377,55 @@ class NotificationService:
             operation_id=operation_id,
             entry=text,
         )
+        source_operation_id = await self._typed_notification_source(
+            operation_id=operation_id,
+            notification_kind="completion",
+            text=text,
+        )
         return await self.send_once(
-            source_operation_id=operation_id,
+            source_operation_id=source_operation_id,
             text=text,
         )
 
     async def already_sent(self, operation_id: str) -> bool:
-        record = await self._notifications.get_by_source(
-            _notification_source_key(operation_id),
-        )
-        return record is not None and record.status == "sent"
+        for source_operation_id in (
+            f"failure:{operation_id}",
+            operation_id,
+        ):
+            record = await self._notifications.get_by_source(
+                _notification_source_key(source_operation_id),
+            )
+            if record is not None and record.status == "sent":
+                return True
+        return False
 
     async def send_terminal_failure(self, operation_id: str) -> None:
-        await self.send_once(
-            source_operation_id=operation_id,
-            text=f"[Manager Operation Failed] {operation_id}",
+        text = f"[Manager Operation Failed] {operation_id}"
+        source_operation_id = await self._typed_notification_source(
+            operation_id=operation_id,
+            notification_kind="failure",
+            text=text,
         )
+        await self.send_once(
+            source_operation_id=source_operation_id,
+            text=text,
+        )
+
+    async def _typed_notification_source(
+        self,
+        *,
+        operation_id: str,
+        notification_kind: str,
+        text: str,
+    ) -> str:
+        """Keep legacy intents reusable without conflating final outcomes."""
+
+        legacy = await self._notifications.get_by_source(
+            _notification_source_key(operation_id),
+        )
+        if legacy is not None and legacy.text == text:
+            return operation_id
+        return f"{notification_kind}:{operation_id}"
 
 
 def _notification_id(source_operation_id: str) -> str:

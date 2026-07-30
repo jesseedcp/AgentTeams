@@ -105,10 +105,19 @@ In the Source channel / requester room:
 Use for one bounded Worker-owned action with one owner, one expected result, no
 DAG, and no Loop.
 
+This rule does not apply to a Manager parent task. A visible `ParentTaskId` or
+`AgentTeams parent-task completion protocol` makes the request Project Work
+even when it has only one Worker and one expected result. In that case, use
+the parent task id as `projectId`, give every child Worker task a distinct id,
+and never call `create_quick_project`.
+
 In the Source channel / requester room:
 
 - Load `teamharness-roomflow` and use `roomflow create_task_room` to create or
-  reuse the Matrix task room.
+  reuse the Matrix task room. The call MUST pass `invite` with the selected
+  Worker's complete Matrix user ID. Do not rely on the Team Admin default
+  invite; the assigned Worker cannot receive the task unless it joins this
+  room.
 - Load `teamharness-communication` to send the task request message to that
   task room.
 - Stop in the source session. Do not call `create_quick_project`,
@@ -142,7 +151,9 @@ In the Source channel / requester room:
 - Load `teamharness-team-coordination` to confirm Project Work and task
   boundaries.
 - Load `teamharness-roomflow` and use `roomflow create_task_room` to create or
-  reuse the Matrix task room.
+  reuse the Matrix task room. The call MUST pass `invite` with every Worker
+  selected for the project, using complete Matrix user IDs. Do not create the
+  task room with only the Team Admin invited.
 - Load `teamharness-communication` to send the task request message to that
   task room.
 - Stop in the source session. Do not call `create_project`, `plan_dag`,
@@ -164,6 +175,11 @@ In the Task room:
 - Publish report files and artifacts with `teamharness-file-sharing` or the
   `artifact` MCP tool only when the destination supports Matrix room files, and
   use `teamharness-communication` for requester reports through `replyRoute`.
+- When the Project id is a Manager parent task id, write the final project
+  report before `complete_project` and trust its `parentTaskCompletion`
+  receipt. A successful receipt already mirrors and syncs the parent Task
+  result plus submitted metadata and wakes Manager; do not hand-edit the parent
+  metadata or send a duplicate completion message.
 
 Only accepted results may advance dependencies or project progress. Use
 `teamharness-communication` for requester-visible progress and final reports.
@@ -177,7 +193,9 @@ turn; resume when a submitted-result event arrives.
 - Use `shared/tasks/{task-id}/` for task files and deliverables.
 - Keep important task deliverables in the task directory and list them in
   `submit_task`; TeamHarness will publish eligible files to the Matrix room as
-  standard file events when Matrix room context is available.
+  standard file events when Matrix room context is available, sync task state,
+  and send one coordinator completion mention. Workers must not duplicate that
+  mention when `completionNotification.status` is `sent`.
 - Do not expose object storage internals in human-facing messages.
 
 ## Credential Safety

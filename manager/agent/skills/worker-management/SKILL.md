@@ -47,9 +47,14 @@ For a registry search or `nacos://` package import, use the
 - A successful `delete_worker` receipt already proves permanent absence.
   Never call `sleep_worker` afterward and never request a second deletion
   approval for the same completed operation.
+- If a deletion receipt is unavailable, verify once with `list_workers` or
+  `get_worker`. A missing Worker is the terminal success condition; a room
+  still visible in Cinny is client history, not a live Worker.
 - After a mutation, use the returned receipt. Do not repeat the same
   operation merely because provisioning takes time; recovery is handled by
   the durable operation journal and heartbeat.
+- Retry an inconclusive diagnostic only once. After two empty, identical, or
+  malformed results, stop issuing tools and report the known state.
 
 ## References
 

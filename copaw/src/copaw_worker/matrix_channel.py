@@ -16,8 +16,9 @@ import re
 import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, AsyncIterator, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
+import httpx
 from nio import (
     AsyncClient,
     AsyncClientConfig,
@@ -78,8 +79,6 @@ TOKEN_REFRESH_BACKOFF_S = 5
 # copaw installed (it's only executed inside a copaw environment).
 # ---------------------------------------------------------------------------
 try:
-    from copaw.app.channels.base import BaseChannel
-    from copaw.app.channels.schema import ChannelType
     from agentscope_runtime.engine.schemas.agent_schemas import (
         AudioContent,
         ContentType,
@@ -88,6 +87,8 @@ try:
         TextContent,
         VideoContent,
     )
+    from copaw.app.channels.base import BaseChannel
+    from copaw.app.channels.schema import ChannelType
     _COPAW_AVAILABLE = True
 except ImportError:  # pragma: no cover
     _COPAW_AVAILABLE = False

@@ -272,6 +272,15 @@ async def test_two_member_room_is_normalized_as_direct(
                 "io.agentteams.acknowledgement": True,
             },
         },
+        {
+            "type": "m.room.message",
+            "content": {
+                "body": (
+                    "@manager:local TASK_COMPLETED: task-20260730-120000-transient"
+                ),
+                "io.agentteams.transient": True,
+            },
+        },
     ],
 )
 async def test_non_actionable_timeline_events_are_not_dispatched(

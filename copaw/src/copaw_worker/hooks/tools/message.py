@@ -15,7 +15,9 @@ from typing import Any, Literal
 
 from agentscope.message import Msg, TextBlock
 from agentscope.tool import ToolResponse
+
 from copaw_worker.hooks.message_filter import (
+    canonicalize_team_worker_mentions,
     extract_matrix_mentions,
     filter_outgoing_matrix_message,
     resolve_team_leader_assignment_room,
@@ -328,7 +330,11 @@ async def _record_matrix_outbound_to_session(
                 "source": "message_tool_outbound",
             },
         )
-        content.append([msg.to_dict(), []])
+        if hasattr(msg, "model_dump"):
+            serialized = msg.model_dump(mode="json")
+        else:  # AgentScope releases before the Pydantic model migration
+            serialized = msg.to_dict()
+        content.append([serialized, []])
         path.write_text(json.dumps(states, ensure_ascii=False), encoding="utf-8")
         logger.info(
             "message tool: recorded outbound Matrix message in session %s",
@@ -417,6 +423,7 @@ async def message(
                 parsed_target.identifier if parsed_target.kind == "room" else None
             ),
         )
+        filtered_message = canonicalize_team_worker_mentions(filtered_message)
         mentions = extract_matrix_mentions(filtered_message)
         content = build_matrix_text_content(filtered_message, mentions)
 

@@ -2,9 +2,11 @@
 
 import importlib.util
 import json
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 from unittest.mock import patch
 
 
@@ -173,6 +175,52 @@ class AgentScopeSessionExportTest(unittest.TestCase):
         self.assertIn('"runtime": "agentscope"', exported)
         self.assertNotIn("alice@example.com", exported)
         self.assertNotIn("syt_abcdefghijklmnopqrstuvwxyz", exported)
+class ExportContainerLogsTest(unittest.TestCase):
+    def test_exports_container_state_and_redacted_logs(self):
+        def run_docker(command, **_kwargs):
+            if command[1:3] == ["ps", "-a"]:
+                return subprocess.CompletedProcess(command, 0, "agentteams-worker-alice\n", "")
+            if command[1:3] == ["inspect", "--format={{json .State}}"]:
+                return subprocess.CompletedProcess(
+                    command,
+                    0,
+                    '{"Status":"running","ExitCode":0,"OOMKilled":false}\n',
+                    "",
+                )
+            if command[1:3] == ["inspect", "--format={{json .Config.Image}}"]:
+                return subprocess.CompletedProcess(command, 0, '"agentteams/qwenpaw-worker:test"\n', "")
+            if command[1:3] == ["inspect", "--format={{.RestartCount}}"]:
+                return subprocess.CompletedProcess(command, 0, "2\n", "")
+            if command[1] == "logs":
+                return subprocess.CompletedProcess(
+                    command,
+                    0,
+                    "qwenpaw app exited api_key=secret-value\n",
+                    "",
+                )
+            raise AssertionError(f"unexpected docker command: {command}")
+
+        with mock.patch.object(export_debug_log.subprocess, "run", side_effect=run_docker):
+            from tempfile import TemporaryDirectory
+
+            with TemporaryDirectory() as tmp:
+                out_dir = Path(tmp)
+                count = export_debug_log.export_container_logs(
+                    out_dir,
+                    since_epoch=1_700_000_000,
+                    redact=True,
+                    container_filter="worker-alice",
+                )
+
+                self.assertEqual(count, 1)
+                state = json.loads((out_dir / "agentteams-worker-alice.state.json").read_text())
+                self.assertEqual(state["restart_count"], 2)
+                self.assertEqual(state["image"], "agentteams/qwenpaw-worker:test")
+                self.assertEqual(state["state"]["Status"], "running")
+                self.assertEqual(
+                    (out_dir / "agentteams-worker-alice.log").read_text(),
+                    "qwenpaw app exited api_key=****\n",
+                )
 
 
 if __name__ == "__main__":

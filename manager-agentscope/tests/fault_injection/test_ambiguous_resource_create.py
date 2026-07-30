@@ -96,15 +96,26 @@ class AcceptedThenTimedOutController:
 class Supervisor:
     def __init__(self) -> None:
         self.status = OperationStatus.PLANNED
+        self.operation: SimpleNamespace | None = None
 
     async def begin(self, **kwargs: object) -> object:
-        return SimpleNamespace(
-            operation_id=kwargs["operation_id"],
-            kind=kwargs["kind"],
-            target_key=kwargs["target_key"],
-            request=kwargs["request"],
-            status=self.status,
-        )
+        if self.operation is None:
+            self.operation = SimpleNamespace(
+                operation_id=kwargs["operation_id"],
+                kind=kwargs["kind"],
+                target_key=kwargs["target_key"],
+                request=kwargs["request"],
+                status=self.status,
+            )
+        self.operation.status = self.status
+        return self.operation
+
+    async def get(self, operation_id: str) -> object | None:
+        if self.operation is None:
+            return None
+        assert self.operation.operation_id == operation_id
+        self.operation.status = self.status
+        return self.operation
 
     async def before_effect(self, *args: object) -> object:
         del args
@@ -207,6 +218,7 @@ async def test_timed_out_create_queries_before_retrying() -> None:
     assert worker.room_id == "!alice:example"
     assert controller.create_calls == 1
     assert controller.get_calls == 2
+    await service.wait_for_background_worker_creates()
     assert supervisor.status is OperationStatus.SUCCEEDED
     assert matrix.transactions == [
         f"agentteams:{context.operation_id}:0",
@@ -236,9 +248,13 @@ async def test_greeting_retry_reuses_the_same_matrix_transaction() -> None:
         model="qwen3.6-plus",
     )
 
-    with pytest.raises(TimeoutError):
-        await service.create_worker(request, context=context)
+    first = await service.create_worker(request, context=context)
+    assert first.room_id == "!alice:example"
+    await service.wait_for_background_worker_creates()
+    assert supervisor.status is OperationStatus.RECONCILING
+
     worker = await service.create_worker(request, context=context)
+    await service.wait_for_background_worker_creates()
 
     expected = f"agentteams:{context.operation_id}:0"
     assert worker.room_id == "!alice:example"

@@ -68,7 +68,7 @@ done
 SKILL_COUNT=$(docker exec "${_AGENT_CTR}" sh -c \
     'find /opt/agentteams/manager/skills -mindepth 1 -maxdepth 1 -type d | wc -l' \
     2>/dev/null | tr -d '[:space:]')
-assert_eq "16" "${SKILL_COUNT}" "Exactly 16 Manager skills are installed"
+assert_eq "19" "${SKILL_COUNT}" "Exactly 19 Manager skills are installed"
 
 STALE_PROCESSES=$(docker exec "${_AGENT_CTR}" python -c \
     'import os,pathlib; pats=("open"+"claw gateway","co"+"paw app","redis"+"-server"); print("\n".join(x for p in pathlib.Path("/proc").glob("[0-9]*/cmdline") if int(p.parent.name)!=os.getpid() for x in [p.read_bytes().replace(b"\0",b" ").decode(errors="ignore")] if any(q in x for q in pats)))' \

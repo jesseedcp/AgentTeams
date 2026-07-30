@@ -30,6 +30,7 @@ def _event(
 @pytest.mark.asyncio
 async def test_same_room_is_serial_but_rooms_are_parallel() -> None:
     started: list[tuple[str, str]] = []
+    begun: dict[tuple[str, str], asyncio.Event] = {}
     releases: dict[tuple[str, str], asyncio.Event] = {}
 
     class Claims:
@@ -56,6 +57,7 @@ async def test_same_room_is_serial_but_rooms_are_parallel() -> None:
         del policy
         key = (event.room_id, event.event_id)
         started.append(key)
+        begun.setdefault(key, asyncio.Event()).set()
         release = releases.setdefault(key, asyncio.Event())
         await release.wait()
 
@@ -67,25 +69,32 @@ async def test_same_room_is_serial_but_rooms_are_parallel() -> None:
     )
     await router.start()
 
-    await router.submit(_event("!a:local", "$1"))
-    await router.submit(_event("!a:local", "$2"))
-    await router.submit(_event("!b:local", "$3"))
+    try:
+        await router.submit(_event("!a:local", "$1"))
+        await router.submit(_event("!a:local", "$2"))
+        await router.submit(_event("!b:local", "$3"))
 
-    for _ in range(5):
-        if ("!b:local", "$3") in started:
-            break
-        await asyncio.sleep(0)
-    assert started == [("!a:local", "$1"), ("!b:local", "$3")]
-    releases[("!a:local", "$1")].set()
-    for _ in range(5):
-        if ("!a:local", "$2") in started:
-            break
-        await asyncio.sleep(0)
-    assert ("!a:local", "$2") in started
-
-    for release in releases.values():
-        release.set()
-    await router.stop()
+        await asyncio.wait_for(
+            begun.setdefault(
+                ("!b:local", "$3"),
+                asyncio.Event(),
+            ).wait(),
+            timeout=1,
+        )
+        assert started == [("!a:local", "$1"), ("!b:local", "$3")]
+        releases[("!a:local", "$1")].set()
+        await asyncio.wait_for(
+            begun.setdefault(
+                ("!a:local", "$2"),
+                asyncio.Event(),
+            ).wait(),
+            timeout=1,
+        )
+        assert ("!a:local", "$2") in started
+    finally:
+        for release in releases.values():
+            release.set()
+        await router.stop()
 
 
 @pytest.mark.asyncio
@@ -227,11 +236,15 @@ async def test_stop_uses_control_path_before_room_queue_drains() -> None:
 
     await router.submit(_event("!a:local", "$work"))
     await work_started.wait()
+    await router.submit(_event("!a:local", "$queued"))
     await router.submit(_event("!a:local", "$stop", "/stop"))
     await asyncio.wait_for(control_seen.wait(), timeout=0.25)
 
     assert handled == ["$work"]
     release_work.set()
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    assert handled == ["$work"]
     await router.stop()
 
 
@@ -415,3 +428,199 @@ async def test_interrupt_mode_cancels_active_before_admitting_message() -> None:
 
     assert handled == ["$active", "$replacement"]
     await router.stop()
+
+
+@pytest.mark.asyncio
+async def test_handler_failure_retries_then_completes_durable_claim() -> None:
+    calls: list[str] = []
+    failed: list[str] = []
+    completed: list[str] = []
+    retry_started: list[str] = []
+    done = asyncio.Event()
+
+    class Claims:
+        async def claim_inbound_event(self, event: InboundEvent) -> bool:
+            return event.event_id == "$retry"
+
+        async def fail_matrix_event(
+            self,
+            room_id: str,
+            event_id: str,
+            *,
+            error: str,
+            max_attempts: int,
+        ) -> bool:
+            del room_id, error, max_attempts
+            failed.append(event_id)
+            return False
+
+        async def retry_matrix_event(
+            self,
+            room_id: str,
+            event_id: str,
+        ) -> None:
+            del room_id
+            retry_started.append(event_id)
+
+        async def complete_matrix_event(
+            self,
+            room_id: str,
+            event_id: str,
+        ) -> None:
+            del room_id
+            completed.append(event_id)
+
+    class Resolver:
+        async def resolve(self, event: InboundEvent) -> RoomPolicy:
+            return RoomPolicy(
+                room_id=event.room_id,
+                kind=RoomKind.ADMIN_DM,
+                revision=1,
+            )
+
+    async def handler(
+        event: InboundEvent,
+        policy: RoomPolicy,
+    ) -> None:
+        del policy
+        calls.append(event.event_id)
+        if len(calls) == 1:
+            raise RuntimeError("transient")
+        done.set()
+
+    router = EventRouter(
+        claims=Claims(),
+        resolver=Resolver(),
+        handler=handler,
+        retry_delays=(0,),
+        max_attempts=3,
+    )
+    await router.start()
+    assert await router.submit(_event("!a:local", "$retry"))
+    await asyncio.wait_for(done.wait(), timeout=1)
+    await router.stop()
+
+    assert calls == ["$retry", "$retry"]
+    assert failed == ["$retry"]
+    assert retry_started == ["$retry"]
+    assert completed == ["$retry"]
+
+
+@pytest.mark.asyncio
+async def test_repeated_handler_failure_is_dead_lettered_and_reported() -> None:
+    failures = 0
+    dead_letters: list[tuple[str, str]] = []
+    reported = asyncio.Event()
+
+    class Claims:
+        async def claim_inbound_event(self, event: InboundEvent) -> bool:
+            del event
+            return True
+
+        async def fail_matrix_event(
+            self,
+            room_id: str,
+            event_id: str,
+            *,
+            error: str,
+            max_attempts: int,
+        ) -> bool:
+            nonlocal failures
+            del room_id, event_id, error
+            failures += 1
+            return failures >= max_attempts
+
+        async def retry_matrix_event(
+            self,
+            room_id: str,
+            event_id: str,
+        ) -> None:
+            del room_id, event_id
+
+    class Resolver:
+        async def resolve(self, event: InboundEvent) -> RoomPolicy:
+            return RoomPolicy(
+                room_id=event.room_id,
+                kind=RoomKind.ADMIN_DM,
+                revision=1,
+            )
+
+    async def handler(
+        event: InboundEvent,
+        policy: RoomPolicy,
+    ) -> None:
+        del event, policy
+        raise RuntimeError("permanent")
+
+    async def dead_letter(
+        event: InboundEvent,
+        error: str,
+    ) -> None:
+        dead_letters.append((event.event_id, error))
+        reported.set()
+
+    router = EventRouter(
+        claims=Claims(),
+        resolver=Resolver(),
+        handler=handler,
+        dead_letter_handler=dead_letter,
+        retry_delays=(0, 0),
+        max_attempts=2,
+    )
+    await router.start()
+    assert await router.submit(_event("!a:local", "$dead"))
+    await asyncio.wait_for(reported.wait(), timeout=1)
+    await router.stop()
+
+    assert failures == 2
+    assert dead_letters == [("$dead", "permanent")]
+
+
+@pytest.mark.asyncio
+async def test_start_replays_durable_event_left_by_prior_process() -> None:
+    recovered = _event("!a:local", "$recover", "resume")
+    handled: list[str] = []
+    completed: list[str] = []
+    done = asyncio.Event()
+
+    class Claims:
+        async def recoverable_matrix_events(
+            self,
+        ) -> tuple[InboundEvent, ...]:
+            return (recovered,)
+
+        async def complete_matrix_event(
+            self,
+            room_id: str,
+            event_id: str,
+        ) -> None:
+            del room_id
+            completed.append(event_id)
+
+    class Resolver:
+        async def resolve(self, event: InboundEvent) -> RoomPolicy:
+            return RoomPolicy(
+                room_id=event.room_id,
+                kind=RoomKind.ADMIN_DM,
+                revision=1,
+            )
+
+    async def handler(
+        event: InboundEvent,
+        policy: RoomPolicy,
+    ) -> None:
+        del policy
+        handled.append(event.event_id)
+        done.set()
+
+    router = EventRouter(
+        claims=Claims(),
+        resolver=Resolver(),
+        handler=handler,
+    )
+    await router.start()
+    await asyncio.wait_for(done.wait(), timeout=1)
+    await router.stop()
+
+    assert handled == ["$recover"]
+    assert completed == ["$recover"]

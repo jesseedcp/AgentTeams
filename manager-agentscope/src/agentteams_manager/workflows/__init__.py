@@ -18,6 +18,7 @@ from .integrations import (
     ModelSwitchRequest,
 )
 from .matrix_resources import MatrixResourceService
+from .memory import ManagerMemoryService, MemoryRecall, MemoryWriteReceipt
 from .notifications import DailyMemory, NotificationService
 from .projects import ProjectReceipt, ProjectService
 from .resources import (
@@ -56,6 +57,9 @@ __all__ = [
     "ModelSwitchReceipt",
     "ModelSwitchRequest",
     "MatrixResourceService",
+    "ManagerMemoryService",
+    "MemoryRecall",
+    "MemoryWriteReceipt",
     "ResourceHeartbeat",
     "ResourceRecoveryReport",
     "ResourceReconciler",

@@ -3,14 +3,14 @@
 On every bridge invocation two things happen:
 
 1. **create phase** — any of {config.json, workspaces/<agent>/agent.json,
-   providers.json} that is missing is installed verbatim from an in-tree
-   template. Templates carry all defaults (identity, security off,
-   channels.console enabled, etc.).
+   providers.json} that is missing is installed from an in-tree template.
+   Templates carry defaults (identity, security, console, etc.).
 
-2. **restart-overlay phase** — ``_CONTROLLER_FIELDS`` refreshes only the
-   fields Controller genuinely owns (Matrix scalars, running.max_input_length,
-   running.embedding_config, heartbeat). Everything else — user edits,
-   CoPaw migration writes — is left alone.
+2. **restart-overlay phase** — Controller-owned Matrix fields are written to
+   both config.json (Lite CoPaw 0.0.x) and agent.json (CoPaw 1.0.2+).
+   Other controller fields include running.max_input_length,
+   running.embedding_config and heartbeat. User edits and CoPaw migration
+   writes are left alone.
 
 Three merge policies cover the controller fields: ``remote-wins`` (scalar
 overwrite), ``union`` (list dedup), ``deep-merge`` (local-wins-at-leaves for
@@ -25,6 +25,7 @@ from pathlib import Path
 
 import pytest
 
+import copaw_worker.bridge as bridge_module
 from copaw_worker.bridge import (
     bridge_controller_to_copaw,
     bridge_runtime_to_standard,
@@ -34,7 +35,6 @@ from copaw_worker.bridge import (
     sync_outer_prompt_files_to_inner,
     sync_skills_to_runtime,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
@@ -99,7 +99,7 @@ def _bridge_and_read_agent(cfg, **kwargs):
 # ---------------------------------------------------------------------------
 
 def test_create_installs_config_json_from_template():
-    """On first boot bridge writes config.json from the template."""
+    """First boot keeps template defaults and adds Lite Matrix config."""
     with tempfile.TemporaryDirectory() as tmpdir:
         working_dir = Path(tmpdir) / "agent"
         _run_bridge(_make_openclaw_cfg(), working_dir)
@@ -107,10 +107,15 @@ def test_create_installs_config_json_from_template():
         cfg_path = working_dir / "config.json"
         assert cfg_path.exists()
         cfg = json.loads(cfg_path.read_text())
-        # Security defaults: all three guards disabled.
-        assert cfg["security"]["tool_guard"]["enabled"] is False
-        assert cfg["security"]["file_guard"]["enabled"] is False
+        # The official CoPaw template keeps tool and file guards enabled.
+        assert cfg["security"]["tool_guard"]["enabled"] is True
+        assert cfg["security"]["file_guard"]["enabled"] is True
         assert cfg["security"]["skill_scanner"]["mode"] == "off"
+        assert cfg["channels"]["matrix"]["enabled"] is True
+        assert cfg["channels"]["matrix"]["homeserver"] == (
+            "http://localhost:6167"
+        )
+        assert cfg["channels"]["matrix"]["access_token"] == "tok"
 
 
 def test_create_installs_worker_agent_json_from_template():
@@ -162,7 +167,7 @@ def test_create_respects_custom_agent_key():
 # ---------------------------------------------------------------------------
 
 def test_user_edits_to_config_json_preserved():
-    """Once config.json exists, bridge never touches it — user owns it."""
+    """Lite overlay refreshes Matrix while retaining user-owned config."""
     with tempfile.TemporaryDirectory() as tmpdir:
         working_dir = Path(tmpdir) / "agent"
         _run_bridge(_make_openclaw_cfg(), working_dir)
@@ -171,13 +176,55 @@ def test_user_edits_to_config_json_preserved():
         cfg = json.loads(cfg_path.read_text())
         cfg["security"]["tool_guard"]["enabled"] = True
         cfg["user_custom"] = {"hello": "world"}
+        cfg["channels"]["matrix"]["user_custom"] = "keep"
         cfg_path.write_text(json.dumps(cfg))
 
-        _run_bridge(_make_openclaw_cfg(), working_dir)
+        refreshed = _make_openclaw_cfg()
+        refreshed["channels"]["matrix"]["accessToken"] = "tok-refreshed"
+        _run_bridge(refreshed, working_dir)
 
         cfg2 = json.loads(cfg_path.read_text())
         assert cfg2["security"]["tool_guard"]["enabled"] is True
         assert cfg2["user_custom"] == {"hello": "world"}
+        assert cfg2["channels"]["matrix"]["user_custom"] == "keep"
+        assert cfg2["channels"]["matrix"]["access_token"] == "tok-refreshed"
+
+
+def test_standard_config_nulls_are_pruned_before_lite_restart():
+    """Standard console persistence must remain loadable by Lite CoPaw."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        working_dir = Path(tmpdir) / "agent"
+        _run_bridge(_make_openclaw_cfg(), working_dir)
+
+        cfg_path = working_dir / "config.json"
+        cfg = json.loads(cfg_path.read_text())
+        cfg["channels"]["imessage"] = {
+            "enabled": False,
+            "media_dir": None,
+            "user_note": "keep",
+        }
+        cfg["agents"] = {
+            "defaults": None,
+            "language": "zh",
+        }
+        cfg["plugins"] = {
+            "custom": {
+                "enabled": True,
+                "optional": None,
+            },
+        }
+        cfg_path.write_text(json.dumps(cfg))
+
+        _run_bridge(_make_openclaw_cfg(), working_dir)
+        refreshed = json.loads(cfg_path.read_text())
+
+    assert refreshed["channels"]["imessage"] == {
+        "enabled": False,
+        "user_note": "keep",
+    }
+    assert refreshed["agents"] == {"language": "zh"}
+    assert refreshed["plugins"]["custom"] == {"enabled": True}
+    assert refreshed["channels"]["matrix"]["access_token"] == "tok"
 
 
 def test_user_edits_to_agent_non_controller_fields_preserved():
@@ -285,8 +332,9 @@ def test_remote_wins_max_input_length_refreshes():
         assert _read_agent(working_dir)["running"]["max_input_length"] == 8192
 
 
-def test_embedding_config_from_memory_search():
+def test_embedding_config_from_memory_search(monkeypatch):
     """memorySearch in openclaw → agent.json running.embedding_config."""
+    monkeypatch.setattr(bridge_module, "_is_in_container", lambda: False)
     agent = _bridge_and_read_agent(_make_openclaw_cfg())
 
     emb = agent["running"]["embedding_config"]
@@ -295,6 +343,17 @@ def test_embedding_config_from_memory_search():
     assert emb["base_url"] == "http://aigw:18080/v1"  # :8080 → :18080 off-container
     assert emb["api_key"] == "key123"
     assert emb["dimensions"] == 1024
+
+
+def test_embedding_config_keeps_internal_gateway_port_in_container(monkeypatch):
+    monkeypatch.setattr(bridge_module, "_is_in_container", lambda: True)
+
+    agent = _bridge_and_read_agent(_make_openclaw_cfg())
+
+    assert (
+        agent["running"]["embedding_config"]["base_url"]
+        == "http://aigw:8080/v1"
+    )
 
 
 def test_embedding_config_absent_when_memory_search_missing():
@@ -417,7 +476,7 @@ def test_manager_template_heartbeat_wins_over_openclaw_seed(monkeypatch):
     }
 
     agent = _bridge_and_read_agent(cfg, profile="manager")
-    assert agent["heartbeat"] == {"enabled": True, "every": "10m"}
+    assert agent["heartbeat"] == {"enabled": True, "every": "30m"}
 
 
 def test_worker_template_seeds_default_heartbeat_when_openclaw_silent():
@@ -542,12 +601,14 @@ def test_sync_skills_to_runtime_exposes_standard_skills_via_symlink(tmp_path):
 
     workspace_skills = runtime_dir / "workspaces" / "default" / "skills"
     assert installed == ["github"]
-    assert workspace_skills.is_symlink()
-    assert workspace_skills.resolve() == (standard_dir / "skills").resolve()
+    if os.name != "nt":
+        assert workspace_skills.is_symlink()
+        assert workspace_skills.resolve() == (standard_dir / "skills").resolve()
     assert (workspace_skills / "github" / "SKILL.md").read_text() == "Use GitHub."
     dst_script = workspace_skills / "github" / "scripts" / "run.sh"
     assert dst_script.read_text() == "#!/bin/sh\necho ok\n"
-    assert dst_script.stat().st_mode & stat.S_IXUSR
+    if os.name != "nt":
+        assert dst_script.stat().st_mode & stat.S_IXUSR
     manifest = json.loads(
         (runtime_dir / "workspaces" / "default" / "skill.json").read_text(),
     )
@@ -609,8 +670,9 @@ def test_sync_skills_to_runtime_replaces_runtime_dir_and_cleans_stale_standard_s
     installed = sync_skills_to_runtime(standard_dir, runtime_dir, ["fresh"])
 
     assert installed == ["fresh"]
-    assert workspace_skills.is_symlink()
-    assert workspace_skills.resolve() == (standard_dir / "skills").resolve()
+    if os.name != "nt":
+        assert workspace_skills.is_symlink()
+        assert workspace_skills.resolve() == (standard_dir / "skills").resolve()
     assert (workspace_skills / "fresh" / "SKILL.md").read_text() == "new"
     assert not (workspace_skills / "stale").exists()
     assert not (workspace_skills / "stale-standard").exists()

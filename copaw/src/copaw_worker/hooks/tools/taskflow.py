@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict
 import json
 import os
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -13,11 +13,11 @@ from agentscope.tool import ToolResponse
 
 from copaw_worker.hooks.tools.filesync import create_sync
 from copaw_worker.task import (
-    FileSystemTaskStore,
     RESULT_STATUSES,
+    FileSystemTaskStore,
+    TaskflowError,
     TaskMeta,
     TaskResult,
-    TaskflowError,
     ack_task,
     canonical_worker_id,
     check_task,

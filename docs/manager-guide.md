@@ -82,10 +82,11 @@ SQLite rather than inside one room's conversation state.
 
 ## Capabilities
 
-The 16 retained Manager skills cover Worker discovery/import and lifecycle,
+The 19 retained Manager skills cover Worker discovery/import and lifecycle,
 Team and Human management, tasks and recurring schedules, projects, channels,
 Matrix administration, file synchronization, Git delegation, model changes,
-MCP management, service publishing, and task coordination.
+MCP management, service publishing, task coordination, coding CLI delegation,
+Higress administration, and durable Manager memory.
 
 The machine-readable coverage map is
 [`tests/manager-skill-parity.json`](../tests/manager-skill-parity.json). Every

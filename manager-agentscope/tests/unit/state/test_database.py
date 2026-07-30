@@ -1,3 +1,4 @@
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -60,3 +61,91 @@ async def test_database_backup_is_a_readable_consistent_copy(
         ).fetchone()[0],
     )
     assert value == "3"
+
+
+@pytest.mark.asyncio
+async def test_matrix_event_schema_migrates_old_claims_as_completed(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "legacy.db"
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE processed_matrix_events (
+              room_id TEXT NOT NULL,
+              event_id TEXT NOT NULL,
+              processed_at TEXT NOT NULL,
+              PRIMARY KEY(room_id, event_id)
+            )
+            """,
+        )
+        connection.execute(
+            """
+            INSERT INTO processed_matrix_events(
+              room_id, event_id, processed_at
+            ) VALUES ('!room:local', '$old', '2026-07-29T00:00:00+00:00')
+            """,
+        )
+        connection.execute("PRAGMA user_version=13")
+
+    database = Database(path)
+    await database.open()
+    row = await database.read(
+        lambda connection: connection.execute(
+            """
+            SELECT status, attempt_count, event_json
+              FROM processed_matrix_events
+             WHERE event_id='$old'
+            """,
+        ).fetchone(),
+    )
+
+    assert row is not None
+    assert dict(row) == {
+        "status": "completed",
+        "attempt_count": 1,
+        "event_json": "",
+    }
+
+
+@pytest.mark.asyncio
+async def test_legacy_project_decisions_migrate_as_private(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "legacy-memory.db"
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE project_decisions (
+              decision_id TEXT PRIMARY KEY,
+              project_id TEXT NOT NULL,
+              decision TEXT NOT NULL,
+              rationale TEXT NOT NULL,
+              created_at TEXT NOT NULL
+            )
+            """,
+        )
+        connection.execute(
+            """
+            INSERT INTO project_decisions(
+              decision_id, project_id, decision, rationale, created_at
+            ) VALUES (
+              'decision-1', 'project-1', 'Keep SQLite',
+              'Avoid another service', '2026-07-29T00:00:00+00:00'
+            )
+            """,
+        )
+        connection.execute("PRAGMA user_version=15")
+
+    database = Database(path)
+    await database.open()
+    visibility = await database.read(
+        lambda connection: connection.execute(
+            """
+            SELECT visibility FROM project_decisions
+            WHERE decision_id='decision-1'
+            """,
+        ).fetchone()[0],
+    )
+
+    assert visibility == "private"

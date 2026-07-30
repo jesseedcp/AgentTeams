@@ -25,6 +25,16 @@ Call `wake_worker` with the same name. A successful receipt proves the
 Controller reports a running or ready container state. Do not create a
 second Worker when an existing one is merely asleep.
 
+## Delete completion boundary
+
+After deleting a Worker, verify once with `list_workers` or `get_worker`. If the
+target Worker is absent, deletion is complete. Do not probe stale Matrix rooms:
+they are client history and can be hidden or left in Cinny.
+
+If verification is inconclusive, retry the same diagnostic at most once. After
+two empty, identical, or malformed results, stop running tools and report the
+confirmed state instead of entering a diagnostic loop.
+
 ## Update or replace
 
 Use `update_worker` for typed desired-state changes. Runtime, image, or

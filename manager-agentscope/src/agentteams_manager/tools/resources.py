@@ -219,7 +219,7 @@ class ToolReceipt(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     tool: str
-    status: Literal["succeeded", "not_found"] = "succeeded"
+    status: Literal["accepted", "succeeded", "not_found"] = "succeeded"
     resource_type: str | None = None
     name: str | None = None
     result: dict[str, Any] = Field(default_factory=dict)
@@ -413,7 +413,8 @@ class ResourceToolkit:
             ),
             (
                 "create_worker",
-                "Create and await one Controller-managed Worker.",
+                "Submit one Worker for background provisioning; the returned "
+                "resource may be Pending and the admin is notified when ready.",
                 WorkerCreateRequest,
                 self._create_worker,
                 False,
@@ -760,7 +761,16 @@ class ResourceToolkit:
             item,
             context=await self._context(),
         )
-        return _resource_receipt("create_worker", "worker", worker)
+        return ToolReceipt(
+            tool="create_worker",
+            status="accepted",
+            resource_type="worker",
+            name=worker.name,
+            result={
+                **worker.model_dump(mode="json"),
+                "background_provisioning": True,
+            },
+        )
 
     async def _update_worker(self, request: BaseModel) -> object:
         item = WorkerUpdateRequest.model_validate(request)

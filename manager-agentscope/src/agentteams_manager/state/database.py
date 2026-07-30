@@ -9,6 +9,8 @@ from pathlib import Path
 from typing import TypeVar
 
 from .schema import (
+    MATRIX_EVENT_MIGRATION_COLUMNS,
+    PROJECT_DECISION_MIGRATION_COLUMNS,
     SCHEMA_SQL,
     SCHEMA_VERSION,
     SESSION_SETTINGS_MIGRATION_COLUMNS,
@@ -60,6 +62,46 @@ class Database:
                             "ALTER TABLE session_settings "
                             f"ADD COLUMN {name} {declaration}",
                         )
+                matrix_event_columns = {
+                    row["name"]
+                    for row in connection.execute(
+                        "PRAGMA table_info(processed_matrix_events)",
+                    )
+                }
+                for name, declaration in (
+                    MATRIX_EVENT_MIGRATION_COLUMNS.items()
+                ):
+                    if name not in matrix_event_columns:
+                        connection.execute(
+                            "ALTER TABLE processed_matrix_events "
+                            f"ADD COLUMN {name} {declaration}",
+                        )
+                project_decision_columns = {
+                    row["name"]
+                    for row in connection.execute(
+                        "PRAGMA table_info(project_decisions)",
+                    )
+                }
+                for name, declaration in (
+                    PROJECT_DECISION_MIGRATION_COLUMNS.items()
+                ):
+                    if name not in project_decision_columns:
+                        connection.execute(
+                            "ALTER TABLE project_decisions "
+                            f"ADD COLUMN {name} {declaration}",
+                        )
+                # CREATE INDEX in SCHEMA_SQL runs before ALTER TABLE on an
+                # upgraded database, so create the recovery index only after
+                # the migration columns exist.
+                connection.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS
+                      processed_matrix_events_recovery_idx
+                    ON processed_matrix_events(
+                      status, next_attempt_at, updated_at
+                    )
+                    """,
+                )
                 connection.execute(
                     f"PRAGMA user_version={SCHEMA_VERSION}",
                 )

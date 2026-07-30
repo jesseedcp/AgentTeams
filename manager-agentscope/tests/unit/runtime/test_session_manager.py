@@ -10,7 +10,10 @@ from agentteams_manager.domain.models import (
     RoomKind,
     RoomPolicy,
 )
-from agentteams_manager.runtime.session_manager import RoomSessionManager
+from agentteams_manager.runtime.session_manager import (
+    RoomSessionManager,
+    _effective_policy,
+)
 from agentteams_manager.state.database import Database
 from agentteams_manager.state.sessions import SessionRepository
 
@@ -40,6 +43,26 @@ def room_policy() -> RoomPolicy:
         kind=RoomKind.ADMIN_DM,
         revision=1,
     )
+
+
+def test_elevated_modes_change_confirmation_only() -> None:
+    policy = RoomPolicy(
+        room_id="!room:example",
+        kind=RoomKind.ADMIN_DM,
+        revision=1,
+        allowed_tools=frozenset({"create_worker", "delete_worker"}),
+        confirm_tools=frozenset({"delete_worker"}),
+    )
+
+    assert _effective_policy(policy, "off").confirm_tools == frozenset(
+        {"delete_worker"},
+    )
+    assert _effective_policy(policy, "off").confirmation_mode == "off"
+    assert _effective_policy(policy, "ask").confirm_tools == policy.allowed_tools
+    assert _effective_policy(policy, "ask").confirmation_mode == "ask"
+    assert _effective_policy(policy, "full").confirm_tools == frozenset()
+    assert _effective_policy(policy, "full").confirmation_mode == "full"
+    assert _effective_policy(policy, "full").allowed_tools == policy.allowed_tools
 
 
 @pytest.mark.asyncio

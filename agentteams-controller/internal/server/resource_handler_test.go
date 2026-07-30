@@ -12,6 +12,7 @@ import (
 
 	v1beta1 "github.com/agentscope-ai/AgentTeams/agentteams-controller/api/v1beta1"
 	authpkg "github.com/agentscope-ai/AgentTeams/agentteams-controller/internal/auth"
+	"github.com/agentscope-ai/AgentTeams/agentteams-controller/internal/backend"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -528,6 +529,7 @@ func TestUpdateTeamMembershipAndHeartbeat(t *testing.T) {
 
 	updateBody := []byte(`{
 		"heartbeatEvery":"45m",
+		"peerMentions":false,
 		"workerMembers":[
 			{"name":"alpha-lead","role":"team_leader"},
 			{"name":"alpha-qa","role":"worker"}
@@ -548,6 +550,9 @@ func TestUpdateTeamMembershipAndHeartbeat(t *testing.T) {
 	if updated.Spec.HeartbeatEvery != "45m" {
 		t.Fatalf("heartbeatEvery = %q, want 45m", updated.Spec.HeartbeatEvery)
 	}
+	if updated.Spec.PeerMentions == nil || *updated.Spec.PeerMentions {
+		t.Fatalf("peerMentions = %#v, want false", updated.Spec.PeerMentions)
+	}
 	if got, want := updated.Spec.WorkerMembers, []v1beta1.TeamWorkerRef{
 		{Name: "alpha-lead", Role: "team_leader"},
 		{Name: "alpha-qa", Role: "worker"},
@@ -564,6 +569,12 @@ func TestUpdateTeamMembershipAndHeartbeat(t *testing.T) {
 	}
 	if !reflect.DeepEqual(resp.WorkerMembers, updated.Spec.WorkerMembers) {
 		t.Fatalf("workerMembers = %#v, want %#v", resp.WorkerMembers, updated.Spec.WorkerMembers)
+	}
+	if resp.HeartbeatEvery != "45m" {
+		t.Fatalf("response heartbeatEvery = %q, want 45m", resp.HeartbeatEvery)
+	}
+	if resp.PeerMentions == nil || *resp.PeerMentions {
+		t.Fatalf("response peerMentions = %#v, want false", resp.PeerMentions)
 	}
 }
 
@@ -735,6 +746,29 @@ func TestCreateWorkerDefaultsRuntime(t *testing.T) {
 	}
 	if got := stored.Spec.Runtime; got != "openclaw" {
 		t.Fatalf("worker.spec.runtime = %q, want openclaw", got)
+	}
+}
+
+func TestCreateWorkerUsesConfiguredDefaultRuntime(t *testing.T) {
+	scheme := newServerTestScheme(t)
+	k8sClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+	handler := NewResourceHandler(k8sClient, "default", nil, "")
+	handler.defaultWorkerRuntime = backend.RuntimeQwenPaw
+
+	body := []byte(`{"name":"worker-cr"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workers", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	handler.CreateWorker(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusCreated, rec.Code, rec.Body.String())
+	}
+
+	var stored v1beta1.Worker
+	if err := k8sClient.Get(context.Background(), client.ObjectKey{Name: "worker-cr", Namespace: "default"}, &stored); err != nil {
+		t.Fatalf("get created worker: %v", err)
+	}
+	if got := stored.Spec.Runtime; got != backend.RuntimeQwenPaw {
+		t.Fatalf("worker.spec.runtime = %q, want %q", got, backend.RuntimeQwenPaw)
 	}
 }
 

@@ -332,6 +332,10 @@ def test_pull_all_refreshes_config_mcporter_and_skills_without_shared(tmp_path, 
     def fake_cat(key):
         if key.endswith("/openclaw.json"):
             return json.dumps(remote_config)
+        if key.endswith("/SOUL.md"):
+            return "remote soul"
+        if key.endswith("/AGENTS.md"):
+            return "remote agents"
         if key.endswith("/config/mcporter.json"):
             return '{"mcpServers":{}}'
         return None
@@ -351,10 +355,18 @@ def test_pull_all_refreshes_config_mcporter_and_skills_without_shared(tmp_path, 
 
     changed = sync.pull_all()
 
-    assert set(changed) == {"openclaw.json", "config/mcporter.json", "skills/github/"}
+    assert set(changed) == {
+        "openclaw.json",
+        "SOUL.md",
+        "AGENTS.md",
+        "config/mcporter.json",
+        "skills/github/",
+    }
     written = json.loads((sync.local_dir / "openclaw.json").read_text())
     assert written["channels"]["matrix"]["accessToken"] == "local-token"
     assert written["channels"]["matrix"]["groupAllowFrom"] == ["@new:mx"]
+    assert (sync.local_dir / "SOUL.md").read_text() == "remote soul"
+    assert (sync.local_dir / "AGENTS.md").read_text() == "remote agents"
     assert (sync.local_dir / "config" / "mcporter.json").read_text() == '{"mcpServers":{}}'
     assert commands == [
         (
@@ -363,6 +375,27 @@ def test_pull_all_refreshes_config_mcporter_and_skills_without_shared(tmp_path, 
             f"{sync.local_dir / 'skills' / 'github'}/",
             "--overwrite",
         )
+    ]
+
+
+def test_prompt_fallback_loaders_read_canonical_worker_paths(tmp_path, monkeypatch):
+    sync = _sync(tmp_path)
+    reads = []
+
+    def fake_cat(key):
+        reads.append(key)
+        return {
+            "agents/dag-team-dev/SOUL.md": "soul",
+            "agents/dag-team-dev/AGENTS.md": "agents",
+        }.get(key)
+
+    monkeypatch.setattr(sync, "_cat", fake_cat)
+
+    assert sync.get_soul() == "soul"
+    assert sync.get_agents_md() == "agents"
+    assert reads == [
+        "agents/dag-team-dev/SOUL.md",
+        "agents/dag-team-dev/AGENTS.md",
     ]
 
 
@@ -413,6 +446,26 @@ def test_push_local_preserves_user_data_but_skips_manager_and_mirrored_state(tmp
         "agentteams/agentteams-storage/agents/dag-team-dev/memory/shared/note.txt",
         "agentteams/agentteams-storage/agents/dag-team-dev/skills/github/SKILL.md",
     }
+
+
+def test_push_local_raises_when_any_upload_fails(tmp_path, monkeypatch):
+    sync = _sync(tmp_path)
+    changed = sync.local_dir / "memory" / "retry-me.txt"
+    changed.parent.mkdir(parents=True, exist_ok=True)
+    changed.write_text("retry me", encoding="utf-8")
+
+    monkeypatch.setattr(sync, "_ensure_alias", lambda: None)
+    monkeypatch.setattr(sync, "_cat", lambda _key: None)
+
+    def fail_upload(*args, **_kwargs):
+        if args[0] == "cp":
+            raise subprocess.CalledProcessError(1, args)
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("copaw_worker.sync._mc", fail_upload)
+
+    with pytest.raises(RuntimeError, match="retry-me.txt"):
+        push_local(sync, since=0)
 
 
 class _RecordingHealth:

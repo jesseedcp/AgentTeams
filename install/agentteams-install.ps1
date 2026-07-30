@@ -31,8 +31,8 @@
 #   AGENTTEAMS_INSTALL_MANAGER_IMAGE       Override manager image (e.g., local build)
 #   AGENTTEAMS_INSTALL_WORKER_IMAGE        Override worker image  (e.g., local build)
 #   AGENTTEAMS_INSTALL_COPAW_WORKER_IMAGE  Override copaw worker image (e.g., local build)
-#   AGENTTEAMS_INSTALL_HERMES_WORKER_IMAGE Override hermes worker image (e.g., local build)
 #   AGENTTEAMS_INSTALL_QWENPAW_WORKER_IMAGE Override qwenpaw worker image (e.g., local build)
+#   AGENTTEAMS_INSTALL_HERMES_WORKER_IMAGE Override hermes worker image (e.g., local build)
 #   AGENTTEAMS_PORT_GATEWAY       Host port for Higress gateway (default: 18080)
 #   AGENTTEAMS_PORT_CONSOLE       Host port for Higress console (default: 18001)
 #   AGENTTEAMS_PORT_CINNY         Host port for Cinny direct access (default: 18088)
@@ -274,6 +274,15 @@ function Get-ControllerEnvPrefix {
         return ("HIC" + "LAW_")
     }
     return "AGENTTEAMS_"
+}
+
+function Get-ControllerStoragePrefix {
+    param([string]$Version)
+
+    if (Test-UseLegacyImageEnv $Version) {
+        return ("hic" + "law/agentteams-storage")
+    }
+    return "agentteams/agentteams-storage"
 }
 
 function Resolve-AgentTeamsVersion {
@@ -1001,8 +1010,8 @@ AGENTTEAMS_CMS_METRICS_ENABLED=$(if ($env:AGENTTEAMS_CMS_METRICS_ENABLED) { $env
 # Worker images (for direct container creation)
 AGENTTEAMS_WORKER_IMAGE=$($Config.WORKER_IMAGE)
 AGENTTEAMS_COPAW_WORKER_IMAGE=$($Config.COPAW_WORKER_IMAGE)
-AGENTTEAMS_HERMES_WORKER_IMAGE=$($Config.HERMES_WORKER_IMAGE)
 AGENTTEAMS_QWENPAW_WORKER_IMAGE=$($Config.QWENPAW_WORKER_IMAGE)
+AGENTTEAMS_HERMES_WORKER_IMAGE=$($Config.HERMES_WORKER_IMAGE)
 
 # Manager runtime is fixed; Worker runtime remains independently configurable.
 AGENTTEAMS_MANAGER_RUNTIME=agentscope
@@ -2536,8 +2545,8 @@ function Install-Manager {
     $config.HIGRESS_REGISTRY = $script:AGENTTEAMS_HIGRESS_REGISTRY
     $config.WORKER_IMAGE = $script:WORKER_IMAGE
     $config.COPAW_WORKER_IMAGE = $script:COPAW_WORKER_IMAGE
-    $config.HERMES_WORKER_IMAGE = $script:HERMES_WORKER_IMAGE
     $config.QWENPAW_WORKER_IMAGE = $script:QWENPAW_WORKER_IMAGE
+    $config.HERMES_WORKER_IMAGE = $script:HERMES_WORKER_IMAGE
 
     # Write env file
     New-EnvFile -Config $config -Path $script:AGENTTEAMS_ENV_FILE
@@ -2658,6 +2667,7 @@ function Install-Manager {
 
         # Controller env args
         $ctrlEnvPrefix = Get-ControllerEnvPrefix $script:AGENTTEAMS_VERSION
+        $storagePrefix = Get-ControllerStoragePrefix $script:AGENTTEAMS_VERSION
         $ctrlArgs = @(
             "run", "-d",
             "--name", "agentteams-controller",
@@ -2687,11 +2697,12 @@ function Install-Manager {
             "-e", "${ctrlEnvPrefix}CINNY_PUBLIC_URL=http://127.0.0.1:$($config.PORT_CINNY)",
             "-e", "${ctrlEnvPrefix}CINNY_URL=http://127.0.0.1:8088",
             "-e", "${ctrlEnvPrefix}PORT_CINNY=$($config.PORT_CINNY)",
+            "-e", "${ctrlEnvPrefix}PORT_MANAGER_CONSOLE=$($config.PORT_MANAGER_CONSOLE)",
             "-e", "${ctrlEnvPrefix}MATRIX_URL=http://127.0.0.1:6167",
             "-e", "${ctrlEnvPrefix}MATRIX_E2EE=$($config.MATRIX_E2EE)",
             "-e", "${ctrlEnvPrefix}MINIO_ENDPOINT=http://127.0.0.1:9000",
             "-e", "${ctrlEnvPrefix}MINIO_BUCKET=agentteams-storage",
-            "-e", "${ctrlEnvPrefix}STORAGE_PREFIX=agentteams/agentteams-storage",
+            "-e", "${ctrlEnvPrefix}STORAGE_PREFIX=$storagePrefix",
             "-e", "${ctrlEnvPrefix}FS_ENDPOINT=http://127.0.0.1:9000",
             "-e", "${ctrlEnvPrefix}AI_GATEWAY_URL=http://$aigwDomain",
             "-e", "${ctrlEnvPrefix}CONTROLLER_URL=http://agentteams-controller:8090",

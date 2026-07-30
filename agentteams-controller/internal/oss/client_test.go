@@ -71,6 +71,32 @@ func TestMinIOClient_PutObjectUsesCp(t *testing.T) {
 	}
 }
 
+func TestMinIOClient_DeleteObjectIsIdempotentWhenObjectIsMissing(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake mc shell executable is POSIX-only")
+	}
+	dir := t.TempDir()
+	mcPath := filepath.Join(dir, "mc")
+	script := "#!/bin/sh\n" +
+		"if [ \"$1\" = \"alias\" ]; then exit 0; fi\n" +
+		"echo 'Object does not exist' >&2\n" +
+		"exit 1\n"
+	if err := os.WriteFile(mcPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	client := NewMinIOClient(Config{
+		MCBinary:      mcPath,
+		StoragePrefix: "agentteams/agentteams-storage",
+	})
+	if err := client.DeleteObject(
+		t.Context(),
+		"agents/worker-1/credentials/matrix/password",
+	); err != nil {
+		t.Fatalf("DeleteObject should ignore a missing object: %v", err)
+	}
+}
+
 func TestMinIOClientCopyArgsIncludeSHA256Metadata(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "runtime.json")
 	if err := os.WriteFile(path, []byte("agentteams"), 0o600); err != nil {
@@ -107,8 +133,8 @@ func TestMinIOAdminClient_BuildWorkerPolicy(t *testing.T) {
 	if policy.Version != "2012-10-17" {
 		t.Errorf("Version = %q", policy.Version)
 	}
-	if len(policy.Statement) != 3 {
-		t.Fatalf("expected 3 statements, got %d", len(policy.Statement))
+	if len(policy.Statement) != 4 {
+		t.Fatalf("expected 4 statements, got %d", len(policy.Statement))
 	}
 
 	locationStmt := policy.Statement[0]
@@ -177,6 +203,9 @@ func TestMinIOAdminClient_BuildWorkerPolicy(t *testing.T) {
 	if !hasTeamDir {
 		t.Errorf("expected team directory prefix in list conditions: %v", prefixes)
 	}
+	if !stringSliceContains(prefixes, "agentteams-config/packages/*") {
+		t.Errorf("expected AgentSpec package prefix in list conditions: %v", prefixes)
+	}
 
 	// Verify team resource in RW statement
 	rwStmt := policy.Statement[2]
@@ -231,6 +260,18 @@ func TestMinIOAdminClient_BuildWorkerPolicy(t *testing.T) {
 	if !hasTeamDirResource {
 		t.Errorf("expected team directory resource in RW statement: %v", rwStmt.Resource)
 	}
+	packageResource := "arn:aws:s3:::agentteams-storage/agentteams-config/packages/*"
+	if stringSliceContains(rwStmt.Resource, packageResource) {
+		t.Errorf("AgentSpec packages must not be writable: %v", rwStmt.Resource)
+	}
+
+	readStmt := policy.Statement[3]
+	if len(readStmt.Action) != 1 || readStmt.Action[0] != "s3:GetObject" {
+		t.Errorf("AgentSpec package statement actions = %v, want GetObject only", readStmt.Action)
+	}
+	if !stringSliceContains(readStmt.Resource, packageResource) {
+		t.Errorf("expected read-only AgentSpec package resource: %v", readStmt.Resource)
+	}
 }
 
 func TestMinIOAdminClient_BuildWorkerPolicyNoTeam(t *testing.T) {
@@ -264,12 +305,20 @@ func TestMinIOAdminClient_BuildManagerPolicy(t *testing.T) {
 	prefixes := condition["s3:prefix"].([]string)
 	hasManager := false
 	hasManagerDir := false
+	hasTeams := false
+	hasTeamsDir := false
 	for _, p := range prefixes {
 		if p == "manager" || p == "manager/*" {
 			hasManager = true
 		}
 		if p == "manager/" {
 			hasManagerDir = true
+		}
+		if p == "teams" || p == "teams/*" {
+			hasTeams = true
+		}
+		if p == "teams/" {
+			hasTeamsDir = true
 		}
 	}
 	if !hasManager {
@@ -278,17 +327,28 @@ func TestMinIOAdminClient_BuildManagerPolicy(t *testing.T) {
 	if !hasManagerDir {
 		t.Errorf("expected manager directory prefix in list conditions: %v", prefixes)
 	}
+	if !hasTeams || !hasTeamsDir {
+		t.Errorf("expected all Team prefixes in manager list conditions: %v", prefixes)
+	}
 
 	// Verify manager resource in RW statement
 	rwStmt := policy.Statement[2]
 	hasManagerResource := false
 	hasManagerDirResource := false
+	hasTeamsResource := false
+	hasTeamsDirResource := false
 	for _, r := range rwStmt.Resource {
 		if r == "arn:aws:s3:::agentteams-storage/manager/*" {
 			hasManagerResource = true
 		}
 		if r == "arn:aws:s3:::agentteams-storage/manager/" {
 			hasManagerDirResource = true
+		}
+		if r == "arn:aws:s3:::agentteams-storage/teams/*" {
+			hasTeamsResource = true
+		}
+		if r == "arn:aws:s3:::agentteams-storage/teams/" {
+			hasTeamsDirResource = true
 		}
 	}
 	if !hasManagerResource {
@@ -297,14 +357,20 @@ func TestMinIOAdminClient_BuildManagerPolicy(t *testing.T) {
 	if !hasManagerDirResource {
 		t.Errorf("expected manager directory resource in RW statement: %v", rwStmt.Resource)
 	}
+	if !hasTeamsResource || !hasTeamsDirResource {
+		t.Errorf("expected all Team resources in manager RW statement: %v", rwStmt.Resource)
+	}
 }
 
-func TestMinIOAdminClient_EnsurePolicyReplacesInPlaceWithoutAccessGap(t *testing.T) {
+func TestMinIOAdminClient_EnsurePolicyOverwritesWithoutAccessGap(t *testing.T) {
 	dir := t.TempDir()
 	argsPath := filepath.Join(dir, "args")
 	mcPath := filepath.Join(dir, "mc")
 	script := `#!/bin/sh
 printf '%s\n' "$*" >> "$MC_ARGS_FILE"
+case "$*" in
+  "admin policy attach "*) echo "Policy already attached to user" >&2; exit 1 ;;
+esac
 exit 0
 `
 	if runtime.GOOS == "windows" {
@@ -330,7 +396,7 @@ exit 0
 	}
 	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
 	if len(lines) != 2 {
-		t.Fatalf("mc calls = %v, want create/attach without detach/remove", lines)
+		t.Fatalf("mc calls = %v, want create/attach", lines)
 	}
 	wantPrefixes := []string{
 		"admin policy create agentteams worker-worker-1 ",

@@ -140,6 +140,7 @@ Dir.mktmpdir("teamharness-taskflow-") do |dir|
     matrix_port = matrix_server.server_address[1]
     os.environ["AGENTTEAMS_MATRIX_URL"] = f"http://127.0.0.1:{matrix_port}"
     os.environ["AGENTTEAMS_WORKER_MATRIX_TOKEN"] = "test-token"
+    os.environ["AGENTTEAMS_MATRIX_USER_ID"] = "@leader:example.test"
     context_file = pathlib.Path("#{root}") / "matrix-context.json"
     os.environ["TEAMHARNESS_MATRIX_CONTEXT_FILE"] = str(context_file)
 
@@ -196,6 +197,8 @@ Dir.mktmpdir("teamharness-taskflow-") do |dir|
         raise AssertionError(f"delegate_task did not write console task_title: {delegated_meta!r}")
     if delegated_meta.get("assigned_to") != "@worker-a:example.test":
         raise AssertionError(f"delegate_task did not write console assigned_to: {delegated_meta!r}")
+    if delegated_meta.get("coordinator_matrix_user_id") != "@leader:example.test":
+        raise AssertionError(f"delegate_task did not persist the Leader Matrix id: {delegated_meta!r}")
     assigned_at = delegated_meta.get("assigned_at")
     if not assigned_at:
         raise AssertionError(f"delegate_task did not write console assigned_at: {delegated_meta!r}")
@@ -343,6 +346,13 @@ Dir.mktmpdir("teamharness-taskflow-") do |dir|
         raise AssertionError(f"submit_task did not sync result: {submitted!r}")
     if submitted["task"].get("assigned_at") != assigned_at:
         raise AssertionError(f"submit_task should preserve assigned_at: {submitted!r}")
+    reacked = payload("taskflow", {
+        "role": "worker",
+        "action": "ack_task",
+        "payload": {"taskId": task_id},
+    })
+    if not reacked.get("ok") or reacked["task"].get("status") != "submitted":
+        raise AssertionError(f"ack_task should not regress a submitted task: {reacked!r}")
     submitted_result_text = detailed_result_path.read_text(encoding="utf-8")
     expected_result_text = (
         "# Detailed Result Body\\n\\n"
@@ -366,7 +376,19 @@ Dir.mktmpdir("teamharness-taskflow-") do |dir|
             raise AssertionError(f"artifact missing Matrix references: {artifact!r}")
         if artifact.get("parentEventId") != "$task-parent":
             raise AssertionError(f"artifact missing parent event reference: {artifact!r}")
-    file_events = [event["content"] for event in matrix["events"]]
+    completion_notification = submitted.get("completionNotification") or {}
+    if completion_notification.get("status") != "sent":
+        raise AssertionError(f"submit_task did not send completion notification: {submitted!r}")
+    completion_event = matrix["events"][-1]["content"]
+    if not completion_event.get("body", "").startswith("@leader:example.test TASK_COMPLETED: t-001"):
+        raise AssertionError(f"completion message body mismatch: {completion_event!r}")
+    if completion_event.get("m.mentions") != {"user_ids": ["@leader:example.test"]}:
+        raise AssertionError(f"completion message mention mismatch: {completion_event!r}")
+    file_events = [
+        event["content"]
+        for event in matrix["events"]
+        if event["content"].get("msgtype") == "m.file"
+    ]
     if [event.get("body") for event in file_events[:2]] != ["t-001-result.md", "t-001-analysis.md"]:
         raise AssertionError(f"m.file event bodies mismatch: {file_events!r}")
     for event in file_events[:2]:
@@ -446,7 +468,11 @@ Dir.mktmpdir("teamharness-taskflow-") do |dir|
         raise AssertionError(f"context submit_task should publish result artifact: {context_submitted!r}")
     if context_published[0].get("parentEventId") != "$context-task-parent":
         raise AssertionError(f"context submit_task did not infer parent event: {context_submitted!r}")
-    context_event = matrix["events"][-1]["content"]
+    context_event = next(
+        event["content"]
+        for event in reversed(matrix["events"])
+        if event["content"].get("body") == "context-parent-task-result.md"
+    )
     if context_event.get("m.relates_to") != {"rel_type": "com.agentteams.attachment", "event_id": "$context-task-parent"}:
         raise AssertionError(f"context submit_task file event missing attachment relation: {context_event!r}")
 

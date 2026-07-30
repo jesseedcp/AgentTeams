@@ -1,8 +1,8 @@
 import asyncio
 import json
-from pathlib import Path
 import sys
 import types
+from pathlib import Path
 
 import pytest
 
@@ -556,6 +556,8 @@ async def test_worker_marks_matrix_unhealthy_when_startup_relogin_cannot_run(tmp
 
 @pytest.mark.anyio
 async def test_worker_builds_readiness_from_on_demand_checks(tmp_path, monkeypatch):
+    import threading
+
     worker = Worker(_config(tmp_path))
     worker._copaw_working_dir = tmp_path / "alice" / ".copaw"
     from copaw_worker.health import HealthState
@@ -567,29 +569,44 @@ async def test_worker_builds_readiness_from_on_demand_checks(tmp_path, monkeypat
         "models": {"providers": {}},
     }
 
-    monkeypatch.setattr(
-        "copaw_worker.worker.check_copaw_service",
-        lambda port: ComponentHealth(
+    event_loop_thread = threading.get_ident()
+    probe_threads = []
+
+    def fake_copaw_check(port):
+        probe_threads.append(threading.get_ident())
+        return ComponentHealth(
             "healthy",
             "copaw health endpoint reachable",
             {"operation": "copaw_health_probe", "port": port},
-        ),
-    )
-    monkeypatch.setattr(
-        "copaw_worker.worker.check_model_service",
-        lambda cfg: ComponentHealth(
+        )
+
+    def fake_model_check(cfg):
+        probe_threads.append(threading.get_ident())
+        return ComponentHealth(
             "unhealthy",
             "model provider is unreachable",
             {"operation": "model_preflight", "cfg_keys": sorted(cfg.keys())},
-        ),
-    )
-    monkeypatch.setattr(
-        "copaw_worker.worker.check_matrix_service",
-        lambda homeserver: ComponentHealth(
+        )
+
+    def fake_matrix_check(homeserver):
+        probe_threads.append(threading.get_ident())
+        return ComponentHealth(
             "healthy",
             "matrix homeserver reachable",
             {"operation": "matrix_endpoint_probe", "homeserver": homeserver},
-        ),
+        )
+
+    monkeypatch.setattr(
+        "copaw_worker.worker.check_copaw_service",
+        fake_copaw_check,
+    )
+    monkeypatch.setattr(
+        "copaw_worker.worker.check_model_service",
+        fake_model_check,
+    )
+    monkeypatch.setattr(
+        "copaw_worker.worker.check_matrix_service",
+        fake_matrix_check,
     )
 
     snapshot = await worker.build_worker_readiness()
@@ -601,6 +618,8 @@ async def test_worker_builds_readiness_from_on_demand_checks(tmp_path, monkeypat
     assert data["components"]["matrix"]["healthiness"] == "healthy"
     assert data["components"]["matrix"]["message"] == "matrix homeserver reachable"
     assert data["components"]["matrix"]["details"]["operation"] == "matrix_endpoint_probe"
+    assert len(probe_threads) == 3
+    assert all(thread_id != event_loop_thread for thread_id in probe_threads)
 
 
 @pytest.mark.anyio
@@ -633,6 +652,8 @@ async def test_worker_liveness_is_lightweight(tmp_path):
 
 @pytest.mark.anyio
 async def test_worker_marks_copaw_healthy_after_startup_probe(tmp_path, monkeypatch):
+    import threading
+
     worker = Worker(_config(tmp_path))
     worker._copaw_working_dir = tmp_path / "alice" / ".copaw"
     from copaw_worker.health import HealthState
@@ -641,9 +662,10 @@ async def test_worker_marks_copaw_healthy_after_startup_probe(tmp_path, monkeypa
     worker._health.persist()
 
     calls = []
+    event_loop_thread = threading.get_ident()
 
     def fake_check(port):
-        calls.append(port)
+        calls.append((port, threading.get_ident()))
         return ComponentHealth(
             "healthy",
             "copaw health endpoint reachable",
@@ -656,7 +678,8 @@ async def test_worker_marks_copaw_healthy_after_startup_probe(tmp_path, monkeypa
 
     data = _health_json(tmp_path)
     copaw = data["components"]["copaw"]
-    assert calls == [8088]
+    assert [port for port, _thread_id in calls] == [8088]
+    assert calls[0][1] != event_loop_thread
     assert copaw["healthiness"] == "healthy"
     assert copaw["message"] == "copaw health endpoint reachable"
     assert copaw["details"]["operation"] == "copaw_health_probe"

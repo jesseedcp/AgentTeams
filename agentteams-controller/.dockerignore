@@ -1,0 +1,7 @@
+**/__pycache__
+**/.pytest_cache
+**/*.py[cod]
+
+agent/copaw-manager-agent
+agent/openhuman-worker-agent
+agent/skills-alpha

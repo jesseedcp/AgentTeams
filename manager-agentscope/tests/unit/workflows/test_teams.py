@@ -301,6 +301,56 @@ async def test_simple_team_uses_typed_create_command() -> None:
 
 
 @pytest.mark.asyncio
+async def test_create_team_default_window_covers_k8s_room_startup() -> None:
+    controller = Controller()
+    for name in ("alpha-lead", "researcher", "coder"):
+        controller.workers[name] = WorkerResource(
+            name=name,
+            runtime="qwenpaw",
+            phase="Running",
+        )
+    pending = TeamResource(
+        name="alpha",
+        leader="alpha-lead",
+        workers=("researcher", "coder"),
+        phase="Starting",
+    )
+    controller.get_sequences["alpha"] = [
+        None,
+        pending,
+        pending,
+        pending,
+        pending,
+        pending,
+        pending,
+        team_ready(),
+    ]
+    supervisor = Supervisor()
+    topology = Topology()
+    service = ResourceService(
+        controller=controller,
+        supervisor=supervisor,
+        topology=topology,
+        matrix=Matrix(),
+        sleeper=no_sleep,
+    )
+    spec = TeamSpec(
+        name="alpha",
+        leader_name="alpha-lead",
+        worker_names=("researcher", "coder"),
+    )
+
+    team = await service.create_team(
+        spec,
+        context=context("create-alpha-delayed"),
+    )
+
+    assert team.phase == "Active"
+    assert len(controller.simple_requests) == 1
+    assert topology.refreshes == 1
+
+
+@pytest.mark.asyncio
 async def test_delete_team_is_proved_absent_before_topology_refresh() -> None:
     controller = Controller()
     controller.teams["alpha"] = team_ready()
@@ -313,6 +363,30 @@ async def test_delete_team_is_proved_absent_before_topology_refresh() -> None:
 
     assert controller.deleted == ["alpha"]
     assert await controller.get_team("alpha") is None
+    assert preserved_workers == ("alpha-lead", "researcher", "coder")
+    assert topology.refreshes == 1
+
+
+@pytest.mark.asyncio
+async def test_delete_team_waits_for_controller_absence_to_converge() -> None:
+    controller = Controller()
+    current = team_ready()
+    controller.teams["alpha"] = current
+    controller.get_sequences["alpha"] = [
+        current,
+        current,
+        current,
+        current,
+        None,
+    ]
+    service, topology = make_service(controller)
+
+    preserved_workers = await service.delete_team(
+        "alpha",
+        context=context("delete-alpha-delayed"),
+    )
+
+    assert controller.deleted == ["alpha"]
     assert preserved_workers == ("alpha-lead", "researcher", "coder")
     assert topology.refreshes == 1
 

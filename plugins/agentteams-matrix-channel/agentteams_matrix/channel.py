@@ -1,11 +1,5 @@
 # -*- coding: utf-8 -*-
-"""
-AgentTeams overlay for QwenPaw MatrixChannel.
-
-The base implementation comes from QwenPaw. AgentTeams keeps a small overlay for
-runtime behavior that is not a TeamHarness concern: startup readiness, first
-sync stability, and Matrix mention compatibility.
-"""
+"""AgentTeams-owned Matrix channel for QwenPaw 2."""
 
 from __future__ import annotations
 
@@ -66,7 +60,7 @@ from nio.responses import (
     WhoamiResponse,
 )
 
-from agentscope_runtime.engine.schemas.agent_schemas import (
+from qwenpaw.schemas import (
     AudioContent,
     ContentType,
     FileContent,
@@ -77,14 +71,14 @@ from agentscope_runtime.engine.schemas.agent_schemas import (
     VideoContent,
 )
 
-from ....app.channels.base import BaseChannel
-from ....app.channels.utils import file_url_to_local_path
-from ....constant import WORKING_DIR
+from qwenpaw.app.channels.base import BaseChannel
+from qwenpaw.app.channels.utils import file_url_to_local_path
+from qwenpaw.constant import WORKING_DIR
 
 logger = logging.getLogger("qwenpaw.channels.matrix")
 
 
-CHANNEL_KEY = "matrix"
+CHANNEL_KEY = "agentteams_matrix"
 
 # Tunables: sync / typing / DM membership cache TTL
 SYNC_TIMEOUT_MS = 30000
@@ -163,6 +157,10 @@ _TOOL_OUTPUT_MESSAGE_TYPE_NAMES = frozenset(
 _MATRIX_STREAMING_REASONING_EVENT_ID_KEY = "matrix_streaming_reasoning_event_id"
 _MATRIX_STREAMING_REASONING_LAST_EDIT_KEY = "matrix_streaming_reasoning_last_edit_at"
 _MATRIX_STREAMING_REASONING_STREAM_ID_KEY = "matrix_streaming_reasoning_stream_id"
+_MATRIX_TRANSIENT_META_KEY = "matrix_agentteams_transient"
+_AGENTTEAMS_TRANSIENT_CONTENT_KEY = "io.agentteams.transient"
+_AGENTTEAMS_FINAL_CONTENT_KEY = "io.agentteams.final"
+_AGENTTEAMS_FINAL_EVENT_TYPE = "io.agentteams.response.final"
 _MATRIX_CONTROL_EPOCH_KEY = "matrix_control_epoch"
 
 
@@ -347,7 +345,7 @@ class HistoryEntry:
     media_parts: Optional[List[Any]] = None
 
 
-class MatrixChannel(BaseChannel):
+class AgentTeamsMatrixChannel(BaseChannel):
     """QwenPaw channel that connects to a Matrix homeserver via matrix-nio."""
 
     channel = CHANNEL_KEY  # type: ignore[assignment]
@@ -370,9 +368,11 @@ class MatrixChannel(BaseChannel):
         history_limit: int = DEFAULT_HISTORY_LIMIT,
         sync_timeout_ms: int = 30000,
         on_reply_sent: Optional[Callable] = None,
-        show_tool_details: bool = True,
-        filter_tool_messages: bool = False,
-        filter_thinking: bool = False,
+        display_config: Any = None,
+        no_text_debounce: bool = True,
+        show_thinking: bool = True,
+        show_tool_calls: bool = True,
+        show_tool_results: bool = True,
         streaming_enabled: bool = True,
         workspace_dir: Path | None = None,
         access_control_dm: bool = False,
@@ -383,9 +383,8 @@ class MatrixChannel(BaseChannel):
         super().__init__(
             process=process,
             on_reply_sent=on_reply_sent,
-            show_tool_details=show_tool_details,
-            filter_tool_messages=filter_tool_messages,
-            filter_thinking=filter_thinking,
+            display_config=display_config,
+            no_text_debounce=no_text_debounce,
             streaming_enabled=streaming_enabled,
             access_control_dm=access_control_dm,
             access_control_group=access_control_group,
@@ -479,20 +478,15 @@ class MatrixChannel(BaseChannel):
         process: Callable,
         config: Any,
         on_reply_sent: Optional[Callable] = None,
-        show_tool_details: bool = True,
-        filter_tool_messages: bool = False,
-        filter_thinking: bool = False,
+        display_config: Any = None,
+        no_text_debounce: bool = True,
         workspace_dir: Path | None = None,
-    ) -> "MatrixChannel":
+    ) -> "AgentTeamsMatrixChannel":
         # Support pydantic model, dict, or SimpleNamespace
         if isinstance(config, dict):
             raw = config
         else:
-            raw = (
-                config.model_dump()
-                if hasattr(config, "model_dump")
-                else vars(config)
-            )
+            raw = config.model_dump() if hasattr(config, "model_dump") else vars(config)
         return cls(
             process=process,
             homeserver=raw.get("homeserver", ""),
@@ -509,13 +503,11 @@ class MatrixChannel(BaseChannel):
             history_limit=raw.get("history_limit", DEFAULT_HISTORY_LIMIT),
             sync_timeout_ms=raw.get("sync_timeout_ms", 30000),
             on_reply_sent=on_reply_sent,
-            show_tool_details=show_tool_details,
-            filter_tool_messages=(
-                filter_tool_messages or raw.get("filter_tool_messages", False)
-            ),
-            filter_thinking=(
-                filter_thinking or raw.get("filter_thinking", False)
-            ),
+            display_config=display_config,
+            no_text_debounce=no_text_debounce,
+            show_thinking=bool(raw.get("show_thinking", True)),
+            show_tool_calls=bool(raw.get("show_tool_calls", True)),
+            show_tool_results=bool(raw.get("show_tool_results", True)),
             streaming_enabled=bool(raw.get("streaming_enabled", True)),
             workspace_dir=workspace_dir,
             access_control_dm=bool(raw.get("access_control_dm", False)),
@@ -528,7 +520,7 @@ class MatrixChannel(BaseChannel):
         cls,
         process: Callable,
         on_reply_sent=None,
-    ) -> "MatrixChannel":
+    ) -> "AgentTeamsMatrixChannel":
         return cls(
             process=process,
             homeserver=os.environ.get("AGENTTEAMS_MATRIX_SERVER", ""),
@@ -673,9 +665,7 @@ class MatrixChannel(BaseChannel):
         if "device_name" in login_params and self.device_name:
             login_kwargs["device_name"] = self.device_name
         if "device_id" in login_params:
-            stable_device_id = (
-                self._client.device_id or resolved_device_id or ""
-            )
+            stable_device_id = self._client.device_id or resolved_device_id or ""
             if stable_device_id:
                 login_kwargs["device_id"] = stable_device_id
         # For nio versions that derive username from client.user.
@@ -697,11 +687,7 @@ class MatrixChannel(BaseChannel):
                 (self.password,),
                 {
                     "device_name": self.device_name,
-                    **(
-                        {"device_id": resolved_device_id}
-                        if resolved_device_id
-                        else {}
-                    ),
+                    **({"device_id": resolved_device_id} if resolved_device_id else {}),
                 },
             ),
         )
@@ -710,11 +696,7 @@ class MatrixChannel(BaseChannel):
                 (login_user, self.password),
                 {
                     "device_name": self.device_name,
-                    **(
-                        {"device_id": resolved_device_id}
-                        if resolved_device_id
-                        else {}
-                    ),
+                    **({"device_id": resolved_device_id} if resolved_device_id else {}),
                 },
             ),
         )
@@ -782,7 +764,10 @@ class MatrixChannel(BaseChannel):
         if isinstance(resp, LoginResponse):
             self._handle_password_login_success(resp)
             return True
-        logger.error("MatrixChannel: password login failed component=matrix response_type=%s", type(resp).__name__)
+        logger.error(
+            "MatrixChannel: password login failed component=matrix response_type=%s",
+            type(resp).__name__,
+        )
         return False
 
     async def _login_with_access_token(self) -> bool:
@@ -825,7 +810,10 @@ class MatrixChannel(BaseChannel):
                     )
                     self.encryption = False
             return True
-        logger.error("MatrixChannel: token login failed component=matrix response_type=%s", type(whoami).__name__)
+        logger.error(
+            "MatrixChannel: token login failed component=matrix response_type=%s",
+            type(whoami).__name__,
+        )
         return False
 
     def _register_plain_room_callbacks(self) -> None:
@@ -908,9 +896,8 @@ class MatrixChannel(BaseChannel):
             has_password_creds=has_password_creds,
             has_token_cred=has_token_cred,
         )
-        resolved_device_id = (
-            self.device_id
-            or self._derive_device_id_from_name(self.device_name)
+        resolved_device_id = self.device_id or self._derive_device_id_from_name(
+            self.device_name
         )
         self._init_async_client(resolved_device_id)
 
@@ -945,7 +932,9 @@ class MatrixChannel(BaseChannel):
             try:
                 await self._sync_task
             except asyncio.CancelledError:
-                logger.debug("MatrixChannel: sync task cancelled during stop component=matrix")
+                logger.debug(
+                    "MatrixChannel: sync task cancelled during stop component=matrix"
+                )
         if self._http_client:
             await self._http_client.aclose()
             self._http_client = None
@@ -1421,8 +1410,7 @@ class MatrixChannel(BaseChannel):
             return
 
         logger.info(
-            "MatrixChannel: accepted key verification from %s "
-            "(device=%s, tx=%s)",
+            "MatrixChannel: accepted key verification from %s (device=%s, tx=%s)",
             event.sender,
             event.from_device,
             event.transaction_id,
@@ -1479,8 +1467,7 @@ class MatrixChannel(BaseChannel):
 
         self._sent_verification_done.add(transaction_id)
         logger.info(
-            "MatrixChannel: sent verification done "
-            "(tx=%s, sender=%s, device=%s)",
+            "MatrixChannel: sent verification done (tx=%s, sender=%s, device=%s)",
             transaction_id,
             sender,
             device_id,
@@ -1499,8 +1486,7 @@ class MatrixChannel(BaseChannel):
                 await self._client.keys_query()
         except Exception as exc:
             logger.warning(
-                "MatrixChannel: failed to query keys for verification "
-                "from %s: %s",
+                "MatrixChannel: failed to query keys for verification from %s: %s",
                 event.sender,
                 exc,
             )
@@ -1510,8 +1496,7 @@ class MatrixChannel(BaseChannel):
             self._client.olm.handle_key_verification(event)
         except Exception as exc:
             logger.warning(
-                "MatrixChannel: failed to rebuild key verification state "
-                "for tx=%s: %s",
+                "MatrixChannel: failed to rebuild key verification state for tx=%s: %s",
                 event.transaction_id,
                 exc,
             )
@@ -1535,8 +1520,7 @@ class MatrixChannel(BaseChannel):
             return
 
         logger.warning(
-            "MatrixChannel: Element key verification challenge from %s "
-            "(tx=%s): %s",
+            "MatrixChannel: Element key verification challenge from %s (tx=%s): %s",
             event.sender,
             event.transaction_id,
             self._format_sas_challenge(sas),
@@ -1550,8 +1534,7 @@ class MatrixChannel(BaseChannel):
             )
         except LocalProtocolError as exc:
             logger.warning(
-                "MatrixChannel: confirm_short_auth_string failed "
-                "for tx=%s: %s",
+                "MatrixChannel: confirm_short_auth_string failed for tx=%s: %s",
                 event.transaction_id,
                 exc,
             )
@@ -1559,8 +1542,7 @@ class MatrixChannel(BaseChannel):
 
         if isinstance(resp, ToDeviceError):
             logger.warning(
-                "MatrixChannel: confirm_short_auth_string failed "
-                "for tx=%s: %s",
+                "MatrixChannel: confirm_short_auth_string failed for tx=%s: %s",
                 event.transaction_id,
                 resp,
             )
@@ -1585,8 +1567,7 @@ class MatrixChannel(BaseChannel):
                     parts.append(
                         "emoji="
                         + " ".join(
-                            f"{symbol}({description})"
-                            for symbol, description in emojis
+                            f"{symbol}({description})" for symbol, description in emojis
                         ),
                     )
             except Exception as exc:
@@ -1642,7 +1623,10 @@ class MatrixChannel(BaseChannel):
                         self._save_sync_token(next_batch)
                     # Still auto-join invited rooms during catch-up
                     for room_id in resp.rooms.invite:
-                        logger.info("MatrixChannel: auto-joining component=matrix room_id=%s", room_id)
+                        logger.info(
+                            "MatrixChannel: auto-joining component=matrix room_id=%s",
+                            room_id,
+                        )
                         await self._client.join(room_id)
                     await self._e2ee_maintenance()
                     logger.info(
@@ -1679,7 +1663,10 @@ class MatrixChannel(BaseChannel):
                     if next_batch is not None:
                         self._save_sync_token(next_batch)
                     for room_id in resp.rooms.invite:
-                        logger.info("MatrixChannel: auto-joining component=matrix room_id=%s", room_id)
+                        logger.info(
+                            "MatrixChannel: auto-joining component=matrix room_id=%s",
+                            room_id,
+                        )
                         await self._client.join(room_id)
                     await self._e2ee_maintenance()
                 else:
@@ -1708,7 +1695,10 @@ class MatrixChannel(BaseChannel):
                         self._save_sync_token(next_batch)
                     # Auto-join invited rooms
                     for room_id in resp.rooms.invite:
-                        logger.info("MatrixChannel: auto-joining component=matrix room_id=%s", room_id)
+                        logger.info(
+                            "MatrixChannel: auto-joining component=matrix room_id=%s",
+                            room_id,
+                        )
                         await self._client.join(room_id)
                     # E2EE: full key maintenance (upload, query, claim,
                     # to-device)
@@ -1728,13 +1718,19 @@ class MatrixChannel(BaseChannel):
                             self._client.access_token = ""
                         self.access_token = ""
                         return
-                    logger.warning("MatrixChannel: sync error component=matrix response_type=%s", type(resp).__name__)
+                    logger.warning(
+                        "MatrixChannel: sync error component=matrix response_type=%s",
+                        type(resp).__name__,
+                    )
                     await asyncio.sleep(5)
             except asyncio.CancelledError:
                 logger.debug("MatrixChannel: sync loop cancelled component=matrix")
                 raise
             except Exception as exc:
-                logger.exception("MatrixChannel: sync exception component=matrix error_type=%s", type(exc).__name__)
+                logger.exception(
+                    "MatrixChannel: sync exception component=matrix error_type=%s",
+                    type(exc).__name__,
+                )
                 await asyncio.sleep(5)
 
     # ------------------------------------------------------------------
@@ -1750,8 +1746,7 @@ class MatrixChannel(BaseChannel):
         """Return True if chat type is muted at channel level."""
         if is_dm and self.dm_disabled:
             logger.warning(
-                "MatrixChannel: dropping DM message (dm_disabled) "
-                "sender=%s room=%s",
+                "MatrixChannel: dropping DM message (dm_disabled) sender=%s room=%s",
                 sender_id,
                 room_id,
             )
@@ -1813,7 +1808,9 @@ class MatrixChannel(BaseChannel):
             return True
         return False
 
-    def _teamharness_self_trigger(self, room_id: str, event: Any) -> dict[str, Any] | None:
+    def _teamharness_self_trigger(
+        self, room_id: str, event: Any
+    ) -> dict[str, Any] | None:
         content = getattr(event, "source", {}).get("content", {})
         if not isinstance(content, dict):
             return None
@@ -1854,8 +1851,7 @@ class MatrixChannel(BaseChannel):
         if room and self._user_id:
             display_name = self._get_display_name(room, self._user_id)
             logger.debug(
-                "strip_mention_prefix: user_id=%s display_name=%r "
-                "room_users=%d",
+                "strip_mention_prefix: user_id=%s display_name=%r room_users=%d",
                 self._user_id,
                 display_name,
                 len(getattr(room, "users", {})),
@@ -1951,8 +1947,7 @@ class MatrixChannel(BaseChannel):
                             return name
                     except Exception as exc:
                         logger.debug(
-                            "MatrixChannel: client_room user_name failed "
-                            "for %s: %s",
+                            "MatrixChannel: client_room user_name failed for %s: %s",
                             user_id,
                             exc,
                         )
@@ -2033,8 +2028,7 @@ class MatrixChannel(BaseChannel):
         prefix_part = TextContent(
             type=ContentType.TEXT,
             text=(
-                f"{HISTORY_CONTEXT_MARKER}\n{history_text}\n\n"
-                f"{CURRENT_MESSAGE_MARKER}"
+                f"{HISTORY_CONTEXT_MARKER}\n{history_text}\n\n{CURRENT_MESSAGE_MARKER}"
             ),
         )
         return [prefix_part] + history_media + content_parts
@@ -2060,9 +2054,7 @@ class MatrixChannel(BaseChannel):
         media_parts: list[Any] = []
 
         if isinstance(event, RoomMessageImage):
-            body_desc = (
-                f"[sent an image: {body}]" if body else "[sent an image]"
-            )
+            body_desc = f"[sent an image: {body}]" if body else "[sent an image]"
             if self.vision_enabled:
                 mxc_url: str = getattr(event, "url", "") or ""
                 if mxc_url:
@@ -2137,10 +2129,7 @@ class MatrixChannel(BaseChannel):
         if "/" not in rest:
             return mxc_url
         server, media_id = rest.split("/", 1)
-        return (
-            f"{self.homeserver}/_matrix/media/v3/download"
-            f"/{server}/{media_id}"
-        )
+        return f"{self.homeserver}/_matrix/media/v3/download/{server}/{media_id}"
 
     async def _download_mxc(
         self,
@@ -2153,10 +2142,7 @@ class MatrixChannel(BaseChannel):
         try:
             rest = mxc_url[6:]  # strip "mxc://"
             server, media_id = rest.split("/", 1)
-            url = (
-                f"{self.homeserver}/_matrix/media/v3/download"
-                f"/{server}/{media_id}"
-            )
+            url = f"{self.homeserver}/_matrix/media/v3/download/{server}/{media_id}"
             headers = {"Authorization": f"Bearer {self.access_token}"}
             if not self._http_client:
                 logger.warning("MatrixChannel: HTTP client not initialized")
@@ -2193,10 +2179,7 @@ class MatrixChannel(BaseChannel):
         try:
             rest = mxc_url[6:]
             server, media_id = rest.split("/", 1)
-            url = (
-                f"{self.homeserver}/_matrix/media/v3/download"
-                f"/{server}/{media_id}"
-            )
+            url = f"{self.homeserver}/_matrix/media/v3/download/{server}/{media_id}"
             headers = {"Authorization": f"Bearer {self.access_token}"}
             if not self._http_client:
                 logger.warning("MatrixChannel: HTTP client not initialized")
@@ -2500,11 +2483,7 @@ class MatrixChannel(BaseChannel):
         try:
             users = list(getattr(room, "users", {}).keys())
             if users:
-                return (
-                    len(users) == 2
-                    and self._user_id in users
-                    and sender_id in users
-                )
+                return len(users) == 2 and self._user_id in users and sender_id in users
             member_count = int(getattr(room, "member_count", 0) or 0)
             return member_count == 2
         except Exception:
@@ -2549,8 +2528,7 @@ class MatrixChannel(BaseChannel):
                     task = json.loads(meta_path.read_text(encoding="utf-8"))
                 except (OSError, json.JSONDecodeError) as exc:
                     logger.debug(
-                        "MatrixChannel: failed to read task room metadata "
-                        "%s: %s",
+                        "MatrixChannel: failed to read task room metadata %s: %s",
                         meta_path,
                         exc,
                     )
@@ -2610,9 +2588,7 @@ class MatrixChannel(BaseChannel):
         if cached and (now - cached["ts"]) < DM_CACHE_TTL_MS:
             members = cached["members"]
             is_dm = (
-                len(members) == 2
-                and self._user_id in members
-                and sender_id in members
+                len(members) == 2 and self._user_id in members and sender_id in members
             )
             logger.debug(
                 "MatrixChannel: DM check (cached) room=%s members=%d is_dm=%s",
@@ -2652,8 +2628,7 @@ class MatrixChannel(BaseChannel):
                 )
                 fallback = self._is_dm_room_fallback(room, sender_id)
                 logger.warning(
-                    "MatrixChannel: joined_members fallback for %s "
-                    "-> is_dm=%s",
+                    "MatrixChannel: joined_members fallback for %s -> is_dm=%s",
                     room_id,
                     fallback,
                 )
@@ -2661,8 +2636,7 @@ class MatrixChannel(BaseChannel):
         except Exception as exc:
             fallback = self._is_dm_room_fallback(room, sender_id)
             logger.warning(
-                "MatrixChannel: joined_members error for %s: %s; "
-                "fallback is_dm=%s",
+                "MatrixChannel: joined_members error for %s: %s; fallback is_dm=%s",
                 room_id,
                 exc,
                 fallback,
@@ -2728,9 +2702,13 @@ class MatrixChannel(BaseChannel):
 
         # Mention check for group rooms
         if not is_dm:
-            if teamharness_self_trigger is None and self._require_mention(room_id) and not self._was_mentioned(
-                event,
-                text,
+            if (
+                teamharness_self_trigger is None
+                and self._require_mention(room_id)
+                and not self._was_mentioned(
+                    event,
+                    text,
+                )
             ):
                 # Thread events that don't mention us are silently ignored
                 if is_thread_event:
@@ -2839,8 +2817,12 @@ class MatrixChannel(BaseChannel):
             payload["meta"].update(
                 {
                     "teamharness_trigger": True,
-                    "teamharness_trigger_type": str(teamharness_self_trigger.get("type") or ""),
-                    "teamharness_trigger_kind": str(teamharness_self_trigger.get("kind") or ""),
+                    "teamharness_trigger_type": str(
+                        teamharness_self_trigger.get("type") or ""
+                    ),
+                    "teamharness_trigger_kind": str(
+                        teamharness_self_trigger.get("kind") or ""
+                    ),
                 },
             )
 
@@ -3111,8 +3093,7 @@ class MatrixChannel(BaseChannel):
                     await self._client.room_typing(room_id, typing_state=False)
                 except Exception as exc:
                     logger.debug(
-                        "MatrixChannel: typing stop after cap failed "
-                        "for %s: %s",
+                        "MatrixChannel: typing stop after cap failed for %s: %s",
                         room_id,
                         exc,
                     )
@@ -3138,8 +3119,7 @@ class MatrixChannel(BaseChannel):
                 return TextContent(
                     type=ContentType.TEXT,
                     text=(
-                        "[Image omitted: current model does not support "
-                        "image input]"
+                        "[Image omitted: current model does not support image input]"
                     ),
                 )
             return ImageContent(
@@ -3242,9 +3222,7 @@ class MatrixChannel(BaseChannel):
             if not targets and fallback_user_id:
                 targets = [fallback_user_id]
         targets = [
-            target
-            for target in _dedupe_nonempty(targets)
-            if target != self._user_id
+            target for target in _dedupe_nonempty(targets) if target != self._user_id
         ]
         if not targets:
             return
@@ -3262,8 +3240,7 @@ class MatrixChannel(BaseChannel):
 
             mxid_enc = urllib.parse.quote(mxid, safe="")
             anchor = (
-                f'<a href="https://matrix.to/#/{mxid_enc}">'
-                f"{html.escape(display)}</a>"
+                f'<a href="https://matrix.to/#/{mxid_enc}">{html.escape(display)}</a>'
             )
             if mxid in html_body:
                 html_body = html_body.replace(mxid, anchor, 1)
@@ -3326,9 +3303,7 @@ class MatrixChannel(BaseChannel):
         room = rooms.get(room_id) if rooms else None
         if room is not None and getattr(room, "encrypted", False) is True:
             return True
-        encrypted_rooms = (
-            getattr(self._client, "encrypted_rooms", set()) or set()
-        )
+        encrypted_rooms = getattr(self._client, "encrypted_rooms", set()) or set()
         if room_id in encrypted_rooms:
             self._mark_room_encrypted(room_id, room)
             return True
@@ -3535,6 +3510,7 @@ class MatrixChannel(BaseChannel):
         content: dict[str, Any] = {
             "msgtype": "m.notice",
             "body": "处理中...",
+            _AGENTTEAMS_TRANSIENT_CONTENT_KEY: True,
         }
         try:
             resp = await self._room_send_with_retry(
@@ -3576,6 +3552,7 @@ class MatrixChannel(BaseChannel):
             "body": text,
             "format": "org.matrix.custom.html",
             "formatted_body": _md_to_html(text),
+            _AGENTTEAMS_TRANSIENT_CONTENT_KEY: True,
         }
         self._apply_thread_relation(
             content,
@@ -3657,9 +3634,8 @@ class MatrixChannel(BaseChannel):
         """
         if not isinstance(content, dict) or not isinstance(meta, dict):
             return
-        thread_root = (
-            meta.get(_MATRIX_THREAD_META_KEY)
-            or meta.get(_MATRIX_OWN_THREAD_ROOT_KEY)
+        thread_root = meta.get(_MATRIX_THREAD_META_KEY) or meta.get(
+            _MATRIX_OWN_THREAD_ROOT_KEY
         )
         if not thread_root:
             return
@@ -3813,6 +3789,8 @@ class MatrixChannel(BaseChannel):
             "formatted_body": html_body if html_body is not None else _md_to_html(text),
         }
         meta_dict = meta if isinstance(meta, dict) else {}
+        if meta_dict.get(_MATRIX_TRANSIENT_META_KEY):
+            content[_AGENTTEAMS_TRANSIENT_CONTENT_KEY] = True
         sender_id = meta_dict.get("sender_id") or meta_dict.get("user_id")
         explicit_ids = meta_dict.get("mention_user_ids") or None
         if explicit_ids or self._extract_mentions_from_text(text):
@@ -3824,6 +3802,41 @@ class MatrixChannel(BaseChannel):
             )
         self._apply_thread_relation(content, meta_dict)
         return content
+
+    async def _send_agentteams_final_signal(
+        self,
+        room_id: str,
+        text: str,
+        meta: Optional[Dict[str, Any]],
+    ) -> None:
+        """Emit one bot-readable final event without duplicating visible text."""
+        if not self._client:
+            return
+        visible = self._visible_final_text(text)
+        if not visible or _ends_with_no_reply_control(text):
+            return
+        upper = visible.upper()
+        if not any(marker in upper for marker in ("TASK_COMPLETED:", "TASK_BLOCKED:")):
+            return
+        content = self._matrix_text_content(
+            room_id,
+            visible,
+            meta,
+            "m.text",
+        )
+        content[_AGENTTEAMS_FINAL_CONTENT_KEY] = True
+        try:
+            await self._room_send_with_retry(
+                room_id,
+                _AGENTTEAMS_FINAL_EVENT_TYPE,
+                content,
+            )
+        except Exception as exc:
+            logger.warning(
+                "MatrixChannel: final signal send failed for %s: %s",
+                room_id,
+                exc,
+            )
 
     def _write_long_message_file(self, text: str) -> Path:
         directory = self._media_dir() / "long-messages"
@@ -3874,7 +3887,10 @@ class MatrixChannel(BaseChannel):
                 preview_chars,
             )
             content = build_content(summary)
-            if _matrix_event_payload_size(content) <= MATRIX_TEXT_EVENT_FALLBACK_BUDGET_BYTES:
+            if (
+                _matrix_event_payload_size(content)
+                <= MATRIX_TEXT_EVENT_FALLBACK_BUDGET_BYTES
+            ):
                 best_content = content
                 low = preview_chars + 1
             else:
@@ -3957,8 +3973,7 @@ class MatrixChannel(BaseChannel):
                 )
             except Exception as exc:
                 logger.warning(
-                    "MatrixChannel: long text fallback media event failed "
-                    "for %s: %s",
+                    "MatrixChannel: long text fallback media event failed for %s: %s",
                     room_id,
                     exc,
                 )
@@ -4014,9 +4029,15 @@ class MatrixChannel(BaseChannel):
         return _enum_name(message_type) == "MESSAGE"
 
     def _thread_content_parts(self, event: Any) -> List[Any]:
-        """Render event for thread display, bypassing filter_tool_messages."""
+        """Render event for thread display with tool messages enabled."""
         from dataclasses import replace as dc_replace
-        style = dc_replace(self._render_style, filter_tool_messages=False)
+
+        display_config = dc_replace(
+            self._render_style.display_config,
+            show_tool_calls=True,
+            show_tool_results=True,
+        )
+        style = dc_replace(self._render_style, display_config=display_config)
         renderer = self._renderer.__class__(style)
         return renderer.message_to_parts(event)
 
@@ -4025,8 +4046,7 @@ class MatrixChannel(BaseChannel):
         return "\n".join(
             getattr(p, "text", "") or getattr(p, "refusal", "") or ""
             for p in parts
-            if getattr(p, "type", None)
-            in (ContentType.TEXT, ContentType.REFUSAL)
+            if getattr(p, "type", None) in (ContentType.TEXT, ContentType.REFUSAL)
         ).strip()
 
     def _visible_final_text(self, text: str) -> str:
@@ -4038,7 +4058,12 @@ class MatrixChannel(BaseChannel):
     def _tool_output_media_parts(self, event: Any) -> List[Any]:
         """Extract media-only parts from a tool output event."""
         from dataclasses import replace as dc_replace
-        style = dc_replace(self._render_style, filter_tool_messages=True)
+
+        display_config = dc_replace(
+            self._render_style.display_config,
+            show_tool_results=False,
+        )
+        style = dc_replace(self._render_style, display_config=display_config)
         renderer = self._renderer.__class__(style)
         parts = renderer.message_to_parts(event)
         return [p for p in parts if getattr(p, "type", None) != ContentType.TEXT]
@@ -4091,12 +4116,16 @@ class MatrixChannel(BaseChannel):
                 return
             if self._is_reasoning_message(message_type):
                 send_meta[_MATRIX_FORCE_NOTICE_KEY] = True
-            await self._send_or_queue_thread_parts(
-                to_handle,
-                parts,
-                send_meta,
-            )
-            send_meta.pop(_MATRIX_FORCE_NOTICE_KEY, None)
+            send_meta[_MATRIX_TRANSIENT_META_KEY] = True
+            try:
+                await self._send_or_queue_thread_parts(
+                    to_handle,
+                    parts,
+                    send_meta,
+                )
+            finally:
+                send_meta.pop(_MATRIX_FORCE_NOTICE_KEY, None)
+                send_meta.pop(_MATRIX_TRANSIENT_META_KEY, None)
             return
         if self._is_tool_output_message(message_type):
             await self._flush_pending_final_message_to_thread(
@@ -4219,7 +4248,10 @@ class MatrixChannel(BaseChannel):
 
         if obj == "message" and self._is_completed_status(status):
             await self.on_event_message_completed(
-                None, to_handle, event, send_meta,
+                None,
+                to_handle,
+                event,
+                send_meta,
             )
         elif obj == "response":
             # Stream completed — flush deferred final message and clean up
@@ -4246,46 +4278,71 @@ class MatrixChannel(BaseChannel):
             None,
         )
         is_placeholder = send_meta.pop(_MATRIX_PLACEHOLDER_THREAD_ROOT_KEY, False)
+        final_signal_text = ""
         if is_placeholder:
             if streaming_final_text:
                 raw_text = streaming_final_text.strip()
                 if _ends_with_no_reply_control(raw_text):
                     await self._edit_thread_root(
-                        to_handle, send_meta, "已处理",
+                        to_handle,
+                        send_meta,
+                        "已处理",
                     )
                 else:
                     text = self._visible_final_text(raw_text)
                     if not text:
                         await self._edit_thread_root(
-                            to_handle, send_meta, "已完成",
+                            to_handle,
+                            send_meta,
+                            "已完成",
                         )
                     else:
                         html_body = _md_to_html(text)
                         await self._edit_thread_root(
-                            to_handle, send_meta, text,
-                            msgtype="m.text", html=html_body,
+                            to_handle,
+                            send_meta,
+                            text,
+                            msgtype="m.text",
+                            html=html_body,
                         )
+                        final_signal_text = text
             elif pending is not None:
                 raw_text = self._text_from_message_event(pending)
                 if _ends_with_no_reply_control(raw_text):
                     await self._edit_thread_root(
-                        to_handle, send_meta, "已处理",
+                        to_handle,
+                        send_meta,
+                        "已处理",
                     )
                 else:
                     text = self._visible_final_text(raw_text)
                     if text:
                         html_body = _md_to_html(text)
                         await self._edit_thread_root(
-                            to_handle, send_meta, text,
-                            msgtype="m.text", html=html_body,
+                            to_handle,
+                            send_meta,
+                            text,
+                            msgtype="m.text",
+                            html=html_body,
                         )
+                        final_signal_text = text
                     else:
                         await self._edit_thread_root(
-                            to_handle, send_meta, "已完成",
+                            to_handle,
+                            send_meta,
+                            "已完成",
                         )
             else:
                 await self._edit_thread_root(
-                    to_handle, send_meta, "已完成",
+                    to_handle,
+                    send_meta,
+                    "已完成",
+                )
+            if final_signal_text:
+                await self._send_agentteams_final_signal(
+                    to_handle,
+                    final_signal_text,
+                    send_meta,
                 )
             self._active_thread_roots.pop(to_handle, None)
         elif streaming_final_text:
@@ -4310,7 +4367,11 @@ class MatrixChannel(BaseChannel):
         root_id = self._active_thread_roots.pop(to_handle, None)
         if root_id:
             fallback_meta = {_MATRIX_OWN_THREAD_ROOT_KEY: root_id}
-            status = "已取消" if "Task has been cancelled" in (err_text or "") else "处理异常"
+            status = (
+                "已取消"
+                if "Task has been cancelled" in (err_text or "")
+                else "处理异常"
+            )
             await self._edit_thread_root(to_handle, fallback_meta, status)
         if "Task has been cancelled" in (err_text or ""):
             logger.info(
@@ -4342,10 +4403,12 @@ class MatrixChannel(BaseChannel):
         return False
 
     # Matrix errcode strings that indicate a transient / retryable condition.
-    _RETRYABLE_MATRIX_ERRCODES = frozenset({
-        "M_LIMIT_EXCEEDED",       # 429 rate-limited
-        "M_UNKNOWN",              # generic server-side error
-    })
+    _RETRYABLE_MATRIX_ERRCODES = frozenset(
+        {
+            "M_LIMIT_EXCEEDED",  # 429 rate-limited
+            "M_UNKNOWN",  # generic server-side error
+        }
+    )
 
     @staticmethod
     def _is_retryable_room_send_response(resp: Any) -> bool:
@@ -4362,7 +4425,7 @@ class MatrixChannel(BaseChannel):
 
         # 1. Check Matrix errcode (string)
         errcode = getattr(resp, "status_code", None)
-        if errcode in MatrixChannel._RETRYABLE_MATRIX_ERRCODES:
+        if errcode in AgentTeamsMatrixChannel._RETRYABLE_MATRIX_ERRCODES:
             return True
 
         # 2. Fall back to HTTP status via transport_response
@@ -4417,13 +4480,20 @@ class MatrixChannel(BaseChannel):
 
                 # nio returns RoomSendError on failure instead of raising
                 if isinstance(resp, RoomSendError):
-                    if self._is_retryable_room_send_response(resp) and attempt < max_retries:
+                    if (
+                        self._is_retryable_room_send_response(resp)
+                        and attempt < max_retries
+                    ):
                         # Prefer server-suggested delay for rate-limiting
                         retry_ms = getattr(resp, "retry_after_ms", None)
-                        if retry_ms and isinstance(retry_ms, (int, float)) and retry_ms > 0:
+                        if (
+                            retry_ms
+                            and isinstance(retry_ms, (int, float))
+                            and retry_ms > 0
+                        ):
                             delay = retry_ms / 1000.0 + random.uniform(0, 0.5)
                         else:
-                            delay = base_delay * (2 ** attempt) + random.uniform(0, 0.5)
+                            delay = base_delay * (2**attempt) + random.uniform(0, 0.5)
                         logger.warning(
                             "MatrixChannel: room_send returned retryable error "
                             "(attempt %d/%d) room_id=%s status=%s message=%s — "
@@ -4439,7 +4509,9 @@ class MatrixChannel(BaseChannel):
                         await asyncio.sleep(delay)
                         continue
                     # Non-retryable or retries exhausted — let caller handle
-                    if attempt >= max_retries and self._is_retryable_room_send_response(resp):
+                    if attempt >= max_retries and self._is_retryable_room_send_response(
+                        resp
+                    ):
                         logger.error(
                             "MatrixChannel: room_send retries exhausted "
                             "(attempts=%d) room_id=%s status=%s message=%s "
@@ -4463,7 +4535,7 @@ class MatrixChannel(BaseChannel):
 
             except Exception as exc:
                 if self._is_retryable_send_error(exc) and attempt < max_retries:
-                    delay = base_delay * (2 ** attempt) + random.uniform(0, 0.5)
+                    delay = base_delay * (2**attempt) + random.uniform(0, 0.5)
                     logger.warning(
                         "MatrixChannel: room_send raised retryable exception "
                         "(attempt %d/%d) room_id=%s error=%s — "
@@ -4506,7 +4578,9 @@ class MatrixChannel(BaseChannel):
         meta: Optional[Dict[str, Any]] = None,
     ) -> None:
         if not self._client:
-            logger.error("MatrixChannel: send called but client not ready component=matrix")
+            logger.error(
+                "MatrixChannel: send called but client not ready component=matrix"
+            )
             return
 
         room_id = (meta or {}).get("room_id") or to_handle
@@ -4532,7 +4606,9 @@ class MatrixChannel(BaseChannel):
 
         html_body = _md_to_html(text)
         meta_dict = meta if isinstance(meta, dict) else {}
-        msgtype = "m.notice" if meta_dict.pop(_MATRIX_FORCE_NOTICE_KEY, False) else "m.text"
+        msgtype = (
+            "m.notice" if meta_dict.pop(_MATRIX_FORCE_NOTICE_KEY, False) else "m.text"
+        )
         content = self._matrix_text_content(
             room_id,
             text,
@@ -4565,7 +4641,9 @@ class MatrixChannel(BaseChannel):
                     await self._flush_pending_thread_parts(room_id, meta_dict)
                 return
             resp = await self._room_send_with_retry(
-                room_id, "m.room.message", content,
+                room_id,
+                "m.room.message",
+                content,
             )
             event_id = getattr(resp, "event_id", None)
             if (

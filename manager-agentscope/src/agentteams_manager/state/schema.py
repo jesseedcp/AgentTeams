@@ -1,6 +1,6 @@
 """Initial SQLite schema for durable operations."""
 
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 16
 
 SESSION_SETTINGS_MIGRATION_COLUMNS = {
     "thinking_effort": "TEXT",
@@ -9,6 +9,22 @@ SESSION_SETTINGS_MIGRATION_COLUMNS = {
     "elevated_mode": "TEXT NOT NULL DEFAULT 'off'",
     "queue_mode": "TEXT NOT NULL DEFAULT 'followup'",
     "queue_limit": "INTEGER NOT NULL DEFAULT 20",
+}
+
+MATRIX_EVENT_MIGRATION_COLUMNS = {
+    # Existing rows came from the former claim-once implementation and have
+    # already been handled, so migration must make them terminal.
+    "event_json": "TEXT NOT NULL DEFAULT ''",
+    "status": "TEXT NOT NULL DEFAULT 'completed'",
+    "attempt_count": "INTEGER NOT NULL DEFAULT 1",
+    "last_error": "TEXT",
+    "next_attempt_at": "TEXT",
+    "updated_at": "TEXT",
+}
+
+PROJECT_DECISION_MIGRATION_COLUMNS = {
+    # Legacy decisions predate scoped projections and must remain private.
+    "visibility": "TEXT NOT NULL DEFAULT 'private'",
 }
 
 SCHEMA_SQL = """
@@ -41,6 +57,12 @@ CREATE TABLE IF NOT EXISTS processed_matrix_events (
   room_id TEXT NOT NULL,
   event_id TEXT NOT NULL,
   processed_at TEXT NOT NULL,
+  event_json TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'completed',
+  attempt_count INTEGER NOT NULL DEFAULT 1,
+  last_error TEXT,
+  next_attempt_at TEXT,
+  updated_at TEXT,
   PRIMARY KEY(room_id, event_id)
 );
 
@@ -103,6 +125,7 @@ CREATE TABLE IF NOT EXISTS project_decisions (
   project_id TEXT NOT NULL,
   decision TEXT NOT NULL,
   rationale TEXT NOT NULL,
+  visibility TEXT NOT NULL DEFAULT 'private',
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS project_decisions_project_idx
@@ -116,6 +139,14 @@ CREATE TABLE IF NOT EXISTS worker_capability_assessments (
   updated_at TEXT NOT NULL,
   PRIMARY KEY(worker_name, capability),
   CHECK(score >= 0.0 AND score <= 1.0)
+);
+
+CREATE TABLE IF NOT EXISTS supervision_checks (
+  subject_key TEXT PRIMARY KEY,
+  observed_token TEXT NOT NULL,
+  missed_cycles INTEGER NOT NULL DEFAULT 0,
+  last_ping_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS tasks (

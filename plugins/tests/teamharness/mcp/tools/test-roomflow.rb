@@ -184,6 +184,17 @@ Dir.mktmpdir("teamharness-roomflow-") do |dir|
         raise AssertionError(f"runtime admin was not auto-invited: {dry_runtime_admin!r}")
     if dry_runtime_admin["content"].get("power_level_content_override", {}).get("users", {}).get("@runtime-admin:example.test") != 100:
         raise AssertionError(f"runtime admin power level missing: {dry_runtime_admin!r}")
+    dry_runtime_worker_fallback = payload({
+        "action": "create_task_room",
+        "taskId": "demo-project-002-fallback",
+        "name": "Task: runtime worker fallback",
+        "source": "matrix",
+        "dryRun": True,
+    })
+    if dry_runtime_worker_fallback.get("invite") != ["@worker:example.test", "@runtime-admin:example.test"]:
+        raise AssertionError(f"runtime Worker fallback invite mismatch: {dry_runtime_worker_fallback!r}")
+    if dry_runtime_worker_fallback.get("autoInvitedTeamWorkers") != ["@worker:example.test"]:
+        raise AssertionError(f"runtime Worker fallback receipt missing: {dry_runtime_worker_fallback!r}")
     os.environ.pop("TEAMHARNESS_RUNTIME_CONFIG", None)
 
     invalid = payload({

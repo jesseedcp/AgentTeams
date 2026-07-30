@@ -11,6 +11,7 @@ eval "$(
         -e '/^_ver_lt()/,/^}/p' \
         -e '/^_use_legacy_image_env()/,/^}/p' \
         -e '/^_controller_env_prefix()/,/^}/p' \
+        -e '/^_controller_storage_prefix()/,/^}/p' \
         "${INSTALLER}"
 )"
 
@@ -74,6 +75,21 @@ do
     fi
 done
 
+legacy_storage_prefix='hic''law/agentteams-storage'
+for pair in \
+    "v1.1.2:${legacy_storage_prefix}" \
+    "v1.2.0:agentteams/agentteams-storage" \
+    "garbage:agentteams/agentteams-storage"
+do
+    version="${pair%%:*}"
+    expected="${pair#*:}"
+    actual="$(_controller_storage_prefix "${version}")"
+    if [ "${actual}" != "${expected}" ]; then
+        echo "FAIL: ${version} storage prefix ${actual}, expected ${expected}" >&2
+        exit 1
+    fi
+done
+
 controller_env_block="$(
     sed -n \
         '/        # Controller env args/,/        # Timezone/p' \
@@ -105,5 +121,12 @@ do
         exit 1
     fi
 done
+
+if ! grep -Fq \
+    '"${_ctrl_env_prefix}STORAGE_PREFIX=${_storage_prefix}"' \
+    <<<"${controller_env_block}"; then
+    echo "FAIL: controller storage prefix does not use the selected value" >&2
+    exit 1
+fi
 
 echo "PASS: Bash installer selects one controller env contract by image version"

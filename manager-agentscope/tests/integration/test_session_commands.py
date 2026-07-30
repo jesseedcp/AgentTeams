@@ -364,6 +364,20 @@ async def test_session_controls_parse_persist_and_reject_unsafe_elevation(
     assert unchanged.elevated_mode == "ask"
     assert any("仅管理员" in item.text for item in matrix.sent)
 
+    project_room = _policy().model_copy(
+        update={"kind": RoomKind.PROJECT_ROOM},
+    )
+    await runner.handle(
+        _event("/elevated full", "$admin-project-room"),
+        project_room,
+    )
+    still_unchanged = await repository.settings(
+        "!admin:local",
+        now=datetime(2026, 7, 26, 12, 0, tzinfo=UTC),
+    )
+    assert still_unchanged.elevated_mode == "ask"
+    assert any("管理员私聊" in item.text for item in matrix.sent)
+
 
 @pytest.mark.asyncio
 async def test_thinking_rejects_a_known_non_reasoning_model(

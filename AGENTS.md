@@ -64,7 +64,7 @@ The Manager prompt root is `manager/agent/`:
 - `SOUL.md` — identity and delegation behavior;
 - `HEARTBEAT.md` — periodic reconciliation guidance;
 - `TOOLS.md` — tool boundary;
-- `skills/<name>/SKILL.md` — the 16 retained Manager skills.
+- `skills/<name>/SKILL.md` — the 19 retained Manager skills.
 
 Skills are guidance, not executable capabilities. Any capability change must
 update the registered typed tool, room policy, deterministic workflow, recovery

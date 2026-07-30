@@ -17,8 +17,9 @@ Built on a **Manager-Workers architecture**, AgentTeams uses an **AgentScope 2.0
 The Manager runtime is fixed to AgentScope 2.0. Worker execution remains pluggable across OpenClaw, CoPaw, Hermes, and QwenPaw.
 
 This fork is behaviorally audited against
-`agentscope-ai/AgentTeams@8de237da736a542766e132836b29c0a2a9c48740`.
-See the [parity report](docs/parity/upstream-agentteams-8de237d.md) for the
+`agentscope-ai/AgentTeams@fb3a40be1f005bd584f45544fc73bd4601d5c52a`
+(the latest remote `main` at the time of audit). See the
+[parity report](docs/parity/upstream-agentteams-fb3a40b.md) for the
 implemented capabilities, deliberate architectural replacements, and
 external validations that still require platform credentials.
 

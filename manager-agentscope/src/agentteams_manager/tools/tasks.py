@@ -48,9 +48,11 @@ TASK_TOOL_NAMES = frozenset(
         "delete_task",
         "delegate_task",
         "delegate_team_task",
+        "inspect_task_result",
         "complete_task",
         "schedule_task",
         "create_project",
+        "confirm_project_plan",
         "list_projects",
         "get_project",
         "update_project",
@@ -115,6 +117,20 @@ class DelegateTeamTaskInput(_Input):
 
 class CompleteTaskInput(_TaskIdInput):
     result: dict[str, Any] | None = None
+    accepted: bool = False
+    result_digest: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{64}$",
+    )
+
+    @model_validator(mode="after")
+    def validate_acceptance(self) -> CompleteTaskInput:
+        if self.accepted and self.result_digest is None:
+            raise ValueError(
+                "accepted results require result_digest from "
+                "inspect_task_result",
+            )
+        return self
 
 
 class CreateRecurringTaskInput(CreateFiniteTaskInput):
@@ -130,9 +146,8 @@ class CancelTaskInput(_TaskIdInput):
     pass
 
 
-class UpdateTaskInput(_TaskIdInput):
+class UpdateTaskInput(CompleteTaskInput):
     action: Literal["complete", "record_execution", "cancel"]
-    result: dict[str, Any] | None = None
 
 
 class CreateProjectInput(_Input):
@@ -140,6 +155,10 @@ class CreateProjectInput(_Input):
     description: str = Field(min_length=1, max_length=20_000)
     plan: str = Field(min_length=1, max_length=100_000)
     participants: tuple[str, ...] = Field(min_length=1)
+
+
+class ConfirmProjectPlanInput(_ProjectIdInput):
+    pass
 
 
 class AddProjectTaskInput(_Input):
@@ -174,6 +193,11 @@ class UpdateProjectInput(_ProjectIdInput):
         pattern=r"^[a-z0-9][a-z0-9-]*$",
     )
     result: dict[str, Any] | None = None
+    accepted: bool = False
+    result_digest: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{64}$",
+    )
     dependencies: tuple[str, ...] = ()
 
     @model_validator(mode="after")
@@ -186,6 +210,15 @@ class UpdateProjectInput(_ProjectIdInput):
             )
         if self.action == "complete_task" and not self.task_id:
             raise ValueError("complete_task requires task_id")
+        if (
+            self.action == "complete_task"
+            and self.accepted
+            and self.result_digest is None
+        ):
+            raise ValueError(
+                "accepted results require result_digest from "
+                "inspect_task_result",
+            )
         return self
 
 
@@ -396,6 +429,8 @@ class TaskTools:
             task_id=request.task_id,
             worker_event_id=context.event_id,
             structured_result=request.result,
+            accepted=request.accepted,
+            result_digest=request.result_digest,
         )
 
     async def create_recurring(
@@ -457,6 +492,21 @@ class ProjectTools:
             plan=request.plan,
             participants=request.participants,
             context=context,
+        )
+
+    async def confirm(
+        self,
+        request: ConfirmProjectPlanInput,
+        *,
+        context: MutationContext,
+        confirmed_by: str,
+        auto_confirmed: bool = False,
+    ) -> ProjectReceipt:
+        return await self._service.confirm_plan(
+            project_id=request.project_id,
+            confirmed_by=confirmed_by,
+            context=context,
+            auto_confirmed=auto_confirmed,
         )
 
     async def add_task(
@@ -602,8 +652,15 @@ class TaskToolkit:
                 False,
             ),
             (
+                "inspect_task_result",
+                "Pull and validate a submitted result without accepting it.",
+                _TaskIdInput,
+                self._inspect_task_result,
+                True,
+            ),
+            (
                 "complete_task",
-                "Record finite completion or recurring execution.",
+                "Apply a result decision using its inspected digest.",
                 CompleteTaskInput,
                 self._complete_task,
                 False,
@@ -617,9 +674,16 @@ class TaskToolkit:
             ),
             (
                 "create_project",
-                "Create one durable project and private Matrix room.",
+                "Prepare one project plan and private Matrix room.",
                 CreateProjectInput,
                 self._create_project,
+                False,
+            ),
+            (
+                "confirm_project_plan",
+                "Confirm a prepared project plan and activate execution.",
+                ConfirmProjectPlanInput,
+                self._confirm_project_plan,
                 False,
             ),
             (
@@ -856,6 +920,15 @@ class TaskToolkit:
             task_id=item.task_id,
             worker_event_id=context.event_id,
             structured_result=item.result,
+            accepted=item.accepted,
+            result_digest=item.result_digest,
+        )
+
+    async def _inspect_task_result(self, request: BaseModel) -> object:
+        item = _TaskIdInput.model_validate(request)
+        await self._require_visible_task(item.task_id)
+        return await self._task_service.inspect_result(
+            task_id=item.task_id,
         )
 
     async def _delete_task(self, request: BaseModel) -> object:
@@ -910,6 +983,8 @@ class TaskToolkit:
                 worker_event_id=context.event_id,
                 sender_id=_policy_sender(self._policy),
                 structured_result=item.result,
+                accepted=item.accepted,
+                result_digest=item.result_digest,
             )
         if task.task_type in {"infinite", "recurring"}:
             return await self._task_service.record_execution(
@@ -920,6 +995,8 @@ class TaskToolkit:
             task_id=item.task_id,
             worker_event_id=context.event_id,
             structured_result=item.result,
+            accepted=item.accepted,
+            result_digest=item.result_digest,
         )
 
     async def _schedule_task(self, request: BaseModel) -> object:
@@ -931,8 +1008,38 @@ class TaskToolkit:
 
     async def _create_project(self, request: BaseModel) -> object:
         item = CreateProjectInput.model_validate(request)
-        return await ProjectTools(self._project_service).create(
+        context = await self._context()
+        receipt = await ProjectTools(self._project_service).create(
             item,
+            context=context,
+        )
+        if (
+            receipt.status == "planning"
+            and (
+                self._yolo
+                or self._policy.confirmation_mode == "full"
+            )
+        ):
+            return await self._project_service.confirm_plan(
+                project_id=receipt.project_id,
+                confirmed_by=_policy_sender(self._policy),
+                context=MutationContext(
+                    room_id=context.room_id,
+                    event_id=context.event_id,
+                    tool_call_id=(
+                        f"{context.tool_call_id}:auto-confirm-plan"
+                    ),
+                ),
+                auto_confirmed=True,
+            )
+        return receipt
+
+    async def _confirm_project_plan(self, request: BaseModel) -> object:
+        item = ConfirmProjectPlanInput.model_validate(request)
+        await self._require_visible_project(item.project_id)
+        return await self._project_service.confirm_plan(
+            project_id=item.project_id,
+            confirmed_by=_policy_sender(self._policy),
             context=await self._context(),
         )
 
@@ -981,6 +1088,8 @@ class TaskToolkit:
                 worker_event_id=context.event_id,
                 sender_id=_policy_sender(self._policy),
                 structured_result=item.result,
+                accepted=item.accepted,
+                result_digest=item.result_digest,
             )
         assert item.title is not None
         assert item.specification is not None
@@ -1183,7 +1292,11 @@ class TaskToolkit:
         if self._policy.kind is RoomKind.WORKER_ROOM:
             return task.assigned_to == self._policy.resource_name
         if self._policy.kind is RoomKind.LEADER_ROOM:
-            return task.delegated_to_team == self._policy.team_name
+            return (
+                task.delegated_to_team == self._policy.team_name
+                or task.assigned_to
+                in self._policy.allowed_worker_names
+            )
         if self._policy.kind is RoomKind.PROJECT_ROOM:
             return task.project_id == self._policy.project_id
         if task.assigned_to in self._policy.allowed_worker_names:

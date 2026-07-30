@@ -5,8 +5,10 @@ from __future__ import annotations
 import json
 import subprocess
 
+import pytest
+
 from hermes_worker import sync as sync_module
-from hermes_worker.sync import FileSync
+from hermes_worker.sync import FileSync, push_local
 
 
 def test_mirror_all_falls_back_to_startup_files_when_prefix_missing(
@@ -64,3 +66,30 @@ def test_mirror_all_falls_back_to_startup_files_when_prefix_missing(
         f"{sync.local_dir / 'shared'}/",
         "--overwrite",
     ) in commands
+
+
+def test_push_local_raises_when_any_upload_fails(tmp_path, monkeypatch) -> None:
+    sync = FileSync(
+        endpoint="http://minio:9000",
+        access_key="minio",
+        secret_key="password",
+        bucket="agentteams-storage",
+        worker_name="dag-team-dev",
+        local_dir=tmp_path / "worker",
+    )
+    changed = sync.local_dir / "memory" / "retry-me.txt"
+    changed.parent.mkdir(parents=True, exist_ok=True)
+    changed.write_text("retry me", encoding="utf-8")
+
+    monkeypatch.setattr(sync, "_ensure_alias", lambda: None)
+    monkeypatch.setattr(sync, "_cat", lambda _key: None)
+
+    def fail_upload(*args, **_kwargs):
+        if args[0] == "cp":
+            raise subprocess.CalledProcessError(1, args)
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(sync_module, "_mc", fail_upload)
+
+    with pytest.raises(RuntimeError, match="retry-me.txt"):
+        push_local(sync, since=0)

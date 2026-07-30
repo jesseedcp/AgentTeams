@@ -11,6 +11,7 @@ from agentteams_manager.domain.models import (
 )
 from agentteams_manager.state.database import Database
 from agentteams_manager.state.journal import S3Journal
+from agentteams_manager.state.memory import MemoryRepository
 from agentteams_manager.state.operations import OperationRepository
 from agentteams_manager.state.recovery import RecoveryCoordinator
 from agentteams_manager.workflows.supervisor import OperationSupervisor
@@ -87,6 +88,54 @@ async def test_restore_replays_events_after_snapshot(tmp_path: Path) -> None:
         ).fetchone()[0],
     )
     assert seed == "present"
+
+
+@pytest.mark.asyncio
+async def test_remote_snapshot_restores_long_term_memory_and_decisions(
+    tmp_path: Path,
+) -> None:
+    now = datetime(2026, 7, 30, 12, 0, tzinfo=UTC)
+    store = MemoryObjectStore()
+    journal = S3Journal(store, prefix="agentteams")
+    source = Database(tmp_path / "memory-source.db")
+    await source.open()
+    source_memory = MemoryRepository(source)
+    await source_memory.curate_long_term(
+        scope="global",
+        category="preference",
+        content="Respond in Chinese.",
+        importance=8,
+        now=now,
+    )
+    await source_memory.record_project_decision(
+        project_id="project-20260730-120000-abc123",
+        decision="Keep SQLite",
+        rationale="No extra service dependency.",
+        now=now,
+    )
+    snapshot_path = tmp_path / "memory-snapshot.db"
+    await source.backup_to(snapshot_path)
+    await journal.upload_snapshot(snapshot_path, sequence=0)
+
+    target = Database(tmp_path / "memory-target.db")
+    await target.open()
+    coordinator = RecoveryCoordinator(
+        database=target,
+        journal=journal,
+        replay_event=lambda event: None,
+        temp_directory=tmp_path / "memory-restore",
+    )
+    await coordinator.restore()
+    recovered = MemoryRepository(target)
+
+    assert (await recovered.long_term("global"))[0].content == (
+        "Respond in Chinese."
+    )
+    assert (
+        await recovered.project_decisions(
+            "project-20260730-120000-abc123",
+        )
+    )[0].decision == "Keep SQLite"
 
 
 @pytest.mark.asyncio

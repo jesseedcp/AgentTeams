@@ -2,7 +2,7 @@
 
 `manager/Dockerfile` builds the single AgentTeams Manager image:
 `agentteams/agentteams-manager`. It embeds AgentScope 2.0, the typed `agt`
-client, Matrix E2EE support, the 16 retained Manager skills, and the four
+client, Matrix E2EE support, the 19 retained Manager skills, and the four
 image-owned prompt documents.
 
 The image does not run infrastructure. Higress, Matrix, MinIO, Cinny, and

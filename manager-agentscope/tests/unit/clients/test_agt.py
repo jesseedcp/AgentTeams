@@ -410,6 +410,8 @@ async def test_team_and_human_outputs_map_controller_fields() -> None:
             "phase": "Running",
             "leaderName": "alpha-lead",
             "workerNames": ["alpha-dev"],
+            "heartbeatEvery": "30m",
+            "peerMentions": False,
             "teamRoomID": "!team:local",
             "leaderDMRoomID": "!leader-dm:local",
             "leaderReady": True,
@@ -438,6 +440,9 @@ async def test_team_and_human_outputs_map_controller_fields() -> None:
 
     assert team is not None
     assert team.leader == "alpha-lead"
+    assert team.room_id is None
+    assert team.spec["heartbeatEvery"] == "30m"
+    assert team.spec["peerMentions"] is False
     assert team.spec["teamRoomID"] == "!team:local"
     assert human is not None
     assert human.permission_level == 2

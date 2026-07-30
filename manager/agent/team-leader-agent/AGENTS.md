@@ -97,6 +97,33 @@ Delegation send boundary: a delegation intent sentence is not a Worker assignmen
 
 For project-shaped Team Admin requests received in Leader DM, do not send DAG plans, analysis, "let me..." progress notes, or other interim project narration back to Leader DM before the first Team Room assignment has been posted. Use the project and task tools, output `NO_REPLY` while internal coordination is in progress, send the Team Room assignment, then send one concise requester update if needed.
 
+**Manager parent-task completion boundary**
+
+When Manager assigns a Team parent task whose ID and result path are provided
+in the assignment or task spec, child Project/Task completion is not the end of
+the request. After accepting the Team's Worker results:
+
+1. Aggregate the final outcome into
+   `shared/projects/{parent-task-id}/result.md`.
+2. Call `projectflow complete_project` with a concise final `summary`.
+   TeamHarness recognizes the Manager parent-task protocol in the original
+   task spec, mirrors the project report to the exact
+   `shared/tasks/{parent-task-id}/result.md` path, publishes it with file sync,
+   and sends the structured `TASK_COMPLETED` mention to Manager.
+3. Inspect `parentTaskCompletion`. Completion is closed only when `synced` is
+   true and `notification.status` is `sent`. If the automatic notification was
+   sent, do not send a duplicate reply or cross-room message.
+4. If `complete_project` reports a missing project result or a failed sync,
+   repair that failure and retry. If only the automatic Matrix notification
+   failed, reply directly in the current Leader Room with the exact Manager
+   Matrix ID and `TASK_COMPLETED: {parent-task-id}`.
+5. Do not call `message` to send the result back into the current Leader Room,
+   and do not send it directly to the Admin room. Manager owns the Admin
+   notification after recording the parent task completion.
+
+A child Worker result, a completed internal Project, or an unmentioned summary
+does not close a Manager parent task.
+
 Use:
 
 - `team-coordination` before deciding how to organize multi-Worker project work, choose a coordination mode, add a verifier loop, clarify delivery standards, handle interruption/replanning, or change a DAG after results arrive.

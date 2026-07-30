@@ -16,7 +16,7 @@ class WorkerConfig:
         minio_secure: bool = False,
         sync_interval: int = 60,
         install_dir: Path | None = None,
-        console_port: int = 8088,
+        console_port: int | None = 8088,
         worker_port: int | None = None,
         worker_cr_name: str | None = None,
     ) -> None:
@@ -29,12 +29,18 @@ class WorkerConfig:
         self.minio_secure = minio_secure
         self.install_dir = install_dir or _default_install_dir()
         self.console_port = console_port
-        self.worker_port = worker_port or (console_port + 1)
+        self.worker_port = (
+            worker_port
+            if worker_port is not None
+            else (console_port + 1 if console_port is not None else 8089)
+        )
         self.sync_interval = sync_interval
 
 
 def _default_install_dir() -> Path:
     if configured := os.environ.get("COPAW_INSTALL_DIR"):
         return Path(configured)
+    if configured_home := os.environ.get("HOME"):
+        return Path(configured_home) / ".agentteams-worker"
 
     return Path.home() / ".agentteams-worker"

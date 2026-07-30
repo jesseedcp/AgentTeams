@@ -1,6 +1,6 @@
 ---
 name: teamharness-task-execution
-description: "Use when a Worker receives TASK_ASSIGNED, acknowledges the task, works inside shared/tasks/{task-id}/, submits with taskflow submit_task, publishes deliverables through submit_task, and reports TASK_COMPLETED or blockers in the Task room."
+description: "Use when a Worker receives TASK_ASSIGNED, acknowledges the task, works inside shared/tasks/{task-id}/, submits with taskflow submit_task, publishes deliverables, and verifies the automatic completion notification."
 ---
 
 # Task Execution
@@ -139,21 +139,25 @@ file panel.
 
 ## Completion Message
 
-After `submit_task` returns `ok: true`, send a normal text message in the
-current Task room and mention the Leader with the exact Matrix user id or
-resolvable mention from the task spec:
+After `submit_task` returns `ok: true`, inspect
+`completionNotification.status`. TeamHarness normally sends the Matrix text
+event itself, using the coordinator identity stored by `delegate_task`:
 
 ```text
 @leader-user:matrix.local TASK_COMPLETED: demo-project-001-01 - Result: shared/tasks/demo-project-001-01/result.md
 ```
 
-If the task spec gives an exact completion line, preserve that line exactly and
-include one short summary sentence. A tool call, tool-output thread, or
-`result.md` file does not count as the completion message. Do not use
-`NO_REPLY` after successful submission.
+When `completionNotification.status` is `sent`, do not send a second completion
+message. Return `NO_REPLY` unless the coordinator asked for another direct
+answer.
+
+Only when the notification is `skipped` or `failed`, send the exact fallback
+line from the task spec as a normal current-room reply. A tool-output display,
+file attachment, or `result.md` file alone is not a fallback completion
+message.
 
 For blockers:
 
 ```text
-@leader-user:matrix.local BLOCKED: demo-project-001-01 - <short blocker summary>
+@leader-user:matrix.local TASK_BLOCKED: demo-project-001-01 - <short blocker summary>
 ```

@@ -13,8 +13,9 @@ RUN if [ -n "${APT_MIRROR}" ]; then \
         sed -i "s|deb.debian.org|${APT_MIRROR}|g" \
             /etc/apt/sources.list.d/debian.sources; \
     fi \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends \
+    && apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=60 update \
+    && apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=60 \
+        install -y --no-install-recommends \
         gcc \
     && rm -rf /var/lib/apt/lists/* \
     && python -m venv "${VIRTUAL_ENV}" \
@@ -35,8 +36,9 @@ RUN if [ -n "${APT_MIRROR}" ]; then \
         sed -i "s|deb.debian.org|${APT_MIRROR}|g" \
             /etc/apt/sources.list.d/debian.sources; \
     fi \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends \
+    && apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=60 update \
+    && apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=60 \
+        install -y --no-install-recommends \
         ca-certificates \
         git \
         openssh-client \

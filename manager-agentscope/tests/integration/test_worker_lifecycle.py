@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -125,6 +126,7 @@ async def test_worker_create_is_journaled_through_greeting(
         topology=Topology(),
         matrix=matrix,
         worker_poll_delays=(0,),
+        admin_room_id="!admin:example",
     )
     context = MutationContext(
         room_id="!admin:example",
@@ -140,10 +142,19 @@ async def test_worker_create_is_journaled_through_greeting(
         ),
         context=context,
     )
+    accepted_operation = await operations.get(context.operation_id)
+
+    assert worker.phase == "Pending"
+    assert accepted_operation is not None
+    assert accepted_operation.status is OperationStatus.RUNNING
+
+    await asyncio.wait_for(
+        service.wait_for_background_worker_creates(),
+        timeout=1,
+    )
     operation = await operations.get(context.operation_id)
     events = await operations.events_for(context.operation_id)
 
-    assert worker.phase == "Running"
     assert operation is not None
     assert operation.kind is OperationKind.CREATE_WORKER
     assert operation.status is OperationStatus.SUCCEEDED
@@ -151,10 +162,12 @@ async def test_worker_create_is_journaled_through_greeting(
         "operation_started",
         "effect_planned",
         "effect_acknowledged",
+        "effect_acknowledged",
         "effect_planned",
         "effect_succeeded",
     ]
-    assert len(journal_store.objects) == 5
+    assert len(journal_store.objects) == 6
     assert matrix.transactions == [
         f"agentteams:{context.operation_id}:0",
+        f"agentteams:{context.operation_id}:1",
     ]

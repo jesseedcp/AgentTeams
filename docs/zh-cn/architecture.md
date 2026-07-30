@@ -118,7 +118,7 @@ Reconciler 创建 Manager/Worker Pod。Manager CRD 只接受
 
 ## Skills 与验证
 
-16 项镜像内置 Manager skill 位于 `manager/agent/skills/`。Skill 是行为指导，
+19 项镜像内置 Manager skill 位于 `manager/agent/skills/`。Skill 是行为指导，
 已注册 typed 工具才是可执行边界。完整映射和测试证据位于
 [`tests/manager-skill-parity.json`](../../tests/manager-skill-parity.json)。
 

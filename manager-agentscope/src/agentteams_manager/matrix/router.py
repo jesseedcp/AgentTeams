@@ -26,6 +26,7 @@ class PolicyResolver(Protocol):
 
 
 EventHandler = Callable[[InboundEvent, RoomPolicy], Awaitable[None]]
+DeadLetterHandler = Callable[[InboundEvent, str], Awaitable[None]]
 QueueSettingsProvider = Callable[
     [str],
     Awaitable[tuple[str, int]],
@@ -53,7 +54,17 @@ class EventRouter:
         queue_settings: QueueSettingsProvider | None = None,
         interrupt_handler: InterruptHandler | None = None,
         idle_timeout_seconds: float = 300,
+        shutdown_grace_seconds: float = 5.0,
+        retry_delays: tuple[float, ...] = (1.0, 3.0),
+        max_attempts: int = 3,
+        dead_letter_handler: DeadLetterHandler | None = None,
     ) -> None:
+        if max_attempts < 1:
+            raise ValueError("max_attempts must be positive")
+        if any(delay < 0 for delay in retry_delays):
+            raise ValueError("retry_delays must not be negative")
+        if shutdown_grace_seconds < 0:
+            raise ValueError("shutdown_grace_seconds must not be negative")
         self._claims = claims
         self._resolver = resolver
         self._handler = handler
@@ -61,6 +72,10 @@ class EventRouter:
         self._queue_settings = queue_settings
         self._interrupt_handler = interrupt_handler
         self._idle_timeout = idle_timeout_seconds
+        self._shutdown_grace = shutdown_grace_seconds
+        self._retry_delays = retry_delays
+        self._max_attempts = max_attempts
+        self._dead_letter_handler = dead_letter_handler
         self._queues: dict[str, asyncio.Queue[RoutedEvent]] = {}
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._active_handlers: dict[str, asyncio.Task[None]] = {}
@@ -69,9 +84,16 @@ class EventRouter:
 
     async def start(self) -> None:
         self._running = True
+        await self._recover_durable_events()
 
     async def stop(self) -> None:
         self._running = False
+        active = tuple(self._active_handlers.values())
+        if active and self._shutdown_grace:
+            await asyncio.wait(
+                active,
+                timeout=self._shutdown_grace,
+            )
         async with self._guard:
             tasks = tuple(self._tasks.values())
             self._tasks.clear()
@@ -92,12 +114,20 @@ class EventRouter:
             self._control_handler is not None
             and _is_stop_command(event.body)
         ):
-            if not await self._claims.claim_matrix_event(
-                event.room_id,
-                event.event_id,
-            ):
+            if not await self._claim_event(event):
                 return False
-            await self._control_handler(event, policy)
+            async with self._guard:
+                discarded = self._discard_waiting_events_locked(
+                    event.room_id,
+                )
+            await self._cancel_events(
+                discarded,
+                reason="cancelled by /stop",
+            )
+            await self._process_routed(
+                RoutedEvent(event=event, policy=policy),
+                handler=self._control_handler,
+            )
             return True
 
         queue_mode, queue_limit = await self._room_queue_settings(
@@ -112,10 +142,7 @@ class EventRouter:
                 and queue.qsize() >= queue_limit
             ):
                 return False
-            if not await self._claims.claim_matrix_event(
-                event.room_id,
-                event.event_id,
-            ):
+            if not await self._claim_event(event):
                 return False
             interrupt_active = (
                 queue_mode == "interrupt"
@@ -132,6 +159,23 @@ class EventRouter:
         await asyncio.sleep(0)
         await asyncio.sleep(0)
         return True
+
+    def _discard_waiting_events_locked(
+        self,
+        room_id: str,
+    ) -> tuple[RoutedEvent, ...]:
+        """Drop already-claimed follow-up work when `/stop` is received."""
+
+        queue = self._queues.get(room_id)
+        if queue is None:
+            return ()
+        discarded: list[RoutedEvent] = []
+        while True:
+            try:
+                discarded.append(queue.get_nowait())
+            except asyncio.QueueEmpty:
+                return tuple(discarded)
+            queue.task_done()
 
     async def _room_queue_settings(
         self,
@@ -211,7 +255,7 @@ class EventRouter:
             handler_task: asyncio.Task[None] | None = None
             try:
                 handler_task = asyncio.create_task(
-                    self._invoke_handler(routed),
+                    self._process_routed(routed, batch=batch),
                     name=(
                         "matrix-event:"
                         f"{routed.event.room_id}:"
@@ -225,7 +269,7 @@ class EventRouter:
                     raise
             except Exception:
                 logger.exception(
-                    "Matrix event processing failed",
+                    "Matrix event routing failed outside retry boundary",
                     extra={
                         "room_id": routed.event.room_id,
                         "event_id": routed.event.event_id,
@@ -243,6 +287,197 @@ class EventRouter:
 
     async def _invoke_handler(self, routed: RoutedEvent) -> None:
         await self._handler(routed.event, routed.policy)
+
+    async def _process_routed(
+        self,
+        routed: RoutedEvent,
+        *,
+        batch: list[RoutedEvent] | None = None,
+        handler: EventHandler | None = None,
+    ) -> None:
+        """Run one event batch with bounded retry and durable completion."""
+
+        deliveries = batch or [routed]
+        selected_handler = handler or self._handler
+        attempt = 1
+        while True:
+            try:
+                await selected_handler(routed.event, routed.policy)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                error = str(exc).strip() or type(exc).__name__
+                dead_letter = attempt >= self._max_attempts
+                for delivery in deliveries:
+                    dead_letter = (
+                        await self._fail_event(
+                            delivery.event,
+                            error=error,
+                            attempt=attempt,
+                        )
+                        or dead_letter
+                    )
+                if dead_letter:
+                    logger.exception(
+                        "Matrix event moved to dead letter",
+                        extra={
+                            "room_id": routed.event.room_id,
+                            "event_id": routed.event.event_id,
+                            "attempt": attempt,
+                        },
+                    )
+                    await self._report_dead_letter(routed.event, error)
+                    return
+                logger.warning(
+                    "Matrix event processing failed; retrying",
+                    extra={
+                        "room_id": routed.event.room_id,
+                        "event_id": routed.event.event_id,
+                        "attempt": attempt,
+                    },
+                    exc_info=True,
+                )
+                delay = self._retry_delay(attempt)
+                if delay:
+                    await asyncio.sleep(delay)
+                for delivery in deliveries:
+                    await self._begin_retry(delivery.event)
+                attempt += 1
+                continue
+            for delivery in deliveries:
+                await self._complete_event(delivery.event)
+            return
+
+    async def _claim_event(self, event: InboundEvent) -> bool:
+        durable_claim = getattr(
+            self._claims,
+            "claim_inbound_event",
+            None,
+        )
+        if callable(durable_claim):
+            return bool(await durable_claim(event))
+        return await self._claims.claim_matrix_event(
+            event.room_id,
+            event.event_id,
+        )
+
+    async def _complete_event(self, event: InboundEvent) -> None:
+        complete = getattr(
+            self._claims,
+            "complete_matrix_event",
+            None,
+        )
+        if callable(complete):
+            await complete(event.room_id, event.event_id)
+
+    async def _fail_event(
+        self,
+        event: InboundEvent,
+        *,
+        error: str,
+        attempt: int,
+    ) -> bool:
+        fail = getattr(self._claims, "fail_matrix_event", None)
+        if callable(fail):
+            return bool(
+                await fail(
+                    event.room_id,
+                    event.event_id,
+                    error=error,
+                    max_attempts=self._max_attempts,
+                ),
+            )
+        return attempt >= self._max_attempts
+
+    async def _begin_retry(self, event: InboundEvent) -> None:
+        retry = getattr(self._claims, "retry_matrix_event", None)
+        if callable(retry):
+            await retry(event.room_id, event.event_id)
+
+    async def _cancel_events(
+        self,
+        events: tuple[RoutedEvent, ...],
+        *,
+        reason: str,
+    ) -> None:
+        cancel = getattr(self._claims, "cancel_matrix_event", None)
+        if not callable(cancel):
+            return
+        for routed in events:
+            await cancel(
+                routed.event.room_id,
+                routed.event.event_id,
+                reason=reason,
+            )
+
+    async def _recover_durable_events(self) -> None:
+        recover = getattr(
+            self._claims,
+            "recoverable_matrix_events",
+            None,
+        )
+        if not callable(recover):
+            return
+        events = await recover()
+        for event in events:
+            try:
+                policy = await self._resolver.resolve(event)
+                if policy.silent:
+                    cancel = getattr(
+                        self._claims,
+                        "cancel_matrix_event",
+                        None,
+                    )
+                    if callable(cancel):
+                        await cancel(
+                            event.room_id,
+                            event.event_id,
+                            reason=(
+                                "room policy rejected event during recovery"
+                            ),
+                        )
+                    continue
+                queue_mode, _ = await self._room_queue_settings(
+                    event.room_id,
+                )
+                async with self._guard:
+                    await self._enqueue_locked(
+                        event,
+                        policy,
+                        queue_mode,
+                    )
+            except Exception:
+                logger.exception(
+                    "Failed to restore durable Matrix event",
+                    extra={
+                        "room_id": event.room_id,
+                        "event_id": event.event_id,
+                    },
+                )
+
+    def _retry_delay(self, attempt: int) -> float:
+        if not self._retry_delays:
+            return 0
+        index = min(attempt - 1, len(self._retry_delays) - 1)
+        return self._retry_delays[index]
+
+    async def _report_dead_letter(
+        self,
+        event: InboundEvent,
+        error: str,
+    ) -> None:
+        if self._dead_letter_handler is None:
+            return
+        try:
+            await self._dead_letter_handler(event, error)
+        except Exception:
+            logger.exception(
+                "Failed to report Matrix dead letter",
+                extra={
+                    "room_id": event.room_id,
+                    "event_id": event.event_id,
+                },
+            )
 
 
 def _is_stop_command(body: str) -> bool:

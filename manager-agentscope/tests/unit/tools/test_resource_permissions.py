@@ -37,7 +37,7 @@ def test_level_two_human_is_read_only_and_resource_scoped() -> None:
     assert "list_workers" in policy.allowed_tools
     assert "create_worker" not in policy.allowed_tools
     assert "delete_worker" not in policy.allowed_tools
-    assert "send_notification" in policy.confirm_tools
+    assert "send_notification" not in policy.confirm_tools
     assert policy.allowed_team_names == frozenset({"alpha"})
     assert policy.allowed_worker_names == frozenset({"alpha-dev"})
     authorize_resource_target(policy, resource_type="team", name="alpha")
@@ -49,7 +49,7 @@ def test_level_two_human_is_read_only_and_resource_scoped() -> None:
         )
 
 
-def test_level_one_human_mutations_still_require_confirmation() -> None:
+def test_level_one_human_only_confirms_high_risk_mutations() -> None:
     policy = human_room_policy(
         scoped_human(level=1),
         room_id="!any:example",
@@ -58,8 +58,10 @@ def test_level_one_human_mutations_still_require_confirmation() -> None:
 
     assert policy.resource_scope_all
     assert "create_worker" in policy.allowed_tools
-    assert "create_worker" in policy.confirm_tools
-    assert "upload_matrix_media" in policy.confirm_tools
+    assert "create_worker" not in policy.confirm_tools
+    assert "upload_matrix_media" not in policy.confirm_tools
+    assert "delete_worker" in policy.confirm_tools
+    assert "write_host_file" in policy.confirm_tools
 
 
 class Channels:

@@ -410,10 +410,9 @@ func (p *Provisioner) ProvisionWorker(ctx context.Context, req WorkerProvisionRe
 	}
 
 	invite := []string{adminMatrixID}
-	if p.managerEnabled {
-		invite = appendUniqueStrings(invite, managerMatrixID)
+	if authorityID != adminMatrixID {
+		invite = appendUniqueStrings(invite, authorityID)
 	}
-	invite = appendUniqueStrings(invite, authorityID)
 	invite = appendUniqueStrings(invite, workerMatrixID)
 
 	leaderMatrixID := ""
@@ -704,6 +703,17 @@ func (p *Provisioner) RefreshManagerCredentials(ctx context.Context, managerName
 	if !hadToken {
 		if err := p.creds.Save(ctx, managerName, creds); err != nil {
 			return nil, fmt.Errorf("persist matrix token: %w", err)
+		}
+	}
+	if p.ossAdmin != nil {
+		if err := p.ossAdmin.EnsureUser(ctx, managerName, creds.MinIOPassword); err != nil {
+			return nil, fmt.Errorf("MinIO manager user refresh failed: %w", err)
+		}
+		if err := p.ossAdmin.EnsurePolicy(ctx, oss.PolicyRequest{
+			WorkerName: managerName,
+			IsManager:  true,
+		}); err != nil {
+			return nil, fmt.Errorf("MinIO manager policy refresh failed: %w", err)
 		}
 	}
 

@@ -1,22 +1,18 @@
 import asyncio
-import io
 import json
 import logging
 import os
-from pathlib import Path
 import sys
 import tarfile
 import types
-import urllib.error
+from pathlib import Path
 
 import pytest
-
 from qwenpaw_worker.config import WorkerConfig
 from qwenpaw_worker.update import (
-    MemberRuntimeConfig,
-    QwenPawModelRuntimeSync,
-    RuntimeUpdater,
     TEAMS_INTERNAL_CONTROL_MARKER,
+    MemberRuntimeConfig,
+    RuntimeUpdater,
 )
 
 
@@ -44,21 +40,218 @@ def _config(tmp_path: Path) -> WorkerConfig:
     )
 
 
-def _agent_package(tmp_path: Path, version: str, *, include_teams: bool = False) -> Path:
+class _FakeQwenPawApi:
+    def __init__(self):
+        self.channels = {
+            "agentteams_matrix": {},
+            "dingtalk": {},
+        }
+        self.acls = {
+            "agentteams_matrix": {"whitelist": {}, "blacklist": {}, "pending": []}
+        }
+        self.mcp = {}
+        self.active_model = None
+        self.enabled_skills = []
+
+    def get_channel(self, channel):
+        return dict(self.channels.get(channel, {}))
+
+    def put_channel(self, channel, desired, *, secret_fields=()):
+        current = self.get_channel(channel)
+        payload = dict(desired)
+        for field in secret_fields:
+            if not payload.get(field) and current.get(field):
+                payload[field] = current[field]
+        self.channels[channel] = payload
+        return dict(payload)
+
+    def reconcile_acl(self, channel, whitelist, blacklist):
+        payload = {
+            "whitelist": {item: {} for item in whitelist},
+            "blacklist": {item: {} for item in blacklist},
+            "pending": [],
+        }
+        self.acls[channel] = payload
+        return payload
+
+    def list_mcp(self):
+        return list(self.mcp.values())
+
+    def create_mcp(self, key, payload):
+        self.mcp[key] = {"key": key, **payload}
+        return self.mcp[key]
+
+    def update_mcp(self, key, payload):
+        self.mcp[key] = {"key": key, **payload}
+        return self.mcp[key]
+
+    def delete_mcp(self, key):
+        self.mcp.pop(key, None)
+
+    def configure_active_model(self, provider_id, model, **kwargs):
+        self.active_model = {"provider_id": provider_id, "model": model, **kwargs}
+        return {"active_llm": self.active_model}
+
+    def refresh_and_enable_skills(self, skill_names):
+        self.enabled_skills = list(skill_names)
+        return {"results": {name: {"success": True} for name in self.enabled_skills}}
+
+
+def _runtime_updater(*args, **kwargs):
+    kwargs.setdefault("api_client", _FakeQwenPawApi())
+    return RuntimeUpdater(*args, **kwargs)
+
+
+def test_runtime_updater_reconciles_model_mcp_matrix_channel_and_acl_via_api(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AGENTTEAMS_MATRIX_URL", "http://matrix.example.com")
+    monkeypatch.setenv("AGENTTEAMS_WORKER_MATRIX_TOKEN", "matrix-token")
+    monkeypatch.setenv("AGENTTEAMS_WORKER_GATEWAY_KEY", "gateway-secret")
+    updater = _runtime_updater(
+        config=_config(tmp_path),
+        package_manager=_NoopPackageManager(),
+    )
+    updater.api_client.channels["matrix"] = {
+        "enabled": True,
+        "access_token": "legacy-matrix-token",
+    }
+
+    updater.apply_once(
+        runtime_config=MemberRuntimeConfig(
+            path=updater.config.runtime_config_path,
+            raw={
+                "metadata": {"generation": "1"},
+                "team": {"teamRoomId": "!team:matrix.local"},
+                "member": {
+                    "runtime": "qwenpaw",
+                    "matrixUserId": "@worker-a:matrix.local",
+                },
+                "credentials": {
+                    "matrixTokenEnv": "AGENTTEAMS_WORKER_MATRIX_TOKEN",
+                    "gatewayKeyEnv": "AGENTTEAMS_WORKER_GATEWAY_KEY",
+                },
+                "desired": {
+                    "model": {
+                        "providerId": "agentteams-gateway",
+                        "model": "qwen-plus",
+                        "gatewayUrl": "https://gateway.example.com",
+                    },
+                    "mcpServers": [
+                        {"name": "docs", "url": "https://gateway.example.com/mcp"},
+                    ],
+                    "channelPolicy": {
+                        "groupAllowExtra": ["@human:matrix.local"],
+                    },
+                },
+            },
+        ),
+    )
+
+    api = updater.api_client
+    assert api.active_model["provider_id"] == "agentteams-gateway"
+    assert api.mcp["docs"]["transport"] == "streamable_http"
+    assert api.channels["matrix"]["enabled"] is False
+    assert api.channels["matrix"]["access_token"] == "legacy-matrix-token"
+    assert api.channels["agentteams_matrix"]["access_token"] == "matrix-token"
+    assert (
+        api.channels["agentteams_matrix"]["groups"]["!team:matrix.local"][
+            "requireMention"
+        ]
+        is True
+    )
+    assert "@human:matrix.local" in api.acls["agentteams_matrix"]["whitelist"]
+    assert not (updater.config.default_workspace_dir / "agent.json").exists()
+    assert not (
+        updater.config.default_workspace_dir / "config" / "mcporter.json"
+    ).exists()
+    assert not (updater.config.default_workspace_dir / "access_control.json").exists()
+
+
+def test_runtime_updater_maps_dingtalk_visibility_and_preserves_empty_secret(
+    tmp_path: Path,
+) -> None:
+    updater = _runtime_updater(
+        config=_config(tmp_path),
+        package_manager=_NoopPackageManager(),
+    )
+    updater.api_client.channels["dingtalk"] = {
+        "enabled": True,
+        "client_secret": "existing-secret",
+    }
+
+    updater.apply_once(
+        runtime_config=MemberRuntimeConfig(
+            path=updater.config.runtime_config_path,
+            raw={
+                "metadata": {"generation": "1"},
+                "member": {"runtime": "qwenpaw"},
+                "desired": {
+                    "channels": {
+                        "dingtalk": {
+                            "enabled": True,
+                            "client_id": "client-id",
+                            "client_secret": "",
+                            "robot_code": "robot",
+                            "filter_thinking": True,
+                            "filter_tool_messages": False,
+                        },
+                    },
+                },
+            },
+        ),
+    )
+
+    actual = updater.api_client.channels["dingtalk"]
+    assert actual["client_secret"] == "existing-secret"
+    assert actual["show_thinking"] is False
+    assert actual["show_tool_calls"] is True
+    assert actual["show_tool_results"] is True
+
+
+def test_runtime_updater_preserves_unmanaged_mcp_clients(tmp_path: Path) -> None:
+    updater = _runtime_updater(
+        config=_config(tmp_path), package_manager=_NoopPackageManager()
+    )
+    updater.api_client.mcp["third-party"] = {
+        "key": "third-party",
+        "name": "third-party",
+    }
+
+    updater.apply_once(
+        runtime_config=MemberRuntimeConfig(
+            path=updater.config.runtime_config_path,
+            raw={"metadata": {"generation": "1"}, "member": {"runtime": "qwenpaw"}},
+        ),
+    )
+
+    assert "third-party" in updater.api_client.mcp
+
+
+def _agent_package(
+    tmp_path: Path, version: str, *, include_teams: bool = False
+) -> Path:
     source_dir = tmp_path / f"package-src-{version}"
     config_dir = source_dir / "config"
     config_dir.mkdir(parents=True)
     (source_dir / "manifest.json").write_text('{"version":"1.0"}\n', encoding="utf-8")
-    (config_dir / "AGENTS.md").write_text(f"agent package {version}\n", encoding="utf-8")
+    (config_dir / "AGENTS.md").write_text(
+        f"agent package {version}\n", encoding="utf-8"
+    )
     if include_teams:
-        (config_dir / "TEAMS.md").write_text(f"package teams {version}\n", encoding="utf-8")
+        (config_dir / "TEAMS.md").write_text(
+            f"package teams {version}\n", encoding="utf-8"
+        )
     package_path = tmp_path / f"agent-package-{version}.tar.gz"
     with tarfile.open(package_path, "w:gz") as archive:
         archive.add(source_dir, arcname=".")
     return package_path
 
 
-def test_runtime_updater_applies_changed_config_and_reapplies_adapter(tmp_path: Path) -> None:
+def test_runtime_updater_applies_changed_config_and_reapplies_adapter(
+    tmp_path: Path,
+) -> None:
     config = _config(tmp_path)
     applied: list[str] = []
     adapter_calls: list[str] = []
@@ -68,7 +261,7 @@ def test_runtime_updater_applies_changed_config_and_reapplies_adapter(tmp_path: 
             applied.append(runtime_config.generation)
             return tmp_path / "packages" / runtime_config.generation
 
-    updater = RuntimeUpdater(
+    updater = _runtime_updater(
         config=config,
         adapter_apply=lambda: adapter_calls.append("adapter"),
         package_manager=FakePackageManager(),
@@ -99,7 +292,9 @@ def test_runtime_updater_applies_changed_config_and_reapplies_adapter(tmp_path: 
     assert updater.current_config.generation == "2"
 
 
-def test_runtime_updater_load_and_apply_once_does_not_reapply_adapter(tmp_path: Path) -> None:
+def test_runtime_updater_load_and_apply_once_does_not_reapply_adapter(
+    tmp_path: Path,
+) -> None:
     config = _config(tmp_path)
     applied: list[str] = []
     adapter_calls: list[str] = []
@@ -119,7 +314,7 @@ member:
 """,
         encoding="utf-8",
     )
-    updater = RuntimeUpdater(
+    updater = _runtime_updater(
         config=config,
         adapter_apply=lambda: adapter_calls.append("adapter"),
         package_manager=FakePackageManager(),
@@ -137,6 +332,45 @@ member:
     assert updater.current_config.generation == "2"
 
 
+def test_runtime_updater_reconciles_storage_only_change(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _config(tmp_path)
+    reconciled: list[tuple[str, str]] = []
+    monkeypatch.setenv("AGENTTEAMS_AGENT_ROLE", "standalone")
+    updater = _runtime_updater(
+        config=config,
+        package_manager=_NoopPackageManager(),
+        runtime_reconcile=lambda runtime: reconciled.append(
+            (runtime.storage["sharedPrefix"], os.environ["AGENTTEAMS_AGENT_ROLE"]),
+        ),
+    )
+    updater.current_config = MemberRuntimeConfig(
+        path=config.runtime_config_path,
+        raw={
+            "metadata": {"generation": "2"},
+            "member": {"runtime": "qwenpaw"},
+            "storage": {"sharedPrefix": "shared"},
+        },
+    )
+
+    result = updater.apply_once(
+        runtime_config=MemberRuntimeConfig(
+            path=config.runtime_config_path,
+            raw={
+                "metadata": {"generation": "2"},
+                "member": {"runtime": "qwenpaw", "role": "team_leader"},
+                "storage": {"sharedPrefix": "teams/demo-team/shared"},
+            },
+        ),
+        reapply_adapter=False,
+    )
+
+    assert result.changed is True
+    assert reconciled == [("teams/demo-team/shared", "team_leader")]
+
+
 def test_runtime_updater_logs_safe_apply_summary_without_sensitive_values(
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
@@ -144,7 +378,7 @@ def test_runtime_updater_logs_safe_apply_summary_without_sensitive_values(
     config = _config(tmp_path)
     adapter_calls: list[str] = []
     caplog.set_level(logging.INFO, logger="qwenpaw_worker.update")
-    updater = RuntimeUpdater(
+    updater = _runtime_updater(
         config=config,
         adapter_apply=lambda: adapter_calls.append("adapter"),
         package_manager=_NoopPackageManager(),
@@ -159,12 +393,21 @@ def test_runtime_updater_logs_safe_apply_summary_without_sensitive_values(
                 "member": {"name": "worker-a", "role": "worker", "runtime": "qwenpaw"},
                 "desired": {
                     "mcpServers": {
-                        "alpha": {"command": "alpha", "env": {"TOKEN": "mcp-secret-token"}},
+                        "alpha": {
+                            "command": "alpha",
+                            "env": {"TOKEN": "mcp-secret-token"},
+                        },
                         "beta": {"command": "beta"},
                     },
                     "channels": {
-                        "matrix": {"enabled": True, "access_token": "matrix-secret-token"},
-                        "dingtalk": {"enabled": True, "client_secret": "dingtalk-secret"},
+                        "matrix": {
+                            "enabled": True,
+                            "access_token": "matrix-secret-token",
+                        },
+                        "dingtalk": {
+                            "enabled": True,
+                            "client_secret": "dingtalk-secret",
+                        },
                     },
                     "credentialBindings": [
                         {
@@ -197,7 +440,9 @@ def test_runtime_updater_logs_safe_apply_summary_without_sensitive_values(
     assert "provider-a" not in caplog.text
 
 
-def test_runtime_config_identity_distinguishes_empty_list_and_empty_object(tmp_path: Path) -> None:
+def test_runtime_config_identity_distinguishes_empty_list_and_empty_object(
+    tmp_path: Path,
+) -> None:
     config = _config(tmp_path)
     first = MemberRuntimeConfig(
         path=config.runtime_config_path,
@@ -219,14 +464,14 @@ def test_runtime_config_identity_distinguishes_empty_list_and_empty_object(tmp_p
     assert first.desired_identity != second.desired_identity
 
 
-def test_runtime_updater_does_not_reapply_adapter_for_mcp_only_change(
+def _legacy_test_runtime_updater_does_not_reapply_adapter_for_mcp_only_change(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config = _config(tmp_path)
     monkeypatch.setenv("AGENTTEAMS_WORKER_GATEWAY_KEY", "gateway-secret")
     adapter_calls: list[str] = []
-    updater = RuntimeUpdater(
+    updater = _runtime_updater(
         config=config,
         adapter_apply=lambda: adapter_calls.append("adapter"),
         package_manager=_NoopPackageManager(),
@@ -268,8 +513,15 @@ def test_runtime_updater_does_not_reapply_adapter_for_mcp_only_change(
     )
 
     assert adapter_calls == ["adapter"]
-    default_config = json.loads((config.default_workspace_dir / "config" / "mcporter.json").read_text(encoding="utf-8"))
-    assert default_config["mcpServers"]["docs"]["url"] == "https://gw.example.com/mcp-servers/docs-v2/mcp"
+    default_config = json.loads(
+        (config.default_workspace_dir / "config" / "mcporter.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert (
+        default_config["mcpServers"]["docs"]["url"]
+        == "https://gw.example.com/mcp-servers/docs-v2/mcp"
+    )
 
 
 def test_runtime_updater_reapplies_adapter_when_credentials_change_with_mcp(
@@ -277,7 +529,7 @@ def test_runtime_updater_reapplies_adapter_when_credentials_change_with_mcp(
 ) -> None:
     config = _config(tmp_path)
     adapter_calls: list[str] = []
-    updater = RuntimeUpdater(
+    updater = _runtime_updater(
         config=config,
         adapter_apply=lambda: adapter_calls.append("adapter"),
         package_manager=_NoopPackageManager(),
@@ -336,7 +588,7 @@ def test_runtime_updater_does_not_reapply_adapter_for_dingtalk_channel_change(
     config = _config(tmp_path)
     monkeypatch.setenv("AGENTTEAMS_WORKER_GATEWAY_KEY", "gateway-secret")
     adapter_calls: list[str] = []
-    updater = RuntimeUpdater(
+    updater = _runtime_updater(
         config=config,
         adapter_apply=lambda: adapter_calls.append("adapter"),
         package_manager=_NoopPackageManager(),
@@ -383,7 +635,7 @@ def test_runtime_updater_does_not_reapply_adapter_for_mcp_and_channel_change(
     config = _config(tmp_path)
     monkeypatch.setenv("AGENTTEAMS_WORKER_GATEWAY_KEY", "gateway-secret")
     adapter_calls: list[str] = []
-    updater = RuntimeUpdater(
+    updater = _runtime_updater(
         config=config,
         adapter_apply=lambda: adapter_calls.append("adapter"),
         package_manager=_NoopPackageManager(),
@@ -396,7 +648,9 @@ def test_runtime_updater_does_not_reapply_adapter_for_mcp_and_channel_change(
                 "metadata": {"generation": "1"},
                 "member": {"runtime": "qwenpaw"},
                 "desired": {
-                    "mcpServers": [{"name": "docs", "url": "https://gw.example.com/mcp/docs-v1"}],
+                    "mcpServers": [
+                        {"name": "docs", "url": "https://gw.example.com/mcp/docs-v1"}
+                    ],
                     "channels": {"dingtalk": {"enabled": False}},
                 },
             },
@@ -409,7 +663,9 @@ def test_runtime_updater_does_not_reapply_adapter_for_mcp_and_channel_change(
                 "metadata": {"generation": "2"},
                 "member": {"runtime": "qwenpaw"},
                 "desired": {
-                    "mcpServers": [{"name": "docs", "url": "https://gw.example.com/mcp/docs-v2"}],
+                    "mcpServers": [
+                        {"name": "docs", "url": "https://gw.example.com/mcp/docs-v2"}
+                    ],
                     "channels": {
                         "dingtalk": {
                             "enabled": True,
@@ -432,7 +688,7 @@ def test_runtime_updater_applies_member_role_to_config_and_env(
     monkeypatch.delenv("AGENTTEAMS_WORKER_ROLE", raising=False)
     monkeypatch.delenv("AGENTTEAMS_AGENT_ROLE", raising=False)
     config = _config(tmp_path)
-    updater = RuntimeUpdater(config=config, package_manager=_NoopPackageManager())
+    updater = _runtime_updater(config=config, package_manager=_NoopPackageManager())
 
     updater.apply_once(
         runtime_config=MemberRuntimeConfig(
@@ -462,7 +718,7 @@ old context
 """,
         encoding="utf-8",
     )
-    updater = RuntimeUpdater(config=config, package_manager=_NoopPackageManager())
+    updater = _runtime_updater(config=config, package_manager=_NoopPackageManager())
 
     updater.apply_once(
         runtime_config=MemberRuntimeConfig(
@@ -525,11 +781,10 @@ old context
     assert "member.runtimeName: worker-a" in text
     assert "runtime.model.providerId: agentteams-gateway" in text
     assert "runtime.model.name: qwen-plus" in text
-    assert (
-        "runtime.coordinator.matrixUserId: "
-        "@leader-runtime:matrix.local"
-    ) in text
-    assert not (config.qwenpaw_working_dir / "teamharness" / "team-context.json").exists()
+    assert ("runtime.coordinator.matrixUserId: @leader-runtime:matrix.local") in text
+    assert not (
+        config.qwenpaw_working_dir / "teamharness" / "team-context.json"
+    ).exists()
     assert "desired" not in text
     assert "storage" not in text
     assert "matrixTokenEnv" not in text
@@ -559,7 +814,7 @@ def test_runtime_updater_restores_team_context_after_adapter_overwrite(
             encoding="utf-8",
         )
 
-    updater = RuntimeUpdater(
+    updater = _runtime_updater(
         config=config,
         adapter_apply=overwrite_with_legacy_context,
         package_manager=_NoopPackageManager(),
@@ -592,7 +847,9 @@ def test_runtime_updater_restores_team_context_after_adapter_overwrite(
     assert "runtime.coordinator.matrixUserId: @manager:matrix.local" in text
 
 
-def test_runtime_updater_rebuilds_missing_teams_md_with_renderer(tmp_path: Path) -> None:
+def test_runtime_updater_rebuilds_missing_teams_md_with_renderer(
+    tmp_path: Path,
+) -> None:
     config = _config(tmp_path)
     rendered: list[str] = []
     adapter_calls: list[str] = []
@@ -608,7 +865,7 @@ old renderer context
 <!-- END AGENTTEAMS RUNTIME TEAM CONTEXT -->
 """
 
-    updater = RuntimeUpdater(
+    updater = _runtime_updater(
         config=config,
         adapter_apply=lambda: adapter_calls.append("adapter"),
         package_manager=_NoopPackageManager(),
@@ -642,7 +899,9 @@ old renderer context
     assert TEAMS_INTERNAL_CONTROL_MARKER in text
 
 
-def test_runtime_updater_preserves_teams_md_when_package_changes_without_adapter(tmp_path: Path) -> None:
+def test_runtime_updater_preserves_teams_md_when_package_changes_without_adapter(
+    tmp_path: Path,
+) -> None:
     config = _config(tmp_path)
     package_v1 = _agent_package(tmp_path, "1", include_teams=True)
     package_v2 = _agent_package(tmp_path, "2", include_teams=False)
@@ -656,13 +915,15 @@ rendered generation {runtime_config.generation}
 <!-- END AGENTTEAMS RUNTIME TEAM CONTEXT -->
 """
 
-    updater = RuntimeUpdater(
+    updater = _runtime_updater(
         config=config,
         adapter_apply=lambda: adapter_calls.append("adapter"),
         team_context_renderer=render_team_context,
     )
 
-    def runtime_config(package_path: Path, version: str, team_name: str) -> MemberRuntimeConfig:
+    def runtime_config(
+        package_path: Path, version: str, team_name: str
+    ) -> MemberRuntimeConfig:
         return MemberRuntimeConfig(
             path=config.runtime_config_path,
             raw={
@@ -685,8 +946,14 @@ rendered generation {runtime_config.generation}
             },
         )
 
-    updater.apply_once(runtime_config=runtime_config(package_v1, "1", "team-one"), reapply_adapter=False)
-    updater.apply_once(runtime_config=runtime_config(package_v2, "2", "team-two"), reapply_adapter=False)
+    updater.apply_once(
+        runtime_config=runtime_config(package_v1, "1", "team-one"),
+        reapply_adapter=False,
+    )
+    updater.apply_once(
+        runtime_config=runtime_config(package_v2, "2", "team-two"),
+        reapply_adapter=False,
+    )
 
     text = (config.default_workspace_dir / "TEAMS.md").read_text(encoding="utf-8")
     assert adapter_calls == []
@@ -697,7 +964,7 @@ rendered generation {runtime_config.generation}
     assert TEAMS_INTERNAL_CONTROL_MARKER in text
 
 
-def test_runtime_updater_applies_desired_model_to_qwenpaw_agent_config(
+def _legacy_test_runtime_updater_applies_desired_model_to_qwenpaw_agent_config(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -713,20 +980,26 @@ def test_runtime_updater_applies_desired_model_to_qwenpaw_agent_config(
     config_module = types.ModuleType("qwenpaw.config.config")
     config_module.ModelSlotConfig = ModelSlotConfig
     config_module.load_agent_config = lambda _agent_id: agent_config
-    config_module.save_agent_config = lambda agent_id, value: saved.update({agent_id: value})
+    config_module.save_agent_config = lambda agent_id, value: saved.update(
+        {agent_id: value}
+    )
 
     monkeypatch.setitem(sys.modules, "qwenpaw", types.ModuleType("qwenpaw"))
-    monkeypatch.setitem(sys.modules, "qwenpaw.config", types.ModuleType("qwenpaw.config"))
+    monkeypatch.setitem(
+        sys.modules, "qwenpaw.config", types.ModuleType("qwenpaw.config")
+    )
     monkeypatch.setitem(sys.modules, "qwenpaw.config.config", config_module)
 
-    updater = RuntimeUpdater(config=config, package_manager=_NoopPackageManager())
+    updater = _runtime_updater(config=config, package_manager=_NoopPackageManager())
     updater.apply_once(
         runtime_config=MemberRuntimeConfig(
             path=config.runtime_config_path,
             raw={
                 "metadata": {"generation": "1"},
                 "member": {"runtime": "qwenpaw"},
-                "desired": {"model": {"providerId": "agentteams-gateway", "model": "qwen-plus"}},
+                "desired": {
+                    "model": {"providerId": "agentteams-gateway", "model": "qwen-plus"}
+                },
             },
         )
     )
@@ -735,7 +1008,7 @@ def test_runtime_updater_applies_desired_model_to_qwenpaw_agent_config(
     assert saved["default"].active_model.model == "qwen-plus"
 
 
-def test_runtime_updater_configures_openai_compatible_provider_from_runtime_config(
+def _legacy_test_runtime_updater_configures_openai_compatible_provider_from_runtime_config(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -787,7 +1060,9 @@ def test_runtime_updater_configures_openai_compatible_provider_from_runtime_conf
     config_module = types.ModuleType("qwenpaw.config.config")
     config_module.ModelSlotConfig = ModelSlotConfig
     config_module.load_agent_config = lambda _agent_id: agent_config
-    config_module.save_agent_config = lambda agent_id, value: saved_agent.update({agent_id: value})
+    config_module.save_agent_config = lambda agent_id, value: saved_agent.update(
+        {agent_id: value}
+    )
 
     provider_module = types.ModuleType("qwenpaw.providers.provider")
     provider_module.ModelInfo = ModelInfo
@@ -797,13 +1072,19 @@ def test_runtime_updater_configures_openai_compatible_provider_from_runtime_conf
     provider_manager_module.ProviderManager = ProviderManager
 
     monkeypatch.setitem(sys.modules, "qwenpaw", types.ModuleType("qwenpaw"))
-    monkeypatch.setitem(sys.modules, "qwenpaw.config", types.ModuleType("qwenpaw.config"))
+    monkeypatch.setitem(
+        sys.modules, "qwenpaw.config", types.ModuleType("qwenpaw.config")
+    )
     monkeypatch.setitem(sys.modules, "qwenpaw.config.config", config_module)
-    monkeypatch.setitem(sys.modules, "qwenpaw.providers", types.ModuleType("qwenpaw.providers"))
+    monkeypatch.setitem(
+        sys.modules, "qwenpaw.providers", types.ModuleType("qwenpaw.providers")
+    )
     monkeypatch.setitem(sys.modules, "qwenpaw.providers.provider", provider_module)
-    monkeypatch.setitem(sys.modules, "qwenpaw.providers.provider_manager", provider_manager_module)
+    monkeypatch.setitem(
+        sys.modules, "qwenpaw.providers.provider_manager", provider_manager_module
+    )
 
-    updater = RuntimeUpdater(config=config, package_manager=_NoopPackageManager())
+    updater = _runtime_updater(config=config, package_manager=_NoopPackageManager())
     updater.apply_once(
         runtime_config=MemberRuntimeConfig(
             path=config.runtime_config_path,
@@ -834,290 +1115,13 @@ def test_runtime_updater_configures_openai_compatible_provider_from_runtime_conf
     assert saved_agent["default"].active_model.model == "qwen-plus"
 
 
-def test_runtime_updater_syncs_live_qwenpaw_app_only_when_model_changes(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    config = _config(tmp_path)
-    monkeypatch.setenv("REAL_MODEL_KEY", "real-model-secret")
-    sync_calls: list[tuple[str, str]] = []
-
-    updater = RuntimeUpdater(
-        config=config,
-        package_manager=_NoopPackageManager(),
-        model_runtime_sync=lambda runtime_config: sync_calls.append(
-            (runtime_config.generation, runtime_config.model["model"])
-        ),
-    )
-
-    base_model = {
-        "providerId": "agentteams-gateway",
-        "model": "qwen-plus",
-        "gatewayUrl": "https://dashscope.aliyuncs.com/compatible-mode",
-        "apiKeyEnv": "REAL_MODEL_KEY",
-    }
-    updater.apply_once(
-        runtime_config=MemberRuntimeConfig(
-            path=config.runtime_config_path,
-            raw={
-                "metadata": {"generation": "1"},
-                "member": {"runtime": "qwenpaw"},
-                "desired": {"model": base_model},
-            },
-        )
-    )
-    updater.apply_once(
-        runtime_config=MemberRuntimeConfig(
-            path=config.runtime_config_path,
-            raw={
-                "metadata": {"generation": "2"},
-                "member": {"runtime": "qwenpaw"},
-                "desired": {"model": base_model},
-            },
-        )
-    )
-    updater.apply_once(
-        runtime_config=MemberRuntimeConfig(
-            path=config.runtime_config_path,
-            raw={
-                "metadata": {"generation": "3"},
-                "member": {"runtime": "qwenpaw"},
-                "desired": {"model": {**base_model, "model": "qwen-max"}},
-            },
-        )
-    )
-
-    assert sync_calls == [("3", "qwen-max")]
-
-
-def test_runtime_updater_model_runtime_sync_failure_is_safe_and_retriable(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    config = _config(tmp_path)
-    monkeypatch.setenv("REAL_MODEL_KEY", "real-model-secret")
-    caplog.set_level(logging.WARNING, logger="qwenpaw_worker.update")
-
-    def fail_sync(_runtime_config: MemberRuntimeConfig) -> None:
-        raise RuntimeError("live sync failed with real-model-secret")
-
-    updater = RuntimeUpdater(
-        config=config,
-        package_manager=_NoopPackageManager(),
-        model_runtime_sync=fail_sync,
-    )
-    updater.apply_once(
-        runtime_config=MemberRuntimeConfig(
-            path=config.runtime_config_path,
-            raw={
-                "metadata": {"generation": "1"},
-                "member": {"runtime": "qwenpaw"},
-                "desired": {
-                    "model": {
-                        "providerId": "agentteams-gateway",
-                        "model": "qwen-plus",
-                        "gatewayUrl": "https://dashscope.aliyuncs.com/compatible-mode",
-                        "apiKeyEnv": "REAL_MODEL_KEY",
-                    }
-                },
-            },
-        )
-    )
-
-    with pytest.raises(RuntimeError):
-        updater.apply_once(
-            runtime_config=MemberRuntimeConfig(
-                path=config.runtime_config_path,
-                raw={
-                    "metadata": {"generation": "2"},
-                    "member": {"runtime": "qwenpaw"},
-                    "desired": {
-                        "model": {
-                            "providerId": "agentteams-gateway",
-                            "model": "qwen-max",
-                            "gatewayUrl": "https://dashscope.aliyuncs.com/compatible-mode",
-                            "apiKeyEnv": "REAL_MODEL_KEY",
-                        }
-                    },
-                },
-            )
-        )
-
-    assert updater.current_config is not None
-    assert updater.current_config.generation == "1"
-    assert "component=update step=model_runtime_sync event=failed" in caplog.text
-    assert "generation=2" in caplog.text
-    assert "error_type=RuntimeError" in caplog.text
-    assert "safe_error_summary=RuntimeError" in caplog.text
-    assert "real-model-secret" not in caplog.text
-
-
-def test_model_runtime_sync_calls_qwenpaw_models_api_and_verifies_agent_active(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    config = _config(tmp_path)
-    monkeypatch.setenv("REAL_MODEL_KEY", "real-model-secret")
-    caplog.set_level(logging.INFO, logger="qwenpaw_worker.update")
-    calls: list[tuple[str, str, dict]] = []
-
-    class FakeResponse:
-        def __init__(self, status: int, payload):
-            self.status = status
-            self._body = json.dumps(payload).encode("utf-8")
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_args):
-            return False
-
-        def read(self):
-            return self._body
-
-    def fake_urlopen(request, timeout):
-        body = json.loads(request.data.decode("utf-8")) if request.data else {}
-        calls.append((request.get_method(), request.full_url, body))
-        index = len(calls)
-        if index == 1:
-            return FakeResponse(200, [])
-        if index == 2:
-            raise urllib.error.HTTPError(
-                request.full_url,
-                404,
-                "Not Found",
-                {},
-                io.BytesIO(b'{"detail":"Provider not found"}'),
-            )
-        if index == 3:
-            return FakeResponse(
-                201,
-                {"id": "agentteams-gateway", "models": [], "extra_models": []},
-            )
-        if index == 4:
-            return FakeResponse(
-                200,
-                {"id": "agentteams-gateway", "models": [], "extra_models": []},
-            )
-        if index == 5:
-            return FakeResponse(
-                201,
-                {
-                    "id": "agentteams-gateway",
-                    "models": [],
-                    "extra_models": [{"id": "qwen-max", "name": "qwen-max"}],
-                },
-            )
-        if index == 6:
-            return FakeResponse(
-                200,
-                {"active_llm": {"provider_id": "agentteams-gateway", "model": "qwen-max"}},
-            )
-        return FakeResponse(
-            200,
-            {"active_llm": {"provider_id": "agentteams-gateway", "model": "qwen-max"}},
-        )
-
-    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
-
-    QwenPawModelRuntimeSync(port=8088).sync(
-        MemberRuntimeConfig(
-            path=config.runtime_config_path,
-            raw={
-                "metadata": {"generation": "2"},
-                "member": {"runtime": "qwenpaw"},
-                "desired": {
-                    "model": {
-                        "providerId": "agentteams-gateway",
-                        "providerName": "AgentTeams Gateway",
-                        "model": "qwen-max",
-                        "gatewayUrl": "https://dashscope.aliyuncs.com/compatible-mode",
-                        "apiKeyEnv": "REAL_MODEL_KEY",
-                    }
-                },
-            },
-        )
-    )
-
-    assert [(method, url.split("/api/models", 1)[1].split("?", 1)[0]) for method, url, _ in calls] == [
-        ("GET", ""),
-        ("PUT", "/agentteams-gateway/config"),
-        ("POST", "/custom-providers"),
-        ("PUT", "/agentteams-gateway/config"),
-        ("POST", "/agentteams-gateway/models"),
-        ("PUT", "/active"),
-        ("GET", "/active"),
-    ]
-    assert calls[3][2] == {
-        "api_key": "real-model-secret",
-        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        "chat_model": "OpenAIChatModel",
-    }
-    assert calls[5][2] == {
-        "scope": "agent",
-        "agent_id": "default",
-        "provider_id": "agentteams-gateway",
-        "model": "qwen-max",
-    }
-    assert "component=update step=model_runtime_sync event=complete" in caplog.text
-    assert "generation=2" in caplog.text
-    assert "provider_id=agentteams-gateway" in caplog.text
-    assert "model=qwen-max" in caplog.text
-    assert "changed=True" in caplog.text
-    assert "real-model-secret" not in caplog.text
-
-
-def test_model_runtime_sync_http_error_does_not_expose_response_body_secret(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    config = _config(tmp_path)
-    monkeypatch.setenv("REAL_MODEL_KEY", "real-model-secret")
-
-    def fake_urlopen(request, timeout):
-        raise urllib.error.HTTPError(
-            request.full_url,
-            500,
-            "Server Error",
-            {},
-            io.BytesIO(b'{"detail":"failed with real-model-secret"}'),
-        )
-
-    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
-    sync = QwenPawModelRuntimeSync(port=8088)
-
-    with pytest.raises(RuntimeError) as excinfo:
-        sync.sync(
-            MemberRuntimeConfig(
-                path=config.runtime_config_path,
-                raw={
-                    "metadata": {"generation": "2"},
-                    "member": {"runtime": "qwenpaw"},
-                    "desired": {
-                        "model": {
-                            "providerId": "agentteams-gateway",
-                            "model": "qwen-max",
-                            "gatewayUrl": "https://dashscope.aliyuncs.com/compatible-mode",
-                            "apiKeyEnv": "REAL_MODEL_KEY",
-                        }
-                    },
-                },
-            )
-        )
-
-    assert "real-model-secret" not in str(excinfo.value)
-    assert "HTTP 500" in str(excinfo.value)
-
-
-def test_runtime_updater_writes_mcporter_config_from_desired_mcp_servers(
+def _legacy_test_runtime_updater_writes_mcporter_config_from_desired_mcp_servers(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config = _config(tmp_path)
     monkeypatch.setenv("AGENTTEAMS_WORKER_GATEWAY_KEY", "gateway-secret")
-    updater = RuntimeUpdater(config=config, package_manager=_NoopPackageManager())
+    updater = _runtime_updater(config=config, package_manager=_NoopPackageManager())
 
     updater.apply_once(
         runtime_config=MemberRuntimeConfig(
@@ -1140,7 +1144,11 @@ def test_runtime_updater_writes_mcporter_config_from_desired_mcp_servers(
     )
 
     legacy_config = config.default_workspace_dir / "mcporter-servers.json"
-    default_config = json.loads((config.default_workspace_dir / "config" / "mcporter.json").read_text(encoding="utf-8"))
+    default_config = json.loads(
+        (config.default_workspace_dir / "config" / "mcporter.json").read_text(
+            encoding="utf-8"
+        )
+    )
     assert not legacy_config.exists()
     assert default_config["mcpServers"]["github"] == {
         "url": "https://gw.example.com/mcp-servers/github/mcp",
@@ -1149,11 +1157,11 @@ def test_runtime_updater_writes_mcporter_config_from_desired_mcp_servers(
     }
 
 
-def test_runtime_updater_writes_empty_mcporter_config_when_mcp_servers_are_omitted(
+def _legacy_test_runtime_updater_writes_empty_mcporter_config_when_mcp_servers_are_omitted(
     tmp_path: Path,
 ) -> None:
     config = _config(tmp_path)
-    updater = RuntimeUpdater(config=config, package_manager=_NoopPackageManager())
+    updater = _runtime_updater(config=config, package_manager=_NoopPackageManager())
 
     updater.apply_once(
         runtime_config=MemberRuntimeConfig(
@@ -1174,7 +1182,10 @@ def test_runtime_updater_writes_empty_mcporter_config_when_mcp_servers_are_omitt
     )
     legacy_config = config.default_workspace_dir / "mcporter-servers.json"
     default_config = config.default_workspace_dir / "config" / "mcporter.json"
-    legacy_config.write_text('{"mcpServers":{"legacy":{"url":"https://old.example.com/mcp"}}}\n', encoding="utf-8")
+    legacy_config.write_text(
+        '{"mcpServers":{"legacy":{"url":"https://old.example.com/mcp"}}}\n',
+        encoding="utf-8",
+    )
     assert default_config.exists()
 
     updater.apply_once(
@@ -1192,7 +1203,7 @@ def test_runtime_updater_writes_empty_mcporter_config_when_mcp_servers_are_omitt
     assert json.loads(default_config.read_text(encoding="utf-8")) == {"mcpServers": {}}
 
 
-def test_runtime_updater_configures_matrix_channel_in_agent_config(
+def _legacy_test_runtime_updater_configures_matrix_channel_in_agent_config(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1219,13 +1230,17 @@ def test_runtime_updater_configures_matrix_channel_in_agent_config(
 
     config_module = types.ModuleType("qwenpaw.config.config")
     config_module.load_agent_config = lambda _agent_id: agent_config
-    config_module.save_agent_config = lambda agent_id, value: saved.update({agent_id: value})
+    config_module.save_agent_config = lambda agent_id, value: saved.update(
+        {agent_id: value}
+    )
 
     monkeypatch.setitem(sys.modules, "qwenpaw", types.ModuleType("qwenpaw"))
-    monkeypatch.setitem(sys.modules, "qwenpaw.config", types.ModuleType("qwenpaw.config"))
+    monkeypatch.setitem(
+        sys.modules, "qwenpaw.config", types.ModuleType("qwenpaw.config")
+    )
     monkeypatch.setitem(sys.modules, "qwenpaw.config.config", config_module)
 
-    updater = RuntimeUpdater(config=config, package_manager=_NoopPackageManager())
+    updater = _runtime_updater(config=config, package_manager=_NoopPackageManager())
     updater.apply_once(
         runtime_config=MemberRuntimeConfig(
             path=config.runtime_config_path,
@@ -1265,40 +1280,11 @@ def test_runtime_updater_allows_plain_messages_in_standalone_worker_room(
     config = _config(tmp_path)
     monkeypatch.setenv("AGENTTEAMS_MATRIX_URL", "http://matrix.example.com:6167")
     monkeypatch.setenv("AGENTTEAMS_WORKER_MATRIX_TOKEN", "matrix-token")
-    saved = {}
-    matrix_config = types.SimpleNamespace(
-        enabled=False,
-        homeserver="",
-        user_id="",
-        access_token="",
-        password="legacy",
-        encryption=False,
-        group_disabled=True,
-        dm_disabled=True,
-        filter_tool_messages=False,
-        filter_thinking=False,
-        groups={"!worker:matrix.local": {"autoReply": True}},
-    )
-    agent_config = types.SimpleNamespace(
-        channels=types.SimpleNamespace(matrix=matrix_config),
-    )
-    config_module = types.ModuleType("qwenpaw.config.config")
-    config_module.load_agent_config = lambda _agent_id: agent_config
-    config_module.save_agent_config = lambda agent_id, value: saved.update(
-        {agent_id: value},
-    )
-    monkeypatch.setitem(sys.modules, "qwenpaw", types.ModuleType("qwenpaw"))
-    monkeypatch.setitem(
-        sys.modules,
-        "qwenpaw.config",
-        types.ModuleType("qwenpaw.config"),
-    )
-    monkeypatch.setitem(sys.modules, "qwenpaw.config.config", config_module)
-
-    RuntimeUpdater(
+    updater = _runtime_updater(
         config=config,
         package_manager=_NoopPackageManager(),
-    ).apply_once(
+    )
+    updater.apply_once(
         runtime_config=MemberRuntimeConfig(
             path=config.runtime_config_path,
             raw={
@@ -1315,14 +1301,14 @@ def test_runtime_updater_allows_plain_messages_in_standalone_worker_room(
         ),
     )
 
-    matrix = saved["default"].channels.matrix
-    assert matrix.groups["*"]["requireMention"] is True
-    assert matrix.groups["!worker:matrix.local"] == {
+    matrix = updater.api_client.channels["agentteams_matrix"]
+    assert matrix["groups"]["*"]["requireMention"] is True
+    assert matrix["groups"]["!worker:matrix.local"] == {
         "requireMention": False,
     }
 
 
-def test_runtime_updater_configures_dingtalk_channel_in_agent_config(
+def _legacy_test_runtime_updater_configures_dingtalk_channel_in_agent_config(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1346,13 +1332,17 @@ def test_runtime_updater_configures_dingtalk_channel_in_agent_config(
 
     config_module = types.ModuleType("qwenpaw.config.config")
     config_module.load_agent_config = lambda _agent_id: agent_config
-    config_module.save_agent_config = lambda agent_id, value: saved.update({agent_id: value})
+    config_module.save_agent_config = lambda agent_id, value: saved.update(
+        {agent_id: value}
+    )
 
     monkeypatch.setitem(sys.modules, "qwenpaw", types.ModuleType("qwenpaw"))
-    monkeypatch.setitem(sys.modules, "qwenpaw.config", types.ModuleType("qwenpaw.config"))
+    monkeypatch.setitem(
+        sys.modules, "qwenpaw.config", types.ModuleType("qwenpaw.config")
+    )
     monkeypatch.setitem(sys.modules, "qwenpaw.config.config", config_module)
 
-    updater = RuntimeUpdater(config=config, package_manager=_NoopPackageManager())
+    updater = _runtime_updater(config=config, package_manager=_NoopPackageManager())
     updater.apply_once(
         runtime_config=MemberRuntimeConfig(
             path=config.runtime_config_path,
@@ -1395,7 +1385,7 @@ def test_runtime_updater_configures_dingtalk_channel_in_agent_config(
     assert not (config.default_workspace_dir / "config.json").exists()
 
 
-def test_runtime_updater_uses_provided_stream_dingtalk_card_config(
+def _legacy_test_runtime_updater_uses_provided_stream_dingtalk_card_config(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
@@ -1420,14 +1410,18 @@ def test_runtime_updater_uses_provided_stream_dingtalk_card_config(
 
     config_module = types.ModuleType("qwenpaw.config.config")
     config_module.load_agent_config = lambda _agent_id: agent_config
-    config_module.save_agent_config = lambda agent_id, value: saved.update({agent_id: value})
+    config_module.save_agent_config = lambda agent_id, value: saved.update(
+        {agent_id: value}
+    )
 
     monkeypatch.setitem(sys.modules, "qwenpaw", types.ModuleType("qwenpaw"))
-    monkeypatch.setitem(sys.modules, "qwenpaw.config", types.ModuleType("qwenpaw.config"))
+    monkeypatch.setitem(
+        sys.modules, "qwenpaw.config", types.ModuleType("qwenpaw.config")
+    )
     monkeypatch.setitem(sys.modules, "qwenpaw.config.config", config_module)
 
     caplog.set_level(logging.WARNING)
-    updater = RuntimeUpdater(
+    updater = _runtime_updater(
         config=config,
         package_manager=_NoopPackageManager(),
     )
@@ -1489,13 +1483,17 @@ def test_runtime_updater_rejects_incomplete_dingtalk_streaming_config(
 
     config_module = types.ModuleType("qwenpaw.config.config")
     config_module.load_agent_config = lambda _agent_id: agent_config
-    config_module.save_agent_config = lambda agent_id, value: saved.update({agent_id: value})
+    config_module.save_agent_config = lambda agent_id, value: saved.update(
+        {agent_id: value}
+    )
 
     monkeypatch.setitem(sys.modules, "qwenpaw", types.ModuleType("qwenpaw"))
-    monkeypatch.setitem(sys.modules, "qwenpaw.config", types.ModuleType("qwenpaw.config"))
+    monkeypatch.setitem(
+        sys.modules, "qwenpaw.config", types.ModuleType("qwenpaw.config")
+    )
     monkeypatch.setitem(sys.modules, "qwenpaw.config.config", config_module)
 
-    updater = RuntimeUpdater(config=config, package_manager=_NoopPackageManager())
+    updater = _runtime_updater(config=config, package_manager=_NoopPackageManager())
     with pytest.raises(ValueError, match="DingTalk streaming requires"):
         updater.apply_once(
             runtime_config=MemberRuntimeConfig(
@@ -1521,7 +1519,7 @@ def test_runtime_updater_rejects_incomplete_dingtalk_streaming_config(
     assert dingtalk_config.enabled is False
 
 
-def test_runtime_updater_preserves_card_config_when_dingtalk_streaming_disabled(
+def _legacy_test_runtime_updater_preserves_card_config_when_dingtalk_streaming_disabled(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1545,13 +1543,17 @@ def test_runtime_updater_preserves_card_config_when_dingtalk_streaming_disabled(
 
     config_module = types.ModuleType("qwenpaw.config.config")
     config_module.load_agent_config = lambda _agent_id: agent_config
-    config_module.save_agent_config = lambda agent_id, value: saved.update({agent_id: value})
+    config_module.save_agent_config = lambda agent_id, value: saved.update(
+        {agent_id: value}
+    )
 
     monkeypatch.setitem(sys.modules, "qwenpaw", types.ModuleType("qwenpaw"))
-    monkeypatch.setitem(sys.modules, "qwenpaw.config", types.ModuleType("qwenpaw.config"))
+    monkeypatch.setitem(
+        sys.modules, "qwenpaw.config", types.ModuleType("qwenpaw.config")
+    )
     monkeypatch.setitem(sys.modules, "qwenpaw.config.config", config_module)
 
-    updater = RuntimeUpdater(config=config, package_manager=_NoopPackageManager())
+    updater = _runtime_updater(config=config, package_manager=_NoopPackageManager())
     updater.apply_once(
         runtime_config=MemberRuntimeConfig(
             path=config.runtime_config_path,
@@ -1581,25 +1583,31 @@ def test_runtime_updater_preserves_card_config_when_dingtalk_streaming_disabled(
     assert dingtalk.card_auto_layout is True
 
 
-def test_runtime_updater_disables_dingtalk_channel_from_runtime_config(
+def _legacy_test_runtime_updater_disables_dingtalk_channel_from_runtime_config(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config = _config(tmp_path)
     saved = {}
-    dingtalk_config = types.SimpleNamespace(enabled=True, client_secret="existing-secret")
+    dingtalk_config = types.SimpleNamespace(
+        enabled=True, client_secret="existing-secret"
+    )
     channel_config = types.SimpleNamespace(dingtalk=dingtalk_config)
     agent_config = types.SimpleNamespace(channels=channel_config)
 
     config_module = types.ModuleType("qwenpaw.config.config")
     config_module.load_agent_config = lambda _agent_id: agent_config
-    config_module.save_agent_config = lambda agent_id, value: saved.update({agent_id: value})
+    config_module.save_agent_config = lambda agent_id, value: saved.update(
+        {agent_id: value}
+    )
 
     monkeypatch.setitem(sys.modules, "qwenpaw", types.ModuleType("qwenpaw"))
-    monkeypatch.setitem(sys.modules, "qwenpaw.config", types.ModuleType("qwenpaw.config"))
+    monkeypatch.setitem(
+        sys.modules, "qwenpaw.config", types.ModuleType("qwenpaw.config")
+    )
     monkeypatch.setitem(sys.modules, "qwenpaw.config.config", config_module)
 
-    updater = RuntimeUpdater(config=config, package_manager=_NoopPackageManager())
+    updater = _runtime_updater(config=config, package_manager=_NoopPackageManager())
     updater.apply_once(
         runtime_config=MemberRuntimeConfig(
             path=config.runtime_config_path,
@@ -1622,19 +1630,25 @@ def test_runtime_updater_leaves_dingtalk_channel_when_runtime_omits_config(
 ) -> None:
     config = _config(tmp_path)
     saved = {}
-    dingtalk_config = types.SimpleNamespace(enabled=True, client_id="existing-client-id")
+    dingtalk_config = types.SimpleNamespace(
+        enabled=True, client_id="existing-client-id"
+    )
     channel_config = types.SimpleNamespace(dingtalk=dingtalk_config)
     agent_config = types.SimpleNamespace(channels=channel_config)
 
     config_module = types.ModuleType("qwenpaw.config.config")
     config_module.load_agent_config = lambda _agent_id: agent_config
-    config_module.save_agent_config = lambda agent_id, value: saved.update({agent_id: value})
+    config_module.save_agent_config = lambda agent_id, value: saved.update(
+        {agent_id: value}
+    )
 
     monkeypatch.setitem(sys.modules, "qwenpaw", types.ModuleType("qwenpaw"))
-    monkeypatch.setitem(sys.modules, "qwenpaw.config", types.ModuleType("qwenpaw.config"))
+    monkeypatch.setitem(
+        sys.modules, "qwenpaw.config", types.ModuleType("qwenpaw.config")
+    )
     monkeypatch.setitem(sys.modules, "qwenpaw.config.config", config_module)
 
-    updater = RuntimeUpdater(config=config, package_manager=_NoopPackageManager())
+    updater = _runtime_updater(config=config, package_manager=_NoopPackageManager())
     updater.apply_once(
         runtime_config=MemberRuntimeConfig(
             path=config.runtime_config_path,
@@ -1651,13 +1665,15 @@ def test_runtime_updater_leaves_dingtalk_channel_when_runtime_omits_config(
     assert dingtalk_config.client_id == "existing-client-id"
 
 
-def test_runtime_updater_applies_copaw_style_matrix_channel_policy(
+def _legacy_test_runtime_updater_applies_copaw_style_matrix_channel_policy(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config = _config(tmp_path)
     saved = {}
-    matrix_config = types.SimpleNamespace(access_control_dm=False, access_control_group=False)
+    matrix_config = types.SimpleNamespace(
+        access_control_dm=False, access_control_group=False
+    )
     channel_config = types.SimpleNamespace(matrix=matrix_config)
     agent_config = types.SimpleNamespace(channels=channel_config)
     whitelist_calls: list[tuple[str, list[str]]] = []
@@ -1667,7 +1683,9 @@ def test_runtime_updater_applies_copaw_style_matrix_channel_policy(
 
     config_module = types.ModuleType("qwenpaw.config.config")
     config_module.load_agent_config = lambda _agent_id: agent_config
-    config_module.save_agent_config = lambda agent_id, value: saved.update({agent_id: value})
+    config_module.save_agent_config = lambda agent_id, value: saved.update(
+        {agent_id: value}
+    )
 
     class Store:
         def set_whitelist(self, channel, values):
@@ -1680,13 +1698,19 @@ def test_runtime_updater_applies_copaw_style_matrix_channel_policy(
     access_module.get_access_control_store = lambda workspace_dir: Store()
 
     monkeypatch.setitem(sys.modules, "qwenpaw", types.ModuleType("qwenpaw"))
-    monkeypatch.setitem(sys.modules, "qwenpaw.config", types.ModuleType("qwenpaw.config"))
+    monkeypatch.setitem(
+        sys.modules, "qwenpaw.config", types.ModuleType("qwenpaw.config")
+    )
     monkeypatch.setitem(sys.modules, "qwenpaw.config.config", config_module)
     monkeypatch.setitem(sys.modules, "qwenpaw.app", types.ModuleType("qwenpaw.app"))
-    monkeypatch.setitem(sys.modules, "qwenpaw.app.channels", types.ModuleType("qwenpaw.app.channels"))
-    monkeypatch.setitem(sys.modules, "qwenpaw.app.channels.access_control", access_module)
+    monkeypatch.setitem(
+        sys.modules, "qwenpaw.app.channels", types.ModuleType("qwenpaw.app.channels")
+    )
+    monkeypatch.setitem(
+        sys.modules, "qwenpaw.app.channels.access_control", access_module
+    )
 
-    updater = RuntimeUpdater(config=config, package_manager=_NoopPackageManager())
+    updater = _runtime_updater(config=config, package_manager=_NoopPackageManager())
     updater.apply_once(
         runtime_config=MemberRuntimeConfig(
             path=config.runtime_config_path,
@@ -1740,16 +1764,20 @@ def test_runtime_updater_applies_copaw_style_matrix_channel_policy(
             ],
         )
     ]
-    assert blacklist_calls == [("matrix", ["@blocked-worker:matrix.local", "@blocked:matrix.local"])]
+    assert blacklist_calls == [
+        ("matrix", ["@blocked-worker:matrix.local", "@blocked:matrix.local"])
+    ]
 
 
-def test_runtime_updater_self_matrix_id_still_respects_deny_policy(
+def _legacy_test_runtime_updater_self_matrix_id_still_respects_deny_policy(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config = _config(tmp_path)
     saved = {}
-    matrix_config = types.SimpleNamespace(access_control_dm=False, access_control_group=False)
+    matrix_config = types.SimpleNamespace(
+        access_control_dm=False, access_control_group=False
+    )
     channel_config = types.SimpleNamespace(matrix=matrix_config)
     agent_config = types.SimpleNamespace(channels=channel_config)
     whitelist_calls: list[tuple[str, list[str]]] = []
@@ -1759,7 +1787,9 @@ def test_runtime_updater_self_matrix_id_still_respects_deny_policy(
 
     config_module = types.ModuleType("qwenpaw.config.config")
     config_module.load_agent_config = lambda _agent_id: agent_config
-    config_module.save_agent_config = lambda agent_id, value: saved.update({agent_id: value})
+    config_module.save_agent_config = lambda agent_id, value: saved.update(
+        {agent_id: value}
+    )
 
     class Store:
         def set_whitelist(self, channel, values):
@@ -1772,13 +1802,19 @@ def test_runtime_updater_self_matrix_id_still_respects_deny_policy(
     access_module.get_access_control_store = lambda workspace_dir: Store()
 
     monkeypatch.setitem(sys.modules, "qwenpaw", types.ModuleType("qwenpaw"))
-    monkeypatch.setitem(sys.modules, "qwenpaw.config", types.ModuleType("qwenpaw.config"))
+    monkeypatch.setitem(
+        sys.modules, "qwenpaw.config", types.ModuleType("qwenpaw.config")
+    )
     monkeypatch.setitem(sys.modules, "qwenpaw.config.config", config_module)
     monkeypatch.setitem(sys.modules, "qwenpaw.app", types.ModuleType("qwenpaw.app"))
-    monkeypatch.setitem(sys.modules, "qwenpaw.app.channels", types.ModuleType("qwenpaw.app.channels"))
-    monkeypatch.setitem(sys.modules, "qwenpaw.app.channels.access_control", access_module)
+    monkeypatch.setitem(
+        sys.modules, "qwenpaw.app.channels", types.ModuleType("qwenpaw.app.channels")
+    )
+    monkeypatch.setitem(
+        sys.modules, "qwenpaw.app.channels.access_control", access_module
+    )
 
-    updater = RuntimeUpdater(config=config, package_manager=_NoopPackageManager())
+    updater = _runtime_updater(config=config, package_manager=_NoopPackageManager())
     updater.apply_once(
         runtime_config=MemberRuntimeConfig(
             path=config.runtime_config_path,
@@ -1818,13 +1854,15 @@ def test_runtime_updater_self_matrix_id_still_respects_deny_policy(
     assert blacklist_calls == [("matrix", ["@leader-a:matrix.local"])]
 
 
-def test_runtime_updater_applies_team_roster_matrix_defaults_for_team_worker(
+def _legacy_test_runtime_updater_applies_team_roster_matrix_defaults_for_team_worker(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config = _config(tmp_path)
     saved = {}
-    matrix_config = types.SimpleNamespace(access_control_dm=False, access_control_group=False)
+    matrix_config = types.SimpleNamespace(
+        access_control_dm=False, access_control_group=False
+    )
     channel_config = types.SimpleNamespace(matrix=matrix_config)
     agent_config = types.SimpleNamespace(channels=channel_config)
     whitelist_calls: list[tuple[str, list[str]]] = []
@@ -1834,7 +1872,9 @@ def test_runtime_updater_applies_team_roster_matrix_defaults_for_team_worker(
 
     config_module = types.ModuleType("qwenpaw.config.config")
     config_module.load_agent_config = lambda _agent_id: agent_config
-    config_module.save_agent_config = lambda agent_id, value: saved.update({agent_id: value})
+    config_module.save_agent_config = lambda agent_id, value: saved.update(
+        {agent_id: value}
+    )
 
     class Store:
         def set_whitelist(self, channel, values):
@@ -1847,13 +1887,19 @@ def test_runtime_updater_applies_team_roster_matrix_defaults_for_team_worker(
     access_module.get_access_control_store = lambda workspace_dir: Store()
 
     monkeypatch.setitem(sys.modules, "qwenpaw", types.ModuleType("qwenpaw"))
-    monkeypatch.setitem(sys.modules, "qwenpaw.config", types.ModuleType("qwenpaw.config"))
+    monkeypatch.setitem(
+        sys.modules, "qwenpaw.config", types.ModuleType("qwenpaw.config")
+    )
     monkeypatch.setitem(sys.modules, "qwenpaw.config.config", config_module)
     monkeypatch.setitem(sys.modules, "qwenpaw.app", types.ModuleType("qwenpaw.app"))
-    monkeypatch.setitem(sys.modules, "qwenpaw.app.channels", types.ModuleType("qwenpaw.app.channels"))
-    monkeypatch.setitem(sys.modules, "qwenpaw.app.channels.access_control", access_module)
+    monkeypatch.setitem(
+        sys.modules, "qwenpaw.app.channels", types.ModuleType("qwenpaw.app.channels")
+    )
+    monkeypatch.setitem(
+        sys.modules, "qwenpaw.app.channels.access_control", access_module
+    )
 
-    updater = RuntimeUpdater(config=config, package_manager=_NoopPackageManager())
+    updater = _runtime_updater(config=config, package_manager=_NoopPackageManager())
     updater.apply_once(
         runtime_config=MemberRuntimeConfig(
             path=config.runtime_config_path,
@@ -1892,12 +1938,21 @@ def test_runtime_updater_applies_team_roster_matrix_defaults_for_team_worker(
     assert saved["default"].channels.matrix.access_control_group is True
     assert saved["default"].channels.matrix.access_control_dm is True
     assert whitelist_calls == [
-        ("matrix", ["@worker-a:matrix.local", "@leader-a:matrix.local", "@admin:matrix.local", "@worker-b:matrix.local"])
+        (
+            "matrix",
+            [
+                "@worker-a:matrix.local",
+                "@manager:matrix.local",
+                "@leader-a:matrix.local",
+                "@admin:matrix.local",
+                "@worker-b:matrix.local",
+            ],
+        )
     ]
     assert blacklist_calls == [("matrix", [])]
 
 
-def test_runtime_updater_system_admin_in_allowlist_when_team_admin_differs(
+def _legacy_test_runtime_updater_system_admin_in_allowlist_when_team_admin_differs(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1905,7 +1960,9 @@ def test_runtime_updater_system_admin_in_allowlist_when_team_admin_differs(
     team.admin.matrixUserId is a *different* user than AGENTTEAMS_ADMIN_USER."""
     config = _config(tmp_path)
     saved = {}
-    matrix_config = types.SimpleNamespace(access_control_dm=False, access_control_group=False)
+    matrix_config = types.SimpleNamespace(
+        access_control_dm=False, access_control_group=False
+    )
     channel_config = types.SimpleNamespace(matrix=matrix_config)
     agent_config = types.SimpleNamespace(channels=channel_config)
     whitelist_calls: list[tuple[str, list[str]]] = []
@@ -1916,7 +1973,9 @@ def test_runtime_updater_system_admin_in_allowlist_when_team_admin_differs(
 
     config_module = types.ModuleType("qwenpaw.config.config")
     config_module.load_agent_config = lambda _agent_id: agent_config
-    config_module.save_agent_config = lambda agent_id, value: saved.update({agent_id: value})
+    config_module.save_agent_config = lambda agent_id, value: saved.update(
+        {agent_id: value}
+    )
 
     class Store:
         def set_whitelist(self, channel, values):
@@ -1929,13 +1988,19 @@ def test_runtime_updater_system_admin_in_allowlist_when_team_admin_differs(
     access_module.get_access_control_store = lambda workspace_dir: Store()
 
     monkeypatch.setitem(sys.modules, "qwenpaw", types.ModuleType("qwenpaw"))
-    monkeypatch.setitem(sys.modules, "qwenpaw.config", types.ModuleType("qwenpaw.config"))
+    monkeypatch.setitem(
+        sys.modules, "qwenpaw.config", types.ModuleType("qwenpaw.config")
+    )
     monkeypatch.setitem(sys.modules, "qwenpaw.config.config", config_module)
     monkeypatch.setitem(sys.modules, "qwenpaw.app", types.ModuleType("qwenpaw.app"))
-    monkeypatch.setitem(sys.modules, "qwenpaw.app.channels", types.ModuleType("qwenpaw.app.channels"))
-    monkeypatch.setitem(sys.modules, "qwenpaw.app.channels.access_control", access_module)
+    monkeypatch.setitem(
+        sys.modules, "qwenpaw.app.channels", types.ModuleType("qwenpaw.app.channels")
+    )
+    monkeypatch.setitem(
+        sys.modules, "qwenpaw.app.channels.access_control", access_module
+    )
 
-    updater = RuntimeUpdater(config=config, package_manager=_NoopPackageManager())
+    updater = _runtime_updater(config=config, package_manager=_NoopPackageManager())
     updater.apply_once(
         runtime_config=MemberRuntimeConfig(
             path=config.runtime_config_path,
@@ -1977,13 +2042,15 @@ def test_runtime_updater_system_admin_in_allowlist_when_team_admin_differs(
     assert "@worker-a:matrix.local" in wl, "current member must be in whitelist"
 
 
-def test_runtime_updater_applies_copaw_style_matrix_defaults_for_team_worker(
+def _legacy_test_runtime_updater_applies_copaw_style_matrix_defaults_for_team_worker(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config = _config(tmp_path)
     saved = {}
-    matrix_config = types.SimpleNamespace(access_control_dm=False, access_control_group=False)
+    matrix_config = types.SimpleNamespace(
+        access_control_dm=False, access_control_group=False
+    )
     channel_config = types.SimpleNamespace(matrix=matrix_config)
     agent_config = types.SimpleNamespace(channels=channel_config)
     whitelist_calls: list[tuple[str, list[str]]] = []
@@ -1993,7 +2060,9 @@ def test_runtime_updater_applies_copaw_style_matrix_defaults_for_team_worker(
 
     config_module = types.ModuleType("qwenpaw.config.config")
     config_module.load_agent_config = lambda _agent_id: agent_config
-    config_module.save_agent_config = lambda agent_id, value: saved.update({agent_id: value})
+    config_module.save_agent_config = lambda agent_id, value: saved.update(
+        {agent_id: value}
+    )
 
     class Store:
         def set_whitelist(self, channel, values):
@@ -2006,13 +2075,19 @@ def test_runtime_updater_applies_copaw_style_matrix_defaults_for_team_worker(
     access_module.get_access_control_store = lambda workspace_dir: Store()
 
     monkeypatch.setitem(sys.modules, "qwenpaw", types.ModuleType("qwenpaw"))
-    monkeypatch.setitem(sys.modules, "qwenpaw.config", types.ModuleType("qwenpaw.config"))
+    monkeypatch.setitem(
+        sys.modules, "qwenpaw.config", types.ModuleType("qwenpaw.config")
+    )
     monkeypatch.setitem(sys.modules, "qwenpaw.config.config", config_module)
     monkeypatch.setitem(sys.modules, "qwenpaw.app", types.ModuleType("qwenpaw.app"))
-    monkeypatch.setitem(sys.modules, "qwenpaw.app.channels", types.ModuleType("qwenpaw.app.channels"))
-    monkeypatch.setitem(sys.modules, "qwenpaw.app.channels.access_control", access_module)
+    monkeypatch.setitem(
+        sys.modules, "qwenpaw.app.channels", types.ModuleType("qwenpaw.app.channels")
+    )
+    monkeypatch.setitem(
+        sys.modules, "qwenpaw.app.channels.access_control", access_module
+    )
 
-    updater = RuntimeUpdater(config=config, package_manager=_NoopPackageManager())
+    updater = _runtime_updater(config=config, package_manager=_NoopPackageManager())
     updater.apply_once(
         runtime_config=MemberRuntimeConfig(
             path=config.runtime_config_path,
@@ -2026,17 +2101,24 @@ def test_runtime_updater_applies_copaw_style_matrix_defaults_for_team_worker(
 
     assert saved["default"].channels.matrix.access_control_group is True
     assert saved["default"].channels.matrix.access_control_dm is True
-    assert whitelist_calls == [("matrix", ["@leader-a:matrix.local", "@admin:matrix.local"])]
+    assert whitelist_calls == [
+        (
+            "matrix",
+            ["@manager:matrix.local", "@leader-a:matrix.local", "@admin:matrix.local"],
+        )
+    ]
     assert blacklist_calls == [("matrix", [])]
 
 
-def test_runtime_updater_applies_copaw_style_matrix_defaults_for_standalone_worker(
+def _legacy_test_runtime_updater_applies_copaw_style_matrix_defaults_for_standalone_worker(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config = _config(tmp_path)
     saved = {}
-    matrix_config = types.SimpleNamespace(access_control_dm=False, access_control_group=False)
+    matrix_config = types.SimpleNamespace(
+        access_control_dm=False, access_control_group=False
+    )
     channel_config = types.SimpleNamespace(matrix=matrix_config)
     agent_config = types.SimpleNamespace(channels=channel_config)
     whitelist_calls: list[tuple[str, list[str]]] = []
@@ -2046,7 +2128,9 @@ def test_runtime_updater_applies_copaw_style_matrix_defaults_for_standalone_work
 
     config_module = types.ModuleType("qwenpaw.config.config")
     config_module.load_agent_config = lambda _agent_id: agent_config
-    config_module.save_agent_config = lambda agent_id, value: saved.update({agent_id: value})
+    config_module.save_agent_config = lambda agent_id, value: saved.update(
+        {agent_id: value}
+    )
 
     class Store:
         def set_whitelist(self, channel, values):
@@ -2059,13 +2143,19 @@ def test_runtime_updater_applies_copaw_style_matrix_defaults_for_standalone_work
     access_module.get_access_control_store = lambda workspace_dir: Store()
 
     monkeypatch.setitem(sys.modules, "qwenpaw", types.ModuleType("qwenpaw"))
-    monkeypatch.setitem(sys.modules, "qwenpaw.config", types.ModuleType("qwenpaw.config"))
+    monkeypatch.setitem(
+        sys.modules, "qwenpaw.config", types.ModuleType("qwenpaw.config")
+    )
     monkeypatch.setitem(sys.modules, "qwenpaw.config.config", config_module)
     monkeypatch.setitem(sys.modules, "qwenpaw.app", types.ModuleType("qwenpaw.app"))
-    monkeypatch.setitem(sys.modules, "qwenpaw.app.channels", types.ModuleType("qwenpaw.app.channels"))
-    monkeypatch.setitem(sys.modules, "qwenpaw.app.channels.access_control", access_module)
+    monkeypatch.setitem(
+        sys.modules, "qwenpaw.app.channels", types.ModuleType("qwenpaw.app.channels")
+    )
+    monkeypatch.setitem(
+        sys.modules, "qwenpaw.app.channels.access_control", access_module
+    )
 
-    updater = RuntimeUpdater(config=config, package_manager=_NoopPackageManager())
+    updater = _runtime_updater(config=config, package_manager=_NoopPackageManager())
     updater.apply_once(
         runtime_config=MemberRuntimeConfig(
             path=config.runtime_config_path,
@@ -2078,7 +2168,9 @@ def test_runtime_updater_applies_copaw_style_matrix_defaults_for_standalone_work
 
     assert saved["default"].channels.matrix.access_control_group is True
     assert saved["default"].channels.matrix.access_control_dm is True
-    assert whitelist_calls == [("matrix", ["@manager:matrix.local", "@admin:matrix.local"])]
+    assert whitelist_calls == [
+        ("matrix", ["@manager:matrix.local", "@admin:matrix.local"])
+    ]
     assert blacklist_calls == [("matrix", [])]
 
 
@@ -2088,7 +2180,9 @@ def test_runtime_updater_skips_short_name_matrix_policy_without_matrix_domain(
 ) -> None:
     config = _config(tmp_path)
     saved = {}
-    matrix_config = types.SimpleNamespace(access_control_dm=False, access_control_group=False)
+    matrix_config = types.SimpleNamespace(
+        access_control_dm=False, access_control_group=False
+    )
     channel_config = types.SimpleNamespace(matrix=matrix_config)
     agent_config = types.SimpleNamespace(channels=channel_config)
     whitelist_calls: list[tuple[str, list[str]]] = []
@@ -2098,7 +2192,9 @@ def test_runtime_updater_skips_short_name_matrix_policy_without_matrix_domain(
 
     config_module = types.ModuleType("qwenpaw.config.config")
     config_module.load_agent_config = lambda _agent_id: agent_config
-    config_module.save_agent_config = lambda agent_id, value: saved.update({agent_id: value})
+    config_module.save_agent_config = lambda agent_id, value: saved.update(
+        {agent_id: value}
+    )
 
     class Store:
         def set_whitelist(self, channel, values):
@@ -2111,13 +2207,19 @@ def test_runtime_updater_skips_short_name_matrix_policy_without_matrix_domain(
     access_module.get_access_control_store = lambda workspace_dir: Store()
 
     monkeypatch.setitem(sys.modules, "qwenpaw", types.ModuleType("qwenpaw"))
-    monkeypatch.setitem(sys.modules, "qwenpaw.config", types.ModuleType("qwenpaw.config"))
+    monkeypatch.setitem(
+        sys.modules, "qwenpaw.config", types.ModuleType("qwenpaw.config")
+    )
     monkeypatch.setitem(sys.modules, "qwenpaw.config.config", config_module)
     monkeypatch.setitem(sys.modules, "qwenpaw.app", types.ModuleType("qwenpaw.app"))
-    monkeypatch.setitem(sys.modules, "qwenpaw.app.channels", types.ModuleType("qwenpaw.app.channels"))
-    monkeypatch.setitem(sys.modules, "qwenpaw.app.channels.access_control", access_module)
+    monkeypatch.setitem(
+        sys.modules, "qwenpaw.app.channels", types.ModuleType("qwenpaw.app.channels")
+    )
+    monkeypatch.setitem(
+        sys.modules, "qwenpaw.app.channels.access_control", access_module
+    )
 
-    updater = RuntimeUpdater(config=config, package_manager=_NoopPackageManager())
+    updater = _runtime_updater(config=config, package_manager=_NoopPackageManager())
     updater.apply_once(
         runtime_config=MemberRuntimeConfig(
             path=config.runtime_config_path,
@@ -2146,11 +2248,13 @@ async def test_runtime_update_loop_survives_bad_config_and_applies_next_change(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     config = _config(tmp_path)
-    updater = RuntimeUpdater(config=config)
+    updater = _runtime_updater(config=config)
     caplog.set_level(logging.INFO, logger="qwenpaw_worker.update")
     loads = [
         RuntimeError("runtime config parse failed secret-token-value"),
-        MemberRuntimeConfig(path=config.runtime_config_path, raw={"metadata": {"generation": "2"}}),
+        MemberRuntimeConfig(
+            path=config.runtime_config_path, raw={"metadata": {"generation": "2"}}
+        ),
     ]
     applied: list[str] = []
     sleeps = 0
@@ -2174,7 +2278,9 @@ async def test_runtime_update_loop_survives_bad_config_and_applies_next_change(
 
     monkeypatch.setattr("qwenpaw_worker.update.asyncio.sleep", sleep_tick)
     monkeypatch.setattr("qwenpaw_worker.update.MemberRuntimeConfig.load", fake_load)
-    monkeypatch.setattr("qwenpaw_worker.update.RuntimeUpdater.apply_once", fake_apply_once)
+    monkeypatch.setattr(
+        "qwenpaw_worker.update.RuntimeUpdater.apply_once", fake_apply_once
+    )
 
     with pytest.raises(asyncio.CancelledError):
         await updater.loop()
@@ -2193,7 +2299,7 @@ async def test_runtime_update_loop_offloads_load_and_apply_to_thread(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config = _config(tmp_path)
-    updater = RuntimeUpdater(config=config)
+    updater = _runtime_updater(config=config)
     applied: list[str] = []
     to_thread_calls: list[str] = []
     sleeps = 0
@@ -2209,7 +2315,9 @@ async def test_runtime_update_loop_offloads_load_and_apply_to_thread(
         return func(*args, **kwargs)
 
     def fake_load(_path):
-        return MemberRuntimeConfig(path=config.runtime_config_path, raw={"metadata": {"generation": "3"}})
+        return MemberRuntimeConfig(
+            path=config.runtime_config_path, raw={"metadata": {"generation": "3"}}
+        )
 
     def fake_apply_once(self, runtime_config=None, force=False, reapply_adapter=True):
         assert runtime_config is not None
@@ -2219,7 +2327,9 @@ async def test_runtime_update_loop_offloads_load_and_apply_to_thread(
     monkeypatch.setattr("qwenpaw_worker.update.asyncio.sleep", sleep_tick)
     monkeypatch.setattr("qwenpaw_worker.update.asyncio.to_thread", fake_to_thread)
     monkeypatch.setattr("qwenpaw_worker.update.MemberRuntimeConfig.load", fake_load)
-    monkeypatch.setattr("qwenpaw_worker.update.RuntimeUpdater.apply_once", fake_apply_once)
+    monkeypatch.setattr(
+        "qwenpaw_worker.update.RuntimeUpdater.apply_once", fake_apply_once
+    )
 
     with pytest.raises(asyncio.CancelledError):
         await updater.loop()
@@ -2245,7 +2355,7 @@ member:
             encoding="utf-8",
         )
 
-    updater = RuntimeUpdater(config=config, runtime_config_pull=pull_runtime_config)
+    updater = _runtime_updater(config=config, runtime_config_pull=pull_runtime_config)
 
     loaded = updater.load()
 

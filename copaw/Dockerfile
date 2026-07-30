@@ -39,7 +39,8 @@ RUN if [ -n "${APT_MIRROR}" ]; then \
         sed -i "s|deb.debian.org|${APT_MIRROR}|g" \
             /etc/apt/sources.list.d/debian.sources 2>/dev/null || true; \
     fi && \
-    apt-get update && apt-get install -y --no-install-recommends \
+    apt-get -o Acquire::Retries=3 update && \
+    apt-get -o Acquire::Retries=3 install -y --no-install-recommends \
         libolm-dev \
         libjemalloc2 \
         curl \
@@ -110,6 +111,10 @@ RUN python -m venv /opt/venv/lite \
     && /opt/venv/lite/bin/pip install --no-cache-dir \
         --index-url "${PIP_INDEX_URL}" \
         --trusted-host "$(echo ${PIP_INDEX_URL} | sed 's|https\?://||;s|/.*||')" \
+        "matrix-nio[e2e]>=0.24.0" \
+        "markdown-it-py>=3.0" \
+        "linkify-it-py>=2.0" \
+    && /opt/venv/lite/bin/pip install --no-cache-dir --no-deps \
         /tmp/copaw-worker/
 
 # ---------------------------------------------------------------------------
@@ -129,26 +134,34 @@ RUN SITE=/opt/venv/lite/lib/python3.11/site-packages \
     && /opt/venv/lite/bin/python /tmp/patch_reme_lazy.py "$SITE/reme" \
     && /opt/venv/lite/bin/python /tmp/patch_agentscope_lazy.py "$SITE/agentscope" \
     && /opt/venv/lite/bin/python /tmp/patch_agentscope_runtime_lazy.py "$SITE/agentscope_runtime" \
+    && /opt/venv/lite/bin/python -c \
+        "from reme.core.application import Application; from reme.core.registry_factory import R; assert 'openai' in R.embedding_models; assert 'local' in R.file_stores; assert 'full' in R.file_watchers" \
     && rm /tmp/patch_*_lazy.py
 
 # --- Overlay real copaw-worker source (high-frequency changes, ~128KB) ---
 # This layer is rebuilt on every src/ change but does NOT invalidate the
 # heavy venv layers above, saving ~2 GB of re-download on typical upgrades.
 COPY src/ /tmp/copaw-worker/src/
-RUN STANDARD_SITE=/opt/venv/standard/lib/python3.11/site-packages/copaw_worker \
-    && LITE_SITE=/opt/venv/lite/lib/python3.11/site-packages/copaw_worker \
-    && cp -a /tmp/copaw-worker/src/copaw_worker/* "$STANDARD_SITE/" \
-    && cp -a /tmp/copaw-worker/src/copaw_worker/* "$LITE_SITE/" \
+RUN STANDARD_SITE=/opt/venv/standard/lib/python3.11/site-packages \
+    && LITE_SITE=/opt/venv/lite/lib/python3.11/site-packages \
+    && cp -a /tmp/copaw-worker/src/copaw_worker/* "$STANDARD_SITE/copaw_worker/" \
+    && cp -a /tmp/copaw-worker/src/copaw_worker/* "$LITE_SITE/copaw_worker/" \
     && for SITE in /opt/venv/standard/lib/python3.11/site-packages /opt/venv/lite/lib/python3.11/site-packages; do \
          rm -rf "$SITE/copaw/app/channels/matrix"; \
          mkdir -p "$SITE/copaw/app/channels/matrix"; \
          cp /tmp/copaw-worker/src/matrix/channel.py /tmp/copaw-worker/src/matrix/__init__.py "$SITE/copaw/app/channels/matrix/"; \
-         if [ -f /tmp/copaw-worker/src/matrix/config.py ]; then \
-           cp /tmp/copaw-worker/src/matrix/config.py "$SITE/copaw/config/config.py"; \
-         fi; \
          find "$SITE/copaw/app/channels/matrix" -name '__pycache__' -type d -prune -exec rm -rf {} +; \
        done \
+    && if [ -f /tmp/copaw-worker/src/matrix/config.py ]; then \
+         cp /tmp/copaw-worker/src/matrix/config.py "$STANDARD_SITE/copaw/config/config.py"; \
+       fi \
     && rm -rf /tmp/copaw-worker/ /tmp/lite-copaw/
+
+# Catch package/API incompatibilities in both runtime modes during image build.
+RUN /opt/venv/standard/bin/python -c \
+        "from copaw_worker.hooks import install_tool_hooks; install_tool_hooks()" \
+    && /opt/venv/lite/bin/python -c \
+        "from copaw_worker.hooks import install_tool_hooks; install_tool_hooks()"
 
 # copaw-sync wrapper
 RUN printf '#!/bin/bash\nexec python3 "/root/.copaw-worker/${AGENTTEAMS_WORKER_NAME}/skills/file-sync/scripts/copaw-sync.py" "$@"\n' \

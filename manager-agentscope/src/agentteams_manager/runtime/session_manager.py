@@ -546,6 +546,18 @@ def _effective_policy(
 ) -> RoomPolicy:
     if elevated_mode == "ask":
         return policy.model_copy(
-            update={"confirm_tools": policy.allowed_tools},
+            update={
+                "confirm_tools": policy.allowed_tools,
+                "confirmation_mode": "ask",
+            },
         )
-    return policy
+    if elevated_mode == "full":
+        return policy.model_copy(
+            update={
+                "confirm_tools": frozenset(),
+                "confirmation_mode": "full",
+            },
+        )
+    return policy.model_copy(
+        update={"confirmation_mode": "off"},
+    )

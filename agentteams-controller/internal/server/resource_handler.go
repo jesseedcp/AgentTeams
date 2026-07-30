@@ -29,6 +29,8 @@ type ResourceHandler struct {
 	namespace string
 	backend   *backend.Registry
 
+	defaultWorkerRuntime string
+
 	// controllerName is stamped as agentteams.io/controller on every CR this
 	// handler creates, overwriting any value supplied by the client. This
 	// enforces that HTTP-created resources always belong to the serving
@@ -90,10 +92,7 @@ func (h *ResourceHandler) CreateWorker(w http.ResponseWriter, r *http.Request) {
 	if req.ContainerManaged != nil {
 		containerManaged = *req.ContainerManaged
 	}
-	runtime := req.Runtime
-	if runtime == "" {
-		runtime = backend.RuntimeOpenClaw
-	}
+	runtime := backend.ResolveRuntime(req.Runtime, h.defaultWorkerRuntime)
 	console, err := normalizedWorkerConsole(req.Console, runtime)
 	if err != nil {
 		httputil.WriteError(w, http.StatusBadRequest, err.Error())
@@ -942,6 +941,7 @@ func teamToResponse(t *v1beta1.Team) TeamResponse {
 		HumanMembers:   t.Spec.HumanMembers,
 		WorkerMembers:  t.Spec.WorkerMembers,
 		HeartbeatEvery: t.Spec.HeartbeatEvery,
+		PeerMentions:   t.Spec.PeerMentions,
 		TeamRoomID:     t.Status.TeamRoomID,
 		LeaderDMRoomID: t.Status.LeaderDMRoomID,
 		LeaderReady:    t.Status.LeaderReady,

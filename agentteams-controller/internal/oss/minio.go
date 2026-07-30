@@ -158,6 +158,9 @@ func (c *MinIOClient) DeleteObject(ctx context.Context, key string) error {
 		return err
 	}
 	_, err := c.runMC(ctx, "rm", c.fullPath(key))
+	if err != nil && strings.Contains(err.Error(), "Object does not exist") {
+		return nil
+	}
 	return err
 }
 

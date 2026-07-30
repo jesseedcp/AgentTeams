@@ -127,6 +127,14 @@ _controller_env_prefix() {
     fi
 }
 
+_controller_storage_prefix() {
+    if _use_legacy_image_env "${1:-}"; then
+        printf '%s%s' 'hic' 'law/agentteams-storage'
+    else
+        printf '%s' 'agentteams/agentteams-storage'
+    fi
+}
+
 AGENTTEAMS_NON_INTERACTIVE="${AGENTTEAMS_NON_INTERACTIVE:-0}"
 AGENTTEAMS_MOUNT_SOCKET="${AGENTTEAMS_MOUNT_SOCKET:-1}"
 STEP_RESULT=""  # Used by state machine to signal "back" navigation
@@ -1029,8 +1037,8 @@ AGENTTEAMS_HIGRESS_REGISTRY="${AGENTTEAMS_HIGRESS_REGISTRY:-$(detect_registry)}"
 MANAGER_IMAGE="${AGENTTEAMS_INSTALL_MANAGER_IMAGE:-}"
 WORKER_IMAGE="${AGENTTEAMS_INSTALL_WORKER_IMAGE:-}"
 COPAW_WORKER_IMAGE="${AGENTTEAMS_INSTALL_COPAW_WORKER_IMAGE:-}"
-HERMES_WORKER_IMAGE="${AGENTTEAMS_INSTALL_HERMES_WORKER_IMAGE:-}"
 QWENPAW_WORKER_IMAGE="${AGENTTEAMS_INSTALL_QWENPAW_WORKER_IMAGE:-}"
+HERMES_WORKER_IMAGE="${AGENTTEAMS_INSTALL_HERMES_WORKER_IMAGE:-}"
 
 resolve_image_tags() {
     AGENTTEAMS_VERSION="$(_normalize_version "${AGENTTEAMS_VERSION}")"
@@ -1041,6 +1049,14 @@ resolve_image_tags() {
     HERMES_WORKER_IMAGE="${AGENTTEAMS_INSTALL_HERMES_WORKER_IMAGE:-${_image_prefix}/agentteams-hermes-worker:${AGENTTEAMS_VERSION}}"
     QWENPAW_WORKER_IMAGE="${AGENTTEAMS_INSTALL_QWENPAW_WORKER_IMAGE:-${_image_prefix}/agentteams-qwenpaw-worker:${AGENTTEAMS_VERSION}}"
     EMBEDDED_IMAGE="${AGENTTEAMS_INSTALL_EMBEDDED_IMAGE:-${_image_prefix}/agentteams-embedded:${AGENTTEAMS_VERSION}}"
+    # These optional runtimes were introduced after the first AgentTeams tags.
+    # Explicit image overrides always win for private backports.
+    if [ -z "${AGENTTEAMS_INSTALL_COPAW_WORKER_IMAGE:-}" ] && _ver_lt "${AGENTTEAMS_VERSION}" "v1.0.4"; then
+        COPAW_WORKER_IMAGE=""
+    fi
+    if [ -z "${AGENTTEAMS_INSTALL_HERMES_WORKER_IMAGE:-}" ] && _ver_lt "${AGENTTEAMS_VERSION}" "v1.1.0"; then
+        HERMES_WORKER_IMAGE=""
+    fi
 }
 
 # Resolve the infrastructure Controller image. The Manager is always a separate
@@ -2874,8 +2890,8 @@ AGENTTEAMS_CMS_METRICS_ENABLED=${AGENTTEAMS_CMS_METRICS_ENABLED:-false}
 # Worker images (for direct container creation)
 AGENTTEAMS_WORKER_IMAGE=${WORKER_IMAGE}
 AGENTTEAMS_COPAW_WORKER_IMAGE=${COPAW_WORKER_IMAGE}
-AGENTTEAMS_HERMES_WORKER_IMAGE=${HERMES_WORKER_IMAGE}
 AGENTTEAMS_QWENPAW_WORKER_IMAGE=${QWENPAW_WORKER_IMAGE}
+AGENTTEAMS_HERMES_WORKER_IMAGE=${HERMES_WORKER_IMAGE}
 
 # Default Worker runtime (openclaw | copaw | hermes | qwenpaw)
 AGENTTEAMS_DEFAULT_WORKER_RUNTIME=${AGENTTEAMS_DEFAULT_WORKER_RUNTIME:-copaw}
@@ -2993,8 +3009,8 @@ EOF
     # Pull all worker runtime images (workers may use any runtime regardless of the default)
     _pull_image "${WORKER_IMAGE}" "install.image.worker_exists" "install.image.pulling_worker"
     _pull_image "${COPAW_WORKER_IMAGE}" "install.image.worker_exists" "install.image.pulling_worker"
-    _pull_image "${HERMES_WORKER_IMAGE}" "install.image.worker_exists" "install.image.pulling_worker"
     _pull_image "${QWENPAW_WORKER_IMAGE}" "install.image.worker_exists" "install.image.pulling_worker"
+    _pull_image "${HERMES_WORKER_IMAGE}" "install.image.worker_exists" "install.image.pulling_worker"
 
     # --- Stop and remove existing containers ---
     if ${DOCKER_CMD} ps -a --format '{{.Names}}' | grep -q "^agentteams-controller$"; then
@@ -3046,6 +3062,8 @@ EOF
         # Controller env args
         local _ctrl_env_prefix
         _ctrl_env_prefix="$(_controller_env_prefix "${AGENTTEAMS_VERSION}")"
+        local _storage_prefix
+        _storage_prefix="$(_controller_storage_prefix "${AGENTTEAMS_VERSION}")"
         local _ctrl_env_args=(
             -e "${_ctrl_env_prefix}ADMIN_USER=${AGENTTEAMS_ADMIN_USER}"
             -e "${_ctrl_env_prefix}ADMIN_PASSWORD=${AGENTTEAMS_ADMIN_PASSWORD}"
@@ -3062,8 +3080,8 @@ EOF
             -e "${_ctrl_env_prefix}DEFAULT_WORKER_RUNTIME=${AGENTTEAMS_DEFAULT_WORKER_RUNTIME:-copaw}"
             -e "${_ctrl_env_prefix}WORKER_IMAGE=${WORKER_IMAGE}"
             -e "${_ctrl_env_prefix}COPAW_WORKER_IMAGE=${COPAW_WORKER_IMAGE}"
-            -e "${_ctrl_env_prefix}HERMES_WORKER_IMAGE=${HERMES_WORKER_IMAGE}"
             -e "${_ctrl_env_prefix}QWENPAW_WORKER_IMAGE=${QWENPAW_WORKER_IMAGE}"
+            -e "${_ctrl_env_prefix}HERMES_WORKER_IMAGE=${HERMES_WORKER_IMAGE}"
             -e "${_ctrl_env_prefix}MATRIX_DOMAIN=${_matrix_domain}"
             -e "${_ctrl_env_prefix}CINNY_HOMESERVER_URL=http://127.0.0.1:${AGENTTEAMS_PORT_GATEWAY}"
             -e "${_ctrl_env_prefix}CINNY_PUBLIC_URL=http://127.0.0.1:${AGENTTEAMS_PORT_CINNY}"
@@ -3073,7 +3091,7 @@ EOF
             -e "${_ctrl_env_prefix}MATRIX_E2EE=${AGENTTEAMS_MATRIX_E2EE:-0}"
             -e "${_ctrl_env_prefix}MINIO_ENDPOINT=http://127.0.0.1:9000"
             -e "${_ctrl_env_prefix}MINIO_BUCKET=agentteams-storage"
-            -e "${_ctrl_env_prefix}STORAGE_PREFIX=agentteams/agentteams-storage"
+            -e "${_ctrl_env_prefix}STORAGE_PREFIX=${_storage_prefix}"
             -e "${_ctrl_env_prefix}FS_ENDPOINT=http://127.0.0.1:9000"
             -e "${_ctrl_env_prefix}AI_GATEWAY_URL=http://${_aigw_domain}"
             -e "${_ctrl_env_prefix}CONTROLLER_URL=http://agentteams-controller:8090"

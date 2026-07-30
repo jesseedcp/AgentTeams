@@ -21,7 +21,9 @@ live task; the old assignee loses completion authority immediately.
 
 Use `revise_project_plan` for a minor change: reordering work within a phase,
 slightly refining scope, or adding explanatory subtasks. It versions and
-exports the plan without a human gate.
+exports the plan without a second tool-level gate. If the project is still
+`planning`, every revision still needs the administrator's final plan
+confirmation before execution starts.
 
 Changing the project goal, overall deliverables, phase structure, more than
 two assignments, participants, or forced closure is a material decision. Use

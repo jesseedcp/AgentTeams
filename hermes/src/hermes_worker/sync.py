@@ -590,6 +590,7 @@ def push_local(sync: FileSync, since: float = 0) -> list[str]:
     }
 
     pushed: list[str] = []
+    failures: list[tuple[str, Exception]] = []
     local_dir = sync.local_dir
     if not local_dir.exists():
         return pushed
@@ -659,7 +660,14 @@ def push_local(sync: FileSync, since: float = 0) -> list[str]:
             logger.debug("Pushed %s -> %s", rel, dest)
         except Exception as exc:
             logger.debug("push_local: failed for %s: %s", rel, exc)
+            failures.append((rel.as_posix(), exc))
 
+    if failures:
+        failed_path, failure = failures[0]
+        raise RuntimeError(
+            f"failed to push {len(failures)} local file(s); "
+            f"first={failed_path} ({type(failure).__name__})"
+        ) from failure
     return pushed
 
 

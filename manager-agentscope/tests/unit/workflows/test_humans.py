@@ -218,6 +218,29 @@ async def test_list_and_delete_human_use_controller_facts() -> None:
 
 
 @pytest.mark.asyncio
+async def test_delete_human_waits_for_controller_absence_to_converge() -> None:
+    controller = Controller()
+    current = human()
+    controller.humans["reviewer"] = current
+    controller.sequences["reviewer"] = [
+        current,
+        current,
+        current,
+        current,
+        None,
+    ]
+    workflow, topology = service(controller)
+
+    await workflow.delete_human(
+        "reviewer",
+        context=context("delete-reviewer-delayed"),
+    )
+
+    assert controller.deleted == ["reviewer"]
+    assert topology.refreshes == 1
+
+
+@pytest.mark.asyncio
 async def test_update_human_proves_new_scope_and_allows_explicit_clear() -> None:
     controller = Controller()
     controller.humans["reviewer"] = human()

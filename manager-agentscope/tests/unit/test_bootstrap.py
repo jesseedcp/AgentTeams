@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+import asyncio
 import inspect
 from datetime import UTC
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from pydantic import SecretStr
 
 from agentteams_manager.application import ManagerApplication
 from agentteams_manager.bootstrap import (
+    HeartbeatRuntime,
     MinioJournalStore,
     SystemClock,
     build_application,
@@ -77,6 +80,48 @@ def test_bootstrap_factory_is_async() -> None:
 
 def test_system_clock_returns_utc() -> None:
     assert SystemClock().now().tzinfo is UTC
+
+
+@pytest.mark.asyncio
+async def test_heartbeat_runtime_is_ready_before_first_sweep_finishes() -> None:
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    class BlockingHeartbeat:
+        async def run_once(self):
+            started.set()
+            await release.wait()
+            return SimpleNamespace(
+                reconciled=0,
+                task_reconciled=0,
+                integration_reconciled=0,
+                completions_reconciled=0,
+                notification_reconciled=0,
+                failed=0,
+                task_failed=0,
+                integration_failed=0,
+                completions_failed=0,
+                notification_failed=0,
+            )
+
+    class Metrics:
+        def increment(self, name: str, amount: int = 1) -> None:
+            del name, amount
+
+    runtime = HeartbeatRuntime(
+        heartbeat=BlockingHeartbeat(),
+        interval=lambda: 1,
+        metrics=Metrics(),
+        tracer=None,
+    )
+
+    await asyncio.wait_for(runtime.start(), timeout=0.1)
+    await asyncio.wait_for(started.wait(), timeout=0.1)
+    assert runtime.ready
+
+    release.set()
+    await runtime.stop()
+    assert runtime.ready is False
 
 
 @pytest.mark.asyncio

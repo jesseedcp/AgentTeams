@@ -263,6 +263,7 @@ class FileSyncService:
                 processor=processor,
             )
         task = await self._require_task(task_id)
+        prefix = _task_remote_prefix(task)
         request: dict[str, object] = {
             "action": "push_task",
             "task_id": task_id,
@@ -285,7 +286,7 @@ class FileSyncService:
             {
                 "operation": "upload_task_files",
                 "task_id": task_id,
-                "prefix": f"shared/tasks/{task_id}/",
+                "prefix": prefix,
             },
         )
         receipt = await self.push_task(
@@ -361,10 +362,10 @@ class FileSyncService:
         )
 
     async def pull_task(self, task_id: str) -> Path:
-        await self._require_task(task_id)
+        task = await self._require_task(task_id)
         destination = self._task_root(task_id)
         await self._storage.mirror_down(
-            f"shared/tasks/{task_id}/",
+            _task_remote_prefix(task),
             destination,
         )
         return destination
@@ -454,7 +455,8 @@ class FileSyncService:
         processor: str,
         lease: ProcessingLease | None = None,
     ) -> FileSyncReceipt:
-        await self._require_task(task_id)
+        task = await self._require_task(task_id)
+        prefix = _task_remote_prefix(task)
         root = self._task_root(task_id)
         if not root.is_dir():
             raise FileNotFoundError(root)
@@ -489,10 +491,7 @@ class FileSyncService:
                     raise ValueError(f"sync path is not a file: {path}")
                 data = absolute.read_bytes()
                 digest = hashlib.sha256(data).hexdigest()
-                key = (
-                    f"shared/tasks/{task_id}/"
-                    f"{relative.as_posix()}"
-                )
+                key = f"{prefix}{relative.as_posix()}"
                 current = await self._storage.head(key)
                 if (
                     current is None
@@ -530,7 +529,7 @@ class FileSyncService:
         ).encode("utf-8")
         return FileSyncReceipt(
             task_id=task_id,
-            prefix=f"shared/tasks/{task_id}/",
+            prefix=prefix,
             files=len(entries),
             bytes_transferred=transferred,
             manifest_sha256=hashlib.sha256(encoded).hexdigest(),
@@ -653,6 +652,21 @@ def _manager_owned(relative: Path) -> bool:
         "meta.json",
         "spec.md",
     }
+
+
+def _task_remote_prefix(task: TaskRecord) -> str:
+    team_name = str(
+        task.delegated_to_team
+        or task.metadata.get("storage_team_name")
+        or "",
+    ).strip()
+    if not team_name:
+        return f"shared/tasks/{task.task_id}/"
+    if re.fullmatch(r"[a-z0-9][a-z0-9-]*", team_name) is None:
+        raise RecoveryError(
+            f"task {task.task_id} has an invalid delegated Team name",
+        )
+    return f"teams/{team_name}/shared/tasks/{task.task_id}/"
 
 
 def _content_type(path: Path) -> str:

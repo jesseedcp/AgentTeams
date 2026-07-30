@@ -260,6 +260,39 @@ func TestGetResponseTypesPreserveSkillsAndMCPServers(t *testing.T) {
 	}
 }
 
+func TestGetTeamResponsePreservesControllerConfiguration(t *testing.T) {
+	data := []byte(`{
+		"name":"alpha",
+		"phase":"Active",
+		"leaderName":"alpha-lead",
+		"heartbeatEvery":"30m",
+		"peerMentions":false
+	}`)
+	var team teamResp
+	if err := json.Unmarshal(data, &team); err != nil {
+		t.Fatalf("decode team: %v", err)
+	}
+	if team.HeartbeatEvery != "30m" {
+		t.Fatalf(
+			"team heartbeatEvery = %q, want 30m",
+			team.HeartbeatEvery,
+		)
+	}
+	if team.PeerMentions == nil || *team.PeerMentions {
+		t.Fatalf(
+			"team peerMentions = %#v, want false",
+			team.PeerMentions,
+		)
+	}
+	encoded, err := json.Marshal(team)
+	if err != nil {
+		t.Fatalf("encode team: %v", err)
+	}
+	if !strings.Contains(string(encoded), `"peerMentions":false`) {
+		t.Fatalf("encoded team lost explicit false: %s", encoded)
+	}
+}
+
 func TestWorkerResponsePreservesMutableDesiredState(t *testing.T) {
 	data := []byte(`{
 		"name":"alice",

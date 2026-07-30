@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from agentteams_manager.clients.minio import MinioClient
+from agentteams_manager.domain.ids import operation_id_for
 from agentteams_manager.state.database import Database
 from agentteams_manager.state.notifications import NotificationRepository
 from agentteams_manager.state.tasks import TaskRepository
@@ -96,20 +97,36 @@ async def test_crash_after_send_does_not_duplicate_completion(
     )
     await storage.put_bytes_if_version(
         f"shared/tasks/{created.task_id}/result.md",
-        b"All tests pass.",
+        (
+            "STATUS: SUCCESS\n"
+            "SUMMARY: All tests pass.\n"
+            "DELIVERABLES:\n"
+            f"- shared/tasks/{created.task_id}/result.md\n"
+        ).encode(),
         expected_etag=None,
         content_type="text/markdown",
     )
+    submission = await service.inspect_result(task_id=created.task_id)
+    completion_operation_id = operation_id_for(
+        created.room_id,
+        "$done",
+        f"complete:{created.task_id}",
+    )
+    await notifications.send_terminal_failure(completion_operation_id)
     matrix.timeout_once = True
 
     with pytest.raises(TimeoutError):
         await service.record_completion(
             task_id=created.task_id,
             worker_event_id="$done",
+            accepted=True,
+            result_digest=submission.digest,
         )
     completed = await service.record_completion(
         task_id=created.task_id,
         worker_event_id="$done",
+        accepted=True,
+        result_digest=submission.digest,
     )
 
     notification_txns = {
@@ -120,5 +137,9 @@ async def test_crash_after_send_does_not_duplicate_completion(
     memory = await storage.get_bytes("manager/memory/2026-07-23.md")
     assert completed.status == "completed"
     assert len(notification_txns) == 1
-    assert len(matrix.visible) == 2  # assignment plus completion
+    assert len(matrix.visible) == 3  # assignment, failure, completion
+    assert any(
+        "Manager Operation Failed" in attempt.text
+        for attempt in matrix.attempts
+    )
     assert memory.count(created.task_id.encode()) == 1

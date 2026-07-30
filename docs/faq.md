@@ -904,3 +904,9 @@ Identity and resource changes continue to use typed tools and confirmation.
 AgentScope state and command settings are stored per Matrix room in SQLite, so
 a Manager restart restores them. `/new` starts an empty context in the same
 room; `/reset` clears the context while preserving its model setting.
+
+`/elevated` is admin-DM-only. `off` is the normal mode and asks only before
+destructive, access-changing, externally exposing, or host-affecting tools;
+`ask` asks before every allowed tool; `full` performs allowed tools without
+approval prompts. `full` does not grant new tools or bypass sender, room,
+resource-scope, path, or credential checks.

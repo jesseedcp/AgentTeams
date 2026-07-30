@@ -7,7 +7,7 @@ Record image-affecting changes to `manager/`, `worker/`, `copaw/`, `hermes/`, `o
 **Features**
 
 - **Single AgentScope Manager image**: Ship one Python 3.11 Manager process
-  with AgentScope 2.0, Matrix E2EE, `agt`, the retained 16-skill catalog, and
+  with AgentScope 2.0, Matrix E2EE, `agt`, the retained 19-skill catalog, and
   standard-library health/readiness/metrics on port 18799. OpenClaw, CoPaw,
   Hermes and QwenPaw remain Worker runtimes.
 - **Role-specific runtimes**: Make `agentscope` the Manager-only runtime while
@@ -56,6 +56,24 @@ Record image-affecting changes to `manager/`, `worker/`, `copaw/`, `hermes/`, `o
 
 **Bug Fixes**
 
+- **QwenPaw 2.0 runtime compatibility**: Move the Worker to QwenPaw 2.0.1,
+  configure models, channels, MCP clients, policies, agents, and skills through
+  the public local API, and install TeamHarness, Workerflow, and Matrix as
+  native QwenPaw plugins.
+- **QwenPaw startup and Team convergence**: Apply desired state only after the
+  QwenPaw API is ready, establish built-in MCP policies before accepting work,
+  preserve effective Team storage during independent Worker reconciliation,
+  and project inline prompts and Team context into the active workspace.
+- **Manager diagnostic convergence**: Stop repeated no-op diagnostics and treat
+  Controller-confirmed Worker absence as the deletion boundary instead of
+  probing stale Matrix rooms.
+- **Worker storage sync I/O amplification**: Upload changed OpenClaw workspace
+  files once per successful watermark, retry failed uploads, collapse large
+  change sets to one mirror, keep jq 1.7 fallback pulls alive, and limit the
+  embedded Controller mirror to control-plane configuration. CoPaw, QwenPaw,
+  and Hermes now also refuse to advance their watermark after any partial
+  upload failure, so every retained Worker runtime retries unsaved state.
+  ([#1110](https://github.com/agentscope-ai/AgentTeams/pull/1110))
 - **PVC-first restart recovery**: Preserve an existing Manager SQLite database
   across Pod restarts and replay only newer immutable journal events; use the
   MinIO snapshot only when the local database is absent, matching the declared

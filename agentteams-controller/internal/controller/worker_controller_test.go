@@ -101,6 +101,92 @@ func newWorkerRig(t *testing.T, objs ...client.Object) *workerTestRig {
 	}
 }
 
+func TestWorkerTeamNameFindsReferencedTeam(t *testing.T) {
+	worker := &v1beta1.Worker{ObjectMeta: metav1.ObjectMeta{Name: "leader", Namespace: "agents"}}
+	team := &v1beta1.Team{
+		ObjectMeta: metav1.ObjectMeta{Name: "team-cr", Namespace: "agents"},
+		Spec: v1beta1.TeamSpec{
+			TeamName: "runtime-team",
+			WorkerMembers: []v1beta1.TeamWorkerRef{
+				{Name: "leader", Role: "team_leader"},
+			},
+		},
+	}
+	rig := newWorkerRig(t, worker, team)
+
+	got, err := rig.r.workerTeamName(context.Background(), worker)
+	if err != nil {
+		t.Fatalf("workerTeamName: %v", err)
+	}
+	if got != "runtime-team" {
+		t.Fatalf("workerTeamName=%q, want runtime-team", got)
+	}
+}
+
+func TestWorkerTeamNameUsesPersistedMembershipAnnotation(t *testing.T) {
+	worker := &v1beta1.Worker{ObjectMeta: metav1.ObjectMeta{
+		Name:      "leader",
+		Namespace: "agents",
+		Annotations: map[string]string{
+			v1beta1.AnnotationWorkerTeamName: "runtime-team",
+		},
+	}}
+	rig := newWorkerRig(t, worker)
+
+	got, err := rig.r.workerTeamName(context.Background(), worker)
+	if err != nil {
+		t.Fatalf("workerTeamName: %v", err)
+	}
+	if got != "runtime-team" {
+		t.Fatalf("workerTeamName=%q, want runtime-team", got)
+	}
+}
+
+func TestWorkerReconcileDoesNotOverwriteTeamOwnedRuntimeConfig(t *testing.T) {
+	worker := newWorker("leader", v1beta1.WorkerSpec{Runtime: "qwenpaw"})
+	team := &v1beta1.Team{
+		ObjectMeta: metav1.ObjectMeta{Name: "team-cr", Namespace: "default"},
+		Spec: v1beta1.TeamSpec{
+			TeamName: "runtime-team",
+			WorkerMembers: []v1beta1.TeamWorkerRef{
+				{Name: "leader", Role: "team_leader"},
+			},
+		},
+	}
+	rig := newWorkerRig(t, worker, team)
+
+	if _, _, err := rig.reconcile("leader"); err != nil {
+		t.Fatalf("reconcile referenced Worker: %v", err)
+	}
+	if got := len(rig.deployer.Calls.DeployMemberRuntimeConfig); got != 0 {
+		t.Fatalf("DeployMemberRuntimeConfig calls=%d, want 0 for Team-owned QwenPaw Worker", got)
+	}
+}
+
+func TestWorkerReconcileUsesTeamLeaderAssetsForFileConfiguredRuntime(t *testing.T) {
+	worker := newWorker("leader", v1beta1.WorkerSpec{Runtime: "copaw"})
+	team := &v1beta1.Team{
+		ObjectMeta: metav1.ObjectMeta{Name: "team-cr", Namespace: "default"},
+		Spec: v1beta1.TeamSpec{
+			TeamName: "runtime-team",
+			WorkerMembers: []v1beta1.TeamWorkerRef{
+				{Name: "leader", Role: "team_leader"},
+			},
+		},
+	}
+	rig := newWorkerRig(t, worker, team)
+
+	if _, _, err := rig.reconcile("leader"); err != nil {
+		t.Fatalf("reconcile referenced Worker: %v", err)
+	}
+	if got := len(rig.deployer.Calls.DeployWorkerConfig); got != 1 {
+		t.Fatalf("DeployWorkerConfig calls=%d, want 1", got)
+	}
+	if got := rig.deployer.Calls.DeployWorkerConfig[0].Role; got != RoleTeamLeader.String() {
+		t.Fatalf("DeployWorkerConfig role=%q, want %q", got, RoleTeamLeader.String())
+	}
+}
+
 type workerTestGateway struct {
 	modelInfo      *gateway.ModelProviderInfo
 	modelErr       error
@@ -424,6 +510,74 @@ func TestWorkerMemberContext_NilLabelsSafe(t *testing.T) {
 	}
 	if len(mctx.PodLabels) != 2 {
 		t.Fatalf("expected exactly the 2 system labels on nil-labels Worker, got %v", mctx.PodLabels)
+	}
+}
+
+func TestWorkerReconcileTeamMemberKeepsTeamCredentialsAndRuntimeConfig(t *testing.T) {
+	worker := newWorker("solo", v1beta1.WorkerSpec{
+		Runtime: "qwenpaw",
+		Model:   "qwen-plus",
+	})
+	rig := newWorkerRig(t, worker)
+	if _, _, err := rig.reconcile("solo"); err != nil {
+		t.Fatalf("initial standalone reconcile: %v", err)
+	}
+
+	team := &v1beta1.Team{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "team-a",
+			Namespace: "default",
+		},
+		Spec: v1beta1.TeamSpec{
+			TeamName: "runtime-team-a",
+			WorkerMembers: []v1beta1.TeamWorkerRef{{
+				Name: "solo",
+				Role: RoleTeamLeader.String(),
+			}},
+		},
+	}
+	if err := rig.client.Create(context.Background(), team); err != nil {
+		t.Fatalf("create Team reference: %v", err)
+	}
+
+	rig.deployer.ClearCalls()
+	refreshedTeam := ""
+	rig.provisioner.RefreshWorkerCredentialsFn = func(
+		_ context.Context,
+		credentialName string,
+		workerName string,
+		teamName string,
+	) (*service.RefreshResult, error) {
+		if credentialName != "solo" || workerName != "solo" {
+			t.Fatalf(
+				"refresh identity=%q/%q, want solo/solo",
+				credentialName,
+				workerName,
+			)
+		}
+		refreshedTeam = teamName
+		return &service.RefreshResult{
+			MatrixToken:    "matrix-token",
+			GatewayKey:     "gateway-key",
+			MinIOPassword:  "minio-password",
+			MatrixPassword: "matrix-password",
+		}, nil
+	}
+
+	if _, _, err := rig.reconcile("solo"); err != nil {
+		t.Fatalf("Team-member reconcile: %v", err)
+	}
+	if refreshedTeam != "runtime-team-a" {
+		t.Fatalf(
+			"credential Team=%q, want runtime-team-a",
+			refreshedTeam,
+		)
+	}
+	if got := len(rig.deployer.Calls.DeployMemberRuntimeConfig); got != 0 {
+		t.Fatalf(
+			"WorkerReconciler overwrote Team-owned runtime config %d time(s)",
+			got,
+		)
 	}
 }
 

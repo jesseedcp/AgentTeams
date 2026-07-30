@@ -78,13 +78,17 @@ Do not edit project-level `shared/projects/{project-id}/plan.md` or `meta.json` 
 
    Submitting a result ends this Worker task. If more work is needed after `REVISION_NEEDED` or `BLOCKED`, wait for your coordinator to assign a new task; do not resume or rewrite the submitted task on your own.
 
-5. In the current room, directly @mention your coordinator with completion:
+5. Inspect `completionNotification` in the tool result. When its status is
+   `sent`, TeamHarness has already posted this current-room completion:
 
    ```text
    @coordinator:domain TASK_COMPLETED: {task-id} - <short outcome>. Result: shared/tasks/{task-id}/result.md
    ```
 
-   Do not look up your Worker profile room or private room as a fallback. The task directory is the source of truth if you ever need to verify the assignment room.
+   Do not send it again. Only if the status is `skipped` or `failed`, send that
+   line manually as a fallback. Do not look up your Worker profile room or
+   private room; the task directory is the source of truth for the assignment
+   room and coordinator.
 
 ## Blocked
 

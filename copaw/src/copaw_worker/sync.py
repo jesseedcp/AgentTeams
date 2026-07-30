@@ -21,13 +21,13 @@ File Sync Design Principle:
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
 import json
 import logging
 import os
 import shutil
 import subprocess
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Optional, Protocol
 
@@ -262,8 +262,11 @@ class FileSync:
         else:
             self.local_dir = Path.home() / ".copaw-worker" / worker_name
         self.local_dir.mkdir(parents=True, exist_ok=True)
-        self.shared_dir = shared_dir or self.local_dir / "shared"
-        self.global_shared_dir = global_shared_dir or self.local_dir / "global-shared"
+        workspace_dir = self.local_dir / ".copaw" / "workspaces" / "default"
+        self.shared_dir = shared_dir or workspace_dir / "shared"
+        self.global_shared_dir = (
+            global_shared_dir or workspace_dir / "global-shared"
+        )
         self._prefix = f"agents/{worker_name}"
         self._alias_set = False
         runtime = os.environ.get("AGENTTEAMS_RUNTIME")
@@ -444,6 +447,7 @@ class FileSync:
         remote = self._object_path(f"{self._prefix}/")
         local = str(self.local_dir) + "/"
         logger.info("mirror_all: primary mirror remote=%s local=%s", remote, local)
+        primary_prefix_missing = False
         try:
             _mc("mirror", remote, local, "--overwrite",
                  "--exclude", "credentials/**", check=True)
@@ -467,6 +471,7 @@ class FileSync:
             error_text = f"{exc.stderr or ''}\n{exc.stdout or ''}"
             if not _looks_like_missing_object_error(error_text):
                 raise
+            primary_prefix_missing = True
             logger.info(
                 "mirror_all: primary mirror prefix missing; trying direct startup file pulls",
             )
@@ -477,13 +482,19 @@ class FileSync:
                     ", ".join(startup_changed),
                 )
 
-        if not (self.local_dir / "openclaw.json").exists():
+        if (
+            primary_prefix_missing
+            and not (self.local_dir / "openclaw.json").exists()
+        ):
             raise RuntimeError(
                 f"openclaw.json not found in MinIO for worker {self.worker_name}"
             )
 
         # Mirror shared/ — team members use teams/{team}/shared/, others use global shared/
-        shared_remote = self._get_shared_remote()
+        try:
+            shared_remote = self._get_shared_remote()
+        except RuntimeError:
+            shared_remote = self._get_startup_shared_remote()
         shared_local = str(self.shared_dir) + "/"
         self.shared_dir.mkdir(parents=True, exist_ok=True)
         logger.info("mirror_all: shared mirror remote=%s local=%s", shared_remote, shared_local)
@@ -499,7 +510,11 @@ class FileSync:
             )
 
         # Team Leader also gets global shared/ as global-shared/ (read-only, for Manager tasks)
-        if self._is_team_leader():
+        try:
+            is_team_leader = self._is_team_leader()
+        except RuntimeError:
+            is_team_leader = False
+        if is_team_leader:
             global_shared_remote = f"{_MC_ALIAS}/{self.bucket}/shared/"
             global_shared_local = str(self.global_shared_dir) + "/"
             self.global_shared_dir.mkdir(parents=True, exist_ok=True)
@@ -574,6 +589,24 @@ class FileSync:
         team_id = self._get_team_id()
         if team_id:
             return f"{_MC_ALIAS}/{self.bucket}/teams/{team_id}/shared/"
+        return f"{_MC_ALIAS}/{self.bucket}/shared/"
+
+    def _get_startup_shared_remote(self) -> str:
+        """Use the mirrored controller config only during bootstrap fallback."""
+        config_path = self.local_dir / "openclaw.json"
+        try:
+            config = json.loads(config_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return f"{_MC_ALIAS}/{self.bucket}/shared/"
+        team_id = config.get("team_id") or config.get("teamId")
+        if isinstance(team_id, str) and team_id.strip():
+            team_name = _team_storage_name_from_worker_team(
+                self.bucket,
+                team_id,
+            )
+            return (
+                f"{_MC_ALIAS}/{self.bucket}/teams/{team_name}/shared/"
+            )
         return f"{_MC_ALIAS}/{self.bucket}/shared/"
 
     def _get_global_shared_remote(self) -> str:
@@ -686,6 +719,14 @@ class FileSync:
         logger.info("openclaw.json raw content (%d chars): %r", len(text), text[:500])
         return json.loads(text)
 
+    def get_soul(self) -> str:
+        """Return the canonical SOUL.md used as a missing-file fallback."""
+        return self._cat(f"{self._prefix}/SOUL.md") or ""
+
+    def get_agents_md(self) -> str:
+        """Return the canonical AGENTS.md used as a missing-file fallback."""
+        return self._cat(f"{self._prefix}/AGENTS.md") or ""
+
     def list_skills(self) -> list[str]:
         """Return list of skill names available in MinIO for this worker."""
         prefix = f"{self._prefix}/skills/"
@@ -707,6 +748,11 @@ class FileSync:
         changed: list[str] = []
         files: dict[str, list[str]] = {
             "openclaw.json": [f"{self._prefix}/openclaw.json"],
+            "SOUL.md": [f"{self._prefix}/SOUL.md"],
+            "AGENTS.md": [f"{self._prefix}/AGENTS.md"],
+            "PROFILE.md": [f"{self._prefix}/PROFILE.md"],
+            "TOOLS.md": [f"{self._prefix}/TOOLS.md"],
+            "HEARTBEAT.md": [f"{self._prefix}/HEARTBEAT.md"],
             "config/mcporter.json": [
                 f"{self._prefix}/config/mcporter.json",
                 f"{self._prefix}/mcporter-servers.json",
@@ -813,6 +859,7 @@ def push_local(sync: FileSync, since: float = 0) -> list[str]:
     # File extensions to skip (transient runtime files)
     _EXCLUDE_EXTENSIONS = {".lock"}
     pushed: list[str] = []
+    failures: list[tuple[str, Exception]] = []
     local_dir = sync.local_dir
     if not local_dir.exists():
         return pushed
@@ -866,11 +913,18 @@ def push_local(sync: FileSync, since: float = 0) -> list[str]:
                 continue
             dest = sync._object_path(key)
             _mc("cp", str(path), dest, check=True)
-            pushed.append(str(rel))
+            pushed.append(rel.as_posix())
             logger.debug("Pushed %s -> %s", rel, dest)
         except Exception as exc:
             logger.debug("push_local: failed for %s: %s", rel, exc)
+            failures.append((rel.as_posix(), exc))
 
+    if failures:
+        failed_path, failure = failures[0]
+        raise RuntimeError(
+            f"failed to push {len(failures)} local file(s); "
+            f"first={failed_path} ({type(failure).__name__})",
+        ) from failure
     return pushed
 
 
@@ -892,11 +946,12 @@ async def push_loop(
     last_push_time: float = 0.0
 
     while True:
-        await asyncio.sleep(check_interval)
         try:
             now = time.time()
-            pushed = await asyncio.get_event_loop().run_in_executor(
-                None, push_local, sync, last_push_time
+            pushed = await asyncio.to_thread(
+                push_local,
+                sync,
+                last_push_time,
             )
             last_push_time = now
             if pushed:
@@ -940,6 +995,7 @@ async def push_loop(
                         "error_type": type(exc).__name__,
                     },
                 )
+        await asyncio.sleep(check_interval)
 
 
 async def sync_loop(
@@ -950,9 +1006,8 @@ async def sync_loop(
 ) -> None:
     """Background task: pull controller-managed worker files."""
     while True:
-        await asyncio.sleep(interval)
         try:
-            changed = await asyncio.get_event_loop().run_in_executor(None, sync.pull_all)
+            changed = await asyncio.to_thread(sync.pull_all)
             if changed:
                 logger.info("FileSync pull: files changed: %s", changed)
                 if on_pull is not None:
@@ -978,3 +1033,4 @@ async def sync_loop(
                         "error_type": type(exc).__name__,
                     },
                 )
+        await asyncio.sleep(interval)

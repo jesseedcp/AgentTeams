@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Patch reme package to lazy-load heavyweight backends.
 
-Copaw only uses ReMeCopaw and CoPawInMemoryMemory — it never touches
-chromadb, elasticsearch, qdrant, pandas CacheHandler, or MCP services
-directly.  This script rewrites several reme __init__.py files so that
-those heavy transitive dependencies are only imported when explicitly
-accessed.  Also defers ReMe/ReMeConfigParser and mcp.types.Tool to
-prevent loading pandas/mcp/uvicorn at import time.  Net saving: ~100 MB RSS.
+Copaw only uses ReMeCopaw and a local persistent file store — it never
+needs chromadb, elasticsearch, qdrant, pandas CacheHandler, or MCP services
+for its default runtime.  This script rewrites several reme __init__.py
+files so those heavy transitive dependencies are imported only when
+explicitly accessed.  The OpenAI embedding adapter remains registered
+because ReMe requires an embedding object even when vector search is off.
 
 Usage:
     python patch_reme_lazy.py /path/to/site-packages/reme
@@ -111,7 +111,8 @@ def patch(site: Path) -> None:
     )
 
     # ------------------------------------------------------------------ #
-    # 2b) core/embedding/__init__.py — lazy-load OpenAI models (pull openai SDK)
+    # 2b) core/embedding/__init__.py — register CoPaw's required async
+    #     OpenAI adapter; keep the unused sync adapter lazy.
     # ------------------------------------------------------------------ #
     (site / "core/embedding/__init__.py").write_text(
         textwrap.dedent("""\
@@ -119,6 +120,10 @@ def patch(site: Path) -> None:
 
             import importlib
             from .base_embedding_model import BaseEmbeddingModel
+            from .openai_embedding_model import OpenAIEmbeddingModel
+            from ..registry_factory import R
+
+            R.embedding_models.register("openai")(OpenAIEmbeddingModel)
 
             __all__ = [
                 "BaseEmbeddingModel",
@@ -127,7 +132,6 @@ def patch(site: Path) -> None:
             ]
 
             _LAZY = {
-                "OpenAIEmbeddingModel": ".openai_embedding_model",
                 "OpenAIEmbeddingModelSync": ".openai_embedding_model_sync",
             }
 
@@ -136,10 +140,7 @@ def patch(site: Path) -> None:
                     mod = importlib.import_module(_LAZY[name], __package__)
                     cls = getattr(mod, name)
                     globals()[name] = cls
-                    from ..registry_factory import R
-                    if name == "OpenAIEmbeddingModel":
-                        R.embedding_models.register("openai")(cls)
-                    elif name == "OpenAIEmbeddingModelSync":
+                    if name == "OpenAIEmbeddingModelSync":
                         R.embedding_models.register("openai_sync")(cls)
                     return cls
                 raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
@@ -532,6 +533,24 @@ def patch(site: Path) -> None:
             "        mcp_client = MCPClient(",
         )
         app.write_text(src)
+
+    # ------------------------------------------------------------------ #
+    # 10) ReMeCopaw — use the dependency-free local store by default.
+    #     The previous Linux "auto" choice selected Chroma, which is
+    #     intentionally not loaded in the Lite runtime and left the
+    #     file-store registry empty during startup.
+    # ------------------------------------------------------------------ #
+    reme_copaw = site / "reme_copaw.py"
+    src = reme_copaw.read_text()
+    auto_backend = (
+        'memory_backend = "local" if platform.system() == "Windows" '
+        'else "chroma"'
+    )
+    if auto_backend not in src:
+        raise RuntimeError("ReMeCopaw auto backend expression changed")
+    reme_copaw.write_text(
+        src.replace(auto_backend, 'memory_backend = "local"', 1),
+    )
 
     print("reme patched successfully — lazy-loading enabled for heavy backends")
 

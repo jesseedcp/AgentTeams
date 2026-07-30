@@ -348,6 +348,8 @@ type teamResp struct {
 	Description       string             `json:"description,omitempty"`
 	LeaderName        string             `json:"leaderName"`
 	LeaderHeartbeat   *teamHeartbeatResp `json:"leaderHeartbeat,omitempty"`
+	HeartbeatEvery    string             `json:"heartbeatEvery,omitempty"`
+	PeerMentions      *bool              `json:"peerMentions,omitempty"`
 	WorkerIdleTimeout string             `json:"workerIdleTimeout,omitempty"`
 	TeamRoomID        string             `json:"teamRoomID,omitempty"`
 	LeaderDMRoomID    string             `json:"leaderDMRoomID,omitempty"`
@@ -436,6 +438,8 @@ func teamDetail(t teamResp) []KeyValue {
 		{"Description", t.Description},
 		{"Leader", t.LeaderName},
 		{"LeaderHeartbeat", teamHeartbeatText(t.LeaderHeartbeat)},
+		{"HeartbeatEvery", t.HeartbeatEvery},
+		{"PeerMentions", optionalBoolText(t.PeerMentions)},
 		{"WorkerIdleTimeout", t.WorkerIdleTimeout},
 		{"LeaderReady", strconv.FormatBool(t.LeaderReady)},
 		{"Workers", strings.Join(t.WorkerNames, ", ")},
@@ -444,6 +448,13 @@ func teamDetail(t teamResp) []KeyValue {
 		{"LeaderDMRoomID", t.LeaderDMRoomID},
 		{"Message", t.Message},
 	}
+}
+
+func optionalBoolText(value *bool) string {
+	if value == nil {
+		return ""
+	}
+	return strconv.FormatBool(*value)
 }
 
 func teamHeartbeatText(hb *teamHeartbeatResp) string {

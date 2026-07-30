@@ -17,10 +17,11 @@
 Manager ランタイムは AgentScope 2.0 に固定されています。Worker は OpenClaw、CoPaw、Hermes、QwenPaw から選択できます。
 
 この Fork は
-`agentscope-ai/AgentTeams@8de237da736a542766e132836b29c0a2a9c48740`
+`agentscope-ai/AgentTeams@fb3a40be1f005bd584f45544fc73bd4601d5c52a`
+（監査時点のリモート `main` 最新コミット）
 を基準に動作差分を監査しています。実装済み機能、意図的な置き換え、
 外部認証情報が必要な検証は
-[parity report](docs/parity/upstream-agentteams-8de237d.md) を参照してください。
+[parity report](docs/parity/upstream-agentteams-fb3a40b.md) を参照してください。
 
 ## 主な特徴
 

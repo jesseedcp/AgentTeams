@@ -130,7 +130,7 @@ accept `openclaw`, `copaw`, `hermes`, and `qwenpaw`.
 
 ## Skills and verification
 
-The 16 image-owned Manager skills live under `manager/agent/skills/`. Skills
+The 19 image-owned Manager skills live under `manager/agent/skills/`. Skills
 are guidance; registered typed tools are the executable boundary. The complete
 mapping and test evidence is maintained in
 [`tests/manager-skill-parity.json`](../tests/manager-skill-parity.json).

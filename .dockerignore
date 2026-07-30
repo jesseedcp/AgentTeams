@@ -1,0 +1,24 @@
+.git
+.omx
+.testtmp
+.venv
+
+**/__pycache__
+**/.mypy_cache
+**/.pytest_cache
+**/.ruff_cache
+**/*.py[cod]
+
+**/node_modules
+**/coverage
+**/*.log
+**/*.pid
+
+# Empty directories left behind by removed upstream Manager/Worker payloads
+# must not reappear in image layers.
+manager/agent/copaw-manager-agent
+manager/agent/openhuman-worker-agent
+manager/agent/skills-alpha
+agentteams-controller/agent/copaw-manager-agent
+agentteams-controller/agent/openhuman-worker-agent
+agentteams-controller/agent/skills-alpha

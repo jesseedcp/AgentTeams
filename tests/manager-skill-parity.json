@@ -95,6 +95,15 @@
       ]
     },
     {
+      "name": "memory-management",
+      "skillFile": "manager/agent/skills/memory-management/SKILL.md",
+      "tools": ["recall_manager_memory", "remember_manager_memory", "record_project_decision", "record_worker_assessment"],
+      "evidence": [
+        "manager-agentscope/tests/unit/tools/test_memory_tools.py",
+        "manager-agentscope/tests/unit/workflows/test_memory_workflow.py"
+      ]
+    },
+    {
       "name": "model-switch",
       "skillFile": "manager/agent/skills/model-switch/SKILL.md",
       "tools": ["switch_model", "update_manager_identity"],
@@ -109,6 +118,7 @@
       "skillFile": "manager/agent/skills/project-management/SKILL.md",
       "tools": [
         "create_project",
+        "confirm_project_plan",
         "list_projects",
         "get_project",
         "update_project",
@@ -147,7 +157,7 @@
     {
       "name": "task-management",
       "skillFile": "manager/agent/skills/task-management/SKILL.md",
-      "tools": ["list_tasks", "get_task", "create_task", "delegate_task", "delegate_team_task", "complete_task", "schedule_task", "update_task", "delete_task"],
+      "tools": ["list_tasks", "get_task", "create_task", "delegate_task", "delegate_team_task", "inspect_task_result", "complete_task", "schedule_task", "update_task", "delete_task"],
       "evidence": [
         "manager-agentscope/tests/integration/test_finite_task_lifecycle.py",
         "manager-agentscope/tests/contract/test_task_skill_parity.py"

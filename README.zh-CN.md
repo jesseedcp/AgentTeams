@@ -17,9 +17,10 @@
 Manager 运行时固定为 AgentScope 2.0；Worker 执行层可在 OpenClaw、CoPaw、Hermes 和 QwenPaw 之间选择。
 
 本 Fork 已对照
-`agentscope-ai/AgentTeams@8de237da736a542766e132836b29c0a2a9c48740`
+`agentscope-ai/AgentTeams@fb3a40be1f005bd584f45544fc73bd4601d5c52a`
+（审计时远程 `main` 最新提交）
 完成行为差异审计。八项已补齐能力、有意架构替换以及仍需真实平台凭据验证的
-项目，见[功能差异报告](docs/parity/upstream-agentteams-8de237d.md)。
+项目，见[功能差异报告](docs/parity/upstream-agentteams-fb3a40b.md)。
 
 - 🧑‍💻 **设计了 Manger-Workers 架构**：不用真人去管理每个干活的 Worker Claw，实现由 Agent 管理 Agents。
 - 🤝 **多运行时协作**：OpenClaw、CoPaw、Hermes 和 QwenPaw Worker 可在同一个 IM 房间中共存协作，AgentScope Manager 统一管理它们的生命周期和协作关系。

@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import asdict
 import json
 import os
-from pathlib import Path
-from typing import Any
 import urllib.error
 import urllib.request
+from dataclasses import asdict
+from pathlib import Path
+from typing import Any
 
 from agentscope.message import TextBlock
 from agentscope.tool import ToolResponse
@@ -20,11 +20,11 @@ from copaw_worker.task import (
     canonical_worker_id,
     complete_project,
     create_project,
-    pause_project,
     parse_dag_tasks,
     parse_loop_plan,
     parse_loop_tasks,
     parse_plan_type,
+    pause_project,
     plan_dag,
     plan_loop,
     ready_loop_nodes,

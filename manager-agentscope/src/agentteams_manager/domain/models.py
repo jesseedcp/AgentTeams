@@ -207,6 +207,7 @@ class RoomPolicy(FrozenStrictModel):
     allowed_team_names: frozenset[str] = frozenset()
     allowed_worker_names: frozenset[str] = frozenset()
     allowed_mcp_names: frozenset[str] = frozenset()
+    confirmation_mode: Literal["off", "ask", "full"] = "off"
     silent: bool = False
 
 
@@ -309,6 +310,7 @@ class TaskMetadata(FrozenStrictModel):
         "in_progress",
         "blocked",
         "revision_needed",
+        "submitted",
         "completed",
         "failed",
         "cancelled",
@@ -316,6 +318,8 @@ class TaskMetadata(FrozenStrictModel):
     title: str = Field(min_length=1)
     assigned_to: str = Field(min_length=1)
     room_id: str = Field(min_length=1)
+    source_room_id: str | None = None
+    coordinator_matrix_user_id: str | None = None
     project_id: str | None = None
     schedule: str | None = None
     timezone: str | None = None
@@ -324,6 +328,23 @@ class TaskMetadata(FrozenStrictModel):
     last_execution_event_id: str | None = None
     created_at: datetime
     completed_at: datetime | None = None
+    assigned_at: datetime | None = None
+    acknowledged_by_role: str | None = None
+    deliverables: tuple[str, ...] = ()
+    result_path: str | None = None
+    result_status: Literal[
+        "SUCCESS",
+        "SUCCESS_WITH_NOTES",
+        "REVISION_NEEDED",
+        "BLOCKED",
+        "INTERRUPTED",
+        "FAILED",
+        "PARTIAL",
+    ] | None = None
+    spec_path: str | None = None
+    submitted_by_role: str | None = None
+    summary: str | None = None
+    task_title: str | None = None
 
     @model_validator(mode="after")
     def validate_schedule(self) -> Self:
@@ -398,14 +419,27 @@ class ProjectMetadata(FrozenStrictModel):
     task_ids: tuple[str, ...] = ()
     created_at: datetime
     updated_at: datetime
+    confirmed_at: datetime | None = None
+    confirmed_by: str | None = None
+    plan_revision: int = Field(default=1, ge=1)
     completed_at: datetime | None = None
 
     @model_validator(mode="after")
     def validate_project_state(self) -> Self:
-        if self.status == "planning" and self.room_id is not None:
-            raise ValueError("planning project must not publish a room")
         if self.status in {"active", "completed"} and not self.room_id:
             raise ValueError(f"{self.status} project requires a room")
+        if self.status in {"active", "completed"} and (
+            self.confirmed_at is None or not self.confirmed_by
+        ):
+            raise ValueError(
+                f"{self.status} project requires plan confirmation",
+            )
+        if self.status == "planning" and (
+            self.confirmed_at is not None or self.confirmed_by is not None
+        ):
+            raise ValueError(
+                "planning project cannot have plan confirmation",
+            )
         if self.status == "completed" and self.completed_at is None:
             raise ValueError("completed project requires completed_at")
         if self.status != "completed" and self.completed_at is not None:

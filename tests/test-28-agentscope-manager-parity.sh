@@ -63,7 +63,7 @@ skills = manifest["skills"]
 assert manifest["schemaVersion"] == 1
 assert manifest["managerRuntime"] == "agentscope"
 assert manifest["agentScopeVersion"] == "2.0.4.post1"
-assert len(skills) == 18
+assert len(skills) == 19
 names = {item["name"] for item in skills}
 disk = {
     path.name
@@ -86,9 +86,9 @@ for item in skills:
         assert (root / evidence).is_file(), (item["name"], evidence)
 PY
 then
-    log_pass "All 18 retained skills have typed-tool documents and evidence"
+    log_pass "All 19 retained skills have typed-tool documents and evidence"
 else
-    log_fail "All 18 retained skills have typed-tool documents and evidence"
+    log_fail "All 19 retained skills have typed-tool documents and evidence"
 fi
 
 log_section "Pinned Upstream Baseline"
@@ -101,7 +101,7 @@ import os
 import pathlib
 
 root = pathlib.Path(os.environ["PROJECT_ROOT"])
-expected = "8de237da736a542766e132836b29c0a2a9c48740"
+expected = "fb3a40be1f005bd584f45544fc73bd4601d5c52a"
 fixture = json.loads(
     (
         root
@@ -112,7 +112,7 @@ fixture = json.loads(
 assert fixture["commit"] == expected
 assert fixture["latestUpstreamDelta"]["commit"] == expected
 report = (
-    root / "docs/parity/upstream-agentteams-8de237d.md"
+    root / "docs/parity/upstream-agentteams-fb3a40b.md"
 ).read_text(encoding="utf-8")
 assert expected in report
 for category in ("已实现", "有意替换", "有意删除", "外部未验证"):
@@ -326,7 +326,7 @@ fi
 IMAGE_SKILLS=$(docker exec "${_AGENT_CTR}" sh -c \
     'find /opt/agentteams/manager/skills -mindepth 1 -maxdepth 1 -type d | wc -l' \
     2>/dev/null | tr -d '[:space:]')
-assert_eq "18" "${IMAGE_SKILLS}" "Running image contains exactly 18 Manager skills"
+assert_eq "19" "${IMAGE_SKILLS}" "Running image contains exactly 19 Manager skills"
 
 LEGACY_BINARIES=$(docker exec "${_AGENT_CTR}" sh -c '
     for path in \

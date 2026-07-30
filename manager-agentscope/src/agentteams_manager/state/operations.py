@@ -12,6 +12,7 @@ from agentteams_manager.domain.errors import (
     RecoveryError,
 )
 from agentteams_manager.domain.models import (
+    InboundEvent,
     JournalEvent,
     OperationRecord,
     OperationStatus,
@@ -171,16 +172,240 @@ class OperationRepository:
         return await self._database.read(read)
 
     async def claim_matrix_event(self, room_id: str, event_id: str) -> bool:
+        """Legacy claim-once API retained for transport/test compatibility."""
+
         def write(connection: sqlite3.Connection) -> bool:
+            now = datetime.now(UTC).isoformat()
             cursor = connection.execute(
                 """
                 INSERT OR IGNORE INTO processed_matrix_events(
-                    room_id, event_id, processed_at
-                ) VALUES (?, ?, ?)
+                    room_id, event_id, processed_at, status,
+                    attempt_count, updated_at
+                ) VALUES (?, ?, ?, 'completed', 1, ?)
                 """,
-                (room_id, event_id, datetime.now(UTC).isoformat()),
+                (room_id, event_id, now, now),
             )
             return cursor.rowcount == 1
+
+        return await self._database.write(write)
+
+    async def claim_inbound_event(self, event: InboundEvent) -> bool:
+        """Durably store an inbound event before admitting it to the router."""
+
+        def write(connection: sqlite3.Connection) -> bool:
+            row = connection.execute(
+                """
+                SELECT status
+                  FROM processed_matrix_events
+                 WHERE room_id=? AND event_id=?
+                """,
+                (event.room_id, event.event_id),
+            ).fetchone()
+            if row is not None:
+                return False
+            now = datetime.now(UTC).isoformat()
+            connection.execute(
+                """
+                INSERT INTO processed_matrix_events(
+                    room_id, event_id, processed_at, event_json,
+                    status, attempt_count, updated_at
+                ) VALUES (?, ?, ?, ?, 'processing', 1, ?)
+                """,
+                (
+                    event.room_id,
+                    event.event_id,
+                    now,
+                    event.model_dump_json(),
+                    now,
+                ),
+            )
+            return True
+
+        return await self._database.write(write)
+
+    async def complete_matrix_event(
+        self,
+        room_id: str,
+        event_id: str,
+    ) -> None:
+        """Mark an event terminal only after its handler returns successfully."""
+
+        def write(connection: sqlite3.Connection) -> None:
+            connection.execute(
+                """
+                UPDATE processed_matrix_events
+                   SET status='completed',
+                       last_error=NULL,
+                       next_attempt_at=NULL,
+                       updated_at=?
+                 WHERE room_id=? AND event_id=?
+                """,
+                (datetime.now(UTC).isoformat(), room_id, event_id),
+            )
+
+        await self._database.write(write)
+
+    async def fail_matrix_event(
+        self,
+        room_id: str,
+        event_id: str,
+        *,
+        error: str,
+        max_attempts: int,
+    ) -> bool:
+        """Persist a retryable failure, returning True for a dead letter."""
+
+        if max_attempts < 1:
+            raise ValueError("max_attempts must be positive")
+
+        def write(connection: sqlite3.Connection) -> bool:
+            row = connection.execute(
+                """
+                SELECT attempt_count
+                  FROM processed_matrix_events
+                 WHERE room_id=? AND event_id=?
+                """,
+                (room_id, event_id),
+            ).fetchone()
+            if row is None:
+                return True
+            dead_letter = int(row["attempt_count"]) >= max_attempts
+            now = datetime.now(UTC).isoformat()
+            connection.execute(
+                """
+                UPDATE processed_matrix_events
+                   SET status=?,
+                       last_error=?,
+                       next_attempt_at=?,
+                       updated_at=?
+                 WHERE room_id=? AND event_id=?
+                """,
+                (
+                    "dead_letter" if dead_letter else "retry_wait",
+                    error[:4_000],
+                    None if dead_letter else now,
+                    now,
+                    room_id,
+                    event_id,
+                ),
+            )
+            return dead_letter
+
+        return await self._database.write(write)
+
+    async def retry_matrix_event(
+        self,
+        room_id: str,
+        event_id: str,
+    ) -> None:
+        """Start the next durable delivery attempt."""
+
+        def write(connection: sqlite3.Connection) -> None:
+            connection.execute(
+                """
+                UPDATE processed_matrix_events
+                   SET status='processing',
+                       attempt_count=attempt_count + 1,
+                       next_attempt_at=NULL,
+                       updated_at=?
+                 WHERE room_id=? AND event_id=?
+                   AND status='retry_wait'
+                """,
+                (datetime.now(UTC).isoformat(), room_id, event_id),
+            )
+
+        await self._database.write(write)
+
+    async def cancel_matrix_event(
+        self,
+        room_id: str,
+        event_id: str,
+        *,
+        reason: str,
+    ) -> None:
+        """Make an intentionally discarded queued event terminal."""
+
+        def write(connection: sqlite3.Connection) -> None:
+            connection.execute(
+                """
+                UPDATE processed_matrix_events
+                   SET status='cancelled',
+                       last_error=?,
+                       next_attempt_at=NULL,
+                       updated_at=?
+                 WHERE room_id=? AND event_id=?
+                """,
+                (
+                    reason[:4_000],
+                    datetime.now(UTC).isoformat(),
+                    room_id,
+                    event_id,
+                ),
+            )
+
+        await self._database.write(write)
+
+    async def recoverable_matrix_events(
+        self,
+        *,
+        limit: int = 1_000,
+    ) -> tuple[InboundEvent, ...]:
+        """Reclaim processing/retry rows left by a prior Manager process."""
+
+        if limit < 1:
+            return ()
+
+        def write(
+            connection: sqlite3.Connection,
+        ) -> tuple[InboundEvent, ...]:
+            rows = connection.execute(
+                """
+                SELECT room_id, event_id, event_json
+                  FROM processed_matrix_events
+                 WHERE status IN ('processing', 'retry_wait')
+                   AND event_json <> ''
+                 ORDER BY processed_at, room_id, event_id
+                 LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+            recovered: list[InboundEvent] = []
+            now = datetime.now(UTC).isoformat()
+            for row in rows:
+                try:
+                    event = InboundEvent.model_validate_json(
+                        row["event_json"],
+                    )
+                except (TypeError, ValueError) as exc:
+                    connection.execute(
+                        """
+                        UPDATE processed_matrix_events
+                           SET status='dead_letter',
+                               last_error=?,
+                               updated_at=?
+                         WHERE room_id=? AND event_id=?
+                        """,
+                        (
+                            f"invalid durable event: {exc}"[:4_000],
+                            now,
+                            row["room_id"],
+                            row["event_id"],
+                        ),
+                    )
+                    continue
+                connection.execute(
+                    """
+                    UPDATE processed_matrix_events
+                       SET status='processing',
+                           attempt_count=attempt_count + 1,
+                           next_attempt_at=NULL,
+                           updated_at=?
+                     WHERE room_id=? AND event_id=?
+                    """,
+                    (now, row["room_id"], row["event_id"]),
+                )
+                recovered.append(event)
+            return tuple(recovered)
 
         return await self._database.write(write)
 

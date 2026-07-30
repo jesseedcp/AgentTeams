@@ -19,7 +19,9 @@ Use a full Matrix ID when the recipient must act.
 
 Mention your coordinator only for:
 
-- Task completion: `@coordinator:domain TASK_COMPLETED: <summary>`
+- Task completion fallback when `taskflow submit_task` reports
+  `completionNotification.status` as `skipped` or `failed`:
+  `@coordinator:domain TASK_COMPLETED: <summary>`
 - Blocker: `@coordinator:domain BLOCKED: <what is blocking you>`
 - Question: `@coordinator:domain QUESTION: <your question>`
 - Direct answer to a coordinator question
@@ -33,6 +35,7 @@ Do not @mention for:
 - Status symbols such as green dots or check marks
 - Short acknowledgments such as `ok`, `done`, `收到`, or `好的`
 - Mid-task progress that requires no decision
+- A second completion message after `completionNotification.status: sent`
 
 Exception: when a new assigned task arrives, `task-management` requires you to directly say in the current room that you received the message before task acceptance work starts. Do not turn it into a progress thread, and do not send repeated acknowledgements for the same task.
 

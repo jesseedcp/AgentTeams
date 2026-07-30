@@ -11,7 +11,10 @@ the requesting admin, Manager, and selected Workers.
 
 Use only these typed operations:
 
-- `create_project` prepares metadata and the plan before room creation.
+- `create_project` prepares a `planning` project, canonical plan, and private
+  room. It does not activate work.
+- `confirm_project_plan` records the administrator's plan decision, publishes
+  the confirmed plan in the project room, and changes the project to `active`.
 - `list_projects` and `get_project` inspect durable status.
 - `update_project` adds a ready task or records a project task completion.
 - `report_project_blocked` records a blocker only for the assigned Worker or
@@ -29,6 +32,11 @@ Use only these typed operations:
 
 Assignments still go to Worker or Team Leader rooms. The project room receives
 progress summaries; it is not a substitute for the assignment room.
+
+In normal mode, present the returned planning project to the administrator in
+the Admin DM and stop. Do not add tasks until a later message explicitly
+confirms the plan. In `/elevated full` or configured YOLO mode, project
+creation auto-confirms and may proceed in the same turn.
 
 Read only the relevant reference:
 

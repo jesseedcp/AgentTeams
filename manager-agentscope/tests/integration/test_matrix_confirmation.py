@@ -122,6 +122,32 @@ class ConcurrentFactory:
         return self.agent
 
 
+class RestartedConfirmationAgent(ConfirmationAgent):
+    async def reply_stream(self, *, inputs: object):
+        if isinstance(inputs, UserConfirmResultEvent):
+            raise ValueError(
+                "Agent is not waiting for user confirmation",
+            )
+        async for item in super().reply_stream(inputs=inputs):
+            yield item
+
+
+class RestartedFactory:
+    runtime_revision = 1
+
+    async def create(
+        self,
+        room_id: str,
+        policy: RoomPolicy,
+        state: AgentState | None = None,
+    ) -> RestartedConfirmationAgent:
+        del policy
+        agent = RestartedConfirmationAgent(room_id)
+        if state is not None:
+            agent.state = state
+        return agent
+
+
 class MultiRoomFactory:
     runtime_revision = 1
 
@@ -495,6 +521,61 @@ async def test_confirmation_continues_same_reply(tmp_path: Path) -> None:
     assert result.reply_id == "reply-delete"
     assert result.confirm_results[0].confirmed
     assert any(item.text == "Deleted alice." for item in matrix.sent)
+
+
+@pytest.mark.asyncio
+async def test_confirmation_interrupted_by_restart_is_cancelled_cleanly(
+    tmp_path: Path,
+) -> None:
+    database = Database(tmp_path / "manager.db")
+    await database.open()
+    repository = SessionRepository(database)
+    confirmations = ConfirmationService(
+        ConfirmationRepository(database),
+    )
+    matrix = RecordingMatrix()
+    first_runner = MatrixSessionRunner(
+        sessions=RoomSessionManager(
+            factory=Factory(),
+            sessions=repository,
+        ),
+        matrix=matrix,
+        admin_user_id="@admin:local",
+        admin_room_id="!admin:local",
+        confirmations=confirmations,
+    )
+    await first_runner.handle(
+        _event("delete alice", "$delete-before-restart"),
+        _policy(),
+    )
+    approval = (await confirmations.pending())[0]
+
+    restarted_runner = MatrixSessionRunner(
+        sessions=RoomSessionManager(
+            factory=RestartedFactory(),
+            sessions=repository,
+        ),
+        matrix=matrix,
+        admin_user_id="@admin:local",
+        admin_room_id="!admin:local",
+        confirmations=confirmations,
+    )
+    await restarted_runner.handle(
+        _event(
+            f"/confirm {approval.confirmation_id}",
+            "$confirm-after-restart",
+        ),
+        _policy(),
+    )
+
+    recovered = await confirmations.get(approval.confirmation_id)
+    assert recovered is not None
+    assert recovered.status is ConfirmationStatus.CANCELLED
+    assert await repository.load("!admin:local") is None
+    assert any(
+        "Manager 重启后无法安全恢复" in item.text
+        for item in matrix.sent
+    )
 
 
 @pytest.mark.asyncio

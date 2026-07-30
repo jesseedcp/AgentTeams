@@ -18,7 +18,8 @@ $requiredFunctions = @(
     "ConvertTo-NormalizedVersion",
     "Test-VersionLessThan",
     "Test-UseLegacyImageEnv",
-    "Get-ControllerEnvPrefix"
+    "Get-ControllerEnvPrefix",
+    "Get-ControllerStoragePrefix"
 )
 $definitions = $ast.FindAll(
     {
@@ -72,6 +73,18 @@ $legacyPrefix = "HIC" + "LAW_"
 Assert-Equal (Get-ControllerEnvPrefix "v1.1.2") $legacyPrefix "legacy prefix"
 Assert-Equal (Get-ControllerEnvPrefix "v1.2.0") "AGENTTEAMS_" "current prefix"
 Assert-Equal (Get-ControllerEnvPrefix "garbage") "AGENTTEAMS_" "invalid prefix"
+Assert-Equal `
+    (Get-ControllerStoragePrefix "v1.1.2") `
+    ("hic" + "law/agentteams-storage") `
+    "legacy storage prefix"
+Assert-Equal `
+    (Get-ControllerStoragePrefix "v1.2.0") `
+    "agentteams/agentteams-storage" `
+    "current storage prefix"
+Assert-Equal `
+    (Get-ControllerStoragePrefix "garbage") `
+    "agentteams/agentteams-storage" `
+    "invalid storage prefix"
 
 $blockMatch = [regex]::Match(
     $source,
@@ -103,6 +116,12 @@ $block = $blockMatch.Value
         $block.Contains(('"' + $legacyPrefix + $_ + '='))) {
         throw "Controller env $_ also has a fixed prefix"
     }
+}
+
+if (-not $block.Contains(
+    '"${ctrlEnvPrefix}STORAGE_PREFIX=$storagePrefix"'
+)) {
+    throw "Controller storage prefix does not use the selected value"
 }
 
 Write-Output "PASS: PowerShell installer selects one controller env contract by image version"

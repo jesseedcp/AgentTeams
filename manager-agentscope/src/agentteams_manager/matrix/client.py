@@ -445,8 +445,7 @@ class MatrixClient:
                 if not await self._refresh_token():
                     if refresh_attempts >= len(delays):
                         raise RuntimeError(
-                            "Matrix sync failed after three token "
-                            "refresh attempts",
+                            "Matrix sync failed after three token refresh attempts",
                         ) from exc
             except asyncio.CancelledError:
                 raise
@@ -455,9 +454,7 @@ class MatrixClient:
                 logger.exception(
                     "Matrix sync watchdog expired; rebuilding transport",
                     extra={
-                        "watchdog_seconds": (
-                            self.config.sync_watchdog_timeout_seconds
-                        ),
+                        "watchdog_seconds": (self.config.sync_watchdog_timeout_seconds),
                     },
                 )
                 await self._rebuild_client()
@@ -583,17 +580,15 @@ class MatrixClient:
         )
         relates_to = content.get("m.relates_to", {})
         relation_type = (
-            relates_to.get("rel_type")
-            if isinstance(relates_to, dict)
-            else None
+            relates_to.get("rel_type") if isinstance(relates_to, dict) else None
         )
-        is_bot_acknowledgement = (
-            content.get("io.agentteams.acknowledgement") is True
-        )
+        is_bot_acknowledgement = content.get("io.agentteams.acknowledgement") is True
+        is_transient = content.get("io.agentteams.transient") is True
         if (
             event_type == "m.room.redaction"
             or relation_type == "m.replace"
             or is_bot_acknowledgement
+            or is_transient
         ):
             return None
         body = getattr(event, "body", None) or content.get("body")
@@ -662,13 +657,9 @@ class MatrixClient:
                     ),
                     filename=body,
                     size=info.get("size"),
-                    encryption_key=(
-                        key.get("k") if isinstance(key, dict) else None
-                    ),
+                    encryption_key=(key.get("k") if isinstance(key, dict) else None),
                     encryption_hash=(
-                        hashes.get("sha256")
-                        if isinstance(hashes, dict)
-                        else None
+                        hashes.get("sha256") if isinstance(hashes, dict) else None
                     ),
                     encryption_iv=encrypted_file.get("iv"),
                 ),
@@ -980,8 +971,7 @@ def _is_unknown_token(value: object) -> bool:
     if isinstance(value, ErrorResponse):
         error_code = value.status_code
         return error_code == "M_UNKNOWN_TOKEN" or (
-            error_code in {"401", 401}
-            and "token" in value.message.lower()
+            error_code in {"401", 401} and "token" in value.message.lower()
         )
     error_code = getattr(value, "errcode", None)
     if error_code == "M_UNKNOWN_TOKEN":

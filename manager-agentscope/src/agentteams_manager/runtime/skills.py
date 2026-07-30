@@ -23,6 +23,7 @@ REQUIRED_MANAGER_SKILLS = frozenset(
         "matrix-server-management",
         "mcp-server-management",
         "mcporter",
+        "memory-management",
         "model-switch",
         "project-management",
         "service-publishing",

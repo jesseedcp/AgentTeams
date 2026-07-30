@@ -195,6 +195,9 @@ SQLite is authoritative for project tasks, dependencies, participants,
 transitions, and plan revisions. `plan.md` is a readable export, not a second
 state store.
 
+- `create_project` prepares the durable plan and Matrix room in `planning`.
+- `confirm_project_plan` records the administrator decision and activates task
+  dispatch. `/elevated full` and YOLO mode auto-confirm this step.
 - `request_project_revision` creates a linked rework task and holds dependent
   work until it completes.
 - `reassign_project_task` atomically changes the assignee, Worker Room, Matrix
@@ -231,6 +234,24 @@ boundary. Rooms parked on a pending global confirmation are excluded until
 that approval is resolved or expires. SQLite also stores bounded daily
 entries, curated long-term memory, project decisions, and Worker capability
 assessments; no Redis service is required.
+
+On the first turn of a new or reset AgentScope session, the runtime injects a
+bounded two-day memory projection before recent Matrix history. Global
+long-term entries and Worker assessments are included only in the
+administrator DM; Project Rooms receive only their room entries and bound
+project decisions. The projection is explicitly marked as historical context,
+so current Controller, Matrix, storage, task, and project facts must still be
+read through typed tools.
+
+`recall_manager_memory`, `remember_manager_memory`,
+`record_project_decision`, and `record_worker_assessment` are Admin-DM-only.
+Manually recorded project decisions remain private; only deterministic
+project-workflow decisions are eligible for the bound Project Room projection.
+Successful notifications are appended idempotently to daily SQLite memory,
+and deterministic project workflows record plan confirmation, plan revisions,
+participant changes, task-result decisions, and project closure. Memory
+tables are included in the verified SQLite snapshot, so they recover after
+loss of the local Manager database.
 
 The active tool list shown to the model comes from the concrete AgentScope
 Toolkit for that room. The checked-in `manager/agent/TOOLS.md` catalog is a

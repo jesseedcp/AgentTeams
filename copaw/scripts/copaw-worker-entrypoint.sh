@@ -4,8 +4,8 @@
 # or lite-copaw-worker.
 #
 # Mode selection:
-#   - AGENTTEAMS_CONSOLE_PORT set → standard mode
-#   - console port unset → lite mode
+#   - AGENTTEAMS_CONSOLE_PORT set: standard mode
+#   - console port unset: lite mode
 #
 # Environment variables (set by container_create_worker in container-api.sh):
 #   AGENTTEAMS_WORKER_NAME   - Worker name (required)
@@ -36,7 +36,7 @@ if [ -n "${TZ}" ] && [ -f "/usr/share/zoneinfo/${TZ}" ]; then
     log "Timezone set to ${TZ}"
 fi
 
-# ── Credential setup ─────────────────────────────────────────────────────────
+# Credential setup
 # Controller-mediated OSS: STS credentials via MC_HOST_${AGENTTEAMS_STORAGE_ALIAS:-agentteams}.
 # Local MinIO: explicit FS endpoint/key/secret passed via CLI args.
 if ensure_mc_credentials && agentteams_mc_host_configured; then

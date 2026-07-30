@@ -192,7 +192,7 @@ async def filesync(
         payload: dict[str, Any] = {
             "action": action,
             "path": resolved_path,
-            "localPath": str(resolved.local),
+            "localPath": resolved.local.as_posix(),
             "kind": resolved.kind,
         }
         if action == "push":

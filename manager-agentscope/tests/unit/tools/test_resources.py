@@ -310,7 +310,9 @@ async def test_create_worker_uses_typed_request_and_turn_context_once() -> None:
     assert request.name == "charlie"
     assert request.skills == ("review",)
     assert context == _context()
-    assert json.loads(chunk.content[0].text)["status"] == "succeeded"
+    receipt = json.loads(chunk.content[0].text)
+    assert receipt["status"] == "accepted"
+    assert receipt["result"]["background_provisioning"] is True
 
     with pytest.raises(Exception):
         await tool.call(
