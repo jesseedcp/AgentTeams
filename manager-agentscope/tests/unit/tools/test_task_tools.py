@@ -219,7 +219,7 @@ def test_project_change_tools_are_registered_with_closed_schemas() -> None:
 
 
 @pytest.mark.asyncio
-async def test_full_mode_auto_confirms_a_prepared_project() -> None:
+async def test_full_mode_keeps_a_prepared_project_planning() -> None:
     projects = Projects()
     toolkit = TaskToolkit(
         policy=_policy(
@@ -235,6 +235,39 @@ async def test_full_mode_auto_confirms_a_prepared_project() -> None:
         file_sync=FileSync(),
         git=Git(),
         context_provider=_context,
+    )
+
+    chunk = await toolkit.tools[0].call(
+        title="Project",
+        description="Ship it",
+        plan="Build then verify",
+        participants=["alice"],
+    )
+    result = json.loads(chunk.content[0].text)
+
+    assert result["status"] == "planning"
+    assert len(projects.created) == 1
+    assert projects.confirmed == []
+
+
+@pytest.mark.asyncio
+async def test_configured_yolo_auto_confirms_a_prepared_project() -> None:
+    projects = Projects()
+    toolkit = TaskToolkit(
+        policy=_policy(
+            kind=RoomKind.ADMIN_DM,
+            allowed_tools=frozenset({"create_project"}),
+            allowed_senders=frozenset({"@admin:example"}),
+            confirmation_mode="off",
+        ),
+        tasks=Tasks(),
+        projects=projects,
+        task_service=Tasks(),
+        project_service=projects,
+        file_sync=FileSync(),
+        git=Git(),
+        context_provider=_context,
+        yolo=True,
     )
 
     chunk = await toolkit.tools[0].call(

@@ -1015,10 +1015,7 @@ class TaskToolkit:
         )
         if (
             receipt.status == "planning"
-            and (
-                self._yolo
-                or self._policy.confirmation_mode == "full"
-            )
+            and self._yolo
         ):
             return await self._project_service.confirm_plan(
                 project_id=receipt.project_id,

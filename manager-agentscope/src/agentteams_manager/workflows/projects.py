@@ -473,6 +473,7 @@ class ProjectService:
         """Activate a prepared project after the plan decision is explicit."""
 
         project = await self._require_project(project_id)
+        confirmation_policy = "yolo" if auto_confirmed else "manual"
         if confirmed_by != self._admin_user_id:
             raise ConflictError("only the administrator may confirm a plan")
         if not project.room_id:
@@ -488,6 +489,7 @@ class ProjectService:
                 "project_id": project_id,
                 "confirmed_by": confirmed_by,
                 "auto_confirmed": auto_confirmed,
+                "confirmation_policy": confirmation_policy,
                 "source_room_id": context.room_id,
                 "source_event_id": context.event_id,
                 "source_tool_call_id": context.tool_call_id,
@@ -517,7 +519,7 @@ class ProjectService:
                     f"{project.metadata.get('plan_revision', 1)}"
                 ),
                 rationale=(
-                    "Automatically confirmed under full authority."
+                    "Automatically confirmed by configured YOLO policy."
                     if auto_confirmed
                     else "Explicitly confirmed by the administrator."
                 ),
@@ -538,6 +540,7 @@ class ProjectService:
                     "plan_confirmation_status": "confirmed",
                     "plan_confirmation_operation_id": operation.operation_id,
                     "plan_auto_confirmed": auto_confirmed,
+                    "plan_confirmation_policy": confirmation_policy,
                 },
             )
             project = changed or await self._require_project(project_id)
@@ -607,7 +610,7 @@ class ProjectService:
                 f"{project.metadata.get('plan_revision', 1)}"
             ),
             rationale=(
-                "Automatically confirmed under full authority."
+                "Automatically confirmed by configured YOLO policy."
                 if auto_confirmed
                 else "Explicitly confirmed by the administrator."
             ),

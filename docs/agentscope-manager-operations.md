@@ -197,7 +197,8 @@ state store.
 
 - `create_project` prepares the durable plan and Matrix room in `planning`.
 - `confirm_project_plan` records the administrator decision and activates task
-  dispatch. `/elevated full` and YOLO mode auto-confirm this step.
+  dispatch. `/elevated full` does not confirm this business decision; only
+  explicitly configured YOLO mode auto-confirms it.
 - `request_project_revision` creates a linked rework task and holds dependent
   work until it completes.
 - `reassign_project_task` atomically changes the assignee, Worker Room, Matrix
@@ -212,6 +213,46 @@ state store.
 
 Completing the final task closes the project and emits idempotent completion
 messages to the project room and original administrator room.
+
+### Resolved product-design bug: elevated mode also decided plan approval
+
+- Tracking ID: `PD-001`
+- Status: resolved
+- Priority: P1
+- Observed: 2026-07-31 during the Cinny end-to-end acceptance flow
+- Resolved: 2026-07-31
+
+Before this fix, `/elevated full` served two unrelated purposes: it bypassed
+authorization prompts for privileged tool execution, and it also made
+`create_project` confirm the project plan internally. As a result, an explicit
+administrator instruction to leave a project in `planning` could not be honored
+while the session is in `full` mode. The tool trace contained only
+`create_project`, even though the returned project is already `active`, which
+also makes the source of the business decision unclear in the UI.
+
+The elevated execution policy and project-plan decision must become independent
+settings. A session should be able to run privileged tools without repetitive
+authorization prompts while still requiring a deliberate project-plan
+confirmation. Fully unattended operation may still opt into automatic plan
+confirmation, but it must be an explicit plan-policy choice rather than an
+implicit side effect of `/elevated full`.
+
+The implementation now leaves projects in `planning` under `/elevated full`.
+Only explicit `AGENTTEAMS_YOLO=1` configuration selects automatic project-plan
+confirmation. Confirmation operations and project metadata record the policy
+source as `manual` or `yolo`.
+
+Acceptance criteria:
+
+1. With elevated execution enabled and plan confirmation set to manual,
+   `create_project` returns a `planning` project and does not activate it.
+2. With plan confirmation explicitly set to automatic, project activation is
+   recorded as an automatic decision with its policy source in the audit trail.
+3. An explicit request to keep a project in `planning` is never silently
+   overridden; the Manager either honors it or reports the policy conflict
+   before calling `create_project`.
+4. Project confirmation continues to leave task creation and dispatch as
+   separate, observable operations.
 
 ## Session commands and memory
 

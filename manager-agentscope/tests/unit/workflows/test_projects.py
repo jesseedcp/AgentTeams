@@ -29,9 +29,23 @@ from tests.fixtures.task_workflow import (
 )
 
 
+@pytest.mark.parametrize(
+    ("auto_confirmed", "expected_policy", "expected_rationale"),
+    (
+        (False, "manual", "Explicitly confirmed by the administrator."),
+        (
+            True,
+            "yolo",
+            "Automatically confirmed by configured YOLO policy.",
+        ),
+    ),
+)
 @pytest.mark.asyncio
 async def test_project_room_contains_admin_and_selected_workers(
     tmp_path: Path,
+    auto_confirmed: bool,
+    expected_policy: str,
+    expected_rationale: str,
 ) -> None:
     database = Database(tmp_path / "manager.db")
     await database.open()
@@ -133,13 +147,19 @@ async def test_project_room_contains_admin_and_selected_workers(
             event_id="$confirm",
             tool_call_id="confirm-project-plan",
         ),
+        auto_confirmed=auto_confirmed,
     )
     assert active.status == "active"
     assert active.confirmed_by == "@admin:example"
     assert active.confirmed_at == clock.now()
+    stored = await ProjectRepository(database).get(project.project_id)
+    assert stored is not None
+    assert stored.metadata["plan_auto_confirmed"] is auto_confirmed
+    assert stored.metadata["plan_confirmation_policy"] == expected_policy
     assert matrix.messages[-1]["text"].startswith(
         "[Project Plan Confirmed]",
     )
     decisions = await memory.project_decisions(project.project_id)
     assert len(decisions) == 1
     assert decisions[0].decision == "Confirmed project plan revision 1"
+    assert decisions[0].rationale == expected_rationale

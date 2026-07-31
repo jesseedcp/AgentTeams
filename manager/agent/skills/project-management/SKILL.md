@@ -33,10 +33,13 @@ Use only these typed operations:
 Assignments still go to Worker or Team Leader rooms. The project room receives
 progress summaries; it is not a substitute for the assignment room.
 
-In normal mode, present the returned planning project to the administrator in
-the Admin DM and stop. Do not add tasks until a later message explicitly
-confirms the plan. In `/elevated full` or configured YOLO mode, project
-creation auto-confirms and may proceed in the same turn.
+In every non-YOLO mode, including `/elevated full`, present the returned
+planning project to the administrator in the Admin DM and stop. Do not add
+tasks until a later message explicitly confirms the plan. `/elevated full`
+changes tool-level authorization only and does not confirm the plan. Only
+configured YOLO mode auto-confirms project creation and may proceed in the same
+turn. If the administrator explicitly requests `planning` while YOLO is
+configured, report the conflict before calling `create_project`.
 
 Read only the relevant reference:
 

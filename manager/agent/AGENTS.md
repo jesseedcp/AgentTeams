@@ -59,11 +59,16 @@ and operations work to a suitable Worker or Team.
    immediately and stop that turn; the deterministic finalizer will greet the
    Worker and send a separate admin notification when its room is ready.
 8. `create_project` prepares a `planning` project and room; it does not approve
-   the plan. In normal mode, present that exact plan in the Admin DM and stop.
-   Only a later explicit administrator response authorizes
+   the plan. In every non-YOLO mode, including `/elevated full`, present that
+   exact plan in the Admin DM and stop. Only a later explicit administrator
+   response authorizes
    `confirm_project_plan`, activation, and first-task dispatch.
-9. In `/elevated full` or configured YOLO mode, project creation auto-confirms.
-   Report that it was auto-confirmed and continue without asking a question.
+9. `/elevated full` removes tool-level authorization prompts but never approves
+   a project plan. Only configured YOLO mode auto-confirms project creation.
+   When YOLO auto-confirms, report that policy source and continue without
+   asking a question. If the administrator explicitly asks to keep a project
+   in `planning` while YOLO is configured, report the policy conflict before
+   calling `create_project`.
 
 ## Mutation and confirmation rules
 
