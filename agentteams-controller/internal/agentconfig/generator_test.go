@@ -271,6 +271,20 @@ func TestDefaultModelSpec(t *testing.T) {
 		t.Errorf("claude-opus-4-6 should have vision: %v", spec.Input)
 	}
 
+	deepSeek := defaultModelSpec("deepseek-v4-flash")
+	if deepSeek.ContextWindow != 1000000 {
+		t.Errorf("deepseek-v4-flash ctx = %d, want 1000000", deepSeek.ContextWindow)
+	}
+	if deepSeek.MaxTokens != 384000 {
+		t.Errorf("deepseek-v4-flash max = %d, want 384000", deepSeek.MaxTokens)
+	}
+	if !deepSeek.Reasoning {
+		t.Error("deepseek-v4-flash should support reasoning")
+	}
+	if len(deepSeek.Input) != 1 || deepSeek.Input[0] != "text" {
+		t.Errorf("deepseek-v4-flash should be text-only: %v", deepSeek.Input)
+	}
+
 	unknown := defaultModelSpec("unknown-model-xyz")
 	if unknown.ContextWindow != 150000 {
 		t.Errorf("unknown model ctx = %d, want 150000", unknown.ContextWindow)

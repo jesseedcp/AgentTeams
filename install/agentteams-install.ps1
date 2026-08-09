@@ -764,7 +764,8 @@ function Get-LanIP {
 $script:KnownModels = @(
     "gpt-5.4", "gpt-5.3-codex", "gpt-5-mini", "gpt-5-nano",
     "claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5",
-    "qwen3.6-plus", "qwen3.5-plus", "deepseek-chat", "deepseek-reasoner",
+    "qwen3.6-plus", "qwen3.5-plus", "deepseek-v4-flash", "deepseek-v4-pro",
+    "deepseek-chat", "deepseek-reasoner",
     "kimi-k2.5", "glm-5", "MiniMax-M2.7", "MiniMax-M2.7-highspeed", "MiniMax-M2.5"
 )
 
