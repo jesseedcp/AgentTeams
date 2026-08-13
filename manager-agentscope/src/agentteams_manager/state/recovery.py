@@ -1,4 +1,12 @@
-"""Restore SQLite and replay remote intent before normal operation."""
+"""Restore SQLite and replay remote intent before normal operation.
+
+在接收新 Matrix 消息前恢复 SQLite，并重放远端操作意图。
+
+若 PVC 中已有有效数据库，优先从其已应用 sequence 继续；本地状态丢失时则下载最新
+MinIO 快照，再按顺序重放后续 journal。重放只恢复确定性状态和待对账操作，不把超时
+自动判成失败。application 必须等这里完成后才启动 Matrix，否则旧操作与新指令可能
+交叉执行。
+"""
 
 from __future__ import annotations
 
@@ -16,6 +24,7 @@ ReplayEvent = Callable[[JournalEvent], Awaitable[None] | None]
 
 
 class RecoveryCoordinator:
+    """选择可信恢复起点，并按 sequence 重放其后的不可变事件。"""
     def __init__(
         self,
         *,

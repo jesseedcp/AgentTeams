@@ -1,3 +1,6 @@
+# 作用：验证 AgentScope Manager 的 Python 行为、Skill/镜像契约及 Linux/Windows 安装器兼容性。
+# 触发：Manager、提示词、安装器或相关契约变化时运行；静态 parity 防止代码、Skill 和镜像入口各自演进。
+# 测试使用仓库内 fixture 和占位配置，不把真实模型、Matrix 或管理员凭据写入日志和测试产物。
 name: AgentScope Manager Tests
 
 on:
@@ -46,6 +49,7 @@ permissions:
   contents: read
 
 jobs:
+  # Linux job 依次检查依赖锁定、pytest、静态契约和调试导出；任一步失败即阻断。
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -79,6 +83,7 @@ jobs:
       - name: Run debug-export compatibility tests
         run: python -m unittest scripts.tests.test_export_debug_log -v
 
+  # Windows 单独检查 PowerShell 路径、转义和旧环境变量兼容，这些问题 Linux 无法发现。
   test-windows-installer:
     runs-on: windows-latest
     timeout-minutes: 10

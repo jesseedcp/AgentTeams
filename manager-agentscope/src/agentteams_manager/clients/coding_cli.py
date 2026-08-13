@@ -1,4 +1,11 @@
-"""Bounded, shell-free execution of explicitly configured coding CLIs."""
+"""Bounded, shell-free execution of explicitly configured coding CLIs.
+
+在受限工作目录中执行显式允许的 Coding CLI。
+
+Manager 可以把编码任务委托给已配置的 CLI，但不会把模型生成的整段文本交给 shell。
+本模块使用固定可执行文件和参数列表、限制输出大小和运行时间，并在取消或超时时终止
+整个子进程组。返回的输出还要经过安全裁剪，避免把本机环境和凭据原样带回聊天。
+"""
 
 from __future__ import annotations
 

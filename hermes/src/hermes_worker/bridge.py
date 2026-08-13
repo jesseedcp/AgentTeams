@@ -24,6 +24,11 @@ Bridge-owned YAML blocks:
 Anything else the user puts in ``config.yaml`` (terminal backend, memory
 limits, mcp servers, skills paths) is preserved verbatim.
 """
+
+# 初学者导读：Controller 为不同 runtime 发布统一 openclaw.json，而 Hermes 读取
+# ``.env`` 与 ``config.yaml``。bridge 只翻译标为“归 Controller 管理”的字段，
+# 用户自定义的 Hermes 选项仍保留。这样既能让模型、Matrix 身份随期望状态更新，
+# 又不会在每次 Pod 重启时抹掉 Worker 自己的终端或记忆设置。
 from __future__ import annotations
 
 import logging
@@ -425,6 +430,8 @@ def bridge_openclaw_to_hermes(
       - Sets ``HERMES_HOME`` env var so subprocesses (mcporter, hermes-cli)
         pick up the same workspace.
     """
+    # owned block 使用整体替换，能让 Controller 删除一个旧字段；若只做递归追加，
+    # 已从期望状态移除的房间或模型选项会永远残留在 Worker 上。
     hermes_home.mkdir(parents=True, exist_ok=True)
 
     # ── .env ────────────────────────────────────────────────────────────

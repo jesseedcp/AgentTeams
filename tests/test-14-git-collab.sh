@@ -5,6 +5,9 @@
 #   Phase 2 (bob): review and request changes via a review branch
 #   Phase 3 (alice): fix based on review, update branch
 #   Phase 4 (charlie): add tests on a test branch
+# 初学者提示：本用例使用本地 bare repository 模拟远程 Git Server，因此无需 GitHub Token，但仍执行真实分支和提交操作。
+# 通过标准是四个阶段按依赖顺序产生可检查的提交图；fake 只替代外部托管服务，不会绕过 Git 本身。
+# 测试目录必须隔离，避免把测试分支或提交写进当前项目仓库。
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/test-helpers.sh"

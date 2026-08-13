@@ -1,4 +1,12 @@
-"""Validated, secret-safe Manager configuration."""
+"""Validated, secret-safe Manager configuration.
+
+定义并校验 Manager 启动配置和 Controller 下发的运行配置。
+
+外部输入不能直接散落到业务代码中：环境变量先被解析成 ``ManagerConfig``，远端
+运行文档先被解析成 ``RuntimeDocument``。Pydantic 在边界处拒绝缺失、格式错误或
+越界的数据；敏感值使用 ``SecretStr``，避免普通日志和对象打印意外泄露密钥。
+这些模型通过校验并不代表拥有权限，真正的房间和工具授权仍由 policy 决定。
+"""
 
 from __future__ import annotations
 

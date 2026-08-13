@@ -1,4 +1,11 @@
-"""Typed, read-only Nacos AgentSpec discovery."""
+"""Typed, read-only Nacos AgentSpec discovery.
+
+从 Nacos 只读发现可导入的 AgentSpec，并做严格结构校验。
+
+发现结果只是候选 Worker 定义，不会自动创建资源。本模块从不同 Nacos 响应形态中提取
+并排序候选，拒绝无效或含糊的数据，再把类型化结果交给资源导入 workflow。真正导入
+仍需要权限、确认和 Controller 写操作，避免外部注册中心直接控制集群。
+"""
 
 from __future__ import annotations
 

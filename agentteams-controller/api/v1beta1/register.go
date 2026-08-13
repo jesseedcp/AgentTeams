@@ -12,6 +12,8 @@ var (
 	AddToScheme        = SchemeBuilder.AddToScheme
 )
 
+// Resource 把资源复数名与 AgentTeams API group 组合成 Kubernetes
+// GroupResource，主要用于构造带正确 group/resource 的 API 错误。
 func Resource(resource string) schema.GroupResource {
 	return SchemeGroupVersion.WithResource(resource).GroupResource()
 }

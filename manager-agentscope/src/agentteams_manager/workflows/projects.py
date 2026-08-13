@@ -1,4 +1,12 @@
-"""Durable projects spanning SQLite, MinIO, Matrix, and task workflows."""
+"""Durable projects spanning SQLite, MinIO, Matrix, and task workflows.
+
+协调跨 SQLite、MinIO、Matrix 与 Task workflow 的完整 Project 生命周期。
+
+创建 Project 先保存 planning 记录与计划 artifact，再创建 Project Room；只有管理员后来
+明确确认计划，才进入 active 并开放 DAG 首批任务。参与者变更、计划修订、任务返修、
+重分配和关闭都保留版本与决策证据。``/elevated full`` 只跳过 tool 确认，不替代项目
+计划确认；只有显式 YOLO policy 可自动确认。
+"""
 
 from __future__ import annotations
 
@@ -202,7 +210,11 @@ class ProjectReceipt(BaseModel):
 
 
 class ProjectService:
-    """Prepare project artifacts before room creation and invitations."""
+    """维护 Project plan、参与者、DAG 和任务结果之间的一致性。
+
+    每次变更都保留 revision/decision；依赖节点只有在上游 accepted 后才 ready。需要返修时
+    创建关联替代 Task 并保持下游关闭，而不是篡改已经提交的原 Task 历史。
+    """
 
     def __init__(
         self,

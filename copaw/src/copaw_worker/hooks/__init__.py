@@ -1,4 +1,10 @@
-"""Runtime hooks for adapting upstream CoPaw behavior to AgentTeams."""
+"""用于把上游 CoPaw 行为约束到 AgentTeams Worker 边界的运行时 hooks。
+
+这些 hooks 处理凭据、消息和工具结果等跨边界数据；它们不改变 Manager 的审批或
+编排策略。集中安装能确保每种 CoPaw 启动模式得到相同保护。
+
+Runtime hooks for adapting upstream CoPaw behavior to AgentTeams.
+"""
 
 from __future__ import annotations
 

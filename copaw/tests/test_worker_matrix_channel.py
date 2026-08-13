@@ -1,5 +1,8 @@
 """Tests for the AgentTeams CoPaw worker Matrix channel."""
 
+# _FakeClient 记录发送事件，让测试准确检查 room_id、消息类型、thread/mention 内容及去重行为，
+# 而不依赖真实 homeserver。它防的是 CoPaw 适配层回归；登录、同步延迟和网络错误仍由端到端测试覆盖。
+
 import asyncio
 from types import SimpleNamespace
 

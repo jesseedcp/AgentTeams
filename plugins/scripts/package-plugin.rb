@@ -1,6 +1,10 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
+# 初学者导读：发布插件前先按 manifest 的 include 白名单复制文件到临时 staging，
+# 清除缓存/生成物，再产出可复现的 tar.gz。这里不打包整个仓库，避免把测试缓存、
+# 本地秘密或模型上下文之外的开发文件意外发布。打包前强制执行 validate-plugin.rb。
+
 require "fileutils"
 require "open3"
 require "pathname"

@@ -1,3 +1,5 @@
+{{- /* Cinny Deployment 只托管静态前端。checksum 注解让 ConfigMap 内容变化时触发
+滚动重建，否则 Pod 可能继续挂载/服务旧配置。 */ -}}
 {{- if .Values.cinny.enabled }}
 {{- $comp := dict "root" . "component" "cinny" }}
 apiVersion: apps/v1

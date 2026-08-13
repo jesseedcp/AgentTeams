@@ -8,6 +8,9 @@
 #   4. Verify openclaw.json, SOUL.md in MinIO
 #   5. Update worker (re-import with different model)
 #   6. Verify config updated, memory preserved, skills merged
+# 初学者提示：本用例特别区分“可更新配置”和“必须保留的用户数据”，防止更新 Worker 时粗暴覆盖整个目录。
+# 通过标准是模型/身份等声明发生预期变化，同时 memory 不丢失、内置与用户 Skill 正确合并。
+# MinIO 中的文件是运行时实际消费的结果，比只检查输入 YAML 更能发现生成器错误。
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/test-helpers.sh"

@@ -1,4 +1,12 @@
-"""Durable operation and idempotency repositories."""
+"""Durable operation and idempotency repositories.
+
+持久化 Operation 状态机、外部效果事件和 Matrix 消费 claim。
+
+每个 mutation 都用稳定 operation ID 从 planned 走向 prepared、dispatched、running，
+最终 succeeded/failed 或进入 reconciling。条件 UPDATE 相当于 compare-and-set：只有
+预期旧状态匹配才转换，防止并发恢复覆盖新结果。Matrix event claim 也存在这里，保证
+同步重放不会再次启动同一 turn。
+"""
 
 from __future__ import annotations
 
@@ -45,7 +53,12 @@ def _operation_from_row(row: sqlite3.Row) -> OperationRecord:
 
 
 class OperationRepository:
-    """Compare-and-swap state changes for recoverable operations."""
+    """用 compare-and-swap 持久化 Operation、事件及消费进度。
+
+    所有状态转换都带 ``expected`` 集合；返回 ``None`` 表示另一个执行者已推进状态，调用方
+    必须重新读取，而不能强行覆盖。journal sequence 与 applied sequence 分开记录，允许
+    崩溃后找出“已远端记录、尚未本地应用”的缺口。
+    """
 
     def __init__(self, database: Database) -> None:
         self._database = database

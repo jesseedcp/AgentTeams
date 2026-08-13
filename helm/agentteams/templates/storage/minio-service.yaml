@@ -1,3 +1,5 @@
+{{- /* 9000 是供程序使用的 S3 API，9001 是人工管理 Console；Agent 文件同步必须
+连接 API 端口，误用 Console 或 Higress HTTP 端口会表现为认证/协议错误。 */ -}}
 {{- if eq .Values.storage.provider "minio" }}
 {{- $comp := dict "root" . "component" "minio" }}
 apiVersion: v1

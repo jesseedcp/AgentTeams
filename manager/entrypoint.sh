@@ -1,10 +1,16 @@
 #!/bin/sh
+# AgentScope Manager 容器入口。Controller 已把 CR 中的期望配置投射为环境变量；
+# 这里先做 fail-fast 校验，再启动 Python 进程。若放过空变量，错误会延迟成 Matrix、
+# Gateway 或对象存储连接失败，难以判断根因。`exec` 让 Python 接管 PID 1，从而正确
+# 接收 Kubernetes 的终止信号并完成 SQLite/会话收尾。
 set -eu
 
 if [ "$#" -gt 0 ]; then
+    # 显式命令用于调试/测试镜像；正常部署没有参数，走下方标准启动链路。
     exec "$@"
 fi
 
+# 这些值来自 Helm Secret → Controller → Manager Pod，而不是镜像内置配置。
 required_environment="
 AGENTTEAMS_MANAGER_NAME
 AGENTTEAMS_MANAGER_MATRIX_USER_ID

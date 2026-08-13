@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""Install bundled QwenPaw plugins into an image-local working directory."""
+"""把镜像内置的 AgentTeams 插件安全安装到 QwenPaw 工作目录。
+
+这是启动时胶水，不是在线插件市场客户端。归档先解压到临时目录并验证目标路径，
+再替换正式目录；这样坏包或越界路径不会覆盖 Worker 工作区。安装标记用于重启时
+判断内容是否已一致，而不是改变 Agent 的提示词语义。
+
+Install bundled QwenPaw plugins into an image-local working directory.
+"""
 
 from __future__ import annotations
 

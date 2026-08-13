@@ -1,4 +1,11 @@
-"""I/O ports that keep workflows independent from infrastructure clients."""
+"""I/O ports that keep workflows independent from infrastructure clients.
+
+声明 workflow 所需的外部能力接口，而不是绑定具体 SDK。
+
+例如任务 workflow 只需要“上传 artifact”这一能力，不需要知道 MinIO 客户端如何认证。
+这种 Protocol 边界让生产环境接入真实 Matrix/Controller/MinIO，测试则接入可控 fake；
+workflow 因而可以专注顺序、幂等和恢复规则，不被传输细节污染。
+"""
 
 from __future__ import annotations
 

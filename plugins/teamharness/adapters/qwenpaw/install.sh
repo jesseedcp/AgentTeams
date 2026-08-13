@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# 构建并安装 QwenPaw 2 可识别的 TeamHarness 插件包。
+# 源目录先复制到 mktemp staging，Ruby builder 校验并产出包，再调用 qwenpaw CLI；
+# trap 始终清理临时文件，安装失败不会把 staging 当作正式插件目录。
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

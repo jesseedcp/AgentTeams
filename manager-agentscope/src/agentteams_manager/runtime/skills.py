@@ -1,4 +1,11 @@
-"""Load the retained Manager skill catalog through AgentScope."""
+"""Load the retained Manager skill catalog through AgentScope.
+
+加载并校验 Manager 的 skill guidance，再组装 AgentScope toolkit。
+
+Skill 文档告诉模型“何时、如何使用能力”，但自身不执行任何操作。真正 capability 必须
+有注册的 typed tool、room policy 和 deterministic workflow。本模块还验证预期 skill
+目录完整，避免镜像漏打包后 Manager 表面启动成功却失去关键操作说明。
+"""
 
 from __future__ import annotations
 

@@ -1,4 +1,8 @@
 """WorkerConfig: parsed from CLI args / env vars."""
+
+# 初学者导读：这里把 Kubernetes 环境变量收拢为一名 CoPaw Worker 的启动配置。
+# Worker 私有目录按 worker_name 隔离，团队 shared 目录则供协作产物共享；运行中
+# 变化的模型、身份与 Matrix 房间仍来自 Controller 发布的配置，而不是本类默认值。
 from __future__ import annotations
 
 import os
@@ -6,6 +10,7 @@ from pathlib import Path
 
 
 class WorkerConfig:
+    """CoPaw Worker 启动阶段所需的路径、存储连接和端口集合。"""
     def __init__(
         self,
         worker_name: str,

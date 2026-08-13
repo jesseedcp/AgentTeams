@@ -30,6 +30,10 @@ Output structure:
         ├── agentteams-worker-xxx.log
         └── agentteams-worker-xxx.state.json
 """
+# 初学者说明：此脚本只读采集 Matrix、Agent session 和容器日志，再生成便于排障的
+# 快照；它不会修复或重放状态。默认脱敏是安全边界，因为原始事件可能包含 API key、
+# Matrix token、用户消息和路径。只有在明确控制输出目录和访问权限时才可使用
+# --no-redact，生成物不得直接提交到 Git 或公开 issue。
 
 import argparse
 import json

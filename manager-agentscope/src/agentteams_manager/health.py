@@ -1,4 +1,12 @@
-"""Standard-library operational HTTP server."""
+"""Standard-library operational HTTP server.
+
+提供不依赖 Web 框架的健康检查、指标和只读运维 HTTP 接口。
+
+Kubernetes 通过 liveness 判断进程是否活着，通过 readiness 判断数据库恢复、配置、
+Matrix 和 heartbeat 是否都已就绪。readiness 不是“网页能打开”这么简单：只要关键
+依赖尚未准备好，就应拒绝把 Manager 当成可服务实例。管理快照会主动过滤敏感信息，
+避免排障页面变成凭据泄露入口。
+"""
 
 from __future__ import annotations
 

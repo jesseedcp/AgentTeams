@@ -1,4 +1,12 @@
-"""Build a deterministic system prompt from verified local sources."""
+"""Build a deterministic system prompt from verified local sources.
+
+从经过验证的本地文件确定性组合 Manager system prompt。
+
+AGENTS、SOUL、TOOLS 与 skills 是模型行为 guidance，不是 executable capability。
+本模块按固定顺序加载并限制大小，使同一 runtime revision 得到相同 prompt；真正允许
+调用哪些工具仍由 room policy 注入。不要在这里读取任意用户路径或 Secret，因为 prompt
+会发送给模型并可能出现在会话上下文中。
+"""
 
 from __future__ import annotations
 

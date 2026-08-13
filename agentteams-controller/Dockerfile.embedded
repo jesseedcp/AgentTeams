@@ -7,6 +7,11 @@
 # This image does NOT include the Manager Agent — it is created as a
 # separate container by the controller's ManagerReconciler via DockerBackend.
 #
+# embedded 只是把 Higress、Tuwunel、MinIO、Cinny 和 Controller 的基础设施打包进
+# 一个便于本机运行的容器。AgentScope Manager 仍是第二个独立容器，所有 Worker
+# 仍由 Controller 分别创建；因此“all-in-one”不等于把所有 Agent 进程混在一起。
+# 各前置 stage 只是复制二进制/静态文件的来源，不会在运行时额外常驻。
+#
 # Build args:
 #   HIGRESS_REGISTRY            - base image registry
 #   TUWUNEL_IMAGE               - Tuwunel image with shared-secret registration

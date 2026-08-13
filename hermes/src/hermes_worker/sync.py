@@ -18,6 +18,11 @@ File Sync Design Principle (mirrors copaw-worker):
   Remote -> Local (sync_loop pull_all): on-demand via file-sync skill when
     Manager @mentions, plus fallback periodic pull of Controller-managed paths.
 """
+
+# 初学者导读：Pod 重建会丢失本地文件，因此启动时从 MinIO 恢复一名 Worker 的
+# 标准工作区，运行中再保存 Agent 产生的会话、记忆和产物。Controller 管理文件
+# 以远端为准，Worker 管理文件以本地变化为准；合并规则保护本地 Matrix token，
+# 同时不允许旧本地模型覆盖 Controller 的新模型。shared 是协作边界，不是私聊备份。
 from __future__ import annotations
 
 import asyncio
@@ -145,7 +150,10 @@ _STARTUP_SYNC_FILES = (
 
 
 class FileSync:
-    """MinIO file sync using mc CLI."""
+    """MinIO file sync using mc CLI.
+
+    维护 Hermes Worker 私有前缀、Controller 文件与 shared 数据的同步边界。
+    """
 
     def __init__(
         self,

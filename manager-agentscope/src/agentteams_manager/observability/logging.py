@@ -1,4 +1,11 @@
-"""Secret-safe structured JSON logging."""
+"""Secret-safe structured JSON logging.
+
+输出便于检索且默认脱敏的结构化 JSON 日志。
+
+同一个 operation 会跨 Matrix、Controller 和 MinIO，结构化字段可用稳定 ID 串起整条
+链路。但日志通常被长期保存，因此在序列化前按敏感字段名递归替换 token、password、
+authorization 等内容；排障价值不能以泄露 Secret 为代价。
+"""
 
 from __future__ import annotations
 
@@ -92,4 +99,3 @@ def configure_logging(level: str = "INFO") -> None:
     root.handlers.clear()
     root.addHandler(handler)
     root.setLevel(level.upper())
-

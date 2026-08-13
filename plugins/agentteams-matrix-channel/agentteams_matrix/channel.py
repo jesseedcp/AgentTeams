@@ -1,6 +1,12 @@
 # -*- coding: utf-8 -*-
 """AgentTeams-owned Matrix channel for QwenPaw 2."""
 
+# 初学者导读：这个长连接是 QwenPaw Worker 与 Matrix homeserver 的传输边界。
+# 入站链路为“同步事件 → 校验房间/发送者/提及 → 下载媒体 → 交给 QwenPaw Agent”；
+# 出站链路为“Agent 内容 → 脱敏/线程/mention/长消息处理 → 写回原房间”。登录 token、
+# sync token 与加密设备状态需要落盘，Pod 重启后才能从上次位置继续而不重复处理消息。
+# Manager 也使用 Matrix，但其管理权限来自 AgentScope room policy，不由此 channel 提供。
+
 from __future__ import annotations
 
 import asyncio
@@ -301,7 +307,10 @@ DEFAULT_HISTORY_LIMIT = 50
 
 
 class QwenPawMatrixClient(AsyncClient):
-    """Keep query-token auth for homeservers/proxies that drop auth headers."""
+    """Keep query-token auth for homeservers/proxies that drop auth headers.
+
+    同时给 matrix-nio 客户端增加 AgentTeams 所需的请求重试与超时边界。
+    """
 
     async def send(
         self,
@@ -346,7 +355,14 @@ class HistoryEntry:
 
 
 class AgentTeamsMatrixChannel(BaseChannel):
-    """QwenPaw channel that connects to a Matrix homeserver via matrix-nio."""
+    """维护 QwenPaw Worker 的 Matrix 登录、同步、房间策略与回复发送。
+
+    一个 channel 实例对应一个 Matrix 身份，但可服务多个房间；session_id 必须按
+    房间/发送者稳定计算，不能把不同房间历史混进同一模型上下文。停止时会取消
+    后台任务并保存 sync token，以便重启恢复。
+
+    QwenPaw channel that connects to a Matrix homeserver via matrix-nio.
+    """
 
     channel = CHANNEL_KEY  # type: ignore[assignment]
     uses_manager_queue: bool = True

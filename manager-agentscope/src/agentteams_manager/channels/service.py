@@ -1,4 +1,11 @@
-"""Durable first-contact and trusted-channel policy."""
+"""Durable first-contact and trusted-channel policy.
+
+持久化外部联系人的首次接触状态，并执行可信渠道策略。
+
+一个陌生账号第一次发来消息时，系统必须先记录来源和待审核状态，不能立即把内容当作
+管理员指令。管理员确认后，同一稳定联系人才能进入绑定的 Matrix 房间。SQLite 记录
+使重启不会忘记信任决定；平台显示名等可变字段不能代替稳定 provider ID 作为身份。
+"""
 
 from __future__ import annotations
 

@@ -1,5 +1,9 @@
 {{/*
 Chart name.
+
+helpers 相当于模板的公共函数库：统一生成名称、标签、镜像地址和 Service DNS。
+它自身不渲染资源。集中在这里是为了避免同一个组件在 Secret、Service 和 Pod 中
+算出不同名字，导致 Pod 找不到配置或网络端点。
 */}}
 {{- define "agentteams.name" -}}
 {{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" -}}

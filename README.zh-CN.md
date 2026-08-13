@@ -491,10 +491,13 @@ python scripts/export-debug-log.py --range 1h
 | | |
 |---|---|
 | [docs/zh-cn/quickstart.md](docs/zh-cn/quickstart.md) | 端到端快速入门，含验证检查点 |
+| [docs/zh-cn/beginner-code-guide.md](docs/zh-cn/beginner-code-guide.md) | 面向初学者，沿一条真实消息理解完整代码链路 |
 | [docs/zh-cn/architecture.md](docs/zh-cn/architecture.md) | 系统架构详解 |
 | [docs/zh-cn/manager-guide.md](docs/zh-cn/manager-guide.md) | Manager 配置与使用 |
 | [docs/zh-cn/worker-guide.md](docs/zh-cn/worker-guide.md) | Worker 部署与故障排查 |
 | [docs/zh-cn/development.md](docs/zh-cn/development.md) | 贡献指南与本地开发 |
+| [docs/zh-cn/commenting-guide.md](docs/zh-cn/commenting-guide.md) | 中文注释规范、覆盖矩阵与排除边界 |
+| [CONTEXT.md](CONTEXT.md) | AgentTeams 领域术语及统一用词 |
 | [docs/zh-cn/faq.md](docs/zh-cn/faq.md) | 常见问题 |
 
 ## 构建与测试

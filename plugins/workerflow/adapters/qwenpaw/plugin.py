@@ -1,5 +1,9 @@
 """WorkerFlow integration implemented with QwenPaw 2 public plugin APIs."""
 
+# 初学者导读：这个薄适配器注册 WorkerFlow 技能和 reload/health 端点；实际临时
+# Agent/DAG 状态机位于 MCP server。使用公共 API 可避免把 QwenPaw 上游内部实现
+# 复制进项目，也明确 WorkerFlow 不会创建正式 TeamHarness Worker。
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -13,6 +17,7 @@ if not (ASSET_DIR / "plugin.yaml").exists():
 
 
 class WorkerFlowPlugin:
+    """把 WorkerFlow 能力注册到当前 QwenPaw Worker，而非 AgentScope Manager。"""
     def register(self, api: Any) -> None:
         api.register_skill_provider(
             ASSET_DIR / "skills" / "agent",

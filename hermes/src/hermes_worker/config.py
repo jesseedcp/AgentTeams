@@ -1,10 +1,15 @@
 """WorkerConfig: parsed from CLI args / env vars."""
+
+# 初学者导读：Kubernetes 把某个 Hermes Worker 的名字、MinIO 连接和同步周期注入
+# 进程，这里统一计算该成员的私有工作区与 ``HERMES_HOME``。路径按 worker_name
+# 隔离，避免不同成员恢复到同一个会话目录；模型和房间等可变状态不在这里决定。
 from __future__ import annotations
 
 from pathlib import Path
 
 
 class WorkerConfig:
+    """Hermes Worker 启动所需的本地路径和对象存储连接参数。"""
     def __init__(
         self,
         worker_name: str,

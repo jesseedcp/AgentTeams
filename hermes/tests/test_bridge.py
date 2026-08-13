@@ -1,5 +1,8 @@
 """Tests for hermes worker config bridging."""
 
+# 以一份 OpenClaw 风格输入为例，桥接器要把 Matrix、模型、视觉能力和文件路径转成 Hermes 能读取的 YAML。
+# 测试写入临时目录并检查最终文件，不会修改用户配置；通过标准是字段语义保留且 API Key 不被额外泄漏。
+
 from __future__ import annotations
 
 import tempfile

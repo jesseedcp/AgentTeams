@@ -1,4 +1,11 @@
-"""Recoverable coding CLI delegation over leased task workspaces."""
+"""Recoverable coding CLI delegation over leased task workspaces.
+
+在带 processing lease 的任务 workspace 中执行可恢复 Coding CLI 委托。
+
+workflow 先验证 Task 和 artifact，再取得 lease、记录外部效果意图，最后运行 CLI 并发布
+结果。CLI 超时可能留下进程或部分文件，因此不能简单重复；恢复会检查 operation event、
+lease 与结果 artifact，判断是已完成、可安全继续还是需要人工关注。
+"""
 
 from __future__ import annotations
 

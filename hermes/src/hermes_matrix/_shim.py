@@ -5,6 +5,10 @@ The image build renames hermes-agent's original Matrix module to
 for ``gateway.run._create_adapter`` while swapping in AgentTeams's subclassed
 ``MatrixAdapter``.
 """
+
+# 初学者导读：shim（薄转接层）保留上游 import 路径，使 Hermes 无需知道自己正在
+# AgentTeams 中运行；除 MatrixAdapter 替换为带策略的子类外，其余名称全部转发给
+# 上游模块。这比修改 vendor 源码稳定，升级时也容易看清我们真正改变了什么。
 from __future__ import annotations
 
 from gateway.platforms import _matrix_native as _native

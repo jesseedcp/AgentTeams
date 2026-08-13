@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 
+# 静态发布门禁：确保活跃代码、路径和默认配置不再泄漏退役品牌或旧 Manager 路径。
+# 这里使用 git grep/ls-files，只扫描 Git 跟踪内容，不启动服务；任一命中都表示重命名尚未完整。
+# blog/changelog 是历史记录，允许保留原文，因此被显式排除，不能把排除范围扩大到运行代码。
+
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

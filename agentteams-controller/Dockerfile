@@ -5,6 +5,12 @@
 # Manager Dockerfile copies these artifacts via: COPY --from=agentteams-controller ...
 #
 # Since v0.2: includes merged worker lifecycle, auth, credentials, and proxy.
+#
+# 初学者说明：builder 负责编译 Controller 与 typed `agt` CLI；mc/kube-bin 阶段只
+# 提供现成二进制；最终镜像把它们组合起来。多阶段 `FROM` 不是启动多个容器。
+# Controller 是一个 Manager、多 Worker 的控制面：它根据 CR 创建/更新各 Agent
+# Pod，自己不承担 LLM 对话。Controller 开启 CGO 是为了 SQLite/kine 依赖；agt
+# 不需要 CGO，因此可构建为更易移植的静态工具。
 
 ARG HIGRESS_REGISTRY=higress-registry.cn-hangzhou.cr.aliyuncs.com
 

@@ -1,5 +1,8 @@
 #!/bin/bash
 # test-05-heartbeat.sh - AgentScope deterministic heartbeat and snapshot gate
+# 测试意图：确认心跳不是“进程还活着”的空检查，而会更新指标并把可恢复快照写入持久化存储。
+# 通过标准是 readyz、heartbeat 指标和 MinIO 快照共同满足契约；任一缺失都可能导致重启后无法恢复。
+# 本用例直接观察容器内部端点，因此比只访问外部 HTTP 更能定位 Manager 运行时故障。
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/test-helpers.sh"

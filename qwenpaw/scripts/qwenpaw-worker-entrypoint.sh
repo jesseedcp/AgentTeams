@@ -10,6 +10,11 @@
 #   AGENTTEAMS_RUNTIME       - "k8s" for controller-managed mc-wrapper storage access
 #   AGENTTEAMS_CONSOLE_PORT - Optional web console port; absent means headless
 #   TZ                      - Timezone (optional)
+#
+# 这里读取 Controller 根据 Worker CR 生成的 runtime.yaml 和身份配置，准备 MinIO/OSS
+# workspace 后再启动 QwenPaw。可选 Console 只增加观察入口，不改变它仍是单个
+# Worker 的事实。WORKER_CR_NAME 是 Kubernetes 资源名，WORKER_NAME 是用户身份名；
+# 两者可能经过规范化，不能在调用 Controller API 时随意互换。
 
 set -e
 

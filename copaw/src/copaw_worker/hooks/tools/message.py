@@ -1,5 +1,9 @@
 """OpenClaw-compatible message tool for the AgentTeams CoPaw runtime."""
 
+# 初学者导读：Worker 用它向指定 Matrix 房间或成员发送协调消息。工具会校验目标、
+# 构造 Matrix mention，并把出站消息补记到当前 session，保证 Agent 下一轮知道自己
+# 已经说过什么。它不能借短昵称绕过房间权限，也不能替 Manager 执行管理操作。
+
 from __future__ import annotations
 
 import asyncio

@@ -1,4 +1,11 @@
-"""Bounded SQLite memory for sessions, projects, and Worker evidence."""
+"""Bounded SQLite memory for sessions, projects, and Worker evidence.
+
+在 SQLite 中保存有界的 Manager 记忆、项目决策和 Worker 证据。
+
+记忆用于补充下一次模型上下文，但不是实时权威状态。记录按 scope 与来源建立稳定 ID，
+限制正文长度和召回数量，并把管理员私有记忆与 Project Room 可见决策分开。任何会变化
+的 Worker、Task 或 Project 状态在执行前仍必须重新查询对应 typed tool。
+"""
 
 from __future__ import annotations
 

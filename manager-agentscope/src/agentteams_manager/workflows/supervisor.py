@@ -1,4 +1,12 @@
-"""Recoverable sequencing for every cross-system side effect."""
+"""Recoverable sequencing for every cross-system side effect.
+
+为所有跨系统外部效果提供统一的 durable Operation 编排。
+
+规则是“先写 intent/journal，再调用外部系统，最后写 outcome”。收到明确成功可进入
+succeeded，明确业务失败可进入 failed；网络超时或进程中断属于 ambiguous，必须进入
+reconciling，由对应 handler 查询外部真实状态。稳定 operation ID 与按 target 加锁共同
+保证重试和并发请求不会重复修改同一资源。
+"""
 
 from __future__ import annotations
 
@@ -48,7 +56,12 @@ def redact(value: object, *, key: str = "") -> object:
 
 
 class OperationSupervisor:
-    """Persist intent, classify ambiguity, and serialize reconciliation."""
+    """持久化意图、区分确定/歧义结果，并串行化同目标恢复。
+
+    ``before_effect`` 必须先于任何外部 I/O；``effect_succeeded`` 只接受可证明的回执；
+    ``effect_ambiguous`` 用于 timeout、断线等“不知道是否已发生”的情况。``recover_all``
+    按 operation kind 选择 typed reconciler，并按 target 加锁，恢复过程本身也可安全重跑。
+    """
 
     def __init__(
         self,
@@ -77,6 +90,7 @@ class OperationSupervisor:
         target_key: str,
         request: dict[str, object],
     ) -> OperationRecord:
+        """创建或复用同一稳定 ID 的 Operation，并验证请求身份没有碰撞。"""
         lock = await self._lock_for(f"operation/{operation_id}")
         async with lock:
             existing = await self._operations.get(operation_id)
@@ -163,6 +177,7 @@ class OperationSupervisor:
         effect: ExternalEffect,
         request: dict[str, object],
     ) -> JournalEvent:
+        """在外部调用前把脱敏请求持久化为 ``effect_planned``。"""
         async with self._journal_guard:
             return await self._before_effect(
                 operation_id,
@@ -422,6 +437,7 @@ class OperationSupervisor:
         effect: ExternalEffect,
         reason: str,
     ) -> OperationRecord:
+        """把无法证明成功或失败的调用转入 reconciliation，而非重试。"""
         async with self._journal_guard:
             return await self._effect_ambiguous(
                 operation_id,
@@ -469,6 +485,7 @@ class OperationSupervisor:
         return result
 
     async def recover_all(self) -> RecoveryReport:
+        """扫描所有非终态 Operation，并交给对应 typed reconciler 对账。"""
         operations = await self._operations.list_recoverable()
         reconciled = 0
         needs_attention: list[str] = []

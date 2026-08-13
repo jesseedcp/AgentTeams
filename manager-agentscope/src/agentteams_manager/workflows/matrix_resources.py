@@ -1,4 +1,11 @@
-"""Crash-safe workflows for Matrix administration and channel policy."""
+"""Crash-safe workflows for Matrix administration and channel policy.
+
+以可恢复步骤创建 Matrix 房间、成员关系和外部渠道绑定。
+
+创建房间、设置名称/主题、邀请用户是多个独立外部效果，任一步后都可能崩溃。workflow
+为每一步记录 intent 与 receipt，恢复时查询房间和成员实际状态并从缺失步骤继续。稳定
+alias 必须最终指向当前 room，旧房间不能继续被当作活跃资源。
+"""
 
 from __future__ import annotations
 

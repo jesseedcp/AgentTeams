@@ -1,5 +1,9 @@
 #!/bin/bash
 # agentteams-env.sh - Unified environment bootstrap for AgentTeams scripts
+# 初学者导读：Manager 和不同 Worker 镜像都需要 Matrix、Higress 与对象存储地址，
+# 本文件把“云上/Kubernetes/Docker 本地”差异收敛成同一组 AGENTTEAMS_* 变量。
+# 调用方应 source 本文件，而不是各自猜地址；这样环境切换只改一处。凭据只导出给
+# 当前进程，不应打印到日志或写进会进入模型上下文的文件。
 #
 # Single source of truth for both Manager and Worker containers.
 # Source this file instead of manually setting up Matrix/storage variables.

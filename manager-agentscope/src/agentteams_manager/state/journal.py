@@ -1,4 +1,11 @@
-"""Immutable MinIO/S3 recovery journal and verified snapshots."""
+"""Immutable MinIO/S3 recovery journal and verified snapshots.
+
+在 MinIO/S3 中保存不可变操作 journal 和经过校验的 SQLite 快照。
+
+本地 PVC 丢失时，Manager 先下载最新快照，再按 sequence 重放之后的事件。journal 对象
+使用只增不改的 key 和条件写入，payload 在写入前已脱敏；快照附带大小与 SHA-256，
+校验失败不会替换本地数据库。它是灾难恢复记录，不是聊天历史或 Secret 存储。
+"""
 
 from __future__ import annotations
 

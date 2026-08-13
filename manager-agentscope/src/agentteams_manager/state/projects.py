@@ -1,4 +1,11 @@
-"""Durable project records independent from Matrix and MinIO."""
+"""Durable project records independent from Matrix and MinIO.
+
+保存 Project 生命周期、计划版本和参与者的本地事务记录。
+
+Project 的对话房间属于 Matrix，artifact 属于 MinIO，资源期望状态可能来自 Controller；
+本表保存 Manager 协调这些系统时所需的 project ID、planning/active 等状态和已确认计划
+版本。它不是独占真相，workflow 会将本地记录与各权威系统对账后才报告成功。
+"""
 
 from __future__ import annotations
 

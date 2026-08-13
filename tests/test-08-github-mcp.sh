@@ -2,6 +2,9 @@
 # test-08-github-mcp.sh - Case 8: GitHub operations via MCP Server
 # Verifies: Worker can read repo, create branch, create file, create PR
 #           via Higress MCP Server (using mcporter)
+# 测试意图：验证 GitHub MCP 的真实读写闭环，而不是只检查工具名称是否出现在配置中。
+# 通过标准是仓库读取、分支、文件和 PR 在 GitHub 上实际存在；因此本测试有外部副作用且需要专用测试仓库/凭据。
+# 缺少 GitHub 或 LLM Secret 时应跳过，不能用占位 Token 冒充一次成功的集成测试。
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/test-helpers.sh"

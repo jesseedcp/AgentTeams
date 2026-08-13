@@ -1,6 +1,9 @@
 #!/bin/bash
 # test-06-multi-worker.sh - Case 6: Create Bob, assign collaborative task
 # Verifies: Second Worker creation, both Workers collaborate via shared MinIO files
+# 测试意图：在 Alice 之外创建 Bob，并让两个独立 Worker 通过共享文件完成协作，防止系统退化为单 Worker 对话。
+# 通过标准包括 Bob 的资源创建、两方实际参与以及共享结果落盘；Manager 单方面声称“已协作”不算通过。
+# 本用例依赖早期用例留下的 Alice，因此完整验收应通过 run-all-tests.sh 按序运行。
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/test-helpers.sh"

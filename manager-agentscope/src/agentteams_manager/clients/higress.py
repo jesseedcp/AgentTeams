@@ -1,4 +1,11 @@
-"""Typed, secret-safe administration of local Higress MCP routes."""
+"""Typed, secret-safe administration of local Higress MCP routes.
+
+类型化管理 Higress 的模型、MCP、Consumer 与服务路由。
+
+workflow 把期望状态交给这里，本模块负责构造受支持的 Higress 请求、解析实际状态，
+并在返回对象中隐藏令牌和认证头。写请求超时具有歧义：Higress 可能已经应用配置，
+所以调用方必须随后读取并比较期望状态，不能因为没收到 HTTP 回应就立即重复创建。
+"""
 
 from __future__ import annotations
 

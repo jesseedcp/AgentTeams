@@ -2,6 +2,9 @@
 # test-10-mcp-permission.sh - Case 10: MCP permission dynamic revoke/restore
 # Verifies: Manager can revoke Alice's GitHub MCP access, Alice gets 403,
 #           then restore access and it works again
+# 测试意图：验证 MCP 权限修改会真正作用于网关，而不是只更新 Controller 中的一段声明状态。
+# 通过标准依次为：原先可访问、撤销后被明确拒绝、恢复后再次成功；少任何一段都无法证明动态权限有效。
+# 这里期待的 403 是安全门禁正常工作的证据，不应被测试辅助函数当成普通网络失败吞掉。
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/test-helpers.sh"

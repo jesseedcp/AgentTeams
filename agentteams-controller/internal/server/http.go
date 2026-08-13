@@ -42,6 +42,10 @@ type HTTPServer struct {
 	server *http.Server
 }
 
+// NewHTTPServer 组装 Controller 的所有 REST 路由及认证/授权中间件。
+// 路由在这里集中注册，让审查者能直接看到哪些 endpoint 是公开健康
+// 检查，哪些需要某个 Action。新增 handler 时不得绕过 RequireAuthz 仅依赖
+// 前端不显示按钮，因为攻击者可以直接发 HTTP 请求。
 func NewHTTPServer(addr string, deps ServerDeps) *HTTPServer {
 	mux := http.NewServeMux()
 	s := &HTTPServer{
@@ -141,6 +145,9 @@ func NewHTTPServer(addr string, deps ServerDeps) *HTTPServer {
 	return s
 }
 
+// Start 在当前 goroutine 中启动 HTTP 服务并持续阻塞，直到 Shutdown
+// 被调用或监听失败。因此 App 通常在独立 goroutine 运行它，同时由
+// 上层 context 管理统一退出。
 func (s *HTTPServer) Start() error {
 	logger := log.Log.WithName("http-server")
 	logger.Info("starting unified REST API server", "addr", s.Addr)

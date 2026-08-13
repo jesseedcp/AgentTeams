@@ -1,4 +1,12 @@
-"""Controller-fact reconciliation and Matrix topology materialization."""
+"""Controller-fact reconciliation and Matrix topology materialization.
+
+协调 Controller 资源事实与 Matrix 房间拓扑的创建、更新和删除。
+
+以 create_worker 为例：先在 Operation 中记录请求，再调用 Controller；返回超时不能
+断言失败，而要 list/get Worker 核验。Controller Ready 后异步建立 Worker Room、邀请
+成员、写入 topology 并通知 Admin。删除和更新也按实际资源状态对账，避免重复效果或
+保留指向旧 room 的绑定。
+"""
 
 from __future__ import annotations
 
@@ -452,7 +460,12 @@ class TeamSpec(BaseModel):
 
 
 class ResourceService:
-    """Run Worker mutations as durable, fact-proved workflows."""
+    """通过可恢复 workflow 管理 Controller 资源及其 Matrix 拓扑。
+
+    create/update/delete 的成功边界不是 client 返回，而是 Controller desired/observed state
+    和必要房间绑定都已核验。Worker 创建采用异步 finalizer：先向管理员返回 accepted，
+    Ready 后再独立创建房间和通知，避免一次模型 turn 长时间等待 Pod。
+    """
 
     def __init__(
         self,

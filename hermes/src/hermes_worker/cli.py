@@ -1,4 +1,7 @@
 """CLI entry point: ``hermes-worker``."""
+
+# 初学者导读：容器入口把参数交给此 CLI，CLI 组装 WorkerConfig 后进入 asyncio
+# 生命周期。它只负责启动一名已有 Worker，不创建 Team、Project 或其他 Worker。
 from __future__ import annotations
 
 import asyncio

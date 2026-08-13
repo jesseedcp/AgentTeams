@@ -8,6 +8,9 @@
 #
 # Built-in baseline skills (file-sync, etc.) are always pushed for every
 # Worker regardless of --skills; the flag controls *on-demand* skills
+# 测试意图：验证 CLI 的 Skill 声明经过 Controller 后，既反映在资源状态，也真正同步到 Worker 文件系统。
+# 通过标准包括内置 Skill 始终保留、用户 Skill 可增删且两层状态一致，防止只更新 CR 或只写文件。
+# 该测试不用 LLM，因为目标是确定性的配置传播，而不是模型是否会主动选择 Skill。
 # pulled from manager/agent/worker-skills/. This test exercises the
 # on-demand path with github-operations → git-delegation.
 #

@@ -28,6 +28,9 @@ type HigressClient struct {
 }
 
 // NewHigressClient creates a gateway Client for Higress Console API.
+// NewHigressClient 创建 Higress Console API 客户端。传入 nil httpClient 时使用
+// 带 30 秒超时的默认客户端，避免 Higress 故障时一次 reconcile 无期挂起。
+// 测试可注入自定义 client/transport，不需真实网关。
 func NewHigressClient(cfg Config, httpClient *http.Client) *HigressClient {
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: 30 * time.Second}
@@ -138,6 +141,10 @@ func (c *HigressClient) changePasswordLocked(ctx context.Context, oldPassword, n
 	return fmt.Errorf("higress change password failed: HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
 }
 
+// EnsureConsumer 确保指定 bearer key 的 Higress consumer 存在。
+// HTTP 409 在这个 Ensure 语义中表示期望状态已满足，而不是需要不断重试
+// 的硬错误。但 Console API 成功可早于数据面认证配置生效，调用者若紧接着
+// 发模型请求，还需要 readiness 检查或重试。
 func (c *HigressClient) EnsureConsumer(ctx context.Context, req ConsumerRequest) (*ConsumerResult, error) {
 	body := map[string]interface{}{
 		"name": req.Name,

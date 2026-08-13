@@ -1,4 +1,11 @@
-"""Matrix escalation edge for external channel messages."""
+"""Matrix escalation edge for external channel messages.
+
+把需要人工或 Manager 介入的外部渠道消息升级到 Matrix。
+
+外部联系人不能直接获得 Manager 的完整管理能力。本模块把可信渠道事件送入预先绑定
+的 Matrix 房间，让后续处理继续经过房间 policy、审计和会话隔离。它是渠道与 Matrix
+之间的边缘适配层，不负责决定联系人是否可信，也不在本地伪造 Matrix 身份。
+"""
 
 from __future__ import annotations
 

@@ -16,6 +16,9 @@
 #   LITE_COPAW_REPO   - lite CoPaw git repo URL
 #   LITE_COPAW_COMMIT - lite CoPaw git commit hash
 # ============================================================
+# 该镜像只用于 CoPaw Worker，不可作为 Manager。两个 venv 隔离 standard/lite 的
+# 依赖版本，但单个容器启动时只会根据 console 配置选择其中一种。mc 与共享脚本
+# 保证它和其他 runtime 遵守相同对象存储契约，Controller 镜像只提供 `agt` 工具。
 
 ARG HIGRESS_REGISTRY=higress-registry.cn-hangzhou.cr.aliyuncs.com
 ARG AGENTTEAMS_CONTROLLER_IMAGE=agentteams/agentteams-controller:latest

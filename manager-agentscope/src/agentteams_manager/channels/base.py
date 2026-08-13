@@ -1,4 +1,12 @@
-"""Provider-neutral external channel contracts."""
+"""Provider-neutral external channel contracts.
+
+定义 Telegram、Slack 等外部聊天渠道共同遵守的数据边界。
+
+每个平台的 webhook 格式不同，本模块先把它们统一成 ``ChannelMessage``、联系人和
+发送回执等中立模型。后续信任判断与 Matrix 升级流程只依赖这些模型，因此不需要在
+每条业务链路中分别理解六种平台协议；平台签名校验仍由各自 adapter 在进入此边界前
+完成。
+"""
 
 from __future__ import annotations
 

@@ -2,6 +2,9 @@
 AgentTeams — {{ .Chart.Name }} / {{ .Release.Name }}
 ========================================================================
 
+说明：下面的 port-forward 不是复制或另起一个服务，而是在本机临时建立到集群
+Service 的通道；终端关闭、Pod 重启或 Docker/kind 停止后，这条通道都会失效。
+
 Namespace: {{ include "agentteams.namespace" . }}
 
 1. Access services via Higress Gateway:

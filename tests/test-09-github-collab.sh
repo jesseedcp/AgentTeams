@@ -1,6 +1,9 @@
 #!/bin/bash
 # test-09-github-collab.sh - Case 9: Multi-Worker GitHub collaboration
 # Verifies: Alice and Bob create separate branches and PRs for a shared project
+# 测试意图：确认两个 Worker 的 GitHub 工作区、分支和身份不会串线，并能围绕同一目标分别提交成果。
+# 通过标准是在真实远程仓库看到两条可区分的分支/PR 及正确作者链路；一方代替另一方完成不算协作通过。
+# 该用例会创建远程资源，测试名称与分支前缀用于隔离和后续清理。
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/test-helpers.sh"

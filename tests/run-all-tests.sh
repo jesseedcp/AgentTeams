@@ -7,6 +7,10 @@
 #   ./tests/run-all-tests.sh --skip-build          # Use existing images
 #   ./tests/run-all-tests.sh --test-filter "01 02"  # Run specific tests only
 #   ./tests/run-all-tests.sh --use-existing         # Run against already-installed Manager
+#
+# 初学者提示：这是根目录端到端脚本的总调度器。它准备同一套测试环境，按编号执行用例，最后汇总并清理。
+# 默认顺序包含隐式前置状态（例如 test-03 使用 test-02 创建的 Worker）；过滤运行时要自行满足这些前置条件。
+# `--use-existing` 不重建/重装，适合本地复测，但也意味着旧状态可能影响结果，失败时应先核对目标环境版本。
 
 set -e
 

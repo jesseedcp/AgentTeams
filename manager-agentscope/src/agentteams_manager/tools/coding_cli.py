@@ -1,4 +1,11 @@
-"""Admin-only AgentScope tools for bounded coding CLI delegation."""
+"""Admin-only AgentScope tools for bounded coding CLI delegation.
+
+向 Admin DM 暴露受限 Coding CLI 委托工具。
+
+模型提供 task、provider 和 prompt 等结构化字段，tool 生成稳定 operation context 后交给
+``CodingCLIDelegationService``。可执行文件、workspace 路径、lease、超时和恢复都不由
+模型控制；tool schema 是输入边界，不是任意主机命令入口。
+"""
 
 from __future__ import annotations
 

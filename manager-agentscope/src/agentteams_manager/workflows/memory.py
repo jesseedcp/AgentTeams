@@ -1,4 +1,11 @@
-"""Curated Manager memory with room-safe recall projections."""
+"""Curated Manager memory with room-safe recall projections.
+
+把持久化记忆整理成符合当前 room 可见范围的上下文投影。
+
+Admin DM 可以召回私有偏好和全局经验，Project Room 只能看到该项目允许公开的决策，
+Worker Room 不应得到其他 Worker 的评估。写入使用来源证据和稳定 ID 去重；projection
+还限制数量与总字符，防止长期记忆无限挤占模型上下文。
+"""
 
 from __future__ import annotations
 

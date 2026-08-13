@@ -1,4 +1,11 @@
-"""Dependency-free Prometheus text counters and gauges."""
+"""Dependency-free Prometheus text counters and gauges.
+
+维护 Manager 的计数器与 gauge，并渲染 Prometheus 文本格式。
+
+运行路径只更新内存中的有限标签指标，health server 在抓取时生成文本。这里刻意不把
+用户输入、房间 ID 等高基数字段作为任意标签，否则一次聊天就可能创建大量时间序列并
+耗尽监控系统内存；指标用于趋势判断，详细单次事件应查脱敏日志。
+"""
 
 from __future__ import annotations
 

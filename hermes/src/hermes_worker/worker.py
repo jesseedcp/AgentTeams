@@ -15,6 +15,11 @@ Bootstrap flow (mirrors copaw_worker.worker.Worker):
        * spins up the Matrix adapter (our overlay; see ``hermes_matrix.adapter``)
        * starts the agent loop and runs until cancelled.
 """
+
+# 初学者导读：启动器按“恢复工作区 → Matrix 重新登录 → 翻译配置 → 同步技能 →
+# 启动 gateway”的顺序工作。这个顺序让 Hermes 开始读消息时已经拥有正确身份、
+# 模型网关和房间策略；如果提前启动 gateway，第一条消息可能落入旧 session 或用
+# 旧 token 回复。后台同步协程让运行时数据可在 Pod 重建后恢复。
 from __future__ import annotations
 
 import asyncio
@@ -42,7 +47,10 @@ logger = logging.getLogger(__name__)
 
 
 class Worker:
-    """Owns the lifecycle of one hermes worker process."""
+    """Owns the lifecycle of one hermes worker process.
+
+    这里管理本地进程与后台协程，但不拥有 Controller 中的期望状态。
+    """
 
     def __init__(self, config: WorkerConfig) -> None:
         self.config = config
@@ -84,6 +92,8 @@ class Worker:
     # ------------------------------------------------------------------
 
     async def start(self) -> bool:
+        # 每一步都可能因存储、身份或配置失败而停止 readiness；宁可暂不接任务，也
+        # 不能让一个只启动了一半的 Worker 在 Matrix 房间里表现为正常成员。
         console.print(
             Panel.fit(
                 f"[bold green]Hermes Worker[/bold green]\n"

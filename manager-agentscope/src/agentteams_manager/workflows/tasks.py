@@ -1,4 +1,12 @@
-"""Crash-safe finite and recurring task workflows."""
+"""Crash-safe finite and recurring task workflows.
+
+实现可崩溃恢复的有限任务、周期任务、派发、验收与返修流程。
+
+有限任务先创建版本化 spec artifact，再向 Worker 或 Team Room 发送带稳定 task ID 的
+assignment。Worker 的 ``TASK_COMPLETED`` 仅触发结果检查；必须读取 result artifact、
+验证 digest 和状态后才能接受，未达标则创建关联 revision task。周期任务由 heartbeat
+根据 cron 生成稳定 occurrence，重启或重复 tick 不会重复派发同一次执行。
+"""
 
 from __future__ import annotations
 
@@ -283,7 +291,12 @@ class TaskMessageFormatter:
 
 
 class TaskService:
-    """Prepare durable task state before dispatching any Worker message."""
+    """编排 Task 的 artifact、状态、派发、结果验收与恢复。
+
+    repository 保证本地事务，supervisor 保证外部效果顺序，Controller/Matrix/MinIO ports
+    提供真实 I/O。本类把它们组合成不可跳步的生命周期；模型不能直接把一条 Worker
+    文本当作完成事实。
+    """
 
     _ASSIGNMENT_EFFECT_SEQUENCE = 0
 

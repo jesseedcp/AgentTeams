@@ -1,3 +1,8 @@
+{{- /*
+Cinny 是静态网页，ConfigMap 同时提供前端配置和 Nginx 配置。浏览器从 publicURL
+做 Matrix discovery，Higress 再把请求送到 Tuwunel；因此这里写浏览器可达地址，
+不能写仅 Pod 内可解析的 Service DNS。config.json 禁止缓存，方便升级后立即生效。
+*/ -}}
 {{- if .Values.cinny.enabled }}
 {{- $matrixUrl := include "agentteams.gateway.publicURL" . }}
 apiVersion: v1

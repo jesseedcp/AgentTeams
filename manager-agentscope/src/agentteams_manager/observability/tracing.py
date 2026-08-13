@@ -1,4 +1,11 @@
-"""Optional OpenTelemetry tracing compatible with CMS deployments."""
+"""Optional OpenTelemetry tracing compatible with CMS deployments.
+
+在安装了 OpenTelemetry 时提供可选的跨组件 tracing。
+
+每个 span 描述一次受控阶段，例如配置拉取或 workflow 执行，便于定位延迟来自哪里。
+没有 tracing 依赖时返回轻量 no-op，不影响 Manager 启动；span 属性仍应遵循脱敏原则，
+不得把消息正文、密钥或完整外部响应当成诊断标签。
+"""
 
 from __future__ import annotations
 
@@ -65,4 +72,3 @@ def build_tracer_from_env() -> TracerHandle:
         provider=provider,
         is_noop=False,
     )
-

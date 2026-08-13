@@ -1,5 +1,8 @@
 #!/bin/bash
 # mc-wrapper.sh - Transparent STS credential refresh for mc (MinIO Client)
+# 初学者导读：其他脚本以为自己在调用普通 ``mc``，实际先经过本 wrapper 刷新短期
+# 凭据，再用 ``exec`` 交给真实 mc.bin。exec 保留退出码和信号，调用方能正确判断
+# 同步是否失败；刷新失败不在此泄露 token，具体存储命令仍由上层处理。
 #
 # Installed as /usr/local/bin/mc (symlink), with the real binary at /usr/local/bin/mc.bin.
 # In cloud mode (RRSA/OIDC), refreshes STS credentials before every mc invocation.

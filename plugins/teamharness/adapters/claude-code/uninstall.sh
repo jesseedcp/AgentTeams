@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# 与 install 对称地记录 Claude Code adapter 卸载事件，不删除项目工作文件。
 set -euo pipefail
 
 log_file="${TEAMHARNESS_INSTALL_LOG:-}"

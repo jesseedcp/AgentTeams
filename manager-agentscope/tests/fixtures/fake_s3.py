@@ -1,3 +1,9 @@
+"""内存版 S3 测试替身，用于验证对象版本、条件写入和冲突恢复。
+
+它模拟 ETag 与 ``If-None-Match`` 等并发语义，而不连接 MinIO；这使故障路径可重复，但不能覆盖真实网络、
+权限和 bucket 配置。端到端测试仍需读取真实 MinIO 对象作为最终通过证据。
+"""
+
 from __future__ import annotations
 
 import hashlib

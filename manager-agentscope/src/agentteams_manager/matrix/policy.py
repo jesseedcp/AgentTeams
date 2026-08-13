@@ -1,4 +1,12 @@
-"""Hard room and sender authorization for Matrix events."""
+"""Hard room and sender authorization for Matrix events.
+
+根据房间拓扑和发送者身份计算不可绕过的工具权限。
+
+同一句“删除 Worker”出现在 Admin DM 和普通 Worker Room 中，权限结果必须不同。resolver
+从本地 materialized topology 识别房间类型、成员和资源范围，再生成 ``RoomPolicy``；
+AgentScope 每个 turn 只收到该 policy 允许的工具。Prompt 里的行为说明只是 guidance，
+真正 capability 由这里及工具层强制执行。
+"""
 
 from __future__ import annotations
 

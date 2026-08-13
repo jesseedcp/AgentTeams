@@ -10,6 +10,10 @@ because ReMe requires an embedding object even when vector search is off.
 
 Usage:
     python patch_reme_lazy.py /path/to/site-packages/reme
+
+初学者导读：这是镜像构建期兼容补丁，会改安装在 site-packages 中的上游 ReMe，
+而不是修改仓库业务源码。目的只是把 CoPaw 不使用的重依赖改成按需 import，降低
+Worker 常驻内存；匹配不到预期上游代码时必须失败，避免升级后悄悄打错补丁。
 """
 
 import sys

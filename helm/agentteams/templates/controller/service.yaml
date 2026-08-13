@@ -1,3 +1,5 @@
+{{- /* Service 为变化的 Controller Pod 提供稳定 DNS；Manager/agt 使用这个地址，
+而不是绑定某个随重建变化的 Pod IP。 */ -}}
 {{- $comp := dict "root" . "component" "controller" }}
 apiVersion: v1
 kind: Service

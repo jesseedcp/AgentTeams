@@ -4,6 +4,10 @@
 # Thin shell that forwards to `agt apply` inside the Manager container.
 # Supports Worker, Team, and Human resources in YAML format.
 #
+# 宿主机脚本只负责把文件安全复制到容器并转发参数；解析资源、计算差异和调用
+# Controller 的权威逻辑都在 typed `agt` CLI 中。`--prune` 会删除清单之外的受管
+# 资源，属于破坏性全量同步；初学者应先用 `--dry-run` 查看差异。
+#
 # Usage:
 #   ./agentteams-apply.sh -f resource.yaml              # incremental apply
 #   ./agentteams-apply.sh -f resource.yaml --prune      # full sync (delete extras)
@@ -49,6 +53,7 @@ if ! ${CONTAINER_CMD} ps --filter name=agentteams-manager --format '{{.Names}}' 
     die "agentteams-manager container is not running"
 fi
 
+# /tmp/import 是一次性中转区，不是持久数据目录；权威状态最终在 Controller/CR 中。
 # Ensure /tmp/import exists before copying files into container
 ${CONTAINER_CMD} exec agentteams-manager mkdir -p /tmp/import 2>/dev/null || true
 

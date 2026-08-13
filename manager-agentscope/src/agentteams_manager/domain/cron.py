@@ -1,4 +1,11 @@
-"""Bounded five-field cron parsing and timezone-aware evaluation."""
+"""Bounded five-field cron parsing and timezone-aware evaluation.
+
+解析五字段 cron，并在明确时区中计算下一次执行时间。
+
+Recurring Task 保存的是计划而不是后台 sleep。heartbeat 每次读取 cron，结合任务时区
+判断当前 occurrence 是否到期。解析器只支持有界语法并拒绝不合法数值，避免一条错误
+表达式造成无限循环；夏令时等时间变化由时区感知的 datetime 处理。
+"""
 
 from __future__ import annotations
 

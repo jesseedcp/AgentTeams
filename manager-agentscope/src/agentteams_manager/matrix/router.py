@@ -1,4 +1,12 @@
-"""Room-serialized, cross-room concurrent Matrix event routing."""
+"""Room-serialized, cross-room concurrent Matrix event routing.
+
+对 Matrix 事件去重，并实现“同房间串行、不同房间并行”。
+
+同一 room 的两条消息共享 AgentScope 会话，必须按顺序处理；不同 room 则可以各自运行，
+避免一个慢请求卡住全系统。事件先通过 SQLite claim 保证只消费一次，再进入房间队列。
+``interrupt`` 可取消当前 turn，``collect`` 可合并积压输入；失败事件进入可恢复状态，
+而不是提前标成已处理。
+"""
 
 from __future__ import annotations
 
@@ -42,7 +50,12 @@ class RoutedEvent:
 
 
 class EventRouter:
-    """Claim once, serialize per room, and process rooms concurrently."""
+    """对事件做 durable claim，并用每房间队列调度处理。
+
+    一个 room 始终只有一个 worker task 修改其 AgentState；队列字典允许其他 room 拥有
+    自己的 worker task 并行运行。只有 handler 成功后才完成 claim，异常会记录 dead
+    letter/retry 信息，因此 Matrix 重放不是简单丢弃。
+    """
 
     def __init__(
         self,

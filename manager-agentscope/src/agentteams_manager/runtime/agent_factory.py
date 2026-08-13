@@ -1,4 +1,12 @@
-"""Construct native AgentScope Agents without an app-server wrapper."""
+"""Construct native AgentScope Agents without an app-server wrapper.
+
+为指定 Matrix 房间创建原生 AgentScope Agent 实例。
+
+factory 从当前 runtime generation 选择模型、system prompt、skill toolkit 和房间允许的
+typed tools，并可恢复已持久化的 ``AgentState``。每个实例绑定创建时的不可变 generation；
+热更新只影响下一个 turn 重建的 Agent，不会在一个正在执行的 tool loop 中途换模型或
+工具集合。
+"""
 
 from __future__ import annotations
 
@@ -50,6 +58,11 @@ ReasoningEffort = Literal[
 
 
 class AgentFactory:
+    """从当前不可变 runtime generation 构造房间专属 Agent。
+
+    allowed tools 取自传入 policy，而非 skill 文本；模型、MCP 与 prompt 取自同一 revision，
+    避免混用半套新配置。``retire`` 负责在旧 turn 结束后释放 generation-scoped MCP。
+    """
     def __init__(
         self,
         *,

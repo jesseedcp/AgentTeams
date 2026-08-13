@@ -1,3 +1,8 @@
+{{- /*
+此 Helm hook 在安装/升级主体资源前做真实 LLM 探测。strict 模式失败会中止发布，
+避免把已工作的 Manager 替换成无法调用模型的新配置；Job 不挂载 ServiceAccount
+token，因为网络探测不需要 Kubernetes API 权限。
+*/ -}}
 {{- if .Values.preflight.llm.enabled }}
 {{- $name := printf "%s-llm-preflight" (include "agentteams.fullname" .) | trunc 63 | trimSuffix "-" }}
 {{- $ctrlTag := include "agentteams.imageTag" (dict "tag" .Values.controller.image.tag "global" .Values.global "root" $) }}

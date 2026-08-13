@@ -1,5 +1,11 @@
 """QwenPaw Worker main entry point."""
 
+# 初学者导读：这个 Worker 进程是 QwenPaw runtime 的“保姆”，不是 Manager。
+# 它先从 MinIO 恢复工作区，再读取 Controller 的 runtime config，准备 Matrix
+# channel、模型网关和内置插件，最后启动真正的 QwenPaw 子进程。启动后还会并行
+# 运行配置轮询、文件持久化和心跳；任何一个 Pod 重启，都能沿同一顺序恢复到
+# Controller 指定的身份与房间，而不是依赖上次进程残留的内存。
+
 from __future__ import annotations
 
 import asyncio
@@ -92,6 +98,12 @@ def _safe_error_code(exc: Exception) -> str:
 
 
 class Worker:
+    """拥有一名 QwenPaw Worker 从准备、运行到停止的完整生命周期。
+
+    这里的“拥有”是指管理本地子进程与后台任务；Worker CR 的真实期望状态仍由
+    Controller 决定，Matrix 则保存对话和房间成员。``start`` 必须先完成恢复与
+    配置再宣布 ready，否则 Manager 可能向尚未具备正确身份的 Worker 派工。
+    """
     def __init__(self, config: WorkerConfig) -> None:
         self.config = config
         self.sync: Optional[FileSync] = None
@@ -122,6 +134,8 @@ class Worker:
             await self.stop()
 
     async def start(self) -> bool:
+        # 启动阶段故意按顺序执行：先有可靠的本地工作区，再应用远端期望状态，最后
+        # 才启动 QwenPaw。若顺序倒置，runtime 可能用默认模型或旧 Matrix 身份先回消息。
         self._stopping = False
         logger.info(
             "qwenpaw worker startup begin component=worker worker=%s cr_name=%s install_dir=%s storage_endpoint=%s bucket=%s "
@@ -341,6 +355,11 @@ class Worker:
         os.environ.setdefault("QWENPAW_RUNNING_IN_CONTAINER", "true")
 
     def _link_workspace_shared(self) -> None:
+        """让 Agent 看到团队共享目录，同时保持共享数据只有一个真实副本。
+
+        工作区中的 ``shared`` 是链接，不是再次复制的数据。这样 Leader 和 Worker
+        看到的是同一批产物；重建链接时只删除链接本身，绝不能递归删除其目标目录。
+        """
         shared_dir = self._workspace_shared_dir or self.config.shared_dir
         workspace_shared = self.config.default_workspace_dir / "shared"
         shared_dir.mkdir(parents=True, exist_ok=True)
@@ -770,6 +789,8 @@ class Worker:
         return packages[0]
 
     async def _run_qwenpaw(self) -> None:
+        # asyncio 让子进程等待、心跳和同步轮询能在一个事件循环中并行推进；这里的
+        # await 不会冻结整个服务，只会暂停当前协程直到对应 I/O 完成。
         qwenpaw_bin = shutil.which("qwenpaw") or str(Path(sys.executable).with_name("qwenpaw"))
         # QwenPaw's local API is also used by the Worker adapter and model
         # synchronizer, so headless mode keeps it alive on loopback. Enabling

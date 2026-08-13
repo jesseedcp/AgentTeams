@@ -20,6 +20,10 @@ import (
 // the Pod selector labels are guaranteed to be present on the target pod.
 // Returns the Service name on success (empty string when the Service is
 // disabled, deleted or skipped).
+// ReconcileMemberService 根据 ServiceEnabled 确保 ClusterIP Service 存在或已删除。
+// 它在 Container 阶段后执行，因为 Service selector 要指向已经带稳定
+// label 的 Pod。Service 属于 Kubernetes 子资源，调和时不只检查“名字
+// 存不存在”，还比较 selector 和 ports，这样 spec 变化才能被幂等更新。
 func ReconcileMemberService(ctx context.Context, mc *MemberContext, deps *MemberDeps) (string, error) {
 	if !mc.ServiceEnabled {
 		return "", ensureServiceDeleted(ctx, mc, deps)

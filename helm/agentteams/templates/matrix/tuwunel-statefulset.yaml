@@ -1,3 +1,8 @@
+{{- /*
+Tuwunel 是 Matrix homeserver，即房间、成员关系和消息的权威存储。使用 StatefulSet
+和 PVC 是因为 Pod 重建后仍需保留这些状态；Cinny 只是读取/发送消息的网页界面。
+Controller/Manager/Worker 都通过下方 Service 与它通信，而不是彼此直接传聊天消息。
+*/ -}}
 {{- if eq .Values.matrix.provider "tuwunel" }}
 {{- $comp := dict "root" . "component" "tuwunel" }}
 apiVersion: apps/v1

@@ -7,6 +7,11 @@ Bootstrap flow:
 3. Install MatrixChannel into CoPaw's custom_channels dir
 4. Start CoPaw AgentRunner + ChannelManager (Matrix channel)
 """
+
+# 初学者导读：这个类负责把一名 CoPaw Worker 从“只有容器”带到“可以在 Matrix
+# 房间接任务”。启动顺序保证先恢复持久文件、再翻译 Controller 配置、再注册房间
+# channel，最后才运行 Agent；否则 Worker 可能带着默认身份在错误房间回复。运行后
+# 文件同步、健康报告与 HTTP 探针作为后台协程并行工作，Pod 重启可重新走同一路径。
 from __future__ import annotations
 
 import asyncio
@@ -45,6 +50,12 @@ logger = logging.getLogger(__name__)
 
 
 class Worker:
+    """管理 CoPaw Worker 的本地生命周期，不拥有 Controller 中的期望状态。
+
+    ``start`` 完成恢复、翻译、channel 与健康服务准备；``run`` 托管上游 Agent；
+    ``stop`` 统一取消后台任务。集中持有这些资源可以保证关闭时不会遗留仍在上传
+    文件或使用旧 Matrix 身份的协程。
+    """
     def __init__(self, config: WorkerConfig) -> None:
         self.config = config
         self.worker_name = config.worker_name
@@ -107,6 +118,7 @@ class Worker:
     # ------------------------------------------------------------------
 
     async def start(self) -> bool:
+        """依次恢复远端状态并启动依赖，全部就绪后才允许 Worker 接收任务。"""
         self._stopping = False
         console.print(
             Panel.fit(

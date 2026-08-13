@@ -1,4 +1,11 @@
-"""Policy-bound AgentScope tools for model configuration."""
+"""Policy-bound AgentScope tools for model configuration.
+
+提供 Manager/Worker 模型与 Manager identity 的受控配置工具。
+
+模型切换先验证目标模型和 gateway，再由 Controller 发布新 runtime revision；identity
+更新则写入 Controller desired state，而不是直接改容器里的 SOUL 文件。这些变更通常
+需要确认，且热更新只在 turn 边界激活，保证正在进行的 Agent loop 配置不漂移。
+"""
 
 from __future__ import annotations
 

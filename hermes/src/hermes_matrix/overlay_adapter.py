@@ -12,6 +12,10 @@ injects the AgentTeams-specific policy layer that differs from upstream:
 All transport-heavy capabilities (media upload/download, streaming edits,
 typing, reactions, threads, E2EE, read receipts) stay in the upstream adapter.
 """
+
+# 初学者导读：Matrix 负责房间、成员和消息持久化，Hermes 负责推理。本适配器位于
+# 二者之间：入站先做 DM/群聊 allow-list 与提及判断，再交给 Agent；出站补充
+# Matrix mention。媒体、加密和线程仍委托上游原生适配器，减少第一方代码的风险面。
 from __future__ import annotations
 
 import logging
@@ -92,7 +96,10 @@ def _describe_dropped_media(source_content: dict, fallback_body: str) -> str:
 
 
 class MatrixAdapter(_NativeMatrixAdapter):
-    """Thin subclass that overlays AgentTeams policy on hermes native Matrix."""
+    """Thin subclass that overlays AgentTeams policy on hermes native Matrix.
+
+    即在上游 Hermes Matrix transport 上叠加 AgentTeams Worker 房间策略。
+    """
 
     def __init__(self, config: PlatformConfig):
         super().__init__(config)

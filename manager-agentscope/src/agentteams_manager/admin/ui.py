@@ -1,4 +1,11 @@
-"""Dependency-free operations console shipped inside the Manager image."""
+"""Dependency-free operations console shipped inside the Manager image.
+
+提供随 Manager 镜像发布的轻量级运维控制台静态页面。
+
+页面只负责把运维人员的输入发送给认证后的本地 API，并呈现经过脱敏的快照；真正的
+资源操作仍在 ``admin.commands`` 和 workflow 中完成。这里刻意不引入前端构建链，
+使故障环境中也能打开诊断页面，但这并不意味着页面可以绕过后端权限或确认规则。
+"""
 
 ADMIN_HTML = """<!doctype html>
 <html lang="zh-CN">

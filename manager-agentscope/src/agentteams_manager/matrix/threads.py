@@ -1,4 +1,11 @@
-"""Matrix thread relations and bounded room history."""
+"""Matrix thread relations and bounded room history.
+
+识别 Matrix thread 关系，并构造有界的房间历史上下文。
+
+回复线程中的消息应继续回到同一 thread，而不是污染主时间线。本模块从事件 relation
+解析 root ID，读取历史时限制消息数和字符数，并过滤不应再次喂给模型的事件类型。
+历史只用于上下文，不会改变“当前消息才触发本 turn”的边界。
+"""
 
 from __future__ import annotations
 

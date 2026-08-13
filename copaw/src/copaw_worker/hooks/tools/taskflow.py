@@ -1,5 +1,9 @@
 """CoPaw-native taskflow tool for AgentTeams task state."""
 
+# 初学者导读：taskflow 把自然语言工作过程落成确定的 Task 状态转换。Leader 派工、
+# Worker ack、完成或报告阻塞都需满足前置条件，状态和结果写入工作区后可随 MinIO
+# 恢复。工具只操作当前任务协议，不能改变 Controller 中的 Team 成员或 Worker CR。
+
 from __future__ import annotations
 
 import json

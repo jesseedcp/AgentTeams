@@ -1,6 +1,10 @@
 {{- /*
 Validate public values at render time. Supported combinations:
 
+初学者说明：此文件不会创建 Kubernetes 对象，只在 Helm 渲染阶段尽早拒绝互相
+矛盾或不完整的 values。若删掉这些检查，错误会推迟到 Pod 启动甚至业务调用时
+才暴露，届时通常只看到模糊的连接失败。
+
   matrix.provider=tuwunel     matrix.mode=managed
   gateway.provider=higress    gateway.mode=managed    → deploy Higress subchart
   gateway.provider=ai-gateway gateway.mode=existing   → external APIG, consumers only

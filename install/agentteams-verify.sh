@@ -8,6 +8,10 @@
 # the direct AgentScope Manager. Prints PASS/FAIL per check.
 # Exit code: 0 if all pass, 1 if any fail.
 #
+# 这是“浅健康检查”：它证明端口和基本接口可达，不等价于 Cinny 页面、真实模型
+# 调用、工具执行和 Manager→Worker 委派的完整验收。检查是只读的，可安全用于安装
+# 后诊断；若要验证 K8s，应走 Helm/kubectl 专用流程，不能把动态 Pod 名硬编码进来。
+#
 # ── Extension notes ────────────────────────────────────────────────────────────
 #
 # Kubernetes migration (TODO when K8s support is planned):

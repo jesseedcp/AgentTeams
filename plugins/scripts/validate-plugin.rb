@@ -1,6 +1,10 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
+# 初学者导读：这个脚本把 plugin.yaml 当作发布契约，检查版本、目录、入口文件和
+# package include。尽早失败可以避免“本地看似存在、安装包里却漏了”的插件进入
+# 镜像。它只读源文件，不运行插件代码，因此适合在 CI 与打包前使用。
+
 require "json"
 require "pathname"
 require "yaml"

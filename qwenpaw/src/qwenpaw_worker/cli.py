@@ -1,5 +1,9 @@
 """CLI entry point: qwenpaw-worker."""
 
+# 初学者导读：Docker entrypoint 最终调用这里。CLI 只负责把命令行和环境变量
+# 转成 WorkerConfig、配置日志并进入异步 Worker 生命周期；模型选择、Team 成员
+# 和 Matrix 房间来自 Controller 发布的 runtime config，不由用户在此临时决定。
+
 from __future__ import annotations
 
 import asyncio

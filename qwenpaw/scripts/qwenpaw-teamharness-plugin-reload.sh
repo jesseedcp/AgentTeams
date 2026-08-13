@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# 在不重建镜像的情况下重新安装/刷新 QwenPaw 的 TeamHarness 或 WorkerFlow 插件。
+# 插件包可能是目录或 zip，本脚本统一解包、校验、调用 QwenPaw/AgentTeams CLI，
+# 最后触发 runtime 刷新。临时目录由 trap 清理；若中途失败，不应留下被下一次
+# reload 误认为完整安装的半成品。
 set -euo pipefail
 
 PLUGIN_NAME="teamharness"

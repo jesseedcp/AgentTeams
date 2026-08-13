@@ -1,4 +1,11 @@
-"""Allowlisted, shell-free subprocess execution."""
+"""Allowlisted, shell-free subprocess execution.
+
+提供只接受参数数组的 allowlist 子进程执行边界。
+
+业务模块不能把模型文本拼成 shell 命令；它们必须选择允许的可执行文件并传入独立 argv。
+本模块负责超时、退出码和有界输出，将操作系统错误转换成稳定异常。这样可以保留调用
+CLI 的能力，同时避免引号转义、命令替换和意外凭据输出带来的风险。
+"""
 
 from __future__ import annotations
 

@@ -1,5 +1,11 @@
 """Small synchronous client for QwenPaw's localhost management API."""
 
+# 初学者导读：这个模块不是直接调用大模型，而是管理同一容器里的 QwenPaw
+# 进程。Controller 发布“应该使用哪个模型、开放哪些 MCP 工具”等期望状态后，
+# RuntimeUpdater 会通过这里的 localhost HTTP API 把配置写进正在运行的 QwenPaw。
+# 之所以不直接改 QwenPaw 的文件，是因为 API 可以校验写入结果，也能避免运行中
+# 的内存状态与磁盘状态互相矛盾。这里是 Worker 内部边界，不是 Manager 管理 API。
+
 from __future__ import annotations
 
 import json
@@ -15,6 +21,12 @@ class QwenPawApiError(RuntimeError):
 
 
 class QwenPawApiClient:
+    """把底层 HTTP 请求封装成可验证的 QwenPaw 配置操作。
+
+    ``base_url`` 通常指向当前 Pod 内的 ``127.0.0.1``。调用方仍需负责判断
+    哪一代 Controller 配置应该生效；本类只负责发送、检查和把网络错误转换成
+    ``QwenPawApiError``，避免上层误把一次超时当成成功。
+    """
     def __init__(self, base_url: str, timeout: float = 10) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
@@ -84,6 +96,11 @@ class QwenPawApiClient:
         *,
         secret_fields: Iterable[str] = (),
     ) -> dict[str, Any]:
+        """写入 channel 后读回核对，并在请求未携带秘密时保留已有秘密字段。
+
+        API 的成功状态只说明请求被接受，不代表持久状态完全一致；读回检查能让
+        RuntimeUpdater 在重启后重试，而不是把部分应用误报为完成。
+        """
         current = self.get_channel(channel)
         payload = dict(desired)
         secret_fields = set(secret_fields)
@@ -116,6 +133,7 @@ class QwenPawApiClient:
         whitelist: Iterable[str],
         blacklist: Iterable[str],
     ) -> dict[str, Any]:
+        """按集合差异增删 allow/deny 项，再读回验证最终 ACL。"""
         desired_white = set(whitelist)
         desired_black = set(blacklist)
         current = self.get_acl(channel)
@@ -303,6 +321,11 @@ class QwenPawApiClient:
         provider_name: str = "",
         chat_model: str = "OpenAIChatModel",
     ) -> dict[str, Any]:
+        """确保 provider/model 存在并切换默认 Agent，最后逐层读回验证。
+
+        Worker 实际请求经过 Higress 模型网关；此处配置的是 QwenPaw 如何找到该
+        provider，而不是把云厂商 key 暴露给 Matrix 或 Agent 提示词。
+        """
         providers = self._request("GET", "/api/models")
         provider = next(
             (item for item in providers if item.get("id") == provider_id),
@@ -404,6 +427,7 @@ class QwenPawApiClient:
         retries: int = 120,
         retry_delay: float = 1.0,
     ) -> bool:
+        """幂等停用临时 Agent；HTTP 409 表示它仍忙，短暂等待后再试。"""
         agents = self._request("GET", "/api/agents").get("agents") or []
         current = next(
             (agent for agent in agents if agent.get("id") == agent_id),

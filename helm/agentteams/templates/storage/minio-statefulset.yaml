@@ -1,3 +1,9 @@
+{{- /*
+MinIO 提供 S3 兼容对象存储，承载共享文件、journal、snapshot 和 artifact。它与
+Manager 的 SQLite PVC 不同：前者供多个组件交换持久对象，后者只服务单活 Manager
+的事务恢复。StatefulSet/PVC 保证 Pod 重建后对象仍在；禁用 persistence 会退化为
+emptyDir，删除 Pod 就会丢失数据，只适合临时测试。
+*/ -}}
 {{- if eq .Values.storage.provider "minio" }}
 {{- $comp := dict "root" . "component" "minio" }}
 apiVersion: apps/v1

@@ -5,7 +5,13 @@
 # HOME is set to the Worker workspace so all agent-generated files are synced to MinIO:
 #   ~/ = /root/agentteams-fs/agents/<WORKER_NAME>/  (SOUL.md, openclaw.json, memory/)
 #   /root/agentteams-fs/shared/                     = Shared tasks, knowledge, collaboration data
+#
+# 启动顺序很重要：先准备时区和目录，再从 MinIO/OSS 拉取 Controller 已发布的配置，
+# 启动后台同步，最后用 `exec` 启动 OpenClaw。容器本地不是权威存储；若直接跳过
+# pull 就启动，Worker 可能使用旧身份/旧模型。每个 Worker 只读写自己名称对应的
+# workspace，共享目录则用于团队任务和产物，不能把 Manager 私密状态同步进去。
 
+# 任一步准备失败就停止，避免以“看似在线但配置不完整”的状态加入 Matrix。
 set -e
 source /opt/agentteams/scripts/lib/agentteams-env.sh
 source /opt/agentteams/scripts/lib/merge-openclaw-config.sh

@@ -27,6 +27,11 @@ var ErrAppServiceNotReady = errors.New("matrix appservice token not active yet")
 
 // Client abstracts Matrix homeserver operations.
 // Implementations: TuwunelClient (current), future SynapseClient.
+// Client 抽象 Matrix homeserver 操作，当前实现是 TuwunelClient。
+//
+// 接口故意使用 Ensure/Create-or-resolve 这类幂等语义。Controller 可能在第一次
+// HTTP 请求已被 homeserver 执行、但回答途中丢失时重试；稳定 room alias
+// 和 user ID 使第二次调用能找到现有资源，而不是再创建一份。
 type Client interface {
 	// EnsureUser registers a user or logs in if the account already exists.
 	// Returns credentials regardless of whether the user was newly created.

@@ -182,6 +182,9 @@ type Provisioner struct {
 	managerModel string
 }
 
+// NewProvisioner 把 Matrix、Gateway、OSS 和 Kubernetes 客户端组装成一个
+// 外部资源编排器。它不发起网络请求，因此可在启动阶段安全构造；
+// 真正副作用只在 Provision*/Ensure*/Delete* 方法被 reconcile 调用时发生。
 func NewProvisioner(cfg ProvisionerConfig) *Provisioner {
 	return &Provisioner{
 		matrix:            cfg.Matrix,
@@ -314,6 +317,10 @@ func (p *Provisioner) DeleteManagerRoom(ctx context.Context, roomID string) erro
 
 // ProvisionWorker executes the full infrastructure setup for a new worker:
 // credentials, Matrix account, MinIO user, Matrix room, Gateway consumer.
+// ProvisionWorker 确保 Worker 的 Matrix 账号/个人房间、网关 consumer 和
+// 本地存储凭据已准备。方法使用稳定 runtime name 与房间别名，因此
+// 重复调用会查找并复用现有资源，而不是创建第二个 Worker 身份。
+// 返回的 token/password 仅供当前部署链使用，不应记录到日志或 status。
 func (p *Provisioner) ProvisionWorker(ctx context.Context, req WorkerProvisionRequest) (*WorkerProvisionResult, error) {
 	logger := log.FromContext(ctx)
 	workerName := req.Name
@@ -770,6 +777,10 @@ func (p *Provisioner) EnsureWorkerGatewayAuth(ctx context.Context, workerName, g
 // "existing room ID" inputs are threaded through. Membership is reconciled
 // unconditionally on every call so newly-added workers are invited and
 // removed workers are kicked.
+// ProvisionTeamRooms 根据期望成员确保团队共享房间和 Leader/Admin 直聊存在。
+// 房间别名是这个操作的稳定幂等键：如果别名已经指向一个房间，
+// 就应复用它并校正 membership。不能只根据 Status.RoomID 盲目信任缓存，
+// 因为 Matrix 中的别名所指真实房间才是外部实际状态。
 func (p *Provisioner) ProvisionTeamRooms(ctx context.Context, req TeamRoomRequest) (*TeamRoomResult, error) {
 	logger := log.FromContext(ctx)
 	managerMatrixID := p.matrix.UserID("manager")
@@ -1080,6 +1091,9 @@ func (p *Provisioner) EnsureRoomNonMember(ctx context.Context, roomID, userID, r
 // Per-user errors are logged and collected; the first error encountered is
 // returned after processing every user (best-effort semantics, consistent
 // with DeprovisionWorker).
+// ReconcileRoomMembership 将 Matrix 房间当前成员集合收敛为 desired。
+// 它先读 actual membership 再计算需邀请与需移除的差集，所以重复
+// reconcile 不会产生重复邀请，也不会把已不在房间的用户当作错误。
 func (p *Provisioner) ReconcileRoomMembership(ctx context.Context, roomID string, desired []string) error {
 	return p.ReconcileRoomMembershipWithActorToken(ctx, roomID, desired, "", "")
 }
@@ -1342,6 +1356,10 @@ type ManagerProvisionResult struct {
 
 // ProvisionManager executes the full infrastructure setup for a Manager Agent:
 // credentials, Matrix account, MinIO user, Admin DM room, Gateway consumer.
+// ProvisionManager 确保 AgentScope Manager 的 Matrix 账号、Admin DM、Gateway consumer
+// 和存储凭据存在。与 Worker 一样，稳定 Manager 名和房间别名是幂等键。
+// “创建请求超时”不能立即认定为失败并换新名称，否则可能产生两个
+// Manager 账号或历史房间。
 func (p *Provisioner) ProvisionManager(ctx context.Context, req ManagerProvisionRequest) (*ManagerProvisionResult, error) {
 	logger := log.FromContext(ctx)
 	managerName := req.Name

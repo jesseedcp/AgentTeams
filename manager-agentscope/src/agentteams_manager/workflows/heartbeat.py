@@ -1,4 +1,12 @@
-"""Deterministic resource and task reconciliation heartbeat."""
+"""Deterministic resource and task reconciliation heartbeat.
+
+周期运行确定性的资源、任务、通知和集成恢复检查。
+
+heartbeat 不是让大模型定时自由行动。每一轮按固定步骤续租/恢复 operation、刷新拓扑、
+派发到期 recurring task、检查 Worker 进展、补发终态通知，并记录有界报告。单个子检查
+失败会被隔离和上报，不能让整个循环永久停止；重复观察也通过 durable supervision
+状态节流。
+"""
 
 from __future__ import annotations
 
@@ -800,7 +808,7 @@ class HeartbeatReport(BaseModel):
 
 
 class Heartbeat:
-    """Recover operations, refresh topology, then notify new failures."""
+    """按固定次序执行一轮 Manager 全局恢复与一致性检查。"""
 
     def __init__(
         self,
@@ -971,7 +979,7 @@ class DispatchReport(BaseModel):
 
 
 class TaskHeartbeat:
-    """Dispatch one idempotent occurrence for each due recurring task."""
+    """派发到期 recurring occurrence，并监督有限任务的可观察进展。"""
 
     def __init__(
         self,

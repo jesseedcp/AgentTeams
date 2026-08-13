@@ -1,3 +1,6 @@
+# 作用：构建 CoPaw Worker 的 Python 分发包，并发布到 PyPI 或手动选择的 TestPyPI。
+# 触发：正式 GitHub Release 发布后自动运行；预发布不会自动进入正式 PyPI，也可由维护者手动试发。
+# Secret 边界：发布令牌只传给对应上传 Action；构建步骤没有令牌，不能意外把凭据打进 wheel。
 name: Publish CoPaw Worker to PyPI
 
 on:
@@ -15,6 +18,7 @@ on:
           - testpypi
 
 jobs:
+  # build 成功只是生成包；只有目标判断成立且上传 Action 成功，整个发布才算通过。
   publish:
     if: github.event_name == 'workflow_dispatch' || github.event.release.prerelease == false
     runs-on: ubuntu-latest

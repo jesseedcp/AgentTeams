@@ -1,4 +1,11 @@
-"""Secret-safe OpenAI-compatible model route preflight."""
+"""Secret-safe OpenAI-compatible model route preflight.
+
+在切换模型前探测 OpenAI-compatible gateway 是否真的可用。
+
+配置中出现一个模型名称并不代表它能完成对话或 tool call。本模块使用受控的小请求验证
+路由、认证和声明能力，并只返回模型能力摘要；API key 保持为 Secret，不进入日志或
+回执。探测通过后，integration workflow 才发布新的 runtime revision。
+"""
 
 from __future__ import annotations
 

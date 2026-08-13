@@ -1,4 +1,11 @@
-"""Admin-only AgentScope tools for typed Higress gateway resources."""
+"""Admin-only AgentScope tools for typed Higress gateway resources.
+
+提供 Higress Provider、Route、Credential 与 Consumer 的 typed tools。
+
+输入模型限制字段与资源类型，读取操作可直接查询，写操作进入可恢复 Gateway workflow。
+Secret 只以引用或受保护输入存在，返回给 Agent 的回执会脱敏。Admin full 可免去工具级
+确认，但不会允许任意 URL、任意凭据读取或越过 room policy。
+"""
 
 from __future__ import annotations
 

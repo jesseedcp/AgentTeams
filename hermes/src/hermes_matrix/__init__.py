@@ -15,3 +15,7 @@ policy-only behavior on top:
   * copaw-style history buffering in group rooms
   * image downgrade when the active model lacks vision support
 """
+
+# 初学者导读：overlay 不是复制整套 Matrix 客户端。上游 Hermes 继续负责加密、
+# 媒体、线程和同步，本包只叠加 AgentTeams 的 Worker 房间/提及/allow-list 策略。
+# 这种“小覆盖面”让升级上游时更容易保留安全修复，也避免维护两套传输实现。

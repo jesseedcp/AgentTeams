@@ -1,5 +1,9 @@
 """Logging setup for qwenpaw-worker."""
 
+# 初学者导读：统一日志配置让容器标准输出和持久化日志使用同一种格式，同时用
+# rotating handler 限制文件大小。这里不能记录 access token、模型 key 或完整
+# runtime config；日志可能被诊断工具导出，敏感值一旦写入就会跨越原本的权限边界。
+
 from __future__ import annotations
 
 import logging

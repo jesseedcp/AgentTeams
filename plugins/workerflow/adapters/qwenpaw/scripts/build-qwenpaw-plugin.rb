@@ -1,6 +1,9 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
+# 初学者导读：把 WorkerFlow 的 MCP、技能和 QwenPaw adapter 组装成宿主可安装包。
+# 只复制 manifest 允许的第一方内容，并清除缓存/生成物，防止本地开发状态进入镜像。
+
 require "fileutils"
 require "json"
 require "open3"

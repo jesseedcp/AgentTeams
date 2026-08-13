@@ -9,6 +9,10 @@
 #   OPENCLAW_BASE_IMAGE        - openclaw-base image (default: agentteams/openclaw-base:20260423-8359cbc)
 #   OPENCLAW_CMS_PLUGIN_URL    - observability plugin tarball URL (bundled unconditionally)
 # ============================================================
+# 镜像依赖链：openclaw-base 提供 runtime；Controller 镜像提供 typed `agt`；mc 阶段
+# 提供对象存储客户端；shared 构建上下文提供所有 Worker 共用的凭据刷新/文件同步。
+# 每个 Worker 实例使用同一镜像但有独立名称、Matrix 身份和 workspace；持久文件
+# 推送到 MinIO/OSS，所以容器本身可被 Controller 安全重建。
 
 ARG HIGRESS_REGISTRY=higress-registry.cn-hangzhou.cr.aliyuncs.com
 ARG OPENCLAW_BASE_IMAGE=agentteams/openclaw-base:20260423-8359cbc

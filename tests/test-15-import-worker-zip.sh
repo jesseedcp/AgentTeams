@@ -8,6 +8,9 @@
 #   4. create-worker.sh runs: Matrix account + Room + Higress consumer + container
 #   5. Worker container is running
 #   6. Admin sends message to Worker via Matrix, Worker replies
+# 初学者提示：ZIP 导入不是简单解压测试，它覆盖“上传声明→Controller reconcile→创建外部资源→真实聊天”的完整路径。
+# 通过标准是包内身份、Skill 和运行配置落在正确位置，Worker 容器可用且能在 Matrix 回复；任一中间状态都不够。
+# 多次等待是在观察异步 Controller 最终收敛，超时后应先检查 reconcile 事件而不是无限延长 sleep。
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/test-helpers.sh"

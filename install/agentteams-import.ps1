@@ -3,6 +3,10 @@
 # Thin shell that delegates to the `agt` CLI inside the Manager container.
 # Supports ZIP packages, remote packages (nacos://, http://), and YAML files.
 #
+# Windows 端只做容器探测、文件中转和参数转发，资源校验与实际变更由容器内 `agt`
+# 完成。`-Prune` 表示清单外资源也可能被删除，应先配合 `-DryRun`；包地址或环境
+# 变量可能含凭据，不要在 Write-Host/异常中输出完整值。
+#
 # Usage:
 #   .\agentteams-import.ps1 worker -Name <name> -Zip <path-or-url>
 #   .\agentteams-import.ps1 worker -Name <name> -Package <nacos://...> [-Model MODEL]

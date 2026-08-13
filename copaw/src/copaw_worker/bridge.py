@@ -3,6 +3,12 @@ Bridge: translate openclaw.json (AgentTeams Worker config) into CoPaw's
 config.json + providers.json, then set COPAW_WORKING_DIR so CoPaw
 picks up the right workspace.
 """
+
+# 初学者导读：Controller 为所有 Worker runtime 生成统一的 ``openclaw.json``，
+# 但 CoPaw 实际读取的是另一套 config/providers/agent 文件。本模块就是翻译层：
+# 它不决定模型和身份，只把 Controller 已决定的值映射到 CoPaw 能理解的位置。
+# “标准工作区”用于跨 runtime 持久化，“.copaw 工作区”是 CoPaw 的本地投影；
+# 重启时可以从前者重新生成后者，不能让投影反过来覆盖 Controller 管理字段。
 from __future__ import annotations
 
 import json
@@ -39,6 +45,9 @@ def _patch_copaw_paths(working_dir: Path) -> None:
     copaw.constant captures WORKING_DIR / SECRET_DIR at import time from
     env vars, so setting COPAW_WORKING_DIR after import has no effect.
     We must update the live module objects directly.
+    初学者注意：Python import 默认只执行模块顶层一次。上游 CoPaw 因而可能已经
+    把旧环境变量保存成模块全局常量；这里只改 ``os.environ`` 已经太晚，必须同步
+    修正已加载模块中的路径。漏掉任何一个副本，文件就可能被写进默认 Agent 目录。
     """
     secret_dir = _secret_dir(working_dir)
     secret_dir.mkdir(parents=True, exist_ok=True)

@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# TeamHarness 顶层卸载分派器：对当前可用的宿主执行清理，并记录审计事件。
+# 卸载只移除插件注册/内容，不删除 AgentTeams Worker 工作区或共享任务产物。
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

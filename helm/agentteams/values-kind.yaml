@@ -1,5 +1,9 @@
 # Local Kind overrides used by hack/local-k8s-up.sh.
 # hack/kind-config.yaml maps node port 30080 to host port 18388.
+# 本文件只覆盖本地 kind 所需的少量值，其余仍继承 values.yaml。
+# 访问链路是：浏览器 127.0.0.1:18388 → kind 节点 30080 → Higress Service 80
+# → Cinny/Matrix/模型路由。Docker Desktop 或 kind 集群停止时，链路中间节点消失，
+# 所以 18388 即使仍显示地址也无法连接；它不是一个脱离 K8s 单独运行的网页服务。
 gateway:
   publicURL: http://127.0.0.1:18388
 

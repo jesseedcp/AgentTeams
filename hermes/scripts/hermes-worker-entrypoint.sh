@@ -9,6 +9,10 @@
 #   AGENTTEAMS_FS_SECRET_KEY - MinIO secret key (required in local mode)
 #   AGENTTEAMS_RUNTIME       - "aliyun" for cloud mode (uses RRSA/STS via agentteams-env.sh)
 #   TZ                   - Timezone (optional)
+#
+# Controller 先为该 Worker 创建独立 Matrix 身份与对象存储路径，本入口再把统一环境
+# 变量映射为 Hermes workspace/config 并启动 runtime。HOME 与 workspace 对齐是为了
+# 让 Agent 生成的文件都落在可同步范围；随意改到容器其他目录会在 Pod 重建时丢失。
 
 set -e
 

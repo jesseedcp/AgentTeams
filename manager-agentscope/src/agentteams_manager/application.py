@@ -1,4 +1,12 @@
-"""Lifecycle ownership for the single Manager daemon."""
+"""Lifecycle ownership for the single Manager daemon.
+
+统一管理 AgentScope Manager 守护进程的启动和停止顺序。
+
+以一次正常启动为例：本模块先开放健康检查端口，再打开 SQLite、恢复未完成操作、
+加载 Controller 下发的运行配置，最后才连接 Matrix 并启动 heartbeat。这个顺序很
+重要；如果恢复和配置尚未完成就接收管理员消息，新请求可能与旧操作重复执行。
+停止时按大致相反的顺序收尾，并先撤销 readiness，避免流量进入正在关闭的进程。
+"""
 
 from __future__ import annotations
 
@@ -13,6 +21,12 @@ logger = logging.getLogger(__name__)
 
 
 class ManagerApplication:
+    """拥有单个 Manager 进程全部长生命周期组件。
+
+    ``start`` 只有在恢复、运行配置、Matrix 与 heartbeat 都准备好后才成功；任一步失败
+    都会撤销 readiness 并关闭已启动组件。``stop`` 可重复调用，便于信号处理和异常路径
+    同时请求停止而不会重复释放同一个连接。
+    """
     def __init__(
         self,
         *,
@@ -48,6 +62,7 @@ class ManagerApplication:
         self._stop_event = asyncio.Event()
 
     async def start(self) -> None:
+        """按依赖顺序启动组件，并只在安全服务时标记 ready。"""
         if self._started:
             return
         try:
@@ -110,6 +125,7 @@ class ManagerApplication:
         self._stop_event.set()
 
     async def stop(self) -> None:
+        """先拒绝新流量，再尽力保存会话并逆序关闭组件。"""
         if self._stopped:
             return
         self._stopped = True

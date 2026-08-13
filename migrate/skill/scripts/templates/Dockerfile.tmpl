@@ -1,4 +1,7 @@
 ARG BASE_IMAGE=agentteams/worker-agent:latest
+# 此文件是 generate-zip.sh 的模板，{{...}} 会在打包时替换，不能当作可直接构建的
+# Dockerfile。它只在基础 Worker 上补齐旧环境确实需要的系统/Python/npm 依赖；
+# 不复制运行时秘密。迁移包构建前应人工审查生成的包列表，避免执行不可信脚本。
 FROM ${BASE_IMAGE}
 
 ARG APT_MIRROR=

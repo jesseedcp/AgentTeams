@@ -1,3 +1,6 @@
+# 作用：为 Issue、Discussion 和 PR 文本追加英文翻译，方便不同语言的维护者协作。
+# 触发：相关内容创建或编辑时运行；它不会构建、测试或发布项目产物。
+# 安全边界：pull_request_target 有目标仓库上下文，因此这里只运行固定 Action，不执行 PR 分支脚本。
 name: Translate GitHub Content into English
 
 on:
@@ -15,6 +18,7 @@ on:
     types: [created, edited]
 
 jobs:
+  # 写权限按资源类型限制在本 job；GITHUB_TOKEN 只作为翻译 Action 的运行凭据传入。
   translate:
     permissions:
       issues: write

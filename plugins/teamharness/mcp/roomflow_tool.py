@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """TeamHarness roomflow MCP helper implementation."""
 
+# 初学者导读：roomflow 把当前 QwenPaw session 与真实 Matrix room 对齐，并读取
+# 房间成员/名称等元数据。room ID 是稳定身份，显示名称只是给人看的标签；逻辑若
+# 用名称代替 ID，同名房间就会串线。这里的 helper 只描述房间，不创建管理资源。
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -57,6 +61,11 @@ def _matrix_get_json_optional(path: str, token: str) -> dict[str, Any]:
 
 
 def describe_room(arguments: dict[str, Any], payload: dict[str, Any], deps: RoomDescribeDeps) -> dict[str, Any]:
+    """用稳定 room ID 查询 Matrix 名称、主题和当前用户标签。
+
+    ``dryRun`` 只返回将查询的规范化身份，不访问网络；真实查询把 404 当成缺少可选
+    state，而连接/鉴权失败则返回显式错误，避免 Agent 把“服务不可用”误认为空房间。
+    """
     room_id = _session_room_id(arguments, payload, deps)
     if not room_id:
         return {"ok": False, "tool": "roomflow", "action": "describe_room", "error": "sessionId or roomId is required"}

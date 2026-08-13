@@ -89,6 +89,12 @@ type WorkerReconciler struct {
 	MountRoleName             string
 }
 
+// Reconcile 将一个独立 Worker 的实际状态逐步收敛到 spec。
+//
+// Kubernetes 可能因 CR 更新、Pod 事件、定时重排或 Controller 重启而重复
+// 调用本函数。所以这里不假定“上一步一定没做过”，而是每次都
+// 从 CR 和外部系统重新获取现状。ctx 在该轮 reconcile 被取消或超时时
+// 传递给下游，防止旧轮次在新轮次开始后继续修改外部状态。
 func (r *WorkerReconciler) Reconcile(ctx context.Context, req reconcile.Request) (retres reconcile.Result, reterr error) {
 	start := time.Now()
 	defer func() { metrics.Observe("worker", start, reterr) }()
@@ -123,6 +129,8 @@ func (r *WorkerReconciler) Reconcile(ctx context.Context, req reconcile.Request)
 		} else {
 			worker.Status.Phase = computeWorkerPhase(&worker, state.ContainerState, reterr)
 		}
+		// generation 每次修改 spec 都会增加。只有整轮无错误时才更新
+		// ObservedGeneration，否则前端会误以为失败的新 spec 已生效。
 		if reterr == nil {
 			worker.Status.ObservedGeneration = worker.Generation
 			worker.Status.Message = state.Message
@@ -136,6 +144,9 @@ func (r *WorkerReconciler) Reconcile(ctx context.Context, req reconcile.Request)
 	}()
 
 	if !worker.DeletionTimestamp.IsZero() {
+		// Kubernetes 删除带 finalizer 的 CR 时会先设置 DeletionTimestamp，
+		// 但保留对象。这给 Controller 机会先删 Matrix 别名、凭据和
+		// 容器；清理成功后移除 finalizer，CR 才会真正消失。
 		if controllerutil.ContainsFinalizer(&worker, finalizerName) {
 			return r.reconcileDelete(ctx, &worker)
 		}
@@ -697,6 +708,9 @@ func computeWorkerPhase(w *v1beta1.Worker, containerState string, reconcileErr e
 	return computeMemberPhase(w.Status.Phase, w.Status.MatrixUserID, w.Spec.DesiredState(), containerState, reconcileErr)
 }
 
+// SetupWithManager 向 controller-runtime 注册 Worker 主资源及其 Pod/Sandbox
+// 观察关系。子资源变化也要触发 Worker reconcile，因为 Pod 的实际
+// 状态不会自动写回 Worker.Status。
 func (r *WorkerReconciler) SetupWithManager(mgr ctrl.Manager) (controller.Controller, error) {
 	bldr := ctrl.NewControllerManagedBy(mgr).
 		For(&v1beta1.Worker{})

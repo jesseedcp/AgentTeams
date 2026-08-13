@@ -3,6 +3,19 @@
 One-click installation scripts for the AgentScope 2.0 AgentTeams Manager,
 Controller infrastructure, and Worker Agents.
 
+初学者可以把安装器理解为“把一组镜像和配置接成可运行系统”的引导程序：它先
+检查 Docker/端口，收集模型与管理员配置，保存受保护的 env 文件，再启动一份
+Controller 和唯一的 AgentScope Manager。以后创建多少个 Worker、选择哪一种
+runtime，都由 Controller 根据资源状态处理，并不是重新运行一遍 Manager 安装。
+
+本目录提供两条部署路线。`agentteams-install.sh/.ps1` 面向本机 Docker/Podman；
+Kubernetes 则应使用 `helm/agentteams` 和 `hack/local-k8s-up.sh`。Docker Desktop
+停止时，本机容器和基于 Docker 的 kind 集群都会停止，相关端口自然不可用。
+
+安全边界：env 文件含 LLM key、Matrix 密码等秘密；不要提交、截图或整文件复制
+到 issue。uninstall/reset/prune 属于破坏性操作，执行前先确认数据卷、workspace
+和目标资源名；验证脚本的端口 PASS 只代表浅健康，不等于完整页面业务验收。
+
 ## Requirements
 
 - **Docker Desktop** (Windows/macOS) or **Docker Engine** (Linux) must be installed and running

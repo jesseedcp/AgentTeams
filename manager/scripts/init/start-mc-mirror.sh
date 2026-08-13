@@ -5,6 +5,9 @@
 # It mirrors shared Worker/control-plane data under /root/agentteams-fs.
 # Manager persistence lives at /var/lib/agentteams-manager; its Python runtime
 # writes immutable journals and verified snapshots through the S3 API.
+# 初学者可以把它看成“远端对象存储到本地缓存的兜底同步器”，而不是数据库复制。
+# 正常写入由写入方立即 push，Matrix mention 促使接收方按需 pull；若改成双向定时
+# mirror，旧本地文件可能覆盖较新的远端结果，形成难以恢复的数据回滚。
 #
 # ── File Sync Design Principle ──────────────────────────────────────────────
 #

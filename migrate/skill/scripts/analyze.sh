@@ -4,6 +4,11 @@
 # Scans the OpenClaw state directory, workspace files, skills, cron jobs,
 # and system tool dependencies to produce a tool-analysis.json report.
 #
+# analyze 只做迁移前盘点，不修改源环境。报告回答“旧 Agent 依赖哪些文件、命令、
+# skill 和 cron”，供下一步 generate-zip 决定打包内容；扫描结果可能含敏感路径或
+# 命令参数，应当视为私密诊断数据。STATE_DIR 必须指向明确的 OpenClaw 目录，不能
+# 为了多找文件而扩大到整个 HOME。
+#
 # Usage:
 #   analyze.sh [--state-dir <path>] [--output <dir>]
 

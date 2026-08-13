@@ -456,10 +456,13 @@ agt update worker --runtime hermes
 | | |
 |---|---|
 | [docs/quickstart.md](docs/quickstart.md) | Step-by-step guide |
+| [docs/zh-cn/beginner-code-guide.md](docs/zh-cn/beginner-code-guide.md) | Chinese beginner's code-path guide |
 | [docs/architecture.md](docs/architecture.md) | System architecture deep dive |
 | [docs/manager-guide.md](docs/manager-guide.md) | Manager configuration |
 | [docs/worker-guide.md](docs/worker-guide.md) | Worker deployment |
 | [docs/development.md](docs/development.md) | Contributing and local dev |
+| [docs/zh-cn/commenting-guide.md](docs/zh-cn/commenting-guide.md) | Chinese commenting and coverage guide |
+| [CONTEXT.md](CONTEXT.md) | Canonical AgentTeams domain vocabulary (Chinese) |
 
 ## Troubleshooting
 

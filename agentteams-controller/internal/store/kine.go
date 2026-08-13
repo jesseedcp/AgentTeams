@@ -27,6 +27,13 @@ type KineServer struct {
 
 // StartKine starts an embedded kine server backed by SQLite.
 // Returns ETCDConfig that can be used to connect via client-go.
+// StartKine 启动一个由 SQLite 持久化的 embedded kine server，并返回
+// client-go 可使用的 etcd-compatible 连接信息。
+//
+// DSN 中的 WAL 让读取在写入期间仍可继续，busy_timeout 则让短暂的写锁
+// 冲突等待最多 30 秒，而不是立即把正常并发当作失败。这个数据库保存
+// embedded Kubernetes API 的 CR 状态，与 AgentScope Manager 用于会话/操作的 SQLite
+// 是不同职责，不应混用或互相直接读表。
 func StartKine(ctx context.Context, cfg Config) (*KineServer, error) {
 	if cfg.DataDir == "" {
 		cfg.DataDir = "/data/agentteams-controller"

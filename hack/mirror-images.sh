@@ -1,6 +1,10 @@
 #!/bin/bash
 # mirror-images.sh - Mirror upstream images to Higress registry (multi-arch)
 #
+# 镜像镜像（mirror）是把相同 digest/多架构 manifest 复制到更近的 registry，不是
+# 重新编译代码。脚本只应写入明确的 TARGET_REGISTRY/TARGET_NS；先用 DRY_RUN 核对
+# 源/目标和 tag，避免覆盖正式仓库。registry 登录文件含凭据，不能提交或打印。
+#
 # Uses skopeo to copy multi-arch manifests from upstream registries to
 # the cn-hangzhou PRIMARY registry. Regional mirrors auto-sync from it:
 #

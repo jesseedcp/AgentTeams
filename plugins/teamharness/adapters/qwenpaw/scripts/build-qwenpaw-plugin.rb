@@ -1,6 +1,10 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
+# 初学者导读：把通用 TeamHarness 源按 QwenPaw 2 的插件目录契约重新组装和压缩。
+# staging 只包含 manifest 声明的文件，并排除缓存/生成物；最终包随后由独立校验器
+# 检查，避免源码目录可用但发布包缺少 MCP、skills 或 adapter。
+
 require "fileutils"
 require "json"
 require "open3"

@@ -8,6 +8,10 @@ Tencent Cloud). User-defined rules can be added via credagent.json's
 ``output_sanitize`` field.
 """
 
+# 初学者导读：工具可能意外返回 key/token。本层在结果进入模型记忆和用户显示前
+# 做最后一道脱敏，因此规则既覆盖常见云凭据，也接受 Controller 配置的自定义
+# 关键词。这里应替换敏感片段而保留错误上下文，方便排障又不暴露真实秘密。
+
 from __future__ import annotations
 
 import logging

@@ -1,3 +1,6 @@
+# 作用：按维护者指定的候选版本（RC）构建一组可供发布前验收的多架构镜像。
+# 触发：只能手动启动；版本格式校验先于任何推送，防止错误标签污染 GHCR。
+# Secret 边界：GITHUB_TOKEN 只用于登录当前仓库的包仓库，job 仅申请 contents:read 与 packages:write。
 name: Build RC
 
 on:
@@ -18,6 +21,7 @@ env:
   REPO: jesseedcp
 
 jobs:
+  # 先生成基础镜像，再让所选组件引用同一个 RC 版本，保证整套镜像可复现。
   build-rc:
     runs-on: ubuntu-latest
     permissions:

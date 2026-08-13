@@ -1,4 +1,12 @@
-"""Durable, cross-room approval requests for AgentScope continuations."""
+"""Durable, cross-room approval requests for AgentScope continuations.
+
+持久化需要管理员批准的 AgentScope continuation。
+
+高风险 tool call 可能源自 Project Room，却必须到 Admin DM 审批。本模块保存原房间、
+原事件、结构化 tool call、policy 快照、有效期和决策状态；``/confirm`` 后 session runner
+恢复原 continuation，而不是重新向模型提问。状态转换使用条件更新，避免双击确认或两个
+管理员并发响应导致同一个操作执行两次。
+"""
 
 from __future__ import annotations
 
@@ -80,6 +88,11 @@ def _from_row(row: sqlite3.Row) -> ConfirmationRequest:
 
 
 class ConfirmationRepository:
+    """用条件事务保存 approval request 的唯一生命周期。
+
+    pending 请求只能由一个 resolver 转入 resolving，之后 complete/cancel/expire 也要求
+    预期旧状态匹配。即使 Matrix 重复投递 ``/confirm``，第二次更新也不会再次取得执行权。
+    """
     def __init__(self, database: Database) -> None:
         self._database = database
 
@@ -438,7 +451,7 @@ class ConfirmationRepository:
 
 
 class ConfirmationService:
-    """Apply lifecycle rules around the durable confirmation repository."""
+    """在 repository 之外统一应用过期、解析与旧会话迁移规则。"""
 
     def __init__(
         self,

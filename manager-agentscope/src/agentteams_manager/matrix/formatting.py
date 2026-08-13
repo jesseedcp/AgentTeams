@@ -1,4 +1,11 @@
-"""Small allowlist Markdown renderer for Matrix formatted bodies."""
+"""Small allowlist Markdown renderer for Matrix formatted bodies.
+
+把有限 Markdown 转成 Matrix 可显示且经过转义的 HTML。
+
+Agent 回复可能包含列表、代码或链接，但 Matrix formatted_body 是 HTML，直接插入模型
+文本会造成标签注入。这里先转义，再只恢复允许的结构和安全链接；纯文本 body 始终
+保留作为兼容回退，客户端不支持 HTML 时仍能看到完整内容。
+"""
 
 from __future__ import annotations
 

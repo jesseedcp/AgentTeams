@@ -5,6 +5,10 @@ the policy layer that AgentTeams adds on top of hermes-agent's native Matrix
 adapter: outbound mention enrichment, dual allow-lists, and copaw-style
 history buffering.
 """
+
+# 初学者导读：这里不连接网络，只回答“这个用户/房间是否允许触发 Worker、该添加
+# 哪些 @mention、未提及的群聊历史如何进入上下文”等确定性问题。把 policy 与
+# transport 分开后，可以用普通单元测试验证权限，而不用启动真实 Matrix 服务。
 from __future__ import annotations
 
 import os
@@ -125,7 +129,10 @@ def apply_outbound_mentions(
 
 @dataclass(frozen=True)
 class DualAllowList:
-    """Allow-list policy split by DM and group contexts."""
+    """Allow-list policy split by DM and group contexts.
+
+    分别判断 DM 与群聊发送者，避免把两种信任边界混成一张名单。
+    """
 
     dm_policy: str = "allowlist"
     group_policy: str = "allowlist"
@@ -181,7 +188,10 @@ class _HistoryEntry:
 
 @dataclass
 class HistoryBuffer:
-    """Per-room copaw-style history buffer for unmentioned group chatter."""
+    """Per-room copaw-style history buffer for unmentioned group chatter.
+
+    暂存群聊中未触发回复的消息，并在下一次有效提及时作为上下文附加。
+    """
 
     limit: int = DEFAULT_HISTORY_LIMIT
     _entries: Dict[str, List[_HistoryEntry]] = field(default_factory=dict)

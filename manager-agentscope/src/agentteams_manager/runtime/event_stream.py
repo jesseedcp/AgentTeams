@@ -1,4 +1,12 @@
-"""Project AgentScope events into Matrix-safe public output."""
+"""Project AgentScope events into Matrix-safe public output.
+
+把 AgentScope 内部事件流投影为可以公开到 Matrix 的内容。
+
+reply_stream 会产生思考、工具调用、工具结果、文本和媒体等多类事件。projector 只提取
+允许展示的摘要与最终回复，并对参数和结果脱敏；确认事件则交给审批流程。这个边界让
+用户看到执行证据，同时避免泄露 chain-of-thought、Secret 或未经裁剪的 subprocess
+输出。
+"""
 
 from __future__ import annotations
 

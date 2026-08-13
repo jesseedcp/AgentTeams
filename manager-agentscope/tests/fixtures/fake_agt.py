@@ -1,5 +1,8 @@
 """Deterministic subprocess double for typed ``agt`` client tests."""
 
+# 测试预先把成功、失败或超时结果压入队列，再检查 client 实际传入的 argv/stdin。
+# 这样能验证参数边界、JSON 解析和错误传播，却不能证明真实 agt 二进制可用，完整链路由集成测试补充。
+
 from __future__ import annotations
 
 import json

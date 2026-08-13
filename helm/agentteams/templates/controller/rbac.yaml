@@ -1,3 +1,8 @@
+{{- /*
+RBAC 是 Controller 在当前 namespace 内可做事项的白名单。创建/删除 Agent Pod、
+读日志和管理 CR 都依赖这里；扩大 verbs/resources 等于扩大控制面权限，不能为了
+绕过一次 Forbidden 就直接授予 cluster-admin。
+*/ -}}
 {{- if .Values.controller.serviceAccount.create }}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role

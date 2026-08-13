@@ -1,4 +1,11 @@
-"""Admin-only AgentScope tools for external channel contacts."""
+"""Admin-only AgentScope tools for external channel contacts.
+
+向 Admin DM 暴露外部渠道联系人审核与回复的 typed tools。
+
+工具只把模型参数解析成稳定输入并调用 ``ChannelService``；是否信任联系人、如何绑定
+Matrix 房间和怎样持久化由 service/workflow 决定。非 Admin room 根本不会获得这些工具，
+避免外部联系人通过自己的渠道消息批准自己。
+"""
 
 from __future__ import annotations
 

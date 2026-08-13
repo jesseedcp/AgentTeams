@@ -1,4 +1,11 @@
-"""Policy-bound AgentScope tools for task and project workflows."""
+"""Policy-bound AgentScope tools for task and project workflows.
+
+向 AgentScope 暴露有限任务、周期任务和 Project 生命周期工具。
+
+这些 tool 只收集结构化请求并绑定当前房间/事件；TaskService 与 ProjectService 才负责
+artifact、DAG、Matrix 通知、状态转换和恢复。``TASK_COMPLETED`` 只是唤醒信号，必须先
+inspect result 并比较 digest，接受或返修后才改变任务终态。
+"""
 
 from __future__ import annotations
 

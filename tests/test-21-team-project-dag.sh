@@ -7,6 +7,9 @@
 #   Part C (e2e via LLM): Admin delegates task in Leader DM, Leader coordinates workers via Team Room
 #
 # NOTE: This test does NOT clean up — environment is left for manual inspection.
+# 初学者提示：DAG 是“有依赖关系的任务图”；这里要求 Leader 只能在上游任务完成后推进下游任务。
+# 通过标准横跨存储策略、房间隔离和真实 LLM 协作，不能用单个资源 Ready 代替整个项目完成。
+# 本脚本故意保留环境便于人工检查，因此后续必须运行 test-100 或明确清理，不能用于共享生产命名空间。
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/test-helpers.sh"

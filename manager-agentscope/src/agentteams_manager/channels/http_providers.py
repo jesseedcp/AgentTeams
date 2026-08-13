@@ -1,4 +1,12 @@
-"""Provider-native webhook and outbound HTTP adapters."""
+"""Provider-native webhook and outbound HTTP adapters.
+
+解析外部聊天平台的原生 webhook，并按平台协议发送回复。
+
+以 Telegram 消息为例，adapter 先验证其请求、提取稳定的联系人和消息 ID，再生成
+provider-neutral ``ChannelMessage`` 交给 ChannelService；出站时再把统一回复翻译成
+Telegram 所需的 HTTP 请求。平台返回超时不等于发送失败，因此上层仍需依赖稳定 ID
+与持久化状态处理可能已经发生的外部效果。
+"""
 
 from __future__ import annotations
 

@@ -1,4 +1,7 @@
 #!/bin/bash
+# 端到端测试的公共断言、日志、环境准备和清理函数。
+# 函数把失败统一记入当前用例，而不是让每个脚本自行打印后继续，最终 summary 据此决定进程退出码。
+# 这里操作的是测试环境容器；调用者仍必须使用 test 前缀和专用命名空间，不能传入生产资源名称。
 # test-helpers.sh - Common test utilities: assertions, lifecycle, logging
 # Source this file in each test script.
 

@@ -1,5 +1,9 @@
 """AgentTeams worker adapter API served beside the CoPaw app."""
 
+# 初学者导读：这个轻量 HTTP 服务只暴露 liveness/readiness 等 Worker 适配状态，
+# 让 Kubernetes 与 Controller 判断是否能派工。它不是 CoPaw 控制台、不是模型
+# API，也不接受管理资源的写操作，因此不能替代 Manager 或 Controller API。
+
 from __future__ import annotations
 
 import asyncio
@@ -12,7 +16,10 @@ logger = logging.getLogger(__name__)
 
 
 class WorkerAPIServer:
-    """Small HTTP server for AgentTeams worker adapter endpoints."""
+    """Small HTTP server for AgentTeams worker adapter endpoints.
+
+    这里只服务 Worker 健康探针，是最小 asyncio HTTP server。
+    """
 
     def __init__(
         self,

@@ -1,3 +1,9 @@
+{{- /*
+Controller 是集群控制面的常驻进程。values 先在这里变成环境变量、Secret 引用和
+镜像地址；Controller 随后观察 Manager/Worker/Team/Human CR，并为一个 Manager
+与多个 Worker 创建各自独立的 Pod。envFrom 提供敏感运行配置，显式 env 提供可
+审查的拓扑选择，二者最终共同构成 Controller 的运行输入。
+*/ -}}
 {{- $comp := dict "root" . "component" "controller" }}
 {{- $tag := include "agentteams.imageTag" (dict "tag" .Values.controller.image.tag "global" .Values.global "root" $) }}
 apiVersion: apps/v1

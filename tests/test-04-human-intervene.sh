@@ -2,6 +2,9 @@
 # test-04-human-intervene.sh - Case 4: Human sends supplementary instructions mid-task
 # Verifies: Human can send additional instructions while Worker is processing,
 #           and the final result incorporates both original and supplementary requirements
+# 测试意图：在 Worker 尚未完成时追加要求，防止实现只读取任务创建瞬间的快照、忽略后续人工纠偏。
+# 通过标准是同一任务的最终结果同时包含原要求和补充要求；仅收到两条聊天消息并不足以通过。
+# 等待窗口用于真实异步处理，不是固定 sleep 后盲目判定，轮询超时意味着链路没有按期收敛。
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/test-helpers.sh"

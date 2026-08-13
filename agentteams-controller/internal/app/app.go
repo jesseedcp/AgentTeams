@@ -93,6 +93,11 @@ type App struct {
 
 // New constructs the entire application dependency graph and wires everything
 // together. It does NOT start any long-running goroutines — call Start for that.
+// New 构造并连接整个应用的依赖图，但不启动长时间运行的 goroutine。
+// 初学者可以把 steps 看成“先有什么，后面才能造什么”的顺序：例如先
+// 注册 API scheme，再创建 client/controller manager，最后才能把 reconciler 和
+// HTTP handler 连上去。构造与 Start 分开后，任一步失败都不会留下半启动
+// 的后台任务，测试也可先检查组装结果。
 func New(ctx context.Context, cfg *config.Config) (*App, error) {
 	a := &App{cfg: cfg, namespace: cfg.Namespace()}
 
@@ -127,6 +132,10 @@ func New(ctx context.Context, cfg *config.Config) (*App, error) {
 // Start runs the HTTP server and controller manager. Blocks until ctx is cancelled.
 // Call Stop afterwards to drain background goroutines and shut the HTTP server
 // down gracefully.
+// Start 运行 HTTP server 与 controller manager，并阻塞到 ctx 被取消。
+// 领导选举保证多副本部署中只有当前 leader 执行集群初始化，但每个
+// 副本仍可以提供健康检查。Stop 会先停止接收新请求，再等待已启动
+// goroutine 退出，避免正在写 status 时粗暴终止进程。
 func (a *App) Start(ctx context.Context) error {
 	logger := ctrl.Log.WithName("app")
 

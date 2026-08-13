@@ -1,4 +1,12 @@
-"""Matrix client ownership and transport boundary."""
+"""Matrix client ownership and transport boundary.
+
+封装 Matrix 登录、同步、房间管理、消息收发和传输重试。
+
+Matrix homeserver 是消息与房间成员关系的权威来源。本模块把 matrix-nio 事件转换成
+Manager 的 ``InboundEvent``，并用稳定 transaction ID 发送回复，以便网络重试不会
+产生重复消息。sync token 只在事件安全交给上层后推进；认证失效和普通网络中断也会
+被区别处理，防止同步循环无声停止。
+"""
 
 from __future__ import annotations
 

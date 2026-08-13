@@ -1,3 +1,9 @@
+"""QwenPaw 与仓库级集成 Workflow 的静态接线契约。
+
+测试把 YAML 当数据读取，确认路径触发器、镜像矩阵和测试分片都包含 QwenPaw。它不会真正构建镜像；
+价值在于提前发现“代码存在，但 CI 从不构建/验收”的发布漏洞，真实运行由 test-26/27 补充。
+"""
+
 from pathlib import Path
 
 import yaml

@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """TeamHarness MCP stdio server entry point."""
 
+# 初学者导读：MCP server 通过标准输入/输出接收 QwenPaw 的 JSON-RPC tool call，
+# 再把它分派给 message、roomflow、filesync、artifact、projectflow 或 taskflow。
+# 它是成员侧协作工具箱，不是 Manager 管理 API。所有外部副作用在确定的工具函数
+# 中执行，并限制 Matrix 目标、共享路径、产物敏感内容和角色权限；stdout 只能输出
+# 协议消息，诊断内容应写 stderr，否则会破坏 MCP 数据流。
+
 from __future__ import annotations
 
 import datetime
@@ -574,6 +580,7 @@ def list_tools() -> list[dict[str, Any]]:
 
 
 def call_tool(name: str, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
+    """按固定白名单分派工具，未知名称不会被当作函数或 shell 命令执行。"""
     args = arguments or {}
     if name not in TOOL_NAMES:
         payload = {"ok": False, "error": "unknown_tool", "tool": name}

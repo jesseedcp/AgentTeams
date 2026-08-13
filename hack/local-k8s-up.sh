@@ -1,6 +1,11 @@
 #!/bin/bash
 # local-k8s-up.sh — Create a kind cluster and deploy AgentTeams via Helm.
 #
+# 实际链路：创建 kind 节点容器 → 构建/导入本地镜像 → Helm 把 values 渲染为
+# Secret、ConfigMap、Service 和工作负载 → Controller 创建唯一 Manager 与后续
+# Worker Pod → kind 的 extraPortMappings 把宿主机 18388 接到 Higress NodePort。
+# 这是一套完整但临时的本地集群；Docker Desktop 停止会连带 kind 与网页入口停止。
+#
 # Prerequisites:
 #   - kind: https://kind.sigs.k8s.io/
 #   - helm: https://helm.sh/
@@ -20,6 +25,7 @@
 # Usage:
 #   AGENTTEAMS_LLM_API_KEY=sk-xxx ./hack/local-k8s-up.sh
 
+# -e 遇错退出，-u 禁止未定义变量，pipefail 防止管道前段失败被最后命令掩盖。
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"

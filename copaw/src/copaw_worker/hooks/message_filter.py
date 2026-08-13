@@ -1,5 +1,9 @@
 """Outgoing Matrix message filtering for AgentTeams CoPaw agents."""
 
+# 初学者导读：Agent 的内部推理并不都适合发到 Matrix。本模块在出站边界识别
+# NO_REPLY、控制文本、重复通知与不允许的 @提及，只让应交付给用户/队友的内容
+# 离开 Worker。它不是修改模型回答的文风，而是防止内部协议泄漏和 Agent 间循环。
+
 from __future__ import annotations
 
 import os

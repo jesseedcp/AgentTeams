@@ -3,6 +3,11 @@
 Automated integration and Kubernetes behavioral acceptance suites for the
 AgentScope Manager fork.
 
+> 初学者说明：这里的根目录 Shell 用例多数是黑盒端到端测试，会把系统当成真实用户正在使用的产品；
+> `manager-agentscope/tests` 和 Controller 的 Go 测试则更偏向快速、隔离的单元/组件测试。
+> 端到端测试中的等待与重试用于观察 Matrix、Controller 等异步组件最终收敛，超时就是失败信号，
+> 不能用无限等待掩盖。缺少真实 LLM/GitHub Secret 的用例会标记跳过，跳过不等于已经验收通过。
+
 ## Architecture
 
 Tests simulate human interaction by calling the Matrix API directly, then verify system responses and side effects:

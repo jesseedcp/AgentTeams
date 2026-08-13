@@ -1,3 +1,4 @@
+{{- /* Service 给 Higress 一个稳定的 Cinny 后端；通常不直接暴露到宿主机。 */ -}}
 {{- if .Values.cinny.enabled }}
 {{- $comp := dict "root" . "component" "cinny" }}
 apiVersion: v1

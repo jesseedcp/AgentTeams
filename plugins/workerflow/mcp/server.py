@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """WorkerFlow MCP stdio server."""
 
+# 初学者导读：WorkerFlow 在一名 QwenPaw Worker 内创建有 ``tmp-`` 前缀的临时
+# Agent，并按 DAG 运行内部子步骤。这些临时 Agent 不属于 Controller 的 Team，
+# 没有独立 Worker CR 或正式 Matrix 成员；它们通过受限 shared/run 目录交换结果，
+# 完成后必须清理。所有 QwenPaw API 地址限制为 loopback，防止工具借参数访问内网。
+
 from __future__ import annotations
 
 import html
@@ -152,6 +157,7 @@ SAFE_TEMP_AGENT_ID_RE = re.compile(r"^tmp-[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 
 def _require_loopback_api_base(base: str) -> None:
+    """拒绝非本机 QwenPaw API，避免 MCP 参数变成服务端请求伪造入口。"""
     parsed = urllib.parse.urlparse(base)
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
         raise ValueError("apiBaseUrl must be an http(s) loopback URL")
@@ -970,6 +976,7 @@ def _workflow_plan_nodes(arguments: dict[str, Any]) -> tuple[list[dict[str, Any]
 
 
 def _validate_workflow_dag(nodes: list[dict[str, Any]]) -> None:
+    """确认依赖节点存在且没有环；有环的 DAG 永远不会出现可运行节点。"""
     by_id = {node["id"]: node for node in nodes}
     visiting: set[str] = set()
     visited: set[str] = set()

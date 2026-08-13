@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """agentteams — TeamHarness plugin CLI fallback."""
 
+# 初学者导读：这里仅把 install/list/update/uninstall 子命令映射给 plugin_manager。
+# 参数解析与真正的安全解包/生命周期脚本分离，使 CLI 入口保持简单，也让测试可以
+# 直接验证安装器而不必启动子进程。
+
 from __future__ import annotations
 
 import argparse

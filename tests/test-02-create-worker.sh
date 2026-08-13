@@ -2,6 +2,9 @@
 # test-02-create-worker.sh - Case 2: Create Worker Alice via Matrix conversation
 # Verifies: Manager creates Matrix user, Higress consumer, Room, config files,
 #           and returns install command
+# 测试意图：模拟管理员在 Matrix 中用自然语言创建 Alice，验证一次请求能贯穿 Manager、Controller 和外部资源。
+# 通过标准是 Worker 资源、Matrix 身份/房间、Higress consumer 与 MinIO 配置相互一致，而非只看到聊天回复。
+# 本用例需要真实 LLM；缺少 Key 时会明确跳过，不能把“未运行”误解为功能通过。
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/test-helpers.sh"

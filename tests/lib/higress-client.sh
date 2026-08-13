@@ -1,4 +1,7 @@
 #!/bin/bash
+# Higress 测试客户端：读取 consumer、路由和 MCP 权限，用网关的实际响应验证 Controller 副作用。
+# 它避免各用例重复拼接管理 API；测试只应操作带测试前缀的对象，并对期望的 403 等失败码显式断言。
+# 管理凭据来自测试环境变量，不能写入请求摘要、产物或失败日志。
 # higress-client.sh - Higress Console API wrapper for integration tests
 
 _HIGRESS_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

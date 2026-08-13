@@ -1,7 +1,15 @@
-"""Register the AgentTeams-owned Matrix transport with QwenPaw."""
+"""向 QwenPaw 注册 AgentTeams 第一方 Matrix transport。
+
+QwenPaw 的 plugin API 只需要知道 channel 类型与可配置字段；真正的登录、房间策略、
+媒体和回复逻辑位于 ``agentteams_matrix.channel``。这个插件用于 Worker，不会注册
+AgentScope Manager 的工具或审批能力。
+
+Register the AgentTeams-owned Matrix transport with QwenPaw.
+"""
 
 
 class AgentTeamsMatrixPlugin:
+    """把 Matrix channel 暴露给 QwenPaw 的插件发现机制。"""
     def register(self, api):
         from .agentteams_matrix.channel import AgentTeamsMatrixChannel
 

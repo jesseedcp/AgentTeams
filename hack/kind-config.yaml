@@ -1,4 +1,7 @@
 # kind cluster configuration for local AgentTeams development.
+# kind 的“节点”本身是 Docker 容器。extraPortMappings 把 Windows/宿主机端口接进
+# 节点；之后仍需 values-kind.yaml 中 NodePort 30080 与 Higress Service 对上。
+# 任一端口数字不一致都会出现页面空白或 homeserver 无法连接。
 #
 # Port mappings expose services on the host:
 #   - 18388: Higress Gateway (AI Gateway / Matrix proxy / Cinny)

@@ -1,5 +1,9 @@
 """CoPaw-native filesync tool for AgentTeams shared files."""
 
+# 初学者导读：此工具让 Agent 显式拉取或发布 shared 目录中的协作产物。路径会被
+# 规范化并限制在授权前缀内，防止通过 ``../`` 访问其他 Worker 私有目录或凭据。
+# 背景同步负责恢复私有状态；显式 filesync 则表达一次有意的团队文件交换。
+
 from __future__ import annotations
 
 import json

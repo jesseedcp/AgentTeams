@@ -1,5 +1,11 @@
 """Object-storage restore and runtime-state persistence for qwenpaw-worker."""
 
+# 初学者导读：Pod 的本地磁盘可能随重建而消失，所以 Worker 启动时先从 MinIO
+# 恢复自己的工作区，运行中再把允许持久化的变化推回去。Controller 管理的配置
+# 主要按“远端覆盖本地”流动；会话、记忆和产物则主要按“本地保存到远端”流动。
+# 过滤规则非常重要：如果把凭据、缓存或刚拉下来的共享投影再次上传，不仅会泄密，
+# 还可能形成反复覆盖的同步回路。
+
 from __future__ import annotations
 
 import asyncio
@@ -57,6 +63,13 @@ def _storage_alias() -> str:
 
 
 class FileSync:
+    """封装一个 Worker 私有前缀和团队共享前缀的 MinIO 同步。
+
+    ``mc`` 是 MinIO Client 命令行工具。该类始终以参数列表调用它，而不是拼接
+    shell 字符串；这样带空格的路径不会被拆坏，也不会把对象名当作命令执行。
+    ``ensure_alias`` 只在本进程第一次使用存储时配置连接，恢复后其余方法才能
+    安全访问对象。
+    """
     def __init__(
         self,
         *,
@@ -215,6 +228,8 @@ class FileSync:
 
 
 def _skip_background_push(rel: Path) -> bool:
+    # 背景推送是自动发生的，因此必须采用保守边界。这里排除的文件即使对调试
+    # 有用，也不应成为跨 Pod 的持久状态；否则重启会恢复陈旧锁、令牌或缓存。
     rel_path = rel.as_posix()
     excluded_prefixes = (
         "credentials",
@@ -240,6 +255,11 @@ def _skip_background_push(rel: Path) -> bool:
 
 
 def push_local(sync: FileSync, since: float = 0) -> List[str]:
+    """上传 ``since`` 之后变化且允许持久化的 Worker 文件。
+
+    返回相对路径列表供日志和测试核对。函数按内容与修改时间筛选，而不是把整个
+    目录无条件镜像到远端，因而不会删除 Controller 刚发布但本地尚未看到的文件。
+    """
     pushed = []
     failures: List[tuple[str, Exception]] = []
     local_dir = sync.local_dir

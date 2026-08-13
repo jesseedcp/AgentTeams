@@ -1,4 +1,11 @@
-"""Versioned task artifacts stored in the shared AgentTeams filesystem."""
+"""Versioned task artifacts stored in the shared AgentTeams filesystem.
+
+以版本化方式在共享 AgentTeams 存储中读写任务 artifact。
+
+Task spec、result 和附件通过受限 prefix 映射到 MinIO，而不是接受任意对象 key。写入时
+使用版本/校验和防止覆盖并发更新，下载后验证内容；Manager-owned 与 Worker-owned 路径
+有不同边界。artifact 回执是任务 workflow 判断派发和验收是否完成的证据之一。
+"""
 
 from __future__ import annotations
 

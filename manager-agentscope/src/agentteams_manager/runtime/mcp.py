@@ -1,4 +1,11 @@
-"""Generation-scoped native AgentScope MCP clients."""
+"""Generation-scoped native AgentScope MCP clients.
+
+按 runtime generation 创建、预热并回收 AgentScope MCP client。
+
+配置更新时先在旁路建立新连接并验证工具，再激活 generation；旧 Agent 正在运行时继续
+持有旧 client，turn 结束后才 retire。这样避免热更新把半途中的 MCP 调用断开，也防止
+新旧配置共享一个可变 client 而产生权限串线。
+"""
 
 from __future__ import annotations
 

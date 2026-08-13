@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 
+# Helm 渲染门禁：用无权限的测试值执行 `helm template`，检查最终 YAML 中的 Manager runtime、镜像和关键资源。
+# 它不会安装到 Kubernetes；默认和 Kind 两套渲染都通过，才说明 values 分支没有生成不同的错误配置。
+# 临时文件由 trap 清理，测试凭据只用于满足模板必填项，绝不能替换成生产 Secret。
+
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

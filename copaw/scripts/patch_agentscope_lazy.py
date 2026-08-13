@@ -10,6 +10,10 @@ Net saving: ~40 MB RSS.
 
 Usage:
     python patch_agentscope_lazy.py /path/to/site-packages/agentscope
+
+初学者导读：CoPaw Worker 只用 AgentScope 的一小部分，此构建期补丁将其他模块
+改成延迟 import 来减少内存。它不把 AgentScope 用作 Manager，也不改变业务工具；
+补丁针对固定上游版本，源码形状不匹配时应立即失败并重新审计。
 """
 
 import sys

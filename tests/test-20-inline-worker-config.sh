@@ -8,6 +8,9 @@
 #   4. WriteInlineConfigs generates SOUL.md + AGENTS.md
 #   5. create-worker.sh runs: Matrix account + Room + container
 #   6. Verify SOUL.md and AGENTS.md in the selected runtime's consumed location
+# 初学者提示：与 ZIP 导入不同，本用例从 YAML 内联字段生成运行文件，专门防止两条配置入口行为不一致。
+# 通过标准是在所选 runtime 真正读取的位置看到准确的 SOUL.md/AGENTS.md，而不是只检查中间临时文件。
+# Controller reconcile 是异步的，因此轮询等待目标文件出现并稳定后再断言内容。
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/test-helpers.sh"

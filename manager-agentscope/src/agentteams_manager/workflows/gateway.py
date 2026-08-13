@@ -1,4 +1,11 @@
-"""Durable, typed administration of Higress gateway resources."""
+"""Durable, typed administration of Higress gateway resources.
+
+以可恢复 Operation 管理 Higress gateway 资源。
+
+每次 Provider、Route、Credential 或 Consumer 变更先持久化期望请求，再执行 client 写入，
+最后读取实际资源比较。若 HTTP 超时，Operation 进入 reconciling：恢复时先查当前状态，
+匹配即补记成功，不匹配才决定重试或报告，避免重复创建和覆盖未知变更。
+"""
 
 from __future__ import annotations
 

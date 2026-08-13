@@ -1,4 +1,7 @@
 #!/bin/bash
+# MinIO 测试客户端：检查任务简报、Worker 配置、记忆、快照和结果是否真正写入持久化对象存储。
+# 测试读取最终对象，而不是只信任 Manager 的聊天回复；这能发现“回复成功但落盘失败”的回归。
+# 测试账户只允许访问测试 bucket/前缀，辅助函数不得回显 Secret Key。
 # minio-client.sh - MinIO verification helpers for integration tests
 #
 # All mc commands run via exec_in_manager() (docker exec into the Manager container)

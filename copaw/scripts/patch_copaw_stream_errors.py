@@ -4,6 +4,10 @@
 AgentTeams currently deploys CoPaw from PyPI. Keep this image-local compatibility
 patch fail-fast so an upstream exceptions.py shape change cannot silently build
 an image that still reports stream-idle disconnects as UnknownAgentException.
+
+初学者导读：这是固定 CoPaw 版本的镜像内兼容补丁，把可重试的流断开归到正确错误
+类别。脚本只在构建时改 site-packages，并通过精确 marker 校验上游形状；如果上游
+已经变化就失败，避免一次“看似成功”的构建携带错误异常语义。
 """
 
 from __future__ import annotations

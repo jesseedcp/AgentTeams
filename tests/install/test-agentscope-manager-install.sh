@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 
+# Linux/macOS 安装器的静态契约测试，与 PowerShell 版本检查同一组 AgentScope Manager 默认行为。
+# 它读取脚本文本而不执行安装，适合无 Docker 的快速 CI；真实容器行为由 test-28 和集成测试补充。
+# 两个平台测试都必须通过，防止只修复一个安装器导致 Windows 与 Unix 用户得到不同产品。
+
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

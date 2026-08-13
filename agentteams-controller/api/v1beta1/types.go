@@ -207,6 +207,8 @@ const (
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
 // Worker represents an AI agent worker in AgentTeams.
+// Worker 表示一个可独立运行的 AI Agent。Spec 是用户期望，Status
+// 是 Controller 对 Matrix 身份、房间和容器实际状态的观察结果。
 type Worker struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -214,6 +216,9 @@ type Worker struct {
 	Status            WorkerStatus `json:"status,omitempty"`
 }
 
+// WorkerSpec 声明 Worker 应该使用的模型、runtime、配置和运行状态。
+// 它不应包含 Matrix token、模型 API key 等真实密钥；这些值由
+// Controller 在部署边界注入，否则会进入 Kubernetes API 的普通 CR 数据。
 type WorkerSpec struct {
 	Model         string                     `json:"model"`
 	ModelProvider string                     `json:"modelProvider,omitempty"` // APIG Model API name for per-worker LLM provider
@@ -300,12 +305,14 @@ type WorkerSpec struct {
 	Mounts []WorkerMountSpec `json:"mounts,omitempty"`
 }
 
+// WorkerVolumeSpec 声明 Worker 要使用的一个具名外部卷。
 type WorkerVolumeSpec struct {
 	Name string               `json:"name"`
 	Type string               `json:"type"` // OSS
 	OSS  *WorkerOSSVolumeSpec `json:"oss,omitempty"`
 }
 
+// WorkerMountSpec 把已声明卷的子路径挂载到 Agent 容器的目标路径。
 type WorkerMountSpec struct {
 	Name      string `json:"name"`
 	VolumeRef string `json:"volumeRef"`
@@ -314,23 +321,27 @@ type WorkerMountSpec struct {
 	ReadOnly  bool   `json:"readOnly"`
 }
 
+// WorkerOSSVolumeSpec 描述 OSS bucket、endpoint 和挂载认证方式。
 type WorkerOSSVolumeSpec struct {
 	Bucket   string            `json:"bucket,omitempty"`
 	Endpoint string            `json:"endpoint,omitempty"`
 	Auth     WorkerOSSAuthSpec `json:"auth,omitempty"`
 }
 
+// WorkerOSSAuthSpec 在 RRSA 与 Secret 引用形式的 AccessKey 认证中二选一。
 type WorkerOSSAuthSpec struct {
 	Type      string                   `json:"type,omitempty"`
 	RRSA      *WorkerOSSRRSASpec       `json:"rrsa,omitempty"`
 	AccessKey *WorkerAccessKeyAuthSpec `json:"accessKey,omitempty"`
 }
 
+// WorkerOSSRRSASpec 声明通过工作负载身份换取 OSS 权限的角色信息。
 type WorkerOSSRRSASpec struct {
 	RoleName string `json:"roleName,omitempty"`
 	RoleARN  string `json:"roleArn,omitempty"`
 }
 
+// WorkerAccessKeyAuthSpec 引用目标集群中供 CSI driver 读取的密钥 Secret。
 type WorkerAccessKeyAuthSpec struct {
 	// SecretRef names the target-cluster Secret used by the CSI driver for
 	// mounting this OSS volume. The controller does not read this Secret when
@@ -339,6 +350,7 @@ type WorkerAccessKeyAuthSpec struct {
 	SecretRef NamespacedSecretRef `json:"secretRef,omitempty"`
 }
 
+// NamespacedSecretRef 引用 Kubernetes Secret，但不包含 Secret 中的真实值。
 type NamespacedSecretRef struct {
 	Name string `json:"name,omitempty"`
 	// Namespace must be omitted for worker OSS AccessKey auth. The mount
@@ -396,10 +408,13 @@ type ChannelPolicySpec struct {
 	DmDenyExtra     []string `json:"dmDenyExtra,omitempty"`
 }
 
+// ChannelsSpec 集中声明 Worker 除 Matrix 之外的可选消息通道。
 type ChannelsSpec struct {
 	DingTalk *DingTalkChannelSpec `json:"dingtalk,omitempty"`
 }
 
+// DingTalkChannelSpec 声明钉钉机器人通道的期望行为与连接参数。
+// 生产部署中敏感值应由 Secret/环境注入，不应直接写入普通 CR。
 type DingTalkChannelSpec struct {
 	Enabled          *bool  `json:"enabled"`
 	ClientID         string `json:"clientId,omitempty"`
@@ -412,6 +427,10 @@ type DingTalkChannelSpec struct {
 	CardTemplateID   string `json:"cardTemplateId,omitempty"`
 }
 
+// WorkerStatus 记录 Controller 已观察到的 Worker 实际状态。
+// ObservedGeneration 等于 metadata.generation 时，表示当前 spec 已完成一次
+// 无错误的 reconcile；不相等时，即使 Phase 仍显示 Running，也可能只是
+// 上一版 spec 的状态。
 type WorkerStatus struct {
 	ObservedGeneration int64               `json:"observedGeneration,omitempty"`
 	SpecHash           string              `json:"specHash,omitempty"`
@@ -443,6 +462,7 @@ type ExposedPortStatus struct {
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
+// WorkerList 是 Kubernetes API 返回多个 Worker 时使用的列表类型。
 type WorkerList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
@@ -454,6 +474,8 @@ type WorkerList struct {
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
 // Team represents a group of workers led by a Team Leader.
+// Team 表示由一个 Team Leader 和多个 Worker 组成的协作单元。
+// Team 通过名称引用已存在的 Worker CR，不再内嵌第二份 Worker 期望状态。
 type Team struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -461,6 +483,9 @@ type Team struct {
 	Status            TeamStatus `json:"status,omitempty"`
 }
 
+// TeamSpec 声明团队成员、角色、人类管理员与通信策略。
+// WorkerMembers 中的名称指向 Worker.metadata.name，TeamReconciler 会读取
+// 被引用的 Worker spec，但它们的独立 WorkerReconciler 不再部署团队成员。
 type TeamSpec struct {
 	Description  string           `json:"description,omitempty"`
 	TeamName     string           `json:"teamName,omitempty"`
@@ -494,6 +519,8 @@ type TeamWorkerRef struct {
 	Role string `json:"role"`
 }
 
+// EffectiveTeamName 返回对外系统使用的团队身份名。显式 TeamName
+// 为空时回退到 Kubernetes metadata.name，使老 CR 仍有稳定的身份键。
 func (s TeamSpec) EffectiveTeamName(metadataName string) string {
 	if s.TeamName != "" {
 		return s.TeamName
@@ -501,17 +528,22 @@ func (s TeamSpec) EffectiveTeamName(metadataName string) string {
 	return metadataName
 }
 
+// TeamAdminSpec 引用团队的人类管理员及其可选 Matrix user ID。
 type TeamAdminSpec struct {
 	Name         string `json:"name"`
 	MatrixUserID string `json:"matrixUserId,omitempty"`
 }
 
+// TeamMemberSpec 声明一个可进入团队房间的人类成员及其角色。
 type TeamMemberSpec struct {
 	Name         string `json:"name"`
 	MatrixUserID string `json:"matrixUserId,omitempty"`
 	Role         string `json:"role,omitempty"` // coordinator (default)
 }
 
+// TeamStatus 聚合团队房间与每个成员的实际状态。
+// 这是观察值而不是任务计划；用户要修改成员时应写 Spec.WorkerMembers，
+// 由 Controller 重新计算并覆盖 Status.Members。
 type TeamStatus struct {
 	Phase          string `json:"phase,omitempty"` // Pending/Active/Degraded/Failed
 	TeamRoomID     string `json:"teamRoomID,omitempty"`
@@ -598,6 +630,7 @@ type TeamMemberStatus struct {
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
+// TeamList 是 Kubernetes API 返回多个 Team 时使用的列表类型。
 type TeamList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
@@ -609,6 +642,8 @@ type TeamList struct {
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
 // Human represents a real human user with configurable access permissions.
+// Human 表示一个真实人类用户及其可访问的 Team/Worker。
+// Human 没有 Agent 容器；Controller 只对其 Matrix 身份和房间成员关系做收敛。
 type Human struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -616,6 +651,9 @@ type Human struct {
 	Status            HumanStatus `json:"status,omitempty"`
 }
 
+// HumanSpec 声明人类用户的展示身份、身份来源与可访问资源。
+// AccessibleTeams/Workers 是期望权限集合；从列表移除一项后，
+// reconcile 会把该用户从对应 Matrix 房间移除。
 type HumanSpec struct {
 	DisplayName       string              `json:"displayName"`
 	Username          string              `json:"username,omitempty"`
@@ -627,11 +665,15 @@ type HumanSpec struct {
 	Note              string              `json:"note,omitempty"`
 }
 
+// IdentitySourceSpec 用稳定 issuer/subject 对标外部 SSO 中的人类身份。
 type IdentitySourceSpec struct {
 	Issuer  string `json:"issuer"`
 	Subject string `json:"subject"`
 }
 
+// HumanStatus 记录已创建的 Matrix user ID 和已同步房间。
+// InitialPassword 是为兼容旧密码流程保留的一次性交付字段，不应当作
+// 长期凭据来源；外部 SSO 身份不在这里保存密码。
 type HumanStatus struct {
 	Phase                       string   `json:"phase,omitempty"` // Pending/Active/Failed/Degraded
 	MatrixUserID                string   `json:"matrixUserID,omitempty"`
@@ -653,6 +695,7 @@ func (s HumanSpec) EffectiveUsername(metadataName string) string {
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
+// HumanList 是 Kubernetes API 返回多个 Human 时使用的列表类型。
 type HumanList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
@@ -666,6 +709,9 @@ type HumanList struct {
 // Manager represents the AgentTeams Manager Agent — the coordinator that receives
 // natural-language instructions from Admin and orchestrates Workers/Teams via
 // the agt CLI / Controller REST API.
+// Manager 表示 AgentTeams 中接收管理员自然语言指令的 AgentScope 管家。
+// Manager 通过 agt CLI/Controller REST API 管理 Worker 与 Team，不直接更改
+// Kubernetes、Matrix 或 Higress 底层状态。
 type Manager struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -673,6 +719,9 @@ type Manager struct {
 	Status            ManagerStatus `json:"status,omitempty"`
 }
 
+// ManagerSpec 声明 AgentScope Manager 的模型、提示词来源、技能与生命周期。
+// Runtime 只支持 agentscope；Worker 的 openclaw/copaw/hermes/qwenpaw 是独立选择，
+// 不是 Manager 启动分支。
 type ManagerSpec struct {
 	Model         string                     `json:"model"`
 	ModelProvider string                     `json:"modelProvider,omitempty"` // APIG Model API name for per-manager LLM provider
@@ -729,6 +778,7 @@ type ManagerCodingCLISpec struct {
 	MaxOutputBytes   int      `json:"maxOutputBytes,omitempty"`
 }
 
+// EffectiveMountPath 返回 coding CLI 在 Manager 容器内的挂载路径。
 func (s ManagerCodingCLISpec) EffectiveMountPath() string {
 	if s.MountPath != "" {
 		return path.Clean(s.MountPath)
@@ -736,6 +786,7 @@ func (s ManagerCodingCLISpec) EffectiveMountPath() string {
 	return DefaultManagerCodingCLIMountPath
 }
 
+// EffectiveTrustedDirectory 返回允许 Manager 查找 CLI 可执行文件的受信任目录。
 func (s ManagerCodingCLISpec) EffectiveTrustedDirectory() string {
 	if s.TrustedDirectory != "" {
 		return path.Clean(s.TrustedDirectory)
@@ -743,6 +794,7 @@ func (s ManagerCodingCLISpec) EffectiveTrustedDirectory() string {
 	return path.Join(s.EffectiveMountPath(), "bin")
 }
 
+// EffectiveTimeoutSeconds 返回单次 coding CLI 进程的超时上限。
 func (s ManagerCodingCLISpec) EffectiveTimeoutSeconds() int {
 	if s.TimeoutSeconds != 0 {
 		return s.TimeoutSeconds
@@ -750,6 +802,7 @@ func (s ManagerCodingCLISpec) EffectiveTimeoutSeconds() int {
 	return DefaultManagerCodingCLITimeoutSeconds
 }
 
+// EffectiveMaxOutputBytes 返回允许带回 Manager 上下文的最大输出字节数。
 func (s ManagerCodingCLISpec) EffectiveMaxOutputBytes() int {
 	if s.MaxOutputBytes != 0 {
 		return s.MaxOutputBytes
@@ -812,12 +865,16 @@ func (s ManagerSpec) DesiredState() string {
 	return "Running"
 }
 
+// ManagerConfig 包含不属于模型或容器的 Manager 行为参数。
 type ManagerConfig struct {
 	HeartbeatInterval string `json:"heartbeatInterval,omitempty"` // default: 30m
 	WorkerIdleTimeout string `json:"workerIdleTimeout,omitempty"` // default: 12h
 	NotifyChannel     string `json:"notifyChannel,omitempty"`     // default: admin-dm
 }
 
+// ManagerStatus 记录 Manager 的 Matrix 身份、管理员直聊房间与运行状态。
+// SpecHash/ObservedGeneration 用来区分“新期望已经部署”和“页面仍显示旧容器
+// 的 Running”。WelcomeSent 则是一次性欢迎消息的幂等标记。
 type ManagerStatus struct {
 	ObservedGeneration int64  `json:"observedGeneration,omitempty"`
 	SpecHash           string `json:"specHash,omitempty"`
@@ -839,6 +896,7 @@ type ManagerStatus struct {
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
+// ManagerList 是 Kubernetes API 返回多个 Manager 时使用的列表类型。
 type ManagerList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`

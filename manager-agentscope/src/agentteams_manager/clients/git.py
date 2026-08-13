@@ -1,4 +1,11 @@
-"""Shell-free parsing and execution of constrained Git delegations."""
+"""Shell-free parsing and execution of constrained Git delegations.
+
+解析并执行受约束的 Git 委托，避免让 Agent 获得任意 shell。
+
+请求先被拆成受支持的 Git 操作、仓库根和显式参数，再由固定 argv 执行。路径必须落在
+允许的仓库内，高风险写操作还受上层确认和 processing lease 保护。本模块只报告经过
+裁剪的 Git 回执，不把可能含凭据的远端 URL 或完整进程环境暴露给模型。
+"""
 
 from __future__ import annotations
 

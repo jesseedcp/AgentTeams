@@ -5,6 +5,10 @@
 // The Memory client stores objects in a map keyed by their full object path.
 // Paths are treated as opaque strings — there is no bucket/prefix logic, so
 // tests see the exact keys that the production code passes in.
+//
+// 这是测试专用的内存实现，不是生产存储。它保留与真实 OSS 客户端
+// 相同的接口，让配置部署和上传测试不需要 MinIO 进程。它不模拟网络、
+// 认证或最终一致性，因此通过这些测试不等于真实 OSS 集成一定正常。
 package ossfake
 
 import (

@@ -8,6 +8,9 @@
 #   4. Verify Team Room exists in teams-registry.json
 #   5. Verify Worker groupAllowFrom plus AgentScope Manager topology policy
 #   6. Verify worker count and roles in workers-registry.json
+# 测试意图：验证 Team Leader、Team Worker、Manager 三种角色生成不同的协作上下文和房间权限，防止拓扑串线。
+# 通过标准不仅是成员数量正确，还要求 Leader 与 Worker 的上游/协调者指向正确，Manager 不被误写成每个 Worker 的直接协调者。
+# 读取 MinIO 生成文件和 registry 是确定性验证，不依赖模型回复。
 #   7. Update team (add description change), verify config updated
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

@@ -1,4 +1,12 @@
-"""Strict domain records for durable Manager workflows."""
+"""Strict domain records for durable Manager workflows.
+
+定义 Manager 各子系统共享的严格领域记录与状态枚举。
+
+Matrix 入站事件、房间 policy、Operation、Task 和 Project 都先表示成这里的模型，再
+进入 workflow 或 SQLite。模型把“允许出现哪些状态和字段”写成可校验契约，避免使用
+松散 dict 时把拼写错误悄悄持久化。状态记录描述已经发生的事实，不负责自行执行外部
+效果。
+"""
 
 from __future__ import annotations
 

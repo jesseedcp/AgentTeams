@@ -1,5 +1,10 @@
 """Worker heartbeat snapshot for the managed QwenPaw process."""
 
+# 初学者导读：Kubernetes 中“进程还活着”不等于“Agent 已经能接任务”。这里同时
+# 探测 QwenPaw 本地 API、最近活动时间，并把摘要报告给 Controller。Controller
+# 据此更新 Worker status，Manager 才能区分正在启动、可用和失联的成员。心跳只
+# 携带健康元数据，不上传聊天内容或凭据。
+
 from __future__ import annotations
 
 import asyncio
@@ -42,6 +47,7 @@ def _parse_rfc3339(value: Any) -> datetime | None:
 
 @dataclass
 class WorkerHeartbeat:
+    """保存可原子写入磁盘的最新健康快照，供 readiness 与诊断读取。"""
     path: Path
     status: str = "not_ready"
     message: str = "qwenpaw app not checked"
@@ -112,7 +118,10 @@ def get_qwenpaw_last_active_at(port: int, agent_id: str = "default") -> str | No
 
 @dataclass(frozen=True)
 class ControllerHeartbeatReporter:
-    """Report QwenPaw worker readiness and heartbeat to the AgentTeams controller."""
+    """把本地探测结果报告给 Controller 的 Worker 专用接口。
+
+    Report QwenPaw worker readiness and heartbeat to the AgentTeams controller.
+    """
 
     worker_name: str
     controller_url: str = ""

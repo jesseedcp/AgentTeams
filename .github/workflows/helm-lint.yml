@@ -1,3 +1,6 @@
+# 作用：在合并 Helm 或本地 K8s 启动脚本改动前，检查品牌替换、依赖、语法和最终渲染结果。
+# 触发：相关路径在 PR/main 中变化或手动运行；所有检查均通过才说明 Chart 可被继续发布测试。
+# 本 Workflow 使用测试占位凭据渲染模板，不接触生产 Secret，也不会部署到真实集群。
 name: Helm Lint
 
 on:
@@ -19,6 +22,7 @@ on:
   workflow_dispatch: ~
 
 jobs:
+  # 顺序很重要：先检查静态契约，再构建依赖、lint，最后用多组 values 做 template dry-run。
   helm-lint:
     runs-on: ubuntu-latest
     steps:

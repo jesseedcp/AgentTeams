@@ -7,6 +7,9 @@
 #
 # This is intentionally not just a plugin smoke test. The final pass condition
 # is a real QwenPaw Team completing one delegated TeamHarness task.
+# 初学者提示：插件“安装成功”只是前置状态；真正验收要求 QwenPaw Leader/Worker 通过 TeamHarness 完成一次委派任务。
+# 通过标准是 Matrix 委派、共享任务结果和团队成员响应都可观察，不能只检查 MCP 工具列表。
+# 该用例需要真实 LLM，因此 Secret 不可用于来自不受信任 Fork 的 CI 分片。
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/test-helpers.sh"

@@ -47,6 +47,9 @@ const (
 	MinAuthTokenExpirationSeconds     = int64(600)
 )
 
+// NormalizeAuthTokenExpirationSeconds 为 projected ServiceAccount token 应用安全默认值
+// 与最小寿命。过短的 token 可能在 Worker 还未启动时就过期，导致表面上
+// 是模型或 Matrix 错误，实际却是身份过期。
 func NormalizeAuthTokenExpirationSeconds(seconds int64) int64 {
 	if seconds <= 0 {
 		return DefaultAuthTokenExpirationSeconds
@@ -328,6 +331,10 @@ type WorkerResult struct {
 
 // WorkerBackend defines the interface for worker lifecycle operations.
 // Implementations: DockerBackend (local), KubernetesBackend (incluster).
+// WorkerBackend 定义 Controller 需要的最小 Agent 运行载体生命周期。
+// Docker、Kubernetes 和 sandbox 会返回不同原始状态，但都必须映射成
+// WorkerStatus，让上层 reconcile 不依赖某个后端的字符串细节。
+// 所有方法都接收 context；实现必须向 HTTP/Kubernetes/进程调用传播取消。
 type WorkerBackend interface {
 	// Name returns the backend identifier (e.g. "docker", "k8s").
 	Name() string

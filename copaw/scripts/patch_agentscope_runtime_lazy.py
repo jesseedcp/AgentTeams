@@ -9,6 +9,10 @@ Net saving: ~100 MB RSS.
 
 Usage:
     python patch_agentscope_runtime_lazy.py /path/to/site-packages/agentscope_runtime
+
+初学者导读：headless Worker 不需要部署器、Web 应用和追踪等完整 runtime 模块，
+这个构建期补丁把它们延迟加载以节省内存。它只优化 CoPaw Worker 镜像，不改变
+正式 AgentScope Manager；上游版本变化导致标记不匹配时必须停止构建。
 """
 
 import sys

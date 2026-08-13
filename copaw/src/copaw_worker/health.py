@@ -103,6 +103,10 @@ Strategy:
     checks; external callers decide when to call them.
 """
 
+# 初学者导读：健康状态不是简单的“Python 进程存在”。CoPaw API、Matrix、模型
+# 网关和 MinIO 同步各自都可能失败，因此这里保存完整组件快照。readiness 只有在
+# 接任务所需依赖真的可用后才成功，Controller 才会把该 Worker 视为可派工成员。
+
 from __future__ import annotations
 
 import json
@@ -141,7 +145,10 @@ class HealthSnapshot:
 
 
 class HealthState:
-    """Maintain component health and persist a full CoPaw health snapshot."""
+    """并发安全地保存并持久化一名 Worker 的完整组件健康快照。
+
+    Maintain component health and persist a full CoPaw health snapshot.
+    """
 
     def __init__(self, state_path: Path) -> None:
         self.state_path = state_path

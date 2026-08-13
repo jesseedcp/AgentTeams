@@ -1,4 +1,12 @@
-"""AgentScope session persistence keyed by Matrix room."""
+"""AgentScope session persistence keyed by Matrix room.
+
+按 Matrix room 持久化 AgentScope state 与会话设置。
+
+每个房间拥有独立上下文、摘要、模型覆盖、thinking、queue 与 elevated 模式。AgentState
+序列化后写入 SQLite，进程重启可继续对话；每日 reset 边界存为绝对时间，避免重启后
+重复或漏掉清理。这里存储设置，不决定设置是否有权限，授权仍由 Admin 命令和 policy
+处理。
+"""
 
 from __future__ import annotations
 

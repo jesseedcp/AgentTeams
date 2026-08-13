@@ -1,5 +1,8 @@
 #!/bin/bash
 # test-28-agentscope-manager-parity.sh - Static and running-image parity gate
+# 测试意图：保证源码、Manager Skill、注册工具、镜像入口与运行中容器暴露的能力是同一套契约。
+# `--static-only` 适合快速 CI，不启动镜像；完整模式还进入真实容器检查，能发现 COPY/entrypoint 遗漏。
+# 通过标准是保留能力存在、已删除的旧 Manager 分支不再出现，且 Skill parity 清单没有漂移。
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"

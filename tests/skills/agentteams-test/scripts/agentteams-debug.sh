@@ -1,5 +1,8 @@
 #!/bin/bash
 # agentteams-debug.sh - Export AgentTeams debug logs for analysis
+# 失败诊断辅助脚本：收集测试环境中的容器状态、日志和关键资源摘要，帮助判断故障位于哪一层。
+# 它不修复、不重启、不删除资源；导出的 Debug 包只是诊断证据，最终通过仍需重新运行相应测试。
+# 输出路径可能被上传为 CI artifact，因此收集内容必须经过脱敏，不能包含 Token、API Key 或管理员密码。
 # Usage: agentteams-debug.sh [command] [time_range]
 #
 # Commands:

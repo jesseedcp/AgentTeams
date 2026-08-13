@@ -1,5 +1,11 @@
 """Runtime desired-state update support for qwenpaw-worker."""
 
+# 初学者导读：这是 QwenPaw Worker 的“期望状态应用器”。Controller 把 Worker
+# 应该加入的 Team/Matrix 房间、模型、MCP、身份与 Agent 包写入 runtime config；
+# 本模块读取其中的 generation，只在版本真正变化时把差异应用到本地 QwenPaw。
+# Manager 负责规划和派工，这里的 Worker 只接受属于自己的配置与任务，不能反过来
+# 修改 Controller 的权威状态。
+
 from __future__ import annotations
 
 import asyncio
@@ -200,7 +206,14 @@ def _bool(value: Any) -> bool:
 
 @dataclass(frozen=True)
 class MemberRuntimeConfig:
-    """Normalized runtime.yaml snapshot used by QwenPaw worker and adapter."""
+    """对 Controller 生成的 runtime config 提供只读、带类型的访问入口。
+
+    原始文件是嵌套 JSON/YAML 数据。把字段解析集中在这里，可以统一处理旧版本缺失
+    字段与默认值；如果业务代码到处直接索引字典，一次配置格式升级就会造成不同
+    模块得到不同答案。
+
+    Normalized runtime.yaml snapshot used by QwenPaw worker and adapter.
+    """
 
     path: Path
     raw: Dict[str, Any]
@@ -531,7 +544,14 @@ class MemberRuntimeConfig:
 
 
 class AgentPackageManager:
-    """Download and extract desired AgentSpec packages without restarting."""
+    """下载并原子应用 Controller 指定的 Agent 包。
+
+    Agent 包包含身份提示、技能和 MCP 配置。应用前会校验归档路径，防止恶意的
+    ``../`` 条目写出工作区；应用时先做快照，只有全部文件成功替换后才提交当前
+    identity。这样进程在复制到一半时退出，重启仍能恢复旧的完整版本。
+
+    Download and extract desired AgentSpec packages without restarting.
+    """
 
     def __init__(self, root_dir: Path, workspace_dir: Optional[Path] = None) -> None:
         self.root_dir = root_dir
@@ -1478,7 +1498,14 @@ class ApplyResult:
 
 
 class RuntimeUpdater:
-    """Apply controller-projected runtime desired state inside one worker pod."""
+    """协调一次期望状态更新，并记录上一次已应用的 generation。
+
+    一次更新可能同时涉及 Agent 包、模型、MCP、Matrix channel 和团队上下文。
+    ``apply_once`` 负责决定哪些部分变化，具体写入委托给 QwenPaw API 或文件管理器。
+    generation 只有在关键步骤完成后才前进，避免重启后把半成品误认成已生效版本。
+
+    Apply controller-projected runtime desired state inside one worker pod.
+    """
 
     def __init__(
         self,
@@ -1517,6 +1544,12 @@ class RuntimeUpdater:
         force: bool = False,
         reapply_adapter: bool = True,
     ) -> ApplyResult:
+        """按固定顺序应用一次配置快照，并只在全部关键步骤后保存 current_config。
+
+        身份/存储先就位，随后模型、MCP、channel 和 Agent 包生效，最后刷新 Team
+        上下文。若中途抛错，旧 generation 仍被视为当前版本，轮询或重启可再次执行。
+        各写入操作必须幂等，才能安全处理“上次实际成功但响应丢失”的情况。
+        """
         started_at = time.monotonic()
         config = runtime_config or self.load()
         previous = self.current_config

@@ -1,3 +1,6 @@
+# 旧版本兼容测试：解析安装器 AST，并验证升级 v1.2 以前镜像时仍会生成旧环境变量映射。
+# 它使用临时输入而不连接 Docker；通过标准是新安装保持新变量、旧镜像得到兼容变量且脚本无语法错误。
+# 兼容层只服务升级路径，不能把旧变量重新变成新部署的默认值。
 $ErrorActionPreference = "Stop"
 
 $root = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path

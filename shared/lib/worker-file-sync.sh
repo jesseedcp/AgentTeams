@@ -1,5 +1,8 @@
 #!/bin/bash
 # Runtime-neutral Local -> Remote Worker workspace synchronization.
+# 初学者导读：OpenClaw 等 Worker 共用这套“本地产物保存到 MinIO”逻辑。它只上传
+# 允许持久化的 Worker 数据，并用成功时间标记避免重复全量扫描；Controller 管理的
+# 配置、凭据、缓存和 Matrix 私有状态明确排除，否则旧 Worker 文件会覆盖新期望状态。
 
 worker_sync_init() {
     local state_dir="$1"
@@ -34,6 +37,8 @@ worker_sync_should_push() {
 }
 
 worker_sync_mirror_all() {
+    # ``mc mirror`` 的方向在这里是 local -> remote；参数调换会把远端历史内容拉回并
+    # 覆盖当前运行结果，因此调用者必须传入已校验的 Worker workspace/prefix。
     local workspace="$1"
     local remote_prefix="$2"
 

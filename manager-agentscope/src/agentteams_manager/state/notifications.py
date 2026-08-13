@@ -1,4 +1,11 @@
-"""Exactly-once notification materialization."""
+"""Exactly-once notification materialization.
+
+物化通知的计划、发送中和已发送状态，实现效果上的 exactly-once。
+
+Matrix 发送超时时，消息可能已被 homeserver 接收。仓库先保存稳定 notification ID 与
+transaction ID，再记录回执；恢复时使用相同 transaction ID 查询或重发，Matrix 会
+按幂等键去重。这里的 exactly-once 指可观察消息不重复，并不假设网络调用只发生一次。
+"""
 
 from __future__ import annotations
 

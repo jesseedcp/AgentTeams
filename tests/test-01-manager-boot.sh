@@ -1,5 +1,8 @@
 #!/bin/bash
 # test-01-manager-boot.sh - AgentScope Manager production boot contract
+# 测试意图：先确认真实容器中的 Matrix、Cinny、Higress、MinIO 和 Manager 健康端点都已就绪。
+# 这是后续用例的前置门禁；如果本测试失败，后面的“创建 Worker”失败通常只是基础设施未启动的连锁结果。
+# 通过标准不仅是进程存在，还包括生产入口、运行时配置与持久化目录符合 AgentScope Manager 契约。
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/test-helpers.sh"

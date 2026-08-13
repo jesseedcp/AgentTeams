@@ -1,4 +1,12 @@
-"""Direct Matrix-to-AgentScope turn execution."""
+"""Direct Matrix-to-AgentScope turn execution.
+
+把一个已授权 Matrix 事件执行成完整的 AgentScope turn。
+
+真实链路是：解析斜杠命令或构造 ``UserMsg``，加载房间历史、媒体和受限记忆，运行
+AgentScope ``reply_stream``，把公开 event 投影成 Matrix 消息。若 AgentScope 请求确认，
+本模块会持久化 continuation 并在 Admin DM 发审批通知；稍后 ``/confirm`` 恢复的是原
+tool call，而不是重新让模型生成一次。内部 reasoning 不会原样发布到房间。
+"""
 
 from __future__ import annotations
 
@@ -142,7 +150,12 @@ class ProjectProtocolWorkflow(Protocol):
 
 
 class MatrixSessionRunner:
-    """Drive one room-scoped Agent through its native streaming API."""
+    """驱动一个 room-scoped Agent，并把 turn 结果安全写回 Matrix。
+
+    输入的 event 已由 router claim、policy resolver 授权；输出端使用同一 source event
+    派生 transaction ID。若流中出现 ``RequireUserConfirmEvent``，runner 会保存 AgentState
+    和 tool call，发出审批请求并停止本 turn，确保确认后能从准确位置续跑。
+    """
 
     def __init__(
         self,
@@ -198,6 +211,7 @@ class MatrixSessionRunner:
         event: InboundEvent,
         policy: RoomPolicy,
     ) -> None:
+        """处理一条普通入站事件，直到回复、审批暂停或确定性失败。"""
         if self._metrics is not None:
             self._metrics.increment(
                 "agentteams_manager_matrix_turns_total",

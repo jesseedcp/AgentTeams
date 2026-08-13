@@ -1,4 +1,11 @@
-"""Verified Controller runtime polling and monotonic activation."""
+"""Verified Controller runtime polling and monotonic activation.
+
+轮询 Controller 发布的 runtime document，并原子激活新配置。
+
+远端对象只有 ETag 改变时才下载；字节数、SHA-256、Pydantic 结构和递增 revision 全部
+通过后，才预热 MCP 等依赖并用原子替换写入本地缓存。无效新版本只把 registry 标为
+degraded，当前可用 generation 保持不变，因此一次坏配置不会破坏正在进行的会话。
+"""
 
 from __future__ import annotations
 
@@ -103,7 +110,11 @@ class RuntimeRegistry:
 
 
 class ConfigWatcher:
-    """Download only changed ETags and activate only verified revisions."""
+    """只下载变化的 ETag，并只激活完整验证且 revision 递增的文档。
+
+    首次 ``start`` 会等待至少一个远端 generation 成功激活，防止 Manager 用镜像内占位
+    配置接收消息。后续轮询失败时保留旧 generation 并标记 degraded，恢复后可自动继续。
+    """
 
     def __init__(
         self,

@@ -1,4 +1,11 @@
-"""Validated Matrix media download, decryption, and upload."""
+"""Validated Matrix media download, decryption, and upload.
+
+在大小和类型边界内下载、解密与上传 Matrix 媒体。
+
+媒体事件只提供 MXC 地址和元数据。本模块先限制数量与声明大小，再下载并校验真实字节；
+加密附件还要验证密钥和哈希。经过验证的媒体才会变成 AgentScope block，避免一个伪造
+附件耗尽内存或把未经校验的内容送进模型。
+"""
 
 from __future__ import annotations
 

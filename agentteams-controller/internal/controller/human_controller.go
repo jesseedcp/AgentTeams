@@ -32,6 +32,9 @@ type HumanReconciler struct {
 	Provisioner service.HumanProvisioner
 }
 
+// Reconcile 将 Human spec 中的身份与可访问资源同步到 Matrix。
+// 它不创建 Pod；一轮典型处理是解析用户身份、确保账号存在，再将
+// 用户加入 desired rooms 并移出不再允许的 rooms。重复触发时结果必须相同。
 func (r *HumanReconciler) Reconcile(ctx context.Context, req reconcile.Request) (retres reconcile.Result, reterr error) {
 	start := time.Now()
 	defer func() { metrics.Observe("human", start, reterr) }()
@@ -81,6 +84,8 @@ func (r *HumanReconciler) Reconcile(ctx context.Context, req reconcile.Request) 
 	}()
 
 	if !human.DeletionTimestamp.IsZero() {
+		// Matrix 账号和房间成员关系不属于 Kubernetes，ownerReference
+		// 无法帮忙删除它们，因此需要 finalizer 执行外部清理。
 		if controllerutil.ContainsFinalizer(&human, finalizerName) {
 			if err := r.resolveHumanScope(s); err != nil && human.Status.MatrixUserID == "" {
 				logger.Error(err, "failed to resolve deleting human identity; continuing best-effort cleanup", "name", human.Name)

@@ -1,3 +1,9 @@
+"""验证外部副作用结果不明确时，Supervisor 不会把超时误写成确定失败或盲目重做。
+
+具体场景是：Manager 已发出外部请求，却在收到响应前断线。通过标准是操作进入可恢复状态、日志保持脱敏，
+恢复流程先查询外部事实再决定补记成功或重试，从而避免重复创建资源。
+"""
+
 from datetime import UTC, datetime
 from pathlib import Path
 

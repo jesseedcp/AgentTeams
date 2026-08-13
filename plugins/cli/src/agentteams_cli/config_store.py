@@ -1,5 +1,9 @@
 """Local `.agentteams/` state store."""
 
+# 初学者导读：插件内容和安装清单保存在当前项目的 ``.agentteams`` 下，不写入
+# 全局用户目录。清单记录版本、来源与 digest，插件管理器才能判断当前安装内容；
+# 它不是 Agent 的长期记忆，也不应保存 Matrix token 或模型 key。
+
 from __future__ import annotations
 
 import json
@@ -9,7 +13,10 @@ from typing import Any, Dict, List, Optional
 
 
 class ConfigStore:
-    """Read and write project-local AgentTeams plugin state."""
+    """Read and write project-local AgentTeams plugin state.
+
+    即读取和写入项目级插件目录及其安装清单。
+    """
 
     def __init__(self, project_dir: Optional[Path] = None) -> None:
         self.project_dir = Path(project_dir) if project_dir else Path.cwd()

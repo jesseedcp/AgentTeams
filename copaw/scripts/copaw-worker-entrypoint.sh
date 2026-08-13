@@ -14,6 +14,11 @@
 #   AGENTTEAMS_FS_SECRET_KEY - MinIO secret key (required in local mode)
 #   AGENTTEAMS_CONSOLE_PORT  - CoPaw web console port (triggers standard mode)
 #   TZ                   - Timezone (optional)
+#
+# 本入口把 Controller 投射的统一 Worker 合约翻译成 CoPaw 所需目录/配置。先完成
+# 对象存储凭据和 workspace 同步，再按是否暴露 Console 选择 standard 或 lite；
+# Console 只是调试界面开关，不会创建第二个 Worker。初始化失败必须终止，否则
+# Matrix 上可能看到一个使用过期身份或没有持久同步的“假在线”Agent。
 
 set -e
 

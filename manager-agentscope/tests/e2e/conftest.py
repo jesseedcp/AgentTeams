@@ -1,5 +1,9 @@
 """Shared opt-in harness for live Kubernetes acceptance tests."""
 
+# 这里通过 kubectl/HTTP/Matrix 访问正在运行的组件，不是进程内 fake；因此默认不会在普通 pytest 中误跑。
+# fixture 创建带唯一后缀的资源，并有限重试等待 Controller 收敛；超时表示集群未达到通过标准。
+# 凭据只从环境读取，测试报告不得回显原值。
+
 from __future__ import annotations
 
 import base64

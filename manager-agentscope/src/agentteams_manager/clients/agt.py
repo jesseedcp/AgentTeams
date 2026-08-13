@@ -1,4 +1,12 @@
-"""Typed command boundary for the AgentTeams Controller CLI."""
+"""Typed command boundary for the AgentTeams Controller CLI.
+
+通过 ``agt`` CLI 与 AgentTeams Controller 进行类型化通信。
+
+Manager 查询或修改 Worker、Team、Human、Project 时，只在本模块把明确参数转换为
+argv，并校验 CLI 返回的 JSON。workflow 不拼接 shell 字符串，也不直接访问 Controller
+HTTP API：这样既减少命令注入风险，又让所有资源协议集中在一个边界。CLI 超时仍可能
+表示 Controller 已执行操作但回执丢失，上层必须进入 reconciliation，而非盲目重试。
+"""
 
 from __future__ import annotations
 

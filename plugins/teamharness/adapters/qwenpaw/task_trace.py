@@ -49,6 +49,10 @@ Set ``AGENTTEAMS_TASK_TRACE_DEBUG=1`` to enable verbose processor logs.
 Default is silent — no I/O overhead on the hot span path.
 """
 
+# 初学者导读：这里给一次 Agent turn 的根 trace 加上 project/task ID，便于在
+# 可观测平台从慢请求回到具体任务。只标根 span 可避免每个内部模型/工具 span 都
+# 重复标签；room_id 与当前 ContextVar 绑定，多个房间并行时不会互相继承任务身份。
+
 from __future__ import annotations
 
 import contextvars

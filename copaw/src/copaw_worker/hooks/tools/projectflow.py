@@ -1,5 +1,9 @@
 """CoPaw-native projectflow tool for AgentTeams project/DAG execution."""
 
+# 初学者导读：DAG 是带依赖关系的任务图，例如 B 只有在 A 完成后才可执行。本工具
+# 在 Worker/Leader 工作区推进该图，并检查仍在运行的子任务，避免父任务提前完成。
+# Manager 仍负责创建与治理正式 Project；这里是成员侧的执行与汇报状态。
+
 from __future__ import annotations
 
 import asyncio

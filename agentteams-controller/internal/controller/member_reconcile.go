@@ -308,6 +308,13 @@ func ValidateMemberDeployment(m MemberContext) error {
 // ReconcileMemberInfra ensures Matrix account, Gateway consumer, MinIO user,
 // and DM room are provisioned (or credentials refreshed). Writes MatrixUserID,
 // RoomID, and ProvResult into state.
+// ReconcileMemberInfra 确保 Matrix 账号、Gateway consumer、MinIO 用户和个人
+// 房间存在，然后把本轮需要的凭据放入 state，供后续配置和容器阶段
+// 使用。
+//
+// ExistingMatrixUserID 是稳定的“已完成基础设施”观察值：有值时只
+// 刷新短期凭据，不重新注册账号。这一分支使重复 reconcile 不会创建
+// 多份身份。但这些 token 只活在本轮内存 state，不得写入 CR status。
 func ReconcileMemberInfra(ctx context.Context, d MemberDeps, m MemberContext, state *MemberState) (reconcile.Result, error) {
 	if m.ExistingMatrixUserID != "" {
 		refreshResult, err := d.Provisioner.RefreshWorkerCredentials(ctx, m.Name, m.RuntimeName, m.TeamName)
@@ -380,6 +387,10 @@ func EnsureMemberServiceAccount(ctx context.Context, d MemberDeps, m MemberConte
 
 // ReconcileMemberConfig pushes all OSS config (package, inline configs,
 // openclaw.json, mcporter, AGENTS.md, builtin skills) for the member.
+// ReconcileMemberConfig 将包、runtime 配置、MCP 设定、AGENTS.md 和 skill 等
+// 期望配置写入 OSS。它在 Infra 之后执行，因为生成有效配置需要已确定
+// 的 Matrix user/room 与 gateway 身份。它在 Container 之前执行，因为新 Pod
+// 启动后应立即看到完整版本，不能读到一半新、一半旧的配置。
 func ReconcileMemberConfig(ctx context.Context, d MemberDeps, m MemberContext, state *MemberState) error {
 	if state.ProvResult == nil {
 		return nil
@@ -498,6 +509,11 @@ func runtimeSkillRegistryConfig(d MemberDeps, m MemberContext, state *MemberStat
 
 // ReconcileMemberContainer converges the member's backend pod/container with
 // the desired lifecycle state (Running / Sleeping / Stopped). Idempotent.
+// ReconcileMemberContainer 比较 desired lifecycle state、spec hash 和后端实际状态，
+// 再决定创建、重建、唤醒、休眠或停止运行载体。spec hash 故意
+// 不包含 State：单纯从 Running 变成 Sleeping 应调用生命周期操作，不应
+// 因 hash 变化重建整个容器。ctx 超时时后端操作结果可能不确定，
+// 下一轮必须先查询实际状态，不能把超时等同于“没创建”。
 func ReconcileMemberContainer(ctx context.Context, d MemberDeps, m MemberContext, state *MemberState) (reconcile.Result, error) {
 	if state.ProvResult == nil {
 		return reconcile.Result{}, nil
@@ -1900,6 +1916,9 @@ func extraHostsForBackend(wb backend.WorkerBackend) []string {
 // ReconcileMemberExpose reconciles gateway port exposure for the member.
 // Non-fatal: logs and returns current state unchanged on failure. The returned
 // slice overwrites state.ExposedPorts on success.
+// ReconcileMemberExpose 将 spec.expose 与 Higress 中已存在路由做差异收敛，
+// 并把已验证的域名写入 state。Higress 是路由的权威来源，Status
+// 只是上次观察缓存；两者冲突时必须以网关实际状态为准。
 func ReconcileMemberExpose(ctx context.Context, d MemberDeps, m MemberContext, state *MemberState) error {
 	if len(m.Spec.Expose) == 0 && len(m.CurrentExposedPorts) == 0 {
 		state.ExposedPorts = nil
@@ -1924,6 +1943,9 @@ func ReconcileMemberExpose(ctx context.Context, d MemberDeps, m MemberContext, s
 // member. Does NOT remove finalizers or compatibility registry entries — those
 // concerns belong to the owning reconciler because they have different rules
 // for standalone vs team contexts.
+// ReconcileMemberDelete 清理一个 member 在 Kubernetes 之外的资源，供所有者
+// finalizer 调用。清理步骤要允许重复执行：进程可能在删掉 Matrix
+// 别名后、移除 finalizer 前重启，下一轮会再次进入这个函数。
 func ReconcileMemberDelete(ctx context.Context, d MemberDeps, m MemberContext) error {
 	logger := log.FromContext(ctx)
 	logger.Info("deleting member", "name", m.Name, "role", m.Role)

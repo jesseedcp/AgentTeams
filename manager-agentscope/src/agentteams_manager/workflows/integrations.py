@@ -1,4 +1,11 @@
-"""Cross-system model, MCP, and service integration workflows."""
+"""Cross-system model, MCP, and service integration workflows.
+
+协调 Controller、Higress、模型 gateway 与 Worker 的集成变更。
+
+例如切换模型需要先 preflight，更新 Higress/Controller 期望状态，等待 runtime revision
+发布，再通知受影响 Worker。每个跨系统效果之前都写 journal，超时后按实际状态对账。
+这使“一条工具成功”代表所有必要系统最终一致，而不是某个 API 暂时返回 200。
+"""
 
 from __future__ import annotations
 

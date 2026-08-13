@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """TeamHarness message MCP tool implementation."""
 
+# 初学者导读：Worker/Leader 通过此工具向 Matrix 房间或队友发送确定的协调消息。
+# 工具先选择当前 channel 的回复路由，执行目标与 @mention 校验，再把消息交给
+# QwenPaw channel 或 Matrix API；成功后补写 session，避免下一轮 Agent 不知道自己
+# 已经发送过。它不是任意 HTTP 客户端，也不授予 Worker 管理资源的权限。
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -19,6 +24,7 @@ TEAMHARNESS_TRIGGER_CONTENT_KEY = "m.teamharness.trigger"
 
 @dataclass(frozen=True)
 class MessageToolDeps:
+    """把网络/路由函数作为依赖注入，便于在单元测试中替换为无副作用假实现。"""
     reply_route: Callable[[dict[str, Any]], dict[str, Any]]
     qwenpaw_message: Callable[[dict[str, Any], dict[str, Any], str, str], dict[str, Any]]
     matrix_target: Callable[[str], tuple[str, str]]
@@ -373,6 +379,12 @@ def _self_trigger_intent(
 
 
 def message(arguments: dict[str, Any], deps: MessageToolDeps) -> dict[str, Any]:
+    """发送一条受策略约束的协作消息，并返回可序列化的工具结果。
+
+    对 Matrix 先规范 route/room，再阻止 ping-pong 与非法 self-trigger；只有发送成功
+    才记录到 session。其他 channel 委托 QwenPaw 的原生消息实现，保持同一 MCP
+    schema 而不在这里复制每个平台协议。
+    """
     action = arguments.get("action") or "send"
     route = deps.reply_route(arguments)
     channel = str(arguments.get("channel") or route.get("channel") or "matrix")

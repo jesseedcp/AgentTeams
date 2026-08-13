@@ -73,6 +73,9 @@ func (r *ManagerReconciler) managerContainerName(name string) string {
 	return r.ResourcePrefix.ManagerPodName(name)
 }
 
+// Reconcile 将 AgentScope Manager 的 Matrix 身份、无密文运行文档、网关权限
+// 和容器收敛到 Manager spec。它可被重复调用，因此每个阶段都必须
+// 能识别“已经完成”，而不是把 reconcile 当作仅执行一遍的启动脚本。
 func (r *ManagerReconciler) Reconcile(ctx context.Context, req reconcile.Request) (retres reconcile.Result, reterr error) {
 	start := time.Now()
 	defer func() { metrics.Observe("manager", start, reterr) }()
@@ -97,6 +100,8 @@ func (r *ManagerReconciler) Reconcile(ctx context.Context, req reconcile.Request
 		}
 
 		mgr.Status.Phase = computeManagerPhase(&mgr, reterr)
+		// ObservedGeneration 是“当前 spec 已被完整观察”的水位线。失败时
+		// 保留旧值，让 API 使用者能看出 status 尚未反映最新 spec。
 		if reterr == nil {
 			mgr.Status.ObservedGeneration = mgr.Generation
 			mgr.Status.Message = ""
@@ -114,6 +119,8 @@ func (r *ManagerReconciler) Reconcile(ctx context.Context, req reconcile.Request
 	}()
 
 	if !mgr.DeletionTimestamp.IsZero() {
+		// Manager 在 Kubernetes 之外还有 Matrix 账号/房间、网关 consumer 和存储
+		// 数据。finalizer 保证这些清理成功前 CR 不会提前消失。
 		if controllerutil.ContainsFinalizer(&mgr, finalizerName) {
 			return r.reconcileManagerDelete(ctx, s)
 		}

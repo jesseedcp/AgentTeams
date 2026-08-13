@@ -1,5 +1,9 @@
 """Run the upstream CoPaw app with AgentTeams runtime hooks installed."""
 
+# 初学者导读：先安装凭据保护、消息过滤和输出脱敏等第一方 hook，再进入上游
+# CoPaw 应用。顺序不能倒置，否则上游可能在保护层注册前就开始处理第一条消息。
+# hook 只收紧 Worker 边界，不把 CoPaw 变成 Manager。
+
 from __future__ import annotations
 
 import runpy

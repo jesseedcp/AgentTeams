@@ -1,4 +1,11 @@
-"""SQLite materialization of authoritative remote processing leases."""
+"""SQLite materialization of authoritative remote processing leases.
+
+把远端 processing lease 的当前状态物化到 SQLite。
+
+Git 或 Coding CLI 会改动共享 workspace，同一时刻只能有一个持有者。远端对象存储中的
+lease 是权威事实，本地表保存便于恢复和查询的镜像；租约含 owner、期限和 generation，
+过期回收也必须比较这些字段，不能仅凭本地时间删除另一个进程刚续租的 lease。
+"""
 
 from __future__ import annotations
 

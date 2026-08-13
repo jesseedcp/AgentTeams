@@ -8,6 +8,9 @@
 # Flow:
 #   1. Create Human via agt apply -f (team doesn't exist yet → permissions skipped)
 #   2. Create Team with that Human as Team Admin (backfills Human permissions)
+# 初学者提示：资源到达 Controller 的顺序无法保证，因此测试先建 Human 后建 Team，验证系统能在 Team 出现时补齐权限。
+# 通过标准是最终权限与“先建 Team 后建 Human”一致，这类性质称为最终收敛，而不是要求每一步瞬时完整。
+# 若只验证创建命令成功，会漏掉最关键的回填权限回归。
 #   3. Verify Human registered, Team Admin in registry
 #   4. Verify backfill: Human in Leader/Worker groupAllowFrom
 #   5. Verify team-context block mentions Team Admin

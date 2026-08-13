@@ -3,6 +3,9 @@
 .testtmp
 .venv
 
+# Docker 会把未排除的文件发送给构建后端；这里不仅影响速度，也是秘密边界。
+# 测试临时目录、虚拟环境、日志和版本库历史都不应进入任何 Manager/Worker 镜像。
+# 新增可能含 token、数据库或调试导出的目录时，应同步检查本文件。
 **/__pycache__
 **/.mypy_cache
 **/.pytest_cache
@@ -16,6 +19,8 @@
 
 # Empty directories left behind by removed upstream Manager/Worker payloads
 # must not reappear in image layers.
+# 这些路径是已删除的旧 Manager/Worker 载荷；保留 ignore 是为了防止本机残留目录
+# 又被 COPY 进正式镜像，并不表示运行时仍支持这些旧 Manager 分支。
 manager/agent/copaw-manager-agent
 manager/agent/openhuman-worker-agent
 manager/agent/skills-alpha

@@ -1,4 +1,11 @@
-"""Resource authorization and deterministic Matrix channel selection."""
+"""Resource authorization and deterministic Matrix channel selection.
+
+提供 Worker、Team、Human 与 Matrix 资源的查询和变更工具。
+
+读取工具通过 Controller typed client 返回权威资源；mutation 会从当前 Matrix event 派生
+稳定 operation ID，进入 ResourceService 完成“记录意图—执行—核验—回执”。房间类型
+还会约束目标资源范围，例如 Team Leader Room 不能借此管理全局 Worker。
+"""
 
 from __future__ import annotations
 

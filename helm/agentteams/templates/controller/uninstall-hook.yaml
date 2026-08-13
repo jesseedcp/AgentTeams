@@ -1,3 +1,8 @@
+{{- /*
+pre-delete hook 在 Helm 删除 Chart 前清理由 Controller 动态创建、但不一定属于
+Helm release 的资源。这里具有删除权限且是破坏性边界：修改 selector 或 namespace
+可能误删其他实例，必须保持资源前缀和标签过滤足够精确。
+*/ -}}
 {{- if .Values.controller.uninstallHook.enabled }}
 {{- $name := printf "%s-uninstall-cleanup" (include "agentteams.fullname" .) | trunc 63 | trimSuffix "-" }}
 {{- $ns := include "agentteams.namespace" . }}

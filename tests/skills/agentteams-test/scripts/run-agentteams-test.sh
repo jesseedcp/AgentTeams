@@ -1,5 +1,8 @@
 #!/bin/bash
 # run-agentteams-test.sh - Quick AgentTeams test runner
+# 面向 Skill 的薄入口：把用户选择转换为根测试调度器参数，并保留真实测试的退出码。
+# 它不另写一套断言；环境准备、用例顺序和通过标准仍由 tests/run-all-tests.sh 统一管理。
+# `--use-existing`/`--cleanup-only` 会作用于指定环境，调用前必须确认不是生产实例。
 # Usage: run-agentteams-test.sh [options] [test-filter]
 #
 # Options:

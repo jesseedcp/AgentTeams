@@ -8,6 +8,9 @@
 # This is a controller-cr style test — no LLM required. It runs the
 # CLI directly via exec_in_agent and asserts on exit code + stderr
 # substring, then snapshots Higress consumers to confirm no consumer
+# 初学者提示：这是“失败路径”测试，非法名字被拒绝才是成功结果；同时必须证明拒绝发生在创建外部资源之前。
+# 通过标准是非零退出、可理解的错误信息，以及 Higress/Controller 状态没有新增残留。
+# 不需要 LLM，因为名字校验属于 CLI 和 API 的确定性安全边界。
 # leaks for names the controller never accepted.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

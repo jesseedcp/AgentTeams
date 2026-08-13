@@ -4,6 +4,15 @@
 # Unified build, test, and release interface.
 # Used locally and in CI/CD (GitHub Actions).
 #
+# 初学者导读：这个文件不是应用本身，而是“常用命令总入口”。执行 `make build`
+# 时，Make 会按照目标之间的依赖关系先构建 Controller，再构建一个 AgentScope
+# Manager 和四种可选 Worker 镜像。运行中的结构始终是一个 Manager 统一协调多个
+# Worker；这里出现多个 Worker 镜像，是为了让每个 Worker 可选择不同 runtime，
+# 并不代表同时启动多个 Manager。
+#
+# 带 `?=` 的变量允许调用者在命令行覆盖，例如 `make build VERSION=dev`；普通 `=`
+# 则是项目内部固定派生值。目标行右侧的依赖会先执行，配方行必须以 Tab 开头。
+#
 # Usage:
 #   make build                    # Build all images (native arch, local)
 #   make build-manager            # Build Manager image only
@@ -19,6 +28,7 @@
 # ============================================================
 
 # ---------- Configuration ----------
+# 配置：远端发布名、版本标签与本地测试名。
 
 VERSION        ?= latest
 REGISTRY       ?= ghcr.io
@@ -43,6 +53,7 @@ CONTROLLER_TAG       ?= $(CONTROLLER_IMAGE):$(VERSION)
 EMBEDDED_TAG         ?= $(EMBEDDED_IMAGE):$(VERSION)
 
 # Local image names (no registry prefix, used by tests and install script)
+# 本地镜像名没有 registry 前缀，只供本机测试和安装器引用，避免误推到远端。
 LOCAL_MANAGER          = agentteams/manager:$(VERSION)
 LOCAL_WORKER           = agentteams/worker-agent:$(VERSION)
 LOCAL_COPAW_WORKER     = agentteams/copaw-worker:$(VERSION)
@@ -74,6 +85,8 @@ endif
 REGISTRY_ARG = --build-arg HIGRESS_REGISTRY=$(HIGRESS_REGISTRY)
 
 # Named build context for shared libraries (requires BuildKit / Docker 23+)
+# 把 shared/lib 作为具名构建上下文传给各 Worker；这样不同 runtime 复用同一套
+# 存储凭据和文件同步约定，而不必复制出多份容易漂移的脚本。
 SHARED_LIB_CTX = --build-context shared=./shared/lib
 
 # Multi-arch build configuration
@@ -117,6 +130,7 @@ LINES          ?= 50
 all: build
 
 # ---------- Build ----------
+# 构建：一套控制面镜像 + 多种彼此独立的 Worker runtime。
 
 build: build-manager build-worker build-copaw-worker build-hermes-worker build-qwenpaw-worker build-agentteams-controller ## Build one AgentScope Manager, four Worker runtimes, and the Controller
 
@@ -133,6 +147,8 @@ OPENCLAW_BASE_VERSION ?= 20260423-8359cbc
 OPENCLAW_BASE_BUILD_ARG = --build-arg OPENCLAW_BASE_IMAGE=$(OPENCLAW_BASE_IMAGE):$(OPENCLAW_BASE_VERSION)
 OPENCLAW_BASE_PUSH_ARG  = --build-arg OPENCLAW_BASE_IMAGE=$(OPENCLAW_BASE_IMAGE):$(OPENCLAW_BASE_VERSION)
 
+# Manager 镜像需要 Controller 产出的 agt 二进制；临时复制 agent 提示词只是构建
+# 上下文准备，构建结束马上删除，不能把该目录当作另一份源代码维护。
 build-agentteams-controller: ## Build agentteams-controller image (prerequisite for Manager)
 	@echo "==> Building agentteams-controller image: $(LOCAL_CONTROLLER)"
 	@rm -rf ./agentteams-controller/agent && cp -r ./manager/agent ./agentteams-controller/agent
@@ -141,6 +157,8 @@ build-agentteams-controller: ## Build agentteams-controller image (prerequisite 
 		./agentteams-controller/
 	@rm -rf ./agentteams-controller/agent
 
+# 冒号后的依赖保证 Controller 镜像先存在，随后 manager/Dockerfile 才能从中复制
+# agt；这就是镜像之间的显式依赖，而不是运行时把两个进程塞进同一个 Pod。
 build-manager: build-agentteams-controller ## Build AgentScope Manager image
 	@echo "==> Building AgentScope Manager image: $(LOCAL_MANAGER)"
 	docker build $(PLATFORM_FLAG) $(DOCKER_BUILD_ARGS) \
@@ -208,6 +226,7 @@ else
 endif
 
 # ---------- Push (multi-arch, default) ----------
+# 发布默认同时生成 amd64/arm64 manifest。
 # Default push always builds multi-arch manifests to avoid overwriting
 # existing multi-arch images with a single-arch image.
 # Automatically detects Docker vs Podman and uses the appropriate strategy:
@@ -450,6 +469,7 @@ else
 endif
 
 # ---------- Push native-arch only (dev use) ----------
+# 仅当前架构发布属于开发用途，并有覆盖远端 manifest 的风险。
 # WARNING: Pushing single-arch images will overwrite multi-arch manifests.
 # Only use for local development / testing, never for release.
 
@@ -494,6 +514,7 @@ push-native-qwenpaw-worker: build-qwenpaw-worker ## Push native-arch QwenPaw Wor
 	docker push $(QWENPAW_WORKER_TAG)
 
 # ---------- Test ----------
+# 测试先探测 Matrix、MinIO、Console 与 Manager 四条健康链路。
 
 # Wait for Manager services to be ready (used internally by test target)
 # Uses docker exec to check health inside container (works regardless of port mappings)
@@ -538,6 +559,7 @@ test-installed: ## Run tests against an already-installed Manager (no container 
 	./tests/run-all-tests.sh --skip-build --use-existing $(if $(TEST_FILTER),--test-filter "$(TEST_FILTER)")
 
 # ---------- Install / Uninstall ----------
+# 本机容器模式的安装/卸载；卸载包含破坏性操作。
 
 install: ## Install Manager locally (non-interactive, set AGENTTEAMS_LLM_API_KEY)
 ifndef SKIP_BUILD
@@ -566,6 +588,8 @@ endif
 		AGENTTEAMS_INSTALL_QWENPAW_WORKER_IMAGE=$(LOCAL_QWENPAW_WORKER) \
 		bash ./install/agentteams-install.sh manager
 
+# 这里会强制删除 Worker 容器和命名卷。外置数据目录会保留并打印位置，但 workspace
+# 目录会尝试删除；修改过滤条件前必须先确认最终路径，不能放宽到 HOME 或仓库根目录。
 uninstall: ## Stop and remove Manager + all Worker containers
 	@echo "==> Uninstalling AgentTeams..."
 	-docker stop agentteams-manager 2>/dev/null && docker rm agentteams-manager 2>/dev/null || true
@@ -597,6 +621,7 @@ uninstall: ## Stop and remove Manager + all Worker containers
 	@echo "==> AgentTeams uninstalled"
 
 # ---------- Embedded Install / Uninstall / Test ----------
+# Embedded 模式下基础设施/Controller 与 Manager 仍是两个容器。
 
 install-embedded: ## Install in embedded mode (dual-container: controller + agent)
 ifndef SKIP_BUILD
@@ -662,6 +687,7 @@ uninstall-embedded: ## Stop and remove embedded containers
 	@echo "==> AgentTeams (embedded) uninstalled"
 
 # ---------- Replay ----------
+# Replay 把一条任务送入真实 Matrix→Manager 链路，不是单元测试替身。
 
 replay: ## Send a task to Manager (TASK="..." or interactive)
 ifdef TASK
@@ -708,6 +734,7 @@ mirror-images: ## Mirror upstream images to Higress registry (multi-arch, via sk
 	./hack/mirror-images.sh
 
 # ---------- Clean ----------
+# 清理只删除明确命名的本地测试容器和镜像。
 
 clean: ## Remove local images and test containers
 	@echo "==> Stopping and removing test containers..."
@@ -722,6 +749,7 @@ clean: ## Remove local images and test containers
 	@echo "==> Clean complete"
 
 # ---------- Local K8s (kind + Helm) ----------
+# kind 提供本地集群，Helm 把 values 渲染为 Kubernetes 资源。
 
 local-k8s-up: ## Create kind cluster and deploy AgentTeams via Helm
 	@bash hack/local-k8s-up.sh
@@ -732,6 +760,7 @@ local-k8s-down: ## Tear down the local AgentTeams kind cluster
 generate: ## Regenerate deepcopy functions and sync CRDs to Helm chart
 	$(MAKE) -C agentteams-controller generate
 
+# Controller 目录是 CRD 唯一源头，Helm 下的副本由此同步；不要直接手改镜像副本。
 sync-crds: ## Sync CRDs from agentteams-controller/config/crd/ to helm/agentteams/crds/
 	@echo "==> Syncing CRDs to Helm chart..."
 	@cp agentteams-controller/config/crd/*.yaml helm/agentteams/crds/

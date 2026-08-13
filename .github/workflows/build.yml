@@ -1,3 +1,6 @@
+# 作用：把正式标签对应的 Manager、Controller 和各 Worker 构建为 amd64/arm64 镜像并推送到 GHCR。
+# 触发：推送语义版本标签时自动运行，也可手动指定版本和目标；它负责产物，不替代测试 Workflow。
+# Secret 边界：GITHUB_TOKEN 仅用于当前仓库 packages:write，镜像构建参数中不得放入运行时 API Key。
 name: Build Images
 
 on:
@@ -22,6 +25,7 @@ env:
   REPO: jesseedcp
 
 jobs:
+  # 所有镜像在同一 job 中共享解析出的版本，避免同一次发布出现组件标签不一致。
   build:
     runs-on: ubuntu-latest
     permissions:

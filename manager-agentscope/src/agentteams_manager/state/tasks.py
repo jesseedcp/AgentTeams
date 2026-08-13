@@ -1,4 +1,12 @@
-"""Durable finite and recurring task records."""
+"""Durable finite and recurring task records.
+
+保存有限任务、周期任务及 Project DAG 的本地事务状态。
+
+有限任务从 prepared、dispatched、submitted 到 accepted/revision 等状态；Project DAG
+还记录依赖节点何时解锁。周期任务保存 cron 和每次 occurrence 的稳定标识。仓库使用
+条件转换与唯一约束防止重复派发，但 artifact 内容仍由 MinIO 保存，Worker 实际存在性
+仍需向 Controller 查询。
+"""
 
 from __future__ import annotations
 

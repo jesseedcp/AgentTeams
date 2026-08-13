@@ -68,6 +68,9 @@ func (h *ResourceHandler) stampControllerLabel(meta *metav1.ObjectMeta) {
 
 // --- Workers ---
 
+// CreateWorker 校验请求并创建 Worker CR。HTTP 201 表示期望状态已被
+// Kubernetes API 接受，不表示 Matrix 账号和容器已 Ready；完成程度要继续
+// 查看 Worker.status。
 func (h *ResourceHandler) CreateWorker(w http.ResponseWriter, r *http.Request) {
 	var req CreateWorkerRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -198,6 +201,9 @@ func (h *ResourceHandler) ListWorkers(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, http.StatusOK, WorkerListResponse{Workers: workers, Total: len(workers)})
 }
 
+// UpdateWorker 用冲突重试更新 Worker spec，而不直接操作容器。
+// Kubernetes resourceVersion 用于乐观并发控制：如果另一个请求先修改了
+// 对象，本请求重新读取并合并，避免用旧副本覆盖新状态。
 func (h *ResourceHandler) UpdateWorker(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	if name == "" {
@@ -320,6 +326,8 @@ func (h *ResourceHandler) UpdateWorker(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// DeleteWorker 请求删除 Worker CR。204 之后对象可能仍处于 Terminating，
+// 因为 finalizer 需要完成 Matrix、Gateway、凭据和容器清理后才允许其消失。
 func (h *ResourceHandler) DeleteWorker(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	if name == "" {
@@ -349,6 +357,8 @@ func (h *ResourceHandler) DeleteWorker(w http.ResponseWriter, r *http.Request) {
 
 // --- Teams ---
 
+// CreateTeam 创建一个引用现有 Worker CR 的 Team CR。成功回答仅确认
+// 团队期望状态已持久化，房间创建和成员配置注入由 TeamReconciler 异步完成。
 func (h *ResourceHandler) CreateTeam(w http.ResponseWriter, r *http.Request) {
 	var req CreateTeamRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -426,6 +436,8 @@ func (h *ResourceHandler) ListTeams(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, http.StatusOK, TeamListResponse{Teams: teams, Total: len(teams)})
 }
 
+// UpdateTeam 只修改 Team 的期望成员与策略，不直接发送 Matrix invite/kick。
+// 这样 REST 请求中断时期望状态仍可被后续 reconcile 恢复完成。
 func (h *ResourceHandler) UpdateTeam(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	if name == "" {
@@ -509,6 +521,8 @@ func (h *ResourceHandler) DeleteTeam(w http.ResponseWriter, r *http.Request) {
 
 // --- Humans ---
 
+// CreateHuman 创建 Human CR。Matrix 账号和房间权限由 HumanReconciler 之后收敛，
+// 因此 API 不在同一 HTTP 请求中暴露或长期保留登录 token。
 func (h *ResourceHandler) CreateHuman(w http.ResponseWriter, r *http.Request) {
 	var req CreateHumanRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -660,6 +674,8 @@ func (h *ResourceHandler) DeleteHuman(w http.ResponseWriter, r *http.Request) {
 
 // --- Managers ---
 
+// CreateManager 创建 AgentScope Manager CR。它只记录无密文期望状态，
+// Manager 的 Matrix token、gateway key 和存储凭据由 Controller 在部署阶段生成并注入。
 func (h *ResourceHandler) CreateManager(w http.ResponseWriter, r *http.Request) {
 	var req CreateManagerRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -755,6 +771,8 @@ func (h *ResourceHandler) ListManagers(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, http.StatusOK, ManagerListResponse{Managers: managers, Total: len(managers)})
 }
 
+// UpdateManager 更新 Manager 的期望配置。已在处理的 AgentScope turn 不由
+// HTTP handler 直接中断；Controller 发布新 revision，运行时在安全边界激活它。
 func (h *ResourceHandler) UpdateManager(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	if name == "" {

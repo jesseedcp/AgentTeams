@@ -18,6 +18,11 @@ File Sync Design Principle:
     - Cache/temp files, local tool state, auto-mirrored shared content, and
       duplicate local projections are excluded from the background push.
 """
+
+# 初学者导读：本模块明确区分三套东西：Controller 管理的标准配置、CoPaw
+# runtime 的本地投影、以及多个成员可见的 shared 目录。拉取用于恢复/接收新配置，
+# 推送用于保存 Worker 产生的记忆和产物。排除凭据、缓存与投影副本能防止泄密和
+# 同一个文件在“拉取后又推回”之间无限循环。
 from __future__ import annotations
 
 import asyncio
@@ -232,7 +237,13 @@ _STARTUP_SYNC_FILES = (
 
 
 class FileSync:
-    """MinIO file sync using mc CLI."""
+    """使用 MinIO Client 在一名 Worker 的本地目录与远端前缀间同步。
+
+    每次同步都先确保本 Worker 的 alias 与 prefix 正确；worker_name 是私有状态的
+    隔离边界，shared prefix 则是显式协作边界。两者写反会造成成员间会话串线。
+
+    MinIO file sync using mc CLI.
+    """
 
     def __init__(
         self,

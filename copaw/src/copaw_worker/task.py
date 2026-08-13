@@ -1,5 +1,10 @@
 """Local taskflow state machine for AgentTeams CoPaw agents."""
 
+# 初学者导读：Manager/Leader 在 Matrix 中派发任务后，Worker 用本地任务状态机记录
+# 接收、完成、阻塞和返修。状态文件帮助 Agent 与工具在进程重启后继续同一 Task，
+# 但它不是 Controller 的 Worker/Project 权威数据库；对外协调仍通过 Matrix 与
+# TeamHarness 协议发生。合法转换集中定义可防止“未接收就完成”等跳跃状态。
+
 from __future__ import annotations
 
 import json
@@ -102,7 +107,12 @@ class TaskStore(Protocol):
 
 
 class FileSystemTaskStore:
-    """TaskStore implementation backed by local shared/ files."""
+    """TaskStore implementation backed by local shared/ files.
+
+    Project 与 Task 分别写入稳定目录，meta.json 保存机器状态，Markdown 保存计划与
+    结果，便于其他 runtime 和人共同读取。写入路径都经过 safe id，不能让任务 ID
+    用 ``../`` 逃出 shared 边界。
+    """
 
     def __init__(self, workspace_dir: Path | str | None = None) -> None:
         self.workspace_dir = Path(workspace_dir) if workspace_dir else Path.cwd()
@@ -766,6 +776,7 @@ def render_dag_task(task: DagTask) -> str:
 
 
 def validate_dag(tasks: list[DagTask]) -> None:
+    """验证任务 ID、依赖存在性和无环性，避免永远无法进入 ready 的项目。"""
     ids = [task.task_id for task in tasks]
     if len(ids) != len(set(ids)):
         raise TaskflowError("duplicate task ids in graph")
@@ -852,6 +863,7 @@ def render_task_result(result: TaskResult) -> str:
 
 
 def validate_task_result(task_id: str, result: TaskResult) -> None:
+    """确认结果状态完整，并把交付物限制在当前 Task 的 shared 目录。"""
     if result.status not in RESULT_STATUSES:
         raise TaskflowError(f"invalid result status: {result.status or '<missing>'}")
     if not result.summary.strip():

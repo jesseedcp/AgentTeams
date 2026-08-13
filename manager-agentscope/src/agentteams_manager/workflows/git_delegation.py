@@ -1,4 +1,11 @@
-"""Expiring workspace leases and recoverable Git delegation."""
+"""Expiring workspace leases and recoverable Git delegation.
+
+使用可过期 processing lease 协调共享 workspace 的 Git 委托。
+
+一个 Project 的多个 Agent 可能同时碰同一仓库。workflow 先在远端取得带 generation 的
+lease，再记录 operation 意图并执行受限 Git；完成或确定失败后释放 lease。崩溃恢复
+会核对 lease 所有者、到期时间和 operation event，不能随意抢占仍在工作的进程。
+"""
 
 from __future__ import annotations
 

@@ -1,6 +1,9 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
+# 初学者导读：检查“已经生成”的 QwenPaw TeamHarness 包，而不是源目录。这样能发现
+# 打包 include 漏项、plugin.json 错误和入口不可导入等发布问题；脚本只读并验证。
+
 require "json"
 require "open3"
 require "pathname"

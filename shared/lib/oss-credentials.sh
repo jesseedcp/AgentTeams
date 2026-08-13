@@ -1,5 +1,9 @@
 #!/bin/bash
 # oss-credentials.sh - STS credential management for mc (MinIO Client)
+# 初学者导读：本地部署可使用静态 MinIO key，云上则向 Controller 换取短期 STS
+# 凭据。STS 会过期，因此每次真正运行 mc 前都要检查剩余寿命并按需刷新。这个库
+# 只把秘密交给 mc 的进程环境，日志必须保持脱敏；Worker 也不会得到 Manager 的
+# GitHub token 或其他无关凭据。
 #
 # Credential modes, in priority order:
 # 1. Static object-storage credentials (local/self-hosted mode):

@@ -1,4 +1,7 @@
 #!/bin/bash
+# Agent 指标辅助函数：在异步任务前后读取计数器，用差值证明 Manager/Worker 确实处理了消息或工具调用。
+# 指标是旁证，不替代业务结果断言；计数增加但产物缺失时测试仍应失败。
+# 轮询给异步指标刷新留出有限时间，超时用于暴露停滞而不是无限等待。
 # agent-metrics.sh - Agent session metrics extraction and analysis
 #
 # Parses agent session artifacts to extract LLM call metrics:

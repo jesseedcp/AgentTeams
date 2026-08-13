@@ -2,6 +2,9 @@
 # test-03-assign-task.sh - Case 3: Assign task in Room, Worker completes
 # Verifies: Manager relays task to Worker, task brief created in MinIO,
 #           Worker completes and writes result
+# 测试意图：沿用前一用例创建的 Alice，把任务从管理员房间派到 Worker，并核对任务简报和结果产物。
+# 这里等待消息是因为 Matrix 与 Worker 执行均为异步；只有回复内容和 MinIO 状态都落地才算完成。
+# 它依赖 test-02 的状态，单独运行前应确保 Alice 与对应房间已经存在。
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/test-helpers.sh"

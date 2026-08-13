@@ -1,5 +1,8 @@
 #!/bin/bash
 # start-cinny.sh - Generate Cinny config and start Nginx.
+# embedded 模式下，Cinny 静态文件由 Nginx 提供。浏览器先访问 Cinny 公网端口，
+# 再根据 .well-known 找到真正的 Matrix/Higress 地址；因此页面能打开并不代表
+# homeserver 一定可达。旧 Element 变量仅作升级读取，前端实际已经由 Cinny 提供。
 
 set -euo pipefail
 

@@ -1,4 +1,12 @@
-"""Console entrypoint for the AgentScope Manager daemon."""
+"""Console entrypoint for the AgentScope Manager daemon.
+
+AgentScope Manager 容器进程的命令行入口。
+
+镜像启动时会进入这里：读取配置、调用 bootstrap 完成依赖装配、注册操作系统信号，
+然后让 ``ManagerApplication`` 持续运行。收到 SIGTERM 等停止信号后不会直接退出，
+而是请求 application 有序保存会话并关闭外部连接，因此 Kubernetes 滚动更新时
+不会无故丢掉刚完成的 AgentScope turn。
+"""
 
 from __future__ import annotations
 

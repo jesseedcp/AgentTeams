@@ -4,6 +4,11 @@ MatrixChannel: CoPaw BaseChannel implementation for Matrix (via matrix-nio).
 This file is installed into ~/.copaw/custom_channels/ at worker startup
 so CoPaw's channel registry picks it up automatically.
 """
+
+# 初学者导读：Matrix 是对话与房间成员关系的权威来源。本 channel 把 Matrix 事件
+# 转成 CoPaw 能处理的消息，再把 Agent 回复写回原房间；allow-list、必须 @提及、
+# DM 与群聊区分都在传输边界执行，避免不属于该 Worker 的消息触发模型。Manager
+# 房间和 Worker 房间虽然都在 Matrix 中，但身份、权限与任务职责不同。
 from __future__ import annotations
 
 import asyncio
@@ -340,7 +345,11 @@ def _should_suppress_team_leader_internal_preamble(
 
 
 class MatrixChannel(BaseChannel):
-    """CoPaw channel that connects to a Matrix homeserver via matrix-nio."""
+    """在 CoPaw 与 Matrix 之间维护登录、同步、媒体和房间策略的长连接。
+
+    CoPaw channel that connects to a Matrix homeserver via matrix-nio.
+    本类在底层传输之上增加 AgentTeams 的 Worker 房间策略。
+    """
 
     channel = CHANNEL_KEY  # type: ignore[assignment]
     uses_manager_queue: bool = True

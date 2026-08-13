@@ -2,6 +2,9 @@
 # test-13-git-delegation.sh - Case 13: Git Delegation Mechanism
 # Verifies: Worker can delegate git operations (commit, push) to Manager
 #           with proper coordination via .processing marker
+# 测试意图：Worker 不直接持有高权限凭据，而把 commit/push 请求交给 Manager，借此验证最小权限边界。
+# `.processing` 标记用于避免同一请求被并发领取两次；通过标准包括一次且仅一次执行及标记最终被清理。
+# 本测试关注委托协议与可恢复状态，不等同于 test-08/09 的 GitHub MCP 协作。
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/test-helpers.sh"

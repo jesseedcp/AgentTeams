@@ -1,3 +1,6 @@
+# 作用：验证 Go Controller 的纯逻辑单元测试，以及使用 envtest 模拟 Kubernetes API 的协调测试。
+# 触发：Controller 代码在 PR/main 变化或手动运行；两个测试阶段都退出 0 才算通过。
+# envtest 不会连接生产集群，它启动临时 API Server，因此失败不会改变用户的 Kubernetes 资源。
 name: AgentTeams Controller Tests
 
 on:
@@ -12,6 +15,7 @@ on:
   workflow_dispatch:
 
 jobs:
+  # Unit tests 先提供快速反馈，Integration tests 再检查 Reconcile 与 Kubernetes 对象交互。
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 10

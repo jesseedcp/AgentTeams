@@ -1,4 +1,8 @@
 """CLI entry point: copaw-worker"""
+
+# 初学者导读：容器 entrypoint 最终调用这里。CLI 只完成参数解析、日志初始化和
+# asyncio 生命周期入口；它不会承担 Manager 的规划职责，也不会自行发明 Team
+# 或模型配置。
 from __future__ import annotations
 
 import asyncio

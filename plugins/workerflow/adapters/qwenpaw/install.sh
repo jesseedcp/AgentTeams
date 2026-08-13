@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# 构建、校验并通过 QwenPaw CLI 安装 WorkerFlow 插件包。临时 staging 由 trap 清理，
+# 所以中断不会留下被下一次启动误认成有效插件的半成品。
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

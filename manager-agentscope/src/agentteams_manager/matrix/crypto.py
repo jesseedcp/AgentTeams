@@ -1,4 +1,11 @@
-"""Persistent Matrix end-to-end encryption support."""
+"""Persistent Matrix end-to-end encryption support.
+
+维护 Matrix 端到端加密设备状态和密钥存储。
+
+加密房间中的事件只有在设备完成验证并取得会话密钥后才能变成明文。相关 crypto store
+必须跨重启保留，否则 Manager 会像一台全新设备一样无法读取历史消息。本模块只处理
+传输加密生命周期；解密后的消息仍需经过 sender 与 room policy 授权。
+"""
 
 from __future__ import annotations
 

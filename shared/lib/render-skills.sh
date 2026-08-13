@@ -1,5 +1,8 @@
 #!/bin/bash
 # render-skills.sh - Replace env var placeholders in agent doc files
+# 初学者导读：镜像中的文档模板需要在启动时填入当前部署地址。envsubst 默认会
+# 替换所有 ``$变量``，可能误伤技能示例里的任务变量，所以这里使用显式白名单。
+# 输出先写临时文件再移动，避免进程中断时把原文截成半个文件。
 # Usage: render-skills.sh <directory> [file1 file2 ...]
 #   render-skills.sh /opt/agentteams/agent/skills          — render all .md in dir
 #   render-skills.sh /dir AGENTS.md TOOLS.md            — render specific files in dir

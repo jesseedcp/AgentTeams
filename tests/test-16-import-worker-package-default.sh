@@ -6,6 +6,9 @@
 #   1. --name without --package defaults to --package <name>
 #   2. explicit --package is preserved
 #   3. --zip imports do not inject --package
+# 测试意图：把宿主机包装脚本替换成记录 argv 的 fake，检查它传给容器内 `agt` 的参数，而不启动真实控制面。
+# fake 只隔离 Docker/Controller 副作用；它仍能捕获默认值重复、显式值被覆盖或 ZIP 模式误注入参数等回归。
+# 通过标准是记录的参数逐项吻合，并且包装脚本退出状态保持成功。
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"

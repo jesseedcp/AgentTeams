@@ -1,4 +1,11 @@
-"""Stable identifiers used across retry and recovery boundaries."""
+"""Stable identifiers used across retry and recovery boundaries.
+
+生成跨重试与重启保持稳定的业务标识符。
+
+同一 Matrix 事件里的同一次 tool call 必须得到相同 operation ID；否则超时重试会被
+系统误认成新操作，可能创建重复 Worker 或重复发消息。这里集中定义确定性 ID 和供
+新资源使用的时间戳 ID，使 workflow 不必各自发明不兼容的命名规则。
+"""
 
 from __future__ import annotations
 
@@ -37,4 +44,3 @@ def new_task_id(now: datetime | None = None) -> str:
 def new_project_id(now: datetime | None = None) -> str:
     """Create a human-readable, collision-resistant project identifier."""
     return _timestamped_id("project", now)
-

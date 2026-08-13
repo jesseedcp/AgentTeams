@@ -7,6 +7,9 @@
 # does NOT assert that the Higress consumer or the MinIO agents/<name>/
 # directory are removed, and it tolerates pre-existing residue (a clean
 # slate run passes with zero workers).
+# 测试意图：删除单个 Worker 后，检查 CR 之外的 Higress consumer、MinIO 目录和运行容器都被释放。
+# 这防止“界面已经删除、后台资源仍占空间或保留权限”的泄漏；资源最终消失才算通过。
+# 与 test-100 的批量兜底不同，本用例要求严格观察一个新建 Worker 的完整删除副作用。
 #
 # This test is deterministic: it creates one fresh worker, snapshots the
 # expected post-create state, deletes it, and asserts each resource is

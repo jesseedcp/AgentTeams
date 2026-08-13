@@ -1,4 +1,12 @@
-"""Small asynchronous boundary around standard-library SQLite."""
+"""Small asynchronous boundary around standard-library SQLite.
+
+用标准库 SQLite 为异步 Manager 提供小型事务边界。
+
+SQLite 调用会阻塞线程，所以每次读写通过 ``asyncio.to_thread`` 放到工作线程，并使用
+独立连接；一个 callback 对应一个提交或回滚的事务。WAL 允许读写更好地并存，但这里
+仍遵守单 Manager writer 架构。启动时幂等建表和迁移；备份使用 SQLite backup API，
+不能直接复制仍有 WAL 的数据库文件。
+"""
 
 from __future__ import annotations
 
@@ -20,7 +28,12 @@ T = TypeVar("T")
 
 
 class Database:
-    """Open one SQLite connection per worker-thread transaction."""
+    """为每个工作线程事务打开独立 SQLite 连接。
+
+    ``read``/``write`` 的 callback 在后台线程执行，不能在其中 ``await``；离开连接的
+    context manager 时，成功路径提交，异常路径回滚。连接不跨线程共享，避免标准库
+    sqlite3 的线程限制和长生命周期连接状态泄漏。
+    """
 
     def __init__(self, path: Path) -> None:
         self.path = path
@@ -124,7 +137,12 @@ class Database:
         self,
         callback: Callable[[sqlite3.Connection], T],
     ) -> T:
-        """Run one callback as one committed transaction."""
+        """把一个同步 callback 作为完整事务执行。
+
+        callback 中所有 SQL 要么一起提交，要么在异常时一起回滚。调用方不应在 callback
+        内执行网络 I/O，否则会长时间占用写锁；跨系统效果由 workflow 在事务外按
+        “先记录意图、再执行效果、最后记录回执”的顺序协调。
+        """
 
         def run() -> T:
             with self._connect() as connection:

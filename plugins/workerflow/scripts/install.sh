@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# WorkerFlow 目前只支持 QwenPaw，因此顶层入口验证 qwenpaw 后直接委托对应 adapter。
+# WorkerFlow 安装的是本地临时 Agent 工作流能力，不会创建 Controller Worker CR。
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

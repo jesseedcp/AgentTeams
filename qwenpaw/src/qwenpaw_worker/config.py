@@ -1,5 +1,11 @@
 """WorkerConfig parsed from CLI args and AgentTeams env."""
 
+# 初学者导读：Kubernetes 把 Worker CR 中的身份、存储地址和端口等配置变成
+# 环境变量与命令行参数，本模块再把这些零散字符串整理成一个 WorkerConfig。
+# 后续启动、同步和热更新代码都读取同一个对象，避免各模块各自拼路径而把同一
+# Worker 的数据写到别人的目录。远端 prefix 是 MinIO 中的位置，本地 Path 则是
+# 当前容器里的位置；两者不能混用。
+
 from __future__ import annotations
 
 import os
@@ -30,6 +36,13 @@ def _join_prefix(root: str, suffix: str) -> str:
 
 
 class WorkerConfig:
+    """一名 QwenPaw Worker 在当前进程中的不可变启动配置。
+
+    ``worker_name`` 同时参与本地目录和远端对象前缀的计算，因此它也是隔离边界。
+    ``shared_dir`` 则刻意由多个团队成员共同使用，用于交付物协作，而不保存私有
+    会话。运行期间会变化的模型、房间和 Team 信息不放在这里，而从 runtime
+    config 读取。
+    """
     def __init__(
         self,
         worker_name: str,

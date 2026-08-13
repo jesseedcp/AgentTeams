@@ -1,4 +1,12 @@
-"""Typed, workflow-backed commands for the local Manager admin API."""
+"""Typed, workflow-backed commands for the local Manager admin API.
+
+把本地运维 API 请求转换为经过校验的 workflow 调用。
+
+运维页面提交的 Worker、Team 或 Project 变更不会在这里直接改数据库或调用 shell；
+本模块先解析成明确的数据模型，再进入与 Matrix 工具相同的确定性 workflow。这样
+无论操作来自聊天还是本地控制台，都共享权限之外的幂等、日志、恢复和状态转换规则。
+返回值还会去掉仅供内部传输使用的字段，避免实现细节泄露给页面。
+"""
 
 from __future__ import annotations
 

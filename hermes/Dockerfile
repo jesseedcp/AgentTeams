@@ -19,6 +19,9 @@
 #                             "Hermes Agent v0.10.0" release)
 #   HERMES_REPO_URL         - hermes-agent git repo URL
 # ============================================================
+# 该镜像只实现 Hermes Worker runtime。固定 upstream ref 让生产镜像可复现；
+# AgentTeams 适配层把 Matrix、允许列表和文件同步接入统一控制面。它与 CoPaw/
+# OpenClaw/QwenPaw 是可选替代关系，不会取代唯一的 AgentScope Manager。
 
 ARG HIGRESS_REGISTRY=higress-registry.cn-hangzhou.cr.aliyuncs.com
 ARG AGENTTEAMS_CONTROLLER_IMAGE=agentteams/agentteams-controller:latest

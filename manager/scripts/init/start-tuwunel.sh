@@ -1,6 +1,9 @@
 #!/bin/bash
 # start-tuwunel.sh - Start Tuwunel Matrix Homeserver
 # NOTE: Tuwunel is a conduwuit fork. Environment variables use CONDUWUIT_ prefix.
+# Tuwunel 保存房间、成员与消息；Cinny 只是界面。/data/tuwunel 必须持久化，删除
+# 它会造成所有 Agent 的 Matrix 身份和房间历史丢失。此脚本只用于 embedded 容器，
+# Kubernetes 部署由 Helm 的 matrix/tuwunel-statefulset.yaml 提供等价配置。
 
 mkdir -p /data/tuwunel
 

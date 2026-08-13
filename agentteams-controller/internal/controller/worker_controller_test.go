@@ -1,3 +1,6 @@
+// WorkerReconciler 测试覆盖 Worker 从 spec 到容器、Matrix/Higress/MinIO 副作用及 status 的状态变化。
+// fake Kubernetes client 让每个边界条件可重复；测试会核对调用参数和最终对象，但真实集群时序由 integration suite 验证。
+// 复杂用例刻意重复调用 Reconcile，用来防止同一个 Worker 因 Controller 重试而被创建两次。
 package controller
 
 import (

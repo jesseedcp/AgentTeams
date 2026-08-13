@@ -4,6 +4,9 @@
 # Each runtime is created, observed through the Controller, exercised through
 # its real Matrix adapter, given a canonical MinIO task, required to publish a
 # result artifact, and deleted before the next runtime starts.
+# 测试意图：对 openclaw、copaw、hermes、qwenpaw 使用同一套黑盒标准，防止某个 runtime 只在单元测试中“看起来兼容”。
+# 通过标准是每个 runtime 都能创建、Matrix 收发、消费 MinIO 任务、写结果并彻底删除；一个失败即阻断发布。
+# 逐个运行和清理可避免同名房间、端口或缓存让后一个 runtime 得到假阳性结果。
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/test-helpers.sh"

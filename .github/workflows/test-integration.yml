@@ -1,3 +1,6 @@
+# 作用：构建真实镜像并启动嵌入式 AgentTeams，按分片执行跨 Matrix、MinIO、Higress、Controller 的端到端测试。
+# 触发：运行链路相关文件在 PR/main/tag 中变化或手动运行；它比单元测试慢，但能发现组件拼接错误。
+# Secret 边界：来自 Fork/Dependabot 的 PR 不获得 GitHub Token；只有声明需要真实 LLM 的分片才读取 LLM Key。
 name: Integration Tests
 
 on:
@@ -85,6 +88,7 @@ env:
   NON_GITHUB_TESTS: "01 02 03 04 05 06 15 17 18 19 20 21 22 23 24 25 26 27 28 100"
 
 jobs:
+  # 先判断改动范围和测试矩阵，让后续 job 只构建、运行受影响的镜像与测试分片。
   # Step 0: Detect which paths changed so we can decide whether to rebuild
   # the openclaw-base image (slow, ~10min) or reuse the published `:latest`.
   # On non-PR triggers (push to main, tag, workflow_dispatch) we conservatively
@@ -147,6 +151,7 @@ jobs:
           fi
           echo "matrix={\"include\":$MATRIX}" >> "$GITHUB_OUTPUT"
 
+  # Controller 镜像作为所有分片共用的基础产物，只构建一次并通过 artifact 传给后续 job。
   # Step 1a: Build the shared base image (agentteams-controller)
   build-base:
     runs-on: ubuntu-latest
@@ -178,6 +183,7 @@ jobs:
           path: /tmp/agentteams-controller.tar.gz
           retention-days: 1
 
+  # OpenClaw 基础层体积较大；只有检测到相关变化时才重建，否则后续使用已发布版本。
   # Step 1b: Build openclaw-base from this PR's source, but only when
   # openclaw-base/** actually changed. Otherwise downstream builds reuse the
   # published `:latest` from the registry (default Makefile behaviour).
@@ -227,6 +233,7 @@ jobs:
           path: /tmp/agentteams-openclaw-base.tar.gz
           retention-days: 1
 
+  # needs 是依赖门禁：变化检测及所需基础镜像失败时，不允许继续构建运行时镜像。
   # Step 2: Build downstream images in parallel (all depend on agentteams-controller;
   # Only the OpenClaw Worker additionally depends on openclaw-base.
   build-images:
@@ -314,6 +321,7 @@ jobs:
           path: /tmp/agentteams-${{ matrix.target }}.tar.gz
           retention-days: 1
 
+  # 每个矩阵分片启动隔离环境；测试后即使失败也导出日志、上传产物并执行清理。
   # Step 3: Run test shards in parallel, each on its own runner with isolated cluster
   integration-tests:
     needs: [detect-changes, build-images]
@@ -608,6 +616,7 @@ jobs:
 # Manual baseline re-generation for a specific release version
 # ============================================================
 
+  # 手动指定发布基线时使用已经推送的镜像复验，避免只验证本地构建缓存。
   release-baseline:
     if: github.event_name == 'workflow_dispatch' && inputs.baseline_version != ''
     runs-on: ubuntu-latest

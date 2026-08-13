@@ -1,4 +1,12 @@
-"""Generic typed management tool with mandatory room authorization."""
+"""Generic typed management tool with mandatory room authorization.
+
+为所有 AgentScope 管理工具提供统一的类型校验与强制授权。
+
+AgentScope 决定“想调用哪个工具”，本模块在执行前读取当前 Matrix turn context，校验
+工具是否属于 room policy，并在需要时产生可持久化 confirmation event。只有通过这一
+层才进入 deterministic workflow；因此新增 skill 文档不会自动获得 capability，新增
+工具也不能绕过房间、发送者、资源范围和确认模式。
+"""
 
 from __future__ import annotations
 

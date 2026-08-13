@@ -1,5 +1,9 @@
 """TeamHarness integration implemented with QwenPaw 2 public plugin APIs."""
 
+# 初学者导读：适配器只使用 QwenPaw 公共 plugin API 注册技能、MCP 与中间件，
+# 避免修改上游内部模块。TeamHarness 让正式 Team 的 Leader/Worker 按 Matrix 房间
+# 协作；它与 WorkerFlow 创建的临时本地 Agent 是两套边界，不能混用身份或状态。
+
 from __future__ import annotations
 
 import importlib.util
@@ -159,6 +163,7 @@ def _register_trace_hooks(api: Any) -> None:
 
 
 class TeamHarnessPlugin:
+    """把 TeamHarness 资源注册到一个正在启动的 QwenPaw Worker。"""
     def register(self, api: Any) -> None:
         api.register_prompt_section(
             "teamharness_context",

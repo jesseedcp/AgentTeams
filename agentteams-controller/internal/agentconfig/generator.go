@@ -26,6 +26,12 @@ func NewGenerator(cfg Config) *Generator {
 // consumed by the AgentScope Manager. Prompt files and skills must be uploaded
 // before this document because publishing it makes the revision eligible for
 // activation.
+// GenerateManagerRuntimeDocument 生成 AgentScope Manager 用于激活新版本的无密文文档。
+//
+// 部署程序必须先上传 SOUL/AGENTS/TOOLS/HEARTBEAT 和 skill，最后再发布
+// 这份文档。原因是 runtime document 就像“版本已就绪”的提交标记：
+// Manager 看到新 revision 后可以立即加载它。如果顺序反过来，正在处理
+// 消息的 Manager 可能读到一个引用了尚未上传文件的半成品版本。
 func (g *Generator) GenerateManagerRuntimeDocument(
 	req ManagerRuntimeRequest,
 ) ([]byte, error) {
@@ -125,6 +131,10 @@ func (g *Generator) GenerateManagerRuntimeDocument(
 }
 
 // GenerateOpenClawConfig produces the openclaw.json content for a worker.
+// GenerateOpenClawConfig 根据统一 Worker spec 生成 OpenClaw 运行时的 openclaw.json。
+// 相同输入必须产生字节稳定的输出：Controller 用配置差异决定是否
+// 重启 Worker，如果在这里加入当前时间或随机值，每次 reconcile 都会被
+// 误判为新版本，打断正在进行的 Agent 任务。
 func (g *Generator) GenerateOpenClawConfig(req WorkerConfigRequest) ([]byte, error) {
 	modelName := req.ModelName
 	if modelName == "" {
@@ -408,6 +418,9 @@ func (g *Generator) applyChannelPolicy(config map[string]interface{}, policy *Ch
 // ResolveModelSpec returns model parameters, applying config overrides. Worker
 // configuration and the AgentScope Manager activation document share this
 // resolver so model limits cannot drift between runtimes.
+// ResolveModelSpec 把模型 ID 解析为上下文长度、输出上限、推理模式和
+// 输入模态。未识别的模型使用保守默认值，这能保持安全可用，但可能
+// 没有暴露供应商宣称的全部上下文容量。
 func (g *Generator) ResolveModelSpec(modelName string) ModelSpec {
 	spec := defaultModelSpec(modelName)
 

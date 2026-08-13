@@ -4,6 +4,10 @@
 # Thin shell that delegates to the `agt` CLI inside the Manager container.
 # Supports ZIP packages, remote packages (nacos://, http://), and YAML files.
 #
+# 这里的“导入”不是把 ZIP 随便解压进运行目录：脚本先把本地包送入容器，再由
+# `agt` 校验并写入 Controller 期望状态。远端包 URI 可能包含凭据，日志与报错不能
+# 回显秘密；`-f ... --prune` 会触发全量删除语义，应优先 dry-run。
+#
 # Usage:
 #   ./agentteams-import.sh worker --name <name> --zip <path-or-url> [--yes]
 #   ./agentteams-import.sh worker --name <name> --package <nacos://...> [--model MODEL]

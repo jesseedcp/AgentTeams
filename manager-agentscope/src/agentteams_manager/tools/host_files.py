@@ -1,4 +1,11 @@
-"""Explicitly allowlisted access to an optional host-share mount."""
+"""Explicitly allowlisted access to an optional host-share mount.
+
+仅在显式 allowlist 的 host-share 根目录内读写文件。
+
+路径会先 resolve 并确认仍位于配置根下，拒绝 ``..``、符号链接逃逸、超限文件和未允许
+扩展名。这个工具不等于完整主机文件系统访问，且通常受高风险确认；不用 shell 执行
+路径，避免文件名被解释成命令。
+"""
 
 from __future__ import annotations
 

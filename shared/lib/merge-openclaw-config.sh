@@ -1,5 +1,9 @@
 #!/bin/bash
 # merge-openclaw-config.sh - Merge remote (MinIO) and local (Worker) openclaw.json
+# 初学者导读：重启恢复时既有 Controller 新配置，也可能有 Worker 运行中保存的本地
+# 自定义项，不能简单让整份文件互相覆盖。这里按字段声明“谁是权威”：模型/网关
+# 服从远端 Controller，登录后刷新的 Matrix token 与用户插件细节保留本地。规则
+# 集中在这里才能让各 Worker runtime 获得同样结果。
 #
 # Design principle (local-first):
 #   Local (Worker disk) is the authoritative base. Periodic pulls from MinIO only

@@ -1,3 +1,6 @@
+# 作用：把带版本号的 Helm Chart 打包，并更新 OSS 中英文两个 Chart 索引。
+# 触发：版本标签自动发布，或维护者手动提供版本；非法版本会在上传前失败。
+# Secret 边界：ACCESS_KEY 只传给下载/上传 OSS 的 Action，不写入 Chart、日志变量或构建产物。
 name: Deploy Helm Chart to OSS
 
 on:
@@ -12,6 +15,7 @@ on:
         type: string
 
 jobs:
+  # 下载旧索引后再 merge 新包，才能保留历史版本；任一步失败都不会继续执行后续上传。
   deploy-helm-to-oss:
     runs-on: ubuntu-latest
     steps:

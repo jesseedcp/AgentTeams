@@ -1,4 +1,12 @@
-"""One serialized AgentScope session per Matrix room."""
+"""One serialized AgentScope session per Matrix room.
+
+为每个 Matrix room 保存一个串行化的 AgentScope 会话。
+
+同一房间的上下文、模型覆盖和 elevated 设置互相关联，不能并发改写；因此每个 room
+有独立 ``asyncio.Lock``，不同 room 仍可并行。每个 turn 结束后把 ``AgentState`` 写入
+SQLite；取消时回滚到 turn 前快照，避免保存半段工具循环。runtime 或 policy revision
+变化时重建 Agent，但复用经过复制的会话状态。
+"""
 
 from __future__ import annotations
 
@@ -66,6 +74,12 @@ class RoomSessionStatus:
 
 
 class RoomSessionManager:
+    """协调房间锁、Agent cache、持久化 state 和 turn 边界热更新。
+
+    ``get_or_create`` 比较 policy/runtime revision 与会话设置；只有边界变化才重建 Agent。
+    ``run_input`` 在持锁期间流式执行，取消则恢复深拷贝 state，正常结束才保存。这是同一
+    room 不出现两条回复互相覆盖上下文的核心保证。
+    """
     def __init__(
         self,
         *,
@@ -197,7 +211,12 @@ class RoomSessionManager:
         on_event: Callable[[AgentEvent, AgentState], None] | None = None,
         transient_context: str = "",
     ) -> AsyncIterator[AgentEvent]:
-        """Run one native AgentScope input under the room session lock."""
+        """在 room lock 内运行一次 AgentScope 输入并原子保存结果。
+
+        ``transient_context`` 只在冷会话首轮临时附加，结束后会把 canonical 用户消息恢复
+        到 state，避免历史/记忆副本被永久重复保存。发生取消时恢复 ``state_before``，
+        因而 ``/stop`` 不会留下半个 tool call 的上下文。
+        """
         lock = await self._lock_for(event.room_id)
         async with lock:
             session = await self._get_or_create_locked(

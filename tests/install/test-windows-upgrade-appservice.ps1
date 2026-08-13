@@ -1,3 +1,6 @@
+# Windows keep-all 升级仿真：用临时目录和 fake docker/命令记录器执行安装器，验证 AppService Secret 被保留并传递。
+# fake 只替代外部程序，安装器的参数拼装、环境文件迁移和分支判断都是真实执行的。
+# 所有文件位于随机临时目录并在结束时清理，绝不能让测试覆盖用户现有的 env 或 Docker 容器。
 $ErrorActionPreference = "Stop"
 
 $root = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path

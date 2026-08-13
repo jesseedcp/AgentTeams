@@ -15,6 +15,10 @@
 #   APT_MIRROR        - APT mirror host (default: empty; set to mirrors.aliyun.com for China)
 #   OPENCLAW_REPO_URL - OpenClaw git repository URL (default: https://github.com/higress-group/openclaw.git)
 # ============================================================
+# 这是 OpenClaw Worker 的共享“地基”，不是可单独部署的 Agent。固定上游 commit
+# 保证重建可复现；worker/Dockerfile 再叠加 AgentTeams 的 agt、同步和入口脚本。
+# Higress 已由控制面共享运行，不能为了方便再塞回每个 Worker，否则会显著浪费
+# 内存并产生互相冲突的网关实例。
 
 ARG HIGRESS_REGISTRY=higress-registry.cn-hangzhou.cr.aliyuncs.com
 

@@ -1,4 +1,7 @@
 #!/bin/bash
+# Matrix 测试客户端：封装登录、查房间、发消息和轮询事件，供端到端脚本观察真实 homeserver 状态。
+# 轮询用于等待 Matrix 最终同步，并非用 fake 直接制造回复；超时必须作为链路失败返回。
+# Access Token 只应放在内存变量和 Authorization header，日志辅助函数不得输出完整 Token。
 # matrix-client.sh - Matrix API wrapper for integration tests
 #
 # All requests are sent via exec_in_manager() (docker exec into the Manager container)

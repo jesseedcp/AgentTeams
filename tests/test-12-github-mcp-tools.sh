@@ -5,6 +5,9 @@
 # Manager descriptor, that all retained GitHub operations are discovered by
 # AgentScope MCPClient, and that representative read-only calls work without
 # the deleted mcporter sidecar or a model round trip.
+# 初学者提示：这是确定性的 MCP 契约测试，直接检查描述符和工具调用，不依赖模型“猜测”应该调用哪个工具。
+# 通过标准包括 Secret 不出现在描述符、保留工具集合完整、只读调用成功，以及旧 sidecar 已不再是运行前置条件。
+# 它与 test-08 的区别是：这里验证 Manager 的原生 AgentScope MCP 接线，test-08 验证 Worker 的真实 GitHub 流程。
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/test-helpers.sh"

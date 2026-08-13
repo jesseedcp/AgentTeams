@@ -1,6 +1,10 @@
 #!/bin/bash
 # replay-task.sh - Send a task message to the Manager Agent via Matrix
 #
+# replay 走真实链路：以 admin 身份登录 Matrix，向 Manager 房间发送消息并等待新
+# 事件。它适合复现对话/工具问题，但不会点击 Cinny，因此不能替代页面 UI 验收。
+# env 文件含管理员密码；读取时只导入允许的键值，日志中不得打印 token/password。
+#
 # Acts as the "human admin" by sending a Matrix message to the Manager
 # and optionally waiting for its reply.
 #

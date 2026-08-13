@@ -8,6 +8,9 @@
 # 2. PR review comments via GitHub API
 # 3. Non-linear task dependencies (revision flow)
 # 4. Cross-worker coordination via GitHub
+# 初学者提示：这条用例刻意走“开发→评审→返修→补测试”的非线性流程，防止 Manager 只能执行一次性直线任务。
+# 通过标准要核对真实 PR 评论、返修提交和最终测试结果，不能只根据模型回复中的自然语言判断成功。
+# GitHub 是本测试的协作事实源，Matrix 消息只是触发和通知渠道。
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/test-helpers.sh"

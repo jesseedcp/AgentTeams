@@ -144,6 +144,9 @@ func LoadAgentPodTemplate(ctx context.Context, client K8sCoreClient, namespace, 
 // ApplyPodTemplate overlays controller-owned runtime fields from overlay onto
 // a deep copy of tmpl, producing a ready-to-submit *corev1.Pod. This function
 // is pure (no I/O, no K8s API calls) for ease of testing.
+// ApplyPodTemplate 把 Controller 强制管理的字段叠加到用户 Pod template 的深拷贝上，
+// 生成可提交的 Pod。它是无 I/O 的纯函数，使“谁覆盖谁”的合并规则可
+// 独立测试，也确保不会在构建 Pod 时意外修改 informer cache 中的原对象。
 //
 // Merge rules (see design doc section 1.2):
 //
@@ -169,6 +172,9 @@ func LoadAgentPodTemplate(ctx context.Context, client K8sCoreClient, namespace, 
 //     spread constraints, runtimeClassName, schedulerName, priorityClassName,
 //     dnsPolicy, dnsConfig, etc.).
 func ApplyPodTemplate(tmpl corev1.PodTemplateSpec, overlay PodOverlay) *corev1.Pod {
+	// DeepCopy 很重要：Kubernetes 对象含有 map/slice。如果只做浅拷贝，
+	// 下面 append label/volume 可能修改调用者持有的 template，使后续
+	// reconcile 在没有 spec 变化的情况下产生不同结果。
 	tmplCopy := tmpl.DeepCopy()
 
 	pod := &corev1.Pod{

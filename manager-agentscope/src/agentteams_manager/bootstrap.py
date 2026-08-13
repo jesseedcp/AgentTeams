@@ -1,4 +1,12 @@
-"""Production dependency wiring for the single AgentScope Manager process."""
+"""Production dependency wiring for the single AgentScope Manager process.
+
+把生产环境中的各个组件装配成一个可运行的 AgentScope Manager。
+
+这个文件相当于系统的“接线图”：配置从环境变量和 Controller runtime document
+进入，随后创建 Matrix、SQLite、MinIO、Higress、AgentScope、各种 tool 与
+workflow，最后交给 :class:`ManagerApplication` 统一启动。这里主要负责选择和连接
+实现，不承载具体业务规则；业务规则应留在 policy、workflow 或 state 模块中。
+"""
 
 from __future__ import annotations
 
@@ -384,7 +392,12 @@ async def create_application(
     *,
     tracer: Any | None = None,
 ) -> ManagerApplication:
-    """Connect external resources and assemble the complete Manager."""
+    """读取配置并异步完成整棵生产依赖图的装配。
+
+    返回的 application 尚未开始消费 Matrix；调用方随后执行 ``start``。分开“装配”和
+    “启动”使测试可以注入 fake，也保证恢复协调器、workflow 与 tool 引用的是同一组
+    repository/client 实例。
+    """
     storage = await MinioClient.connect(
         endpoint_url=config.fs_endpoint,
         bucket=config.fs_bucket,
@@ -408,7 +421,7 @@ def build_application(
     storage: MinioClient | Any,
     tracer: Any | None = None,
 ) -> ManagerApplication:
-    """Pure construction half of the production composition root."""
+    """为已有事件循环之外的调用者提供同步装配入口。"""
     if not config.admin_user_id:
         raise ValueError("Manager admin Matrix user ID is required")
     if not config.manager_admin_room_id:

@@ -4,6 +4,12 @@
 # Default configuration for local Kubernetes deployment (kind / minikube).
 # Override with values-aliyun.yaml for Alibaba Cloud ACK/ACS deployments.
 # =============================================================================
+# 初学者主线：用户或安装脚本给 values 赋值，Helm 再把这些值代入 templates/。
+# 模板最终生成 Secret、ConfigMap、Service、Deployment/StatefulSet 等 Kubernetes
+# 对象；Pod 通过 env/envFrom、挂载卷和 Service DNS 得到实际运行配置。因此只改
+# values 并不会直接改正在运行的进程，必须执行 helm install/upgrade 才会生效。
+# 敏感值最终进入 Secret，普通连接关系进入模板或 ConfigMap；不要把渲染后的
+# Secret YAML、`helm get values` 输出或真实 API key 提交到 Git。
 
 global:
   namespace: ""  # defaults to .Release.Namespace
@@ -13,6 +19,7 @@ global:
 imagePullSecrets: []
 
 # ── Credentials (shared across all components) ────────────────────────────
+# 凭据链路：values → runtime-env Secret → Controller/Manager/Worker 环境变量。
 credentials:
   registrationToken: ""       # Matrix registration token (auto-generated if empty)
   adminUser: "admin"
@@ -24,6 +31,7 @@ credentials:
   githubToken: ""             # Optional GitHub PAT; injected only into the Controller and AgentScope Manager
 
 # ── Preflight checks ─────────────────────────────────────────────────────
+# 先验证模型凭据，避免一整套 Pod 启动后才发现无法调用 LLM。
 preflight:
   llm:
     enabled: true              # run a Helm pre-install/pre-upgrade LLM probe
@@ -34,6 +42,7 @@ preflight:
     resources: {}
 
 # ── Matrix ────────────────────────────────────────────────────────────────
+# Matrix 是权威消息与房间存储；Cinny 只是浏览器客户端。
 matrix:
   provider: tuwunel           # tuwunel | synapse
   mode: managed               # managed | existing
@@ -73,6 +82,7 @@ matrix:
   synapse: {}
 
 # ── Gateway ───────────────────────────────────────────────────────────────
+# Higress 统一接收浏览器 Matrix 流量和 Agent 的模型调用。
 # provider=higress + mode=managed → Higress deployed as a subchart here
 # provider=ai-gateway + mode=existing → external Alibaba Cloud APIG; routes
 #   are provisioned out-of-band and the controller only manages consumers.
@@ -80,6 +90,8 @@ gateway:
   provider: higress           # higress | ai-gateway
   mode: managed               # managed | existing
   publicURL: ""               # required browser/public URL, e.g. http://127.0.0.1:18388
+# publicURL 是宿主机浏览器能访问的地址；集群内 Pod 使用 helper 推导出的 Service
+# DNS。两者不能混用：Pod 里的 127.0.0.1 只代表 Pod 自己。
   higress:
     enabled: true             # controls Higress subchart deployment
   # Required when provider=ai-gateway:
@@ -91,6 +103,9 @@ gateway:
     envId: ""                 # APIG environment id
 
 # ── Storage ───────────────────────────────────────────────────────────────
+# MinIO/OSS 保存跨 Pod 的共享文件、journal、snapshot 和 artifact。
+# Pod 本地文件会随重建丢失，持久内容必须写入对象存储；Manager 自己的 SQLite
+# 事务库则使用下面 manager.persistence 的 PVC，两类存储职责不要混为一谈。
 # provider=minio + mode=managed → MinIO StatefulSet deployed here, static
 #   root credentials, admin API available.
 # provider=oss + mode=existing → external Alibaba Cloud OSS bucket; the
@@ -131,6 +146,7 @@ storage:
       rootPassword: "minioadmin"
 
 # ── Higress subchart values (passed directly to the higress dependency) ───
+# 这些是 Higress 子 Chart 原生 values；键名由第三方依赖规定，不能随意改层级。
 # `gateway.higress.enabled` is the materialized condition flag. The actual
 # Higress chart still reads values from the top-level `higress:` block because
 # the dependency name is `higress`.
@@ -185,6 +201,9 @@ credentialProvider:
   envFrom: []                   # raw envFrom[] entries (secretRef / configMapRef)
 
 # ── Controller (CRD reconciler + worker lifecycle + gateway + credentials) ─
+# Controller 是唯一控制面，观察 CRD 并创建一个 Manager/多个 Worker Pod。
+# Controller 是“期望状态的执行者”：Manager 发出管理请求后由它写/读 CR，
+# reconcile 可重复运行并把实际 Pod/房间/凭据逐步调整到 spec 描述的状态。
 controller:
   replicaCount: 1               # increase for HA with leader election
   image:
@@ -237,6 +256,7 @@ controller:
     resources: {}               # override if your cluster has tight quotas
 
 # ── Manager Agent (CRD-driven) ────────────────────────────────────────────
+# Manager Agent 是唯一协调者；Controller 根据默认 Manager CR 创建其 Pod。
 # When enabled, the controller creates a Manager CR at startup. The
 # ManagerReconciler then provisions the Matrix account, Gateway consumer,
 # and Pod automatically. No static Deployment is created by Helm.
@@ -277,6 +297,7 @@ manager:
     storageClassName: ""
 
 # ── Cinny (Matrix IM UI, optional) ────────────────────────────────────────
+# Cinny 是可选 Matrix 网页客户端；不保存权威消息，也不直接调用 Agent。
 cinny:
   enabled: true
   image:
@@ -308,6 +329,7 @@ cms:
   metricsEnabled: false
 
 # ── Worker defaults ───────────────────────────────────────────────────────
+# 每个 Worker CR 可选 runtime，Controller 再选对应镜像。
 worker:
   defaultImage:
     openclaw:

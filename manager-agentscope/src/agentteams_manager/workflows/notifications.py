@@ -1,4 +1,11 @@
-"""Exactly-once Matrix notifications and append-once daily memory."""
+"""Exactly-once Matrix notifications and append-once daily memory.
+
+发送可恢复的 Matrix 通知，并把重要结果 append-once 到每日记忆。
+
+workflow 先在 SQLite 保存通知 intent 和稳定 Matrix transaction ID，再发送消息并记录
+event ID。超时进入恢复查询，不能换 ID 直接再发。通知成功后才追加对应 daily memory，
+来源键确保重放不会留下重复记录，从而让页面消息与本地记忆最终收敛。
+"""
 
 from __future__ import annotations
 

@@ -1,5 +1,10 @@
 """Plugin package installer used by the `agentteams` CLI fallback."""
 
+# 初学者导读：安装流程是“准备来源 → 安全解包到临时目录 → 找到 manifest 根 →
+# 复制到项目插件目录 → 执行 install 生命周期 → 写入清单”。临时目录与路径穿越
+# 检查避免一个恶意 tar 覆盖项目外文件；清单只在安装成功后保存，失败不会伪装成
+# 已安装。update 复用同一流程，uninstall 则先运行插件自己的清理脚本。
+
 from __future__ import annotations
 
 import hashlib
@@ -58,6 +63,7 @@ def _load_metadata(manifest_path: Path) -> Tuple[str, str, list[str]]:
 
 
 def _safe_extract_tar(package: Path, target: Path) -> None:
+    """只把归档成员解压到 ``target`` 内，拒绝 ``../`` 与绝对路径逃逸。"""
     try:
         with tarfile.open(package, "r:gz") as archive:
             root = target.resolve()
@@ -154,6 +160,7 @@ def _prepare_package(package: Path) -> Tuple[Path, Optional[tempfile.TemporaryDi
 
 
 def install(
+    # package（归档）与 source（目录）是互斥来源，最后都会归一化成可复制的插件根。
     store: ConfigStore,
     name: str,
     package: Optional[Path] = None,

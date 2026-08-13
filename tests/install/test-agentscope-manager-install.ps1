@@ -1,3 +1,6 @@
+# Windows 安装器的静态契约测试：读取 PowerShell 安装器、verify 脚本和 Makefile，确认默认 Manager 始终是 AgentScope。
+# 这里不运行 Docker 或联网安装；Assert-Contains/NotContains 用于发现镜像名、参数和退役分支在发布前发生漂移。
+# 通过标准是安装入口、验证命令和构建目标三者一致，避免“脚本能解析但安装了错误 runtime”。
 $ErrorActionPreference = "Stop"
 
 $root = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path

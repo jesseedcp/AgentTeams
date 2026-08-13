@@ -21,6 +21,9 @@ import (
 	"github.com/agentscope-ai/AgentTeams/agentteams-controller/internal/oss"
 )
 
+// Config 是 Controller 启动后的不可变配置快照。它把环境变量中分散的
+// 字符串整理为各子系统需要的强类型值。敏感字段可以在内存中传给
+// 客户端，但不应整体打印、序列化到 CR 或传给 Agent 提示词。
 type Config struct {
 	// Controller core
 	KubeMode        string // "embedded" or "incluster"
@@ -257,6 +260,10 @@ type managerSpecEnv struct {
 	CodingCLI *v1beta1.ManagerCodingCLISpec     `json:"codingCLI"`
 }
 
+// LoadConfig 在进程启动时读取一次环境并应用默认值。
+// 业务代码之后使用这份快照，不再随时 os.Getenv，否则同一进程中不同
+// 组件可能看到不同值。需要热加载的内容通过明确 watcher/revision 机制处理，
+// 而不是偶然重读环境。
 func LoadConfig() *Config {
 	kubeMode := envOrDefault("AGENTTEAMS_KUBE_MODE", "embedded")
 	metricsBindAddr := os.Getenv("AGENTTEAMS_METRICS_BIND_ADDR")

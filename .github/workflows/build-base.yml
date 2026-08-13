@@ -1,3 +1,6 @@
+# 作用：构建所有 OpenClaw 系 Worker 共用的基础镜像，避免每个 Worker 重复安装相同依赖。
+# 触发：只有 main 上的 openclaw-base 发生变化，或维护者手动运行时才执行。
+# 通过标准：amd64/arm64 两个平台的 latest 镜像都成功推送；登录凭据只交给 Registry 登录步骤。
 name: Build Base Image
 
 on:
@@ -13,6 +16,7 @@ env:
   REPO: agentteams
 
 jobs:
+  # 这是一个发布型 job，会写外部镜像仓库；普通代码测试不应复用它的写权限。
   build-base:
     runs-on: ubuntu-latest
     permissions:

@@ -1,3 +1,6 @@
+# 作用：根据版本标签生成 GitHub Release，随后用 PR 归档本次 changelog 并准备下一版本。
+# 触发：版本标签自动运行或维护者手动指定版本；版本格式验证是所有写操作之前的第一道门禁。
+# Secret 边界：GITHUB_TOKEN 只在建标签、读取发布说明、创建 Release/PR 时使用，并由 permissions 限权。
 name: Release
 
 on:
@@ -17,6 +20,7 @@ env:
   REPO: jesseedcp
 
 jobs:
+  # 这是会写 GitHub 状态的发布 job；镜像构建由独立 Workflow 负责，两者失败可分别追踪。
   release:
     runs-on: ubuntu-latest
     permissions:

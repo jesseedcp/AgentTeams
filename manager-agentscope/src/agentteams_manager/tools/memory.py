@@ -1,4 +1,11 @@
-"""Admin-only typed tools for durable Manager memory."""
+"""Admin-only typed tools for durable Manager memory.
+
+提供受限的长期记忆写入、召回与证据记录工具。
+
+记忆工具用于稳定偏好、项目决策和有事实依据的 Worker 评估，不应保存 Secret、原始工具
+输出或实时资源状态。scope 由当前房间和输入模型约束；写入经过去重与长度限制，召回
+也只返回当前 room 可以看到的投影。
+"""
 
 from __future__ import annotations
 

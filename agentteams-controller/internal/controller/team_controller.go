@@ -65,6 +65,9 @@ type teamAdminActor struct {
 	Username     string
 }
 
+// Reconcile 根据 Team spec 收敛共享房间、Leader 直聊、成员运行配置与状态。
+// 同一 Team 可能在未修改 spec 时被多次调和，因此房间成员同步使用
+// desired set 与 actual set 做差集，而不是每次盲目重发 invite/kick。
 func (r *TeamReconciler) Reconcile(ctx context.Context, req reconcile.Request) (retres reconcile.Result, reterr error) {
 	start := time.Now()
 	defer func() { metrics.Observe("team", start, reterr) }()
@@ -77,6 +80,8 @@ func (r *TeamReconciler) Reconcile(ctx context.Context, req reconcile.Request) (
 	}
 
 	if !team.DeletionTimestamp.IsZero() {
+		// Team 的房间和别名位于 Matrix，不会随 Kubernetes CR 自动删除。
+		// finalizer 把 CR 留在 Terminating，直到这些外部资源已清理。
 		changed := false
 		if controllerutil.ContainsFinalizer(&team, finalizerName) {
 			if err := r.handleDelete(ctx, &team); err != nil {
@@ -1355,6 +1360,8 @@ func uniqueTeamStrings(values []string) []string {
 	return out
 }
 
+// SetupWithManager 注册 Team 及其引用的 Worker/Pod 观察关系。
+// 当任一成员 Pod 变为 Ready 或失败时，Team.Status 的聚合结果需要重新计算。
 func (r *TeamReconciler) SetupWithManager(mgr ctrl.Manager) (controller.Controller, error) {
 	bldr := ctrl.NewControllerManagedBy(mgr).For(&v1beta1.Team{})
 

@@ -8,6 +8,9 @@
 #   3. Waits for controller reconcile (which now calls lifecycle-worker.sh --action delete)
 #   4. Verifies containers are removed (not just stopped)
 #   5. Verifies worker-lifecycle.json entries are cleaned up
+# 初学者提示：这个脚本必须最后运行，因为它会删除前面用例为联调保留的 Worker、Team 和相关运行资源。
+# 通过标准是声明资源与实际容器/生命周期记录一起消失；只删 CR 而遗留容器会造成下一轮测试假失败。
+# 清理目标带有 test 前缀并由测试注册表发现，不能把匹配范围扩大到真实用户资源。
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/test-helpers.sh"

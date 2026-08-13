@@ -217,6 +217,16 @@ func (k *K8sBackend) Available(_ context.Context) bool {
 	return k.client != nil && k.config.Namespace != ""
 }
 
+// Create 根据已解析的 CreateRequest 构造并提交 Agent Pod。
+//
+// Pod 通过 controller OwnerReference 连到 Worker/Team/Manager CR。OwnerReference
+// 是 Kubernetes 的级联回收关系：所有者最终删除后，garbage collector
+// 会删除子 Pod。它不能取代 finalizer，因为 Matrix 房间和 Higress 路由
+// 不是 Kubernetes 对象，仍需 Controller 主动清理。
+//
+// 方法先 Get 稳定 pod name 防止重复创建。这不会消除所有竞态，因为
+// 两个调用可能同时看到 NotFound；Kubernetes 的名称唯一性作为最终保护，
+// 上层在 AlreadyExists/超时后应通过 Status 查询现状。
 func (k *K8sBackend) Create(ctx context.Context, req CreateRequest) (*WorkerResult, error) {
 	// Resolve effective runtime once: explicit > caller fallback > openclaw.
 	// See ResolveRuntime godoc — the Worker / Manager CRDs intentionally have

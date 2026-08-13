@@ -1,3 +1,6 @@
+# 作用：防止 Controller 的 CRD 源文件与 Helm 中供安装使用的副本悄悄分叉。
+# 触发：任一 CRD 目录发生变化时运行；逐字节目录比较无输出且退出码为 0 才算通过。
+# 这是纯读取门禁，不需要 Secret，也不会修改或自动覆盖任何一份 CRD。
 name: Check CRD Sync
 
 on:
@@ -13,6 +16,7 @@ on:
   workflow_dispatch: ~
 
 jobs:
+  # Controller 目录是源，Helm 目录是发布副本；失败信息会提示维护者运行 make sync-crds。
   check-crd-sync:
     runs-on: ubuntu-latest
     steps:

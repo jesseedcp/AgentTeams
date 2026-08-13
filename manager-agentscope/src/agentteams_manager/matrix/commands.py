@@ -1,4 +1,11 @@
-"""Typed parsing for Matrix session control commands."""
+"""Typed parsing for Matrix session control commands.
+
+把 Matrix 中的斜杠命令解析成严格的会话控制动作。
+
+``/new``、``/model``、``/elevated`` 等命令不应先交给大模型“猜意思”。本模块做确定性
+语法解析和参数校验，再由 session runner 执行相应动作。普通聊天返回 ``None``，非法
+命令返回明确错误，因此命令控制面不会因模型输出变化而改变。
+"""
 
 from __future__ import annotations
 

@@ -12,6 +12,9 @@
 #   QWENPAW_PIP_SPEC  - QwenPaw package spec to install from PyPI
 #   NPM_REGISTRY      - npm mirror
 # ============================================================
+# QwenPaw 在这里是 Worker runtime，不是 QwenPaw Manager。Controller 为每个
+# Worker 投射 runtime.yaml、身份和存储凭据；entrypoint 再启动 qwenpaw-worker。
+# 独立 venv 隔离 Python 依赖，分层先复制 metadata 是为了让源码变动时复用依赖缓存。
 
 ARG HIGRESS_REGISTRY=higress-registry.cn-hangzhou.cr.aliyuncs.com
 

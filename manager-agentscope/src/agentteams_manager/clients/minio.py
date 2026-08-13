@@ -1,4 +1,11 @@
-"""Verified, version-aware access to AgentTeams' S3-compatible storage."""
+"""Verified, version-aware access to AgentTeams' S3-compatible storage.
+
+以校验和与版本条件访问 AgentTeams 的 MinIO/S3 对象存储。
+
+任务文件、远端 journal 和数据库快照需要跨 Pod 保存。本模块在上传和下载时验证大小、
+SHA-256 与对象版本，并使用条件写入防止两个请求静默覆盖彼此。它返回稳定回执而不是
+底层 SDK 对象；版本冲突和对象不存在会成为明确错误，供 workflow 决定恢复方式。
+"""
 
 from __future__ import annotations
 

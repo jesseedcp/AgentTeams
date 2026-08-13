@@ -1,4 +1,11 @@
-"""Admin-only AgentScope tools for MCP and service integrations."""
+"""Admin-only AgentScope tools for MCP and service integrations.
+
+提供模型、MCP 与服务发布集成的 Admin-only typed tools。
+
+tool 负责 schema 校验和调用上下文，integration workflow 负责预检、写入 Higress、更新
+Controller runtime document、验证最终状态与恢复。模型不能直接编辑 MCP 配置文件或
+构造任意代理请求；删除、替换、发布等高风险操作仍遵守确认策略。
+"""
 
 from __future__ import annotations
 

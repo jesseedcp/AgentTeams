@@ -106,6 +106,9 @@ func applyFromFilesWithInput(files []string, stdin io.Reader) error {
 	return nil
 }
 
+// applyOneResource 用“先查存在，存在则 PUT，否则 POST”实现声明式 apply。
+// 这里只应用 spec，不将 YAML 中的 status 或 Kubernetes 服务端 metadata 送回，
+// 否则 CLI 可能覆盖 Controller 正在维护的观察状态和并发控制字段。
 func applyOneResource(client *APIClient, res yamlResource) error {
 	kind := strings.ToLower(res.Kind)
 	name := res.Metadata.Name

@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Fork 发布链静态门禁：验证安装器查询本 Fork 的版本、镜像和仓库，而不会悄悄回退到上游官方产物。
+# Shell 只负责选择可用的 Python 3.11+；内嵌 Python 读取文件并做确定性断言，不访问真实发布 API。
+# 通过标准是仓库、镜像目标与 Workflow/Makefile 引用一致，避免“源码是你的，安装下来却是官方旧镜像”。
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

@@ -1,6 +1,15 @@
 #!/bin/bash
 # agentteams-install.sh - One-click installation for AgentTeams Manager and Worker
 #
+# 初学者主线：本脚本把用户回答/环境变量整理成确定配置，检查 Docker/Podman 与
+# 端口，拉取镜像，保存 env 文件，再启动 Controller 和唯一的 AgentScope Manager。
+# 后续创建的多个 Worker 由 Controller 按各自 runtime 选择镜像并独立启动。
+# 脚本本身不是 Manager，也不会参与日常消息处理；安装完成后它可以退出。
+#
+# `set -e` 表示未被显式处理的失败会终止安装，防止半套配置继续往下运行。涉及
+# uninstall/reset/旧版本迁移的分支可能删除容器或重写配置，修改前必须确认目标
+# 名称和数据目录，不能把模糊匹配扩大到用户 HOME 或其他项目。
+#
 # Usage:
 #   ./agentteams-install.sh                  # Interactive installation (choose Quick Start or Manual)
 #   ./agentteams-install.sh manager          # Same as above (explicit)
@@ -51,6 +60,9 @@
 
 set -e
 
+# 兼容旧 env/版本字段的代码只负责把旧安装翻译到当前格式，不代表仍支持旧
+# Manager runtime。升级时要保留自动生成的身份凭据与数据卷，否则 Matrix 身份、
+# 房间和持久状态会与新容器失配。
 AGENTTEAMS_VERSION="${AGENTTEAMS_VERSION:-}"
 AGENTTEAMS_KNOWN_STABLE_VERSION="latest"   # fallback if the Fork has no release yet
 AGENTTEAMS_RELEASE_REPOSITORY="${AGENTTEAMS_RELEASE_REPOSITORY:-jesseedcp/AgentTeams}"

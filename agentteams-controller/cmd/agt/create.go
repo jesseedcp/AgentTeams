@@ -164,6 +164,10 @@ func createWorkerCmd() *cobra.Command {
 	return cmd
 }
 
+// waitForWorkerReady 在 Worker CR 已被接受后轮询实际运行状态。
+// “创建 CR”与“Agent Ready”之间包含账号、房间、配置、容器与网关等
+// 多个异步阶段，因此这里不把 POST 成功误报为 Worker 已可用。启动窗口
+// 中的 404/5xx 可重试，而显式 Failed 立即返回详细状态。
 func waitForWorkerReady(client *APIClient, name string, timeout time.Duration) (*workerResp, error) {
 	deadline := time.Now().Add(timeout)
 	last := &workerResp{Name: name, Phase: "Pending"}

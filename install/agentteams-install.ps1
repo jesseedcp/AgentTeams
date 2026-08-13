@@ -2,6 +2,15 @@
 # agentteams-install.ps1 - One-click installation for AgentTeams Manager and Worker on Windows
 # Requires PowerShell 7.0+ (recommended)
 #
+# 初学者主线：Windows 版本与 Bash 安装器完成同一件事——收集/校验配置、探测
+# Docker Desktop、检查端口、拉取镜像、写 env 文件，然后启动 Controller 和唯一
+# AgentScope Manager。Worker 不是由本脚本一次性全部启动，而是以后由 Controller
+# 按 Worker runtime 创建。PowerShell 管道传递的是对象而不只是文本，因此修改
+# Docker 检测与路径处理时不要机械照抄 Bash 写法。
+#
+# 卸载、Reset 和旧版本迁移分支具有删除/覆盖风险；必须保留精确容器名与已解析
+# 绝对路径检查。env 文件包含密码和 API key，排错时不能把其全文打印到日志。
+#
 # Usage:
 #   .\agentteams-install.ps1                  # Interactive installation (choose Quick Start or Manual)
 #   .\agentteams-install.ps1 manager          # Same as above (explicit)
@@ -38,6 +47,9 @@
 #   AGENTTEAMS_PORT_CINNY         Host port for Cinny direct access (default: 18088)
 
 #Requires -Version 5.1
+
+# 兼容旧 env 变量只为已有安装平滑升级；当前 Manager runtime 仍固定为 AgentScope，
+# 不能把读取旧字段误解为继续保留旧 Manager 启动分支。
 
 [CmdletBinding()]
 param(

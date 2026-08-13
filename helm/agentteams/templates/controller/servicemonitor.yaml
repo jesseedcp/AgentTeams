@@ -1,3 +1,4 @@
+{{- /* 仅在 Prometheus Operator 已安装且显式启用时创建采集规则；它不承载业务流量。 */ -}}
 {{- if and .Values.controller.metrics.enabled .Values.controller.metrics.serviceMonitor.enabled }}
 {{- $comp := dict "root" . "component" "controller" }}
 apiVersion: monitoring.coreos.com/v1

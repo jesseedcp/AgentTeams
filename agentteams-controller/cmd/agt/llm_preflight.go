@@ -189,6 +189,10 @@ func resolveLLMPreflightBaseURL(provider, baseURL string) (string, error) {
 	return strings.TrimRight(baseURL, "/"), nil
 }
 
+// runLLMPreflight 在启动完整 AgentTeams 前用最小 chat/completions 请求验证
+// API key、base URL 和模型 ID。它只对超时、429 和 5xx 等短暂错误做有限重试；
+// 401/403 等配置错误继续重试只会浪费时间并可能触发供应商限制。
+// 返回错误前会对 response body 脱敏，避免供应商在错误中回显的 key 进入日志。
 func runLLMPreflight(ctx context.Context, opts llmPreflightOptions) error {
 	cfg, err := resolveLLMPreflightConfig(opts)
 	if err != nil {

@@ -1,6 +1,10 @@
 ARG PYTHON_IMAGE=python:3.11-slim
 ARG AGENTTEAMS_CONTROLLER_IMAGE=agentteams/agentteams-controller:latest
 
+# 此多阶段镜像只运行一个 AgentScope Manager。python-builder 先把 Python 包装入
+# 独立 venv，controller 阶段只提供 agt 等已编译工具，最终阶段再复制所需产物；
+# 构建阶段不会成为运行中的额外容器。Worker 使用各自镜像，由 Controller 另建 Pod。
+# 分阶段还能让编译器留在 builder，降低最终镜像体积和攻击面。
 FROM ${PYTHON_IMAGE} AS python-builder
 
 ARG APT_MIRROR=
@@ -28,6 +32,7 @@ RUN pip install --no-cache-dir /build/manager-agentscope
 
 FROM ${AGENTTEAMS_CONTROLLER_IMAGE} AS controller
 
+# 最终镜像是实际运行层；上面两个 FROM 都只是构建素材来源。
 FROM ${PYTHON_IMAGE}
 
 ARG APT_MIRROR=

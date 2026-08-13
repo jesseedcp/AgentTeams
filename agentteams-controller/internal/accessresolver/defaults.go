@@ -13,6 +13,11 @@
 //
 // This package is only compiled in and used when a credential-provider
 // sidecar is configured. Local higress+minio deployments never reach it.
+//
+// 可以把这个包理解为“权限模板翻译器”：CR 保留易读、可移植的逻辑
+// 名称，本包在凭据签发前才把它们翻译为当前集群的真实资源。如果让
+// credential-provider 自己猜测 bucketRef 等名称，它就必须获得 Controller
+// 的集群配置和更广权限，破坏最小权限边界。
 package accessresolver
 
 import (

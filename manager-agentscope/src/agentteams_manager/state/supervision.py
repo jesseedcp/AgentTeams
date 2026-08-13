@@ -1,4 +1,11 @@
-"""Durable progress-observation state for proactive heartbeat checks."""
+"""Durable progress-observation state for proactive heartbeat checks.
+
+保存 heartbeat 观察任务进展时使用的游标和告警节流状态。
+
+Supervisor 需要知道上次见到的进度、连续无变化次数和最近告警时间，重启后才能继续
+判断“真的卡住”而非把所有任务都当成新任务。该表只保存观察结果，不直接改变 Task
+状态；任务完成、阻塞或返修仍须经过对应 workflow 的证据检查。
+"""
 
 from __future__ import annotations
 

@@ -66,6 +66,10 @@ func discoverToken() string {
 
 // Do sends an HTTP request and returns the raw response.
 // body may be nil for methods that have no request body.
+// Do 发送一次 Controller API 请求，并保留 HTTP response 给上层判断。
+// token 作为 Authorization header 注入，不放在 URL，避免它进入代理日志、
+// 浏览器历史或错误信息。请求 context 承载超时/取消，调用方不应在其后
+// 绕过客户端重新发起一个无界等待的请求。
 func (c *APIClient) Do(method, path string, body interface{}) (*http.Response, error) {
 	url := c.BaseURL + path
 
@@ -95,6 +99,9 @@ func (c *APIClient) Do(method, path string, body interface{}) (*http.Response, e
 
 // DoJSON sends a request, checks for 2xx, and decodes the response body into result.
 // result may be nil if the caller does not need the response body (e.g. DELETE → 204).
+// DoJSON 执行请求、检查非 2xx 错误并把成功回答解码到 result。
+// 它为所有 CLI 子命令提供统一错误语义，因此 AgentScope workflow 能区分
+// 认证失败、资源不存在与网络超时，而不需要解析人类文本。
 func (c *APIClient) DoJSON(method, path string, body, result interface{}) error {
 	resp, err := c.Do(method, path, body)
 	if err != nil {

@@ -6,6 +6,10 @@ Also installs a monkey-patch hook on ``CoPawAgent._decide_guard_action`` so
 that ``SENSITIVE_FILE_ACCESS`` findings are auto-denied (no user approval).
 """
 
+# 初学者导读：Controller 生成的 credagent.json 只描述“哪些路径含凭据”，这里把
+# 该边界转换成 CoPaw File Guard 规则。自动拒绝敏感文件读取很重要：即使模型被
+# 提示诱导，凭据也不应进入模型上下文、Matrix 消息或远端持久化日志。
+
 from __future__ import annotations
 
 import json

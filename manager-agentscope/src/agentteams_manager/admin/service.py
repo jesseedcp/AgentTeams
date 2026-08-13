@@ -1,4 +1,12 @@
-"""Secret-safe snapshots for the local operations console."""
+"""Secret-safe snapshots for the local operations console.
+
+为本地运维控制台生成经过脱敏的系统状态快照。
+
+控制台需要展示 Manager、Worker、Team、Project 和运行健康度，但它不应读取或返回
+Secret 的真实内容。本模块只组合允许展示的字段，并通过已有 typed client 查询权威
+系统；它提供的是某一时刻的观察结果，不是新的事实来源，也不能代替 Controller、
+Matrix 或 Higress 的权威状态。
+"""
 
 from __future__ import annotations
 

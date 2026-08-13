@@ -4,6 +4,9 @@ import v1beta1 "github.com/agentscope-ai/AgentTeams/agentteams-controller/api/v1
 
 // --- Worker API types ---
 
+// CreateWorkerRequest 是 REST API 接受的 Worker 创建输入，之后会被显式
+// 转换为 v1beta1.WorkerSpec。与 CR 类型分开能避免客户端写入 status、
+// resourceVersion 或 Controller 管理的 metadata。
 type CreateWorkerRequest struct {
 	Name          string                             `json:"name"`
 	WorkerName    string                             `json:"workerName,omitempty"`
@@ -31,6 +34,9 @@ type CreateWorkerRequest struct {
 
 }
 
+// UpdateWorkerRequest 使用指针区分“客户端未提供字段”与“显式设为零值”。
+// 如果把它们换成普通 string/bool，部分更新会无法判断某个空字符串
+// 是要清空配置，还是应保留旧值。
 type UpdateWorkerRequest struct {
 	WorkerName    *string                            `json:"workerName,omitempty"`
 	Model         *string                            `json:"model,omitempty"`
@@ -56,6 +62,8 @@ type UpdateWorkerRequest struct {
 	State            *string `json:"state,omitempty"` // desired lifecycle state: Running, Sleeping, Stopped
 }
 
+// WorkerResponse 合并 Worker spec、status 与团队角色，为 CLI/Manager 提供
+// 稳定、无 Kubernetes 内部字段的 JSON 视图。
 type WorkerResponse struct {
 	Name             string                     `json:"name"`
 	WorkerName       string                     `json:"workerName,omitempty"`
@@ -96,6 +104,7 @@ type WorkerListResponse struct {
 
 // --- Team API types ---
 
+// CreateTeamRequest 是 Team CR 的 REST 创建输入，WorkerMembers 引用现有 Worker。
 type CreateTeamRequest struct {
 	Name           string                     `json:"name"`
 	TeamName       string                     `json:"teamName,omitempty"`
@@ -119,6 +128,7 @@ type UpdateTeamRequest struct {
 	ChannelPolicy  *v1beta1.ChannelPolicySpec `json:"channelPolicy,omitempty"`
 }
 
+// TeamResponse 将 Team spec 与聚合 status 组合成页面和 CLI 可直接使用的视图。
 type TeamResponse struct {
 	Name               string                       `json:"name"`
 	TeamName           string                       `json:"teamName,omitempty"`
@@ -188,6 +198,8 @@ type HumanListResponse struct {
 
 // --- Manager API types ---
 
+// CreateManagerRequest 是 AgentScope Manager 的 REST 创建输入，不允许客户端提交
+// Matrix token、gateway key 等 Controller 管理的凭据。
 type CreateManagerRequest struct {
 	Name          string                             `json:"name"`
 	Model         string                             `json:"model"`
@@ -223,6 +235,7 @@ type UpdateManagerRequest struct {
 	CodingCLI     *v1beta1.ManagerCodingCLISpec      `json:"codingCLI,omitempty"`
 }
 
+// ManagerResponse 是 Manager 对外的无密文状态视图。
 type ManagerResponse struct {
 	Name         string                        `json:"name"`
 	Phase        string                        `json:"phase"`

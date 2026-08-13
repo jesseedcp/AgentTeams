@@ -1,5 +1,8 @@
 //go:build integration
 
+// 本文件是 Controller 集成测试的公共入口。envtest 会在本机启动临时 Kubernetes API Server 与 etcd，
+// 所以 Reconcile 操作的是接近真实的 API 对象，而不是简单 map；但它不会连接用户的生产集群。
+// TestMain 负责统一启动/关闭环境，有限等待用于观察异步 Reconcile 最终收敛，超时即视为失败。
 package controller_test
 
 import (

@@ -4,6 +4,11 @@
 # Takes the analysis results and OpenClaw config, produces a ZIP file
 # that can be fed to agentteams-import.sh on the AgentTeams host.
 #
+# 这是迁移的“打包”阶段，不会直接改正在运行的 AgentTeams。它依据 analyze 报告
+# 复制允许的配置/技能并生成可选扩展镜像模板；ZIP 在导入前仍需检查，尤其不能
+# 携带旧环境的 token、私钥、缓存或绝对宿主机路径。输出目录和 Worker 名会参与
+# 文件路径构造，因此先规范化名称，避免路径穿越或覆盖其他迁移包。
+#
 # Usage:
 #   generate-zip.sh --name <worker-name> [--state-dir <path>] [--analysis <path>] [--output <dir>] [--base-image <image>]
 

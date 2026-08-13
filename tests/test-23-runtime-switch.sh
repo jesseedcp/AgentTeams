@@ -8,6 +8,9 @@
 # The flow exercises:
 #   1. create worker runtime=openclaw → container image is openclaw
 #   2. write sentinel file to MinIO agents/<name>/
+# 初学者提示：runtime 切换需要重建容器，但 Matrix 身份、房间和 MinIO 用户数据必须保持不变。
+# 通过标准同时观察“应该变化的镜像”和“不应变化的身份/哨兵文件”，只验证新容器启动会漏掉数据丢失。
+# 等待 Controller 完成重建属于最终一致性检查，不能在旧容器刚停止时就判定失败。
 #   3. apply worker runtime=copaw → SpecChanged triggers recreate
 #   4. new container image is copaw; sentinel preserved; consumer unchanged
 #

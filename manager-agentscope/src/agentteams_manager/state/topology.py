@@ -1,4 +1,11 @@
-"""Materialized Controller/Matrix room topology."""
+"""Materialized Controller/Matrix room topology.
+
+物化 Controller 资源与 Matrix 房间、用户之间的绑定拓扑。
+
+policy resolver 需要快速回答“这个 room 属于哪个 Worker/Team/Project、发送者是谁”。
+heartbeat 从 Controller 和 Matrix 的权威事实刷新本表；稳定 alias 若迁移到新 room，也要
+替换旧绑定，避免消息进入历史房间。物化表是授权查询缓存，不应凭聊天内容自行写入。
+"""
 
 from __future__ import annotations
 

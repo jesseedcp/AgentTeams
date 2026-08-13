@@ -1,3 +1,7 @@
+{{- /*
+Manager Pod 由 Controller 动态创建，不在本 Chart 的 Deployment 中；此 Service
+使用稳定标签选中 default Manager，并把健康/管理端口固定为集群内地址。
+*/ -}}
 {{- if .Values.manager.enabled }}
 apiVersion: v1
 kind: Service

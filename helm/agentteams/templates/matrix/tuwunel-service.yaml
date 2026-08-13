@@ -1,3 +1,5 @@
+{{- /* Headless Service 给 StatefulSet 稳定网络身份；6167 是集群内 Matrix 端口，
+宿主机的 18388 则先进入 Higress，两者不是同一个监听端口。 */ -}}
 {{- if eq .Values.matrix.provider "tuwunel" }}
 {{- $comp := dict "root" . "component" "tuwunel" }}
 apiVersion: v1

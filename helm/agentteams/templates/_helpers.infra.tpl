@@ -1,6 +1,10 @@
 {{/*
 Infrastructure abstraction helpers.
 
+初学者可以把这些 helper 理解成“选择内部地址的路由表”：managed 模式返回本
+Chart 创建的 Service DNS；existing 模式返回用户提供的外部地址。Controller 和
+Agent 使用内部地址通信，浏览器才使用 publicURL，避免把宿主机端口误塞进 Pod。
+
 Phase 2 reads the new public values API (`matrix.*`, `gateway.*`, `storage.*`).
 The Higress dependency still consumes top-level `higress:` values because the
 dependency name remains `higress`; `gateway.higress.enabled` is only the

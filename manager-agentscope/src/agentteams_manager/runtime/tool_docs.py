@@ -1,4 +1,11 @@
-"""Generate and validate the checked-in typed-tool catalog."""
+"""Generate and validate the checked-in typed-tool catalog.
+
+根据实际注册的 typed tools 生成并校验工具目录文档。
+
+工具说明如果与代码漂移，模型可能请求不存在的参数或误判能力边界。本模块从 toolkit
+读取名称与 schema，渲染到受标记区域并检查文档中的集合；它只同步说明，不授予权限，
+最终可调用集合仍由当前 room policy 决定。
+"""
 
 from __future__ import annotations
 

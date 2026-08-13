@@ -1,4 +1,12 @@
-"""Initial SQLite schema for durable operations."""
+"""Initial SQLite schema for durable operations.
+
+定义 Manager SQLite 的初始 schema、索引与增量迁移列。
+
+表覆盖 session、operation、confirmation、task、project、topology、memory 和 notification
+等本地事务状态。``CREATE IF NOT EXISTS`` 使启动可重复执行；历史数据库缺列时由
+``Database.open`` 逐项补齐并最后提升 ``user_version``。修改 schema 必须同时考虑旧
+版本升级，不能只让全新数据库通过测试。
+"""
 
 SCHEMA_VERSION = 16
 
