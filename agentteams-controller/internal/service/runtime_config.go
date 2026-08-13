@@ -145,6 +145,9 @@ type memberRuntimeConfigCredentials struct {
 // DeployMemberRuntimeConfig writes the controller-to-runtime desired-state
 // snapshot consumed by managed worker runtimes such as QwenPaw.
 func (d *Deployer) DeployMemberRuntimeConfig(ctx context.Context, req MemberRuntimeConfigDeployRequest) error {
+	// 逻辑说明：DeployMemberRuntimeConfig 接收 ctx(context.Context)、req(MemberRuntimeConfigDeployRequest)，依次借助 validateRuntimeCredentialContract、memberRuntimeConfigDocument、preserveExistingRuntimeTeamContext、Marshal部署运行时配置的期望结果。
+	// 返回/状态：返回 error；可能把配置、技能或运行文档写入本地目录或 MinIO/S3 的稳定对象键。
+	// 失败/重试：校验、序列化或 I/O 失败会返回错误；旧配置保持可用，上层可用相同对象键覆盖重试。
 	if d.oss == nil {
 		return fmt.Errorf("OSS client is required to deploy runtime config")
 	}
@@ -182,6 +185,9 @@ func (d *Deployer) DeployMemberRuntimeConfig(ctx context.Context, req MemberRunt
 // WorkerReconciler owns sensitive runtime fields such as matrix tokens and
 // gateway keys.
 func (d *Deployer) MergeMemberRuntimeTeamContext(ctx context.Context, req MemberRuntimeConfigDeployRequest) error {
+	// 逻辑说明：MergeMemberRuntimeTeamContext 接收 ctx(context.Context)、req(MemberRuntimeConfigDeployRequest)，依次借助 memberRuntimeConfigObjectKey、GetObject、Unmarshal、Format合并运行时配置的期望结果。
+	// 返回/状态：返回 error；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	if d.oss == nil {
 		return fmt.Errorf("OSS client is required to deploy runtime config")
 	}
@@ -238,6 +244,9 @@ func (d *Deployer) MergeMemberRuntimeTeamContext(ctx context.Context, req Member
 }
 
 func (d *Deployer) memberRuntimeConfigDocument(req MemberRuntimeConfigDeployRequest, runtimeName string) (memberRuntimeConfigDocument, error) {
+	// 逻辑说明：memberRuntimeConfigDocument 接收 req(MemberRuntimeConfigDeployRequest)、runtimeName(string)，依次借助 runtimeAgentIdentity、copyCredentialBindings、DesiredState、isNativeConfigModel处理运行时配置的期望结果。
+	// 返回/状态：返回 memberRuntimeConfigDocument、error；可能把配置、技能或运行文档写入本地目录或 MinIO/S3 的稳定对象键。
+	// 失败/重试：校验、序列化或 I/O 失败会返回错误；旧配置保持可用，上层可用相同对象键覆盖重试。
 	runtime := strings.TrimSpace(req.Runtime)
 	if runtime == "" {
 		runtime = req.Spec.Runtime
@@ -335,10 +344,16 @@ func (d *Deployer) memberRuntimeConfigDocument(req MemberRuntimeConfigDeployRequ
 }
 
 func isNativeConfigModel(model string) bool {
+	// 逻辑说明：isNativeConfigModel 接收 model(string)，依次借助 EqualFold判断运行时配置的期望结果。
+	// 返回/状态：返回 bool；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	return strings.EqualFold(strings.TrimSpace(model), nativeConfigModel)
 }
 
 func memberRuntimeConfigChannelsFromSpec(spec v1beta1.WorkerSpec) (*memberRuntimeConfigChannels, error) {
+	// 逻辑说明：memberRuntimeConfigChannelsFromSpec 接收 spec(v1beta1.WorkerSpec)，依次借助 memberRuntimeConfigDingTalkFromSpec处理运行时配置的期望结果。
+	// 返回/状态：返回 *memberRuntimeConfigChannels、error；可能把配置、技能或运行文档写入本地目录或 MinIO/S3 的稳定对象键。
+	// 失败/重试：校验、序列化或 I/O 失败会返回错误；旧配置保持可用，上层可用相同对象键覆盖重试。
 	if spec.Channels == nil || spec.Channels.DingTalk == nil {
 		return nil, nil
 	}
@@ -350,6 +365,9 @@ func memberRuntimeConfigChannelsFromSpec(spec v1beta1.WorkerSpec) (*memberRuntim
 }
 
 func memberRuntimeConfigDingTalkFromSpec(spec *v1beta1.DingTalkChannelSpec) (*memberRuntimeConfigDingTalkChannel, error) {
+	// 逻辑说明：memberRuntimeConfigDingTalkFromSpec 接收 spec(*v1beta1.DingTalkChannelSpec)，按本函数中的条件与转换步骤处理运行时配置的期望结果。
+	// 返回/状态：返回 *memberRuntimeConfigDingTalkChannel、error；可能把配置、技能或运行文档写入本地目录或 MinIO/S3 的稳定对象键。
+	// 失败/重试：校验、序列化或 I/O 失败会返回错误；旧配置保持可用，上层可用相同对象键覆盖重试。
 	enabled := false
 	if spec.Enabled != nil {
 		enabled = *spec.Enabled
@@ -394,6 +412,9 @@ func memberRuntimeConfigDingTalkFromSpec(spec *v1beta1.DingTalkChannelSpec) (*me
 }
 
 func validateRuntimeCredentialContract(spec v1beta1.WorkerSpec) error {
+	// 逻辑说明：validateRuntimeCredentialContract 接收 spec(v1beta1.WorkerSpec)，按本函数中的条件与转换步骤校验运行时配置的期望结果。
+	// 返回/状态：返回 error；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	if len(spec.CredentialBindings) == 0 {
 		return nil
 	}
@@ -404,6 +425,9 @@ func validateRuntimeCredentialContract(spec v1beta1.WorkerSpec) error {
 }
 
 func runtimeAgentIdentity(spec v1beta1.WorkerSpec) *v1beta1.AgentIdentitySpec {
+	// 逻辑说明：runtimeAgentIdentity 接收 spec(v1beta1.WorkerSpec)，按本函数中的条件与转换步骤处理运行时配置的期望结果。
+	// 返回/状态：返回 *v1beta1.AgentIdentitySpec；可能把配置、技能或运行文档写入本地目录或 MinIO/S3 的稳定对象键。
+	// 失败/重试：校验、序列化或 I/O 失败会返回错误；旧配置保持可用，上层可用相同对象键覆盖重试。
 	if spec.AgentIdentity == nil {
 		return nil
 	}
@@ -415,6 +439,9 @@ func runtimeAgentIdentity(spec v1beta1.WorkerSpec) *v1beta1.AgentIdentitySpec {
 }
 
 func runtimeAgentIdentityData(spec v1beta1.WorkerSpec, projection RuntimeProjectionConfig) *memberRuntimeConfigAgentIdentityData {
+	// 逻辑说明：runtimeAgentIdentityData 接收 spec(v1beta1.WorkerSpec)、projection(RuntimeProjectionConfig)，按本函数中的条件与转换步骤处理运行时配置的期望结果。
+	// 返回/状态：返回 *memberRuntimeConfigAgentIdentityData；可能把配置、技能或运行文档写入本地目录或 MinIO/S3 的稳定对象键。
+	// 失败/重试：校验、序列化或 I/O 失败会返回错误；旧配置保持可用，上层可用相同对象键覆盖重试。
 	if len(spec.CredentialBindings) == 0 {
 		return nil
 	}
@@ -426,6 +453,9 @@ func runtimeAgentIdentityData(spec v1beta1.WorkerSpec, projection RuntimeProject
 }
 
 func copyCredentialBindings(in []v1beta1.CredentialBinding) []v1beta1.CredentialBinding {
+	// 逻辑说明：copyCredentialBindings 接收 in([]v1beta1.CredentialBinding)，依次借助 DeepCopyInto复制运行时配置的期望结果。
+	// 返回/状态：返回 []v1beta1.CredentialBinding；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	if len(in) == 0 {
 		return nil
 	}
@@ -437,6 +467,9 @@ func copyCredentialBindings(in []v1beta1.CredentialBinding) []v1beta1.Credential
 }
 
 func applyRuntimeTeamContext(doc *memberRuntimeConfigDocument, req MemberRuntimeConfigDeployRequest) {
+	// 逻辑说明：applyRuntimeTeamContext 接收 doc(*memberRuntimeConfigDocument)、req(MemberRuntimeConfigDeployRequest)，按本函数中的条件与转换步骤应用运行时配置的期望结果。
+	// 返回/状态：返回 无；可能把配置、技能或运行文档写入本地目录或 MinIO/S3 的稳定对象键。
+	// 失败/重试：校验、序列化或 I/O 失败会返回错误；旧配置保持可用，上层可用相同对象键覆盖重试。
 	if doc == nil {
 		return
 	}
@@ -468,6 +501,9 @@ func applyRuntimeTeamContext(doc *memberRuntimeConfigDocument, req MemberRuntime
 }
 
 func (d *Deployer) preserveExistingRuntimeTeamContext(ctx context.Context, runtimeName string, doc *memberRuntimeConfigDocument) {
+	// 逻辑说明：preserveExistingRuntimeTeamContext 接收 ctx(context.Context)、runtimeName(string)、doc(*memberRuntimeConfigDocument)，依次借助 GetObject、memberRuntimeConfigObjectKey、Unmarshal保留运行时配置的期望结果。
+	// 返回/状态：返回 无；可能把配置、技能或运行文档写入本地目录或 MinIO/S3 的稳定对象键。
+	// 失败/重试：校验、序列化或 I/O 失败会返回错误；旧配置保持可用，上层可用相同对象键覆盖重试。
 	if d.oss == nil || doc == nil {
 		return
 	}

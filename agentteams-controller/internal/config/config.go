@@ -265,6 +265,7 @@ type managerSpecEnv struct {
 // 组件可能看到不同值。需要热加载的内容通过明确 watcher/revision 机制处理，
 // 而不是偶然重读环境。
 func LoadConfig() *Config {
+	// 逻辑说明：一次性读取全部环境、应用模式相关默认和兼容重写，再校验 Manager/AppService 边界后返回进程配置快照。
 	kubeMode := envOrDefault("AGENTTEAMS_KUBE_MODE", "embedded")
 	metricsBindAddr := os.Getenv("AGENTTEAMS_METRICS_BIND_ADDR")
 	if metricsBindAddr == "" {
@@ -514,6 +515,7 @@ func LoadConfig() *Config {
 
 // Namespace returns the effective K8s namespace, defaulting to "default".
 func (c *Config) Namespace() string {
+	// 逻辑说明：显式 K8s namespace 优先，空值统一回退 default，所有 client/reconciler 因而使用同一作用域。
 	if c.K8sNamespace != "" {
 		return c.K8sNamespace
 	}
@@ -522,31 +524,37 @@ func (c *Config) Namespace() string {
 
 // HasMinIOAdmin reports whether the local MinIO admin API is available.
 func (c *Config) HasMinIOAdmin() bool {
+	// 逻辑说明：以已解析的文件存储 endpoint 判断本地 MinIO 管理能力是否可构造。
 	return c.WorkerEnv.FSEndpoint != ""
 }
 
 // CredsDir returns the directory for persisted worker credentials (embedded mode).
 func (c *Config) CredsDir() string {
+	// 逻辑说明：运行时允许环境覆盖嵌入式凭据目录，否则使用受控持久路径。
 	return envOrDefault("AGENTTEAMS_CREDS_DIR", "/data/worker-creds")
 }
 
 // AgentFSDir returns the local filesystem root for agent workspaces.
 func (c *Config) AgentFSDir() string {
+	// 逻辑说明：返回 Agent 工作区根路径，支持显式覆盖并保持嵌入式默认布局。
 	return envOrDefault("AGENTTEAMS_AGENT_FS_DIR", "/root/agentteams-fs/agents")
 }
 
 // WorkerAgentDir returns the source directory for builtin worker agent files.
 func (c *Config) WorkerAgentDir() string {
+	// 逻辑说明：解析内置 Worker prompt/skill 源目录，未配置时使用镜像内固定路径。
 	return envOrDefault("AGENTTEAMS_WORKER_AGENT_DIR", "/opt/agentteams/agent/worker-agent")
 }
 
 // RegistryPath returns the path to the workers-registry.json (embedded mode).
 func (c *Config) RegistryPath() string {
+	// 逻辑说明：解析嵌入模式 Worker registry 文件位置，允许测试或自定义镜像覆盖。
 	return envOrDefault("AGENTTEAMS_REGISTRY_PATH", "/root/workers-registry.json")
 }
 
 // ManagerResources returns the resource requirements for the Manager Pod.
 func (c *Config) ManagerResources() *backend.ResourceRequirements {
+	// 逻辑说明：把拆分的请求/限制字段组合成 backend 所需对象，不在此重新读取环境。
 	return &backend.ResourceRequirements{
 		CPURequest:    c.K8sManagerCPURequest,
 		CPULimit:      c.K8sManagerCPU,
@@ -556,6 +564,7 @@ func (c *Config) ManagerResources() *backend.ResourceRequirements {
 }
 
 func (c *Config) DockerConfig() backend.DockerConfig {
+	// 逻辑说明：组合 socket、五类镜像和默认网络；镜像可用环境覆盖，其余来自已冻结配置。
 	return backend.DockerConfig{
 		SocketPath:         c.SocketPath,
 		ManagerImage:       c.ManagerImage,
@@ -568,6 +577,7 @@ func (c *Config) DockerConfig() backend.DockerConfig {
 }
 
 func (c *Config) STSConfig() credentials.STSConfig {
+	// 逻辑说明：以显式 FS endpoint 优先、Worker 环境 endpoint 兜底，组合 sidecar 签发所需存储信息。
 	return credentials.STSConfig{
 		OSSBucket:   c.OSSBucket,
 		OSSEndpoint: firstNonEmpty(os.Getenv("AGENTTEAMS_FS_ENDPOINT"), c.WorkerEnv.FSEndpoint),
@@ -577,6 +587,7 @@ func (c *Config) STSConfig() credentials.STSConfig {
 // AIGatewayConfig returns the gateway.AIGatewayConfig used when
 // GatewayProvider == "ai-gateway".
 func (c *Config) AIGatewayConfig() gateway.AIGatewayConfig {
+	// 逻辑说明：将地域、endpoint、gateway/model/environment ID 汇总成云 AI Gateway client 配置。
 	return gateway.AIGatewayConfig{
 		Region:     c.Region,
 		Endpoint:   c.GWEndpoint,
@@ -589,16 +600,19 @@ func (c *Config) AIGatewayConfig() gateway.AIGatewayConfig {
 // UsesAIGateway reports whether the controller should wire the AI Gateway
 // (APIG) implementation of gateway.Client.
 func (c *Config) UsesAIGateway() bool {
+	// 逻辑说明：通过规范化 provider 名选择云 AI Gateway 实现，而不是按零散字段是否存在猜测。
 	return c.GatewayProvider == "ai-gateway"
 }
 
 // UsesExternalOSS reports whether the controller should talk to Alibaba
 // Cloud OSS (existing bucket) instead of an embedded MinIO.
 func (c *Config) UsesExternalOSS() bool {
+	// 逻辑说明：显式 storage provider 为 oss 时选择外部对象存储，否则保持嵌入式 MinIO 路径。
 	return c.StorageProvider == "oss"
 }
 
 func (c *Config) K8sConfig() backend.K8sConfig {
+	// 逻辑说明：把 namespace、镜像、资源和 controller 隔离信息投影为 K8s backend 配置。
 	return backend.K8sConfig{
 		Namespace:          c.K8sNamespace,
 		ManagerImage:       c.ManagerImage,
@@ -616,6 +630,7 @@ func (c *Config) K8sConfig() backend.K8sConfig {
 }
 
 func (c *Config) SandboxConfig() backend.SandboxConfig {
+	// 逻辑说明：组合 sandbox provider、预热参数、镜像和资源限制；是否显式配置预热大小单独保留。
 	return backend.SandboxConfig{
 		Namespace:                    c.K8sNamespace,
 		ProviderType:                 c.SandboxProviderType,
@@ -635,6 +650,7 @@ func (c *Config) SandboxConfig() backend.SandboxConfig {
 }
 
 func envOrDefault(key, defaultVal string) string {
+	// 逻辑说明：只把非空环境值视为显式覆盖，避免“变量存在但为空”意外抹掉可工作的默认值。
 	if v := os.Getenv(key); v != "" {
 		return v
 	}
@@ -643,6 +659,7 @@ func envOrDefault(key, defaultVal string) string {
 
 // generateRandomHex returns a cryptographically random hex string of n bytes (2n hex chars).
 func generateRandomHex(n int) string {
+	// 逻辑说明：使用密码学安全随机源生成 n 字节令牌；随机源失败时立即终止启动，避免退化为可预测凭据。
 	b := make([]byte, n)
 	if _, err := rand.Read(b); err != nil {
 		panic(fmt.Sprintf("crypto/rand failed: %v", err))
@@ -651,6 +668,7 @@ func generateRandomHex(n int) string {
 }
 
 func envOrDefaultInt(key string, defaultVal int) int {
+	// 逻辑说明：读取十进制环境变量；空值或非法整数都回退默认值，使错误配置不会把端口、超时等字段变成零值。
 	if v := os.Getenv(key); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			return n
@@ -660,11 +678,13 @@ func envOrDefaultInt(key string, defaultVal int) int {
 }
 
 func envBool(key string) bool {
+	// 逻辑说明：把部署清单常见的 1/true 大小写形式统一解释为开启，其他值保持关闭。
 	v := os.Getenv(key)
 	return v == "1" || v == "true" || v == "True" || v == "TRUE"
 }
 
 func envBoolDefault(key string, defaultVal bool) bool {
+	// 逻辑说明：未设置变量时保留调用方指定的默认策略；一旦显式设置，则按受支持的真值集合解析。
 	v := os.Getenv(key)
 	if v == "" {
 		return defaultVal
@@ -673,6 +693,7 @@ func envBoolDefault(key string, defaultVal bool) bool {
 }
 
 func firstNonEmpty(values ...string) string {
+	// 逻辑说明：按新配置到旧兼容配置的优先顺序返回首个非空值，所有候选都为空时返回空串。
 	for _, v := range values {
 		if v != "" {
 			return v
@@ -682,6 +703,7 @@ func firstNonEmpty(values ...string) string {
 }
 
 func applyManagerSpec(cfg *Config, specJSON string) error {
+	// 逻辑说明：解析单一 JSON 规范并以其中的非空字段覆盖环境配置；资源和 Coding CLI 会进一步校验，失败时拒绝整次启动配置。
 	var spec managerSpecEnv
 	if err := json.Unmarshal([]byte(specJSON), &spec); err != nil {
 		return err
@@ -723,6 +745,7 @@ func applyManagerSpec(cfg *Config, specJSON string) error {
 }
 
 func agentResourcesEmpty(r v1beta1.AgentResourceRequirements) bool {
+	// 逻辑说明：同时检查 request 与 limit 四个维度，只有完全未声明资源时才允许沿用旧环境变量配置。
 	return r.Requests.CPU == "" &&
 		r.Requests.Memory == "" &&
 		r.Limits.CPU == "" &&
@@ -731,6 +754,7 @@ func agentResourcesEmpty(r v1beta1.AgentResourceRequirements) bool {
 
 // extractHost returns the hostname from a URL (e.g. "http://agentteams-controller:8090" → "agentteams-controller").
 func extractHost(rawURL string) string {
+	// 逻辑说明：从服务 URL 安全提取不含端口的主机名；解析失败返回空值，让调用方保留原地址而非构造损坏 URL。
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return ""
@@ -740,6 +764,7 @@ func extractHost(rawURL string) string {
 
 // replaceHost replaces the hostname in a URL while preserving scheme, port, and path.
 func replaceHost(rawURL, newHost string) string {
+	// 逻辑说明：只替换 URL 主机名并保留协议、端口和路径；输入缺失或解析失败时原样返回以支持幂等兼容重写。
 	if rawURL == "" || newHost == "" {
 		return rawURL
 	}
@@ -759,6 +784,7 @@ func replaceHost(rawURL, newHost string) string {
 // is served on the object store port (9000 in AgentTeams), not the Higress HTTP
 // gateway (8080). A URL like http://fs-local.agentteams.io:8080 breaks mc silently.
 func normalizeMinIOS3Endpoint(raw string) string {
+	// 逻辑说明：仅把已知误配的 8080 网关端口改写为 MinIO API 的 9000；其他端口、空值和非法 URL 均保持原样。
 	if raw == "" {
 		return raw
 	}
@@ -775,6 +801,7 @@ func normalizeMinIOS3Endpoint(raw string) string {
 }
 
 func (c *Config) MatrixConfig() matrix.Config {
+	// 逻辑说明：把进程级 Matrix 与 AppService 字段投影为客户端专用配置，避免下游直接依赖庞大的 Config。
 	return matrix.Config{
 		ServerURL:                    c.MatrixServerURL,
 		Domain:                       c.MatrixDomain,
@@ -793,6 +820,7 @@ func (c *Config) MatrixConfig() matrix.Config {
 }
 
 func appServicePushURL(controllerURL string) string {
+	// 逻辑说明：清理控制器公开地址两端空白和末尾斜杠，空输入保持禁用，供 AppService 注册信息稳定复用。
 	controllerURL = strings.TrimRight(strings.TrimSpace(controllerURL), "/")
 	if controllerURL == "" {
 		return ""
@@ -801,6 +829,7 @@ func appServicePushURL(controllerURL string) string {
 }
 
 func (c *Config) GatewayConfig() gateway.Config {
+	// 逻辑说明：组合 Higress 管理面与数据面地址；只有嵌入模式允许默认管理员回退，外部部署必须使用显式凭据。
 	return gateway.Config{
 		ConsoleURL:                c.HigressBaseURL,
 		AdminUser:                 c.HigressAdminUser,
@@ -811,6 +840,7 @@ func (c *Config) GatewayConfig() gateway.Config {
 }
 
 func (c *Config) OSSConfig() oss.Config {
+	// 逻辑说明：按新旧环境变量优先级选择对象存储凭据和 endpoint，并修正常见 MinIO 端口误配后交给 OSS 客户端。
 	accessKey := firstNonEmpty(os.Getenv("AGENTTEAMS_FS_ACCESS_KEY"), os.Getenv("AGENTTEAMS_MINIO_USER"))
 	secretKey := firstNonEmpty(os.Getenv("AGENTTEAMS_FS_SECRET_KEY"), os.Getenv("AGENTTEAMS_MINIO_PASSWORD"))
 	endpoint := firstNonEmpty(os.Getenv("AGENTTEAMS_FS_ENDPOINT"), c.WorkerEnv.FSEndpoint)
@@ -827,6 +857,7 @@ func (c *Config) OSSConfig() oss.Config {
 // container needs to connect to the infrastructure services in the embedded
 // controller container. These are passed via DockerBackend.Create.
 func (c *Config) ManagerAgentEnv() map[string]string {
+	// 逻辑说明：从已校验配置构造独立 Manager 容器的环境快照，只传递非空项，并解析外部渠道 JSON 后按引用复制所需密钥。
 	env := map[string]string{}
 	setIfNonEmpty := func(k, v string) {
 		if v != "" {
@@ -897,6 +928,7 @@ func (c *Config) ManagerAgentEnv() map[string]string {
 }
 
 func externalChannelSecretNames(raw string) []string {
+	// 逻辑说明：解析渠道配置里的 env: 引用，去重并排序返回实际需要透传的密钥名；非法 JSON 安全视为没有引用。
 	if raw == "" {
 		return nil
 	}
@@ -935,6 +967,7 @@ func externalChannelSecretNames(raw string) []string {
 }
 
 func (c *Config) AgentConfig() agentconfig.Config {
+	// 逻辑说明：为 Worker 配置生成器选择其容器内可达的服务 URL；嵌入模式优先使用已做主机替换的 WorkerEnv 地址。
 	// Use WorkerEnv URLs (host-replaced in embedded mode) since openclaw.json
 	// is consumed by worker containers, not the controller itself.
 	matrixURL := c.MatrixServerURL

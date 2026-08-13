@@ -46,6 +46,7 @@ class _Message(_Contact):
 
 class ChannelToolkitFactory:
     def __init__(self, *, service: ChannelService, yolo: bool) -> None:
+        # 逻辑说明：绑定 channel 服务与 YOLO 策略；构造时不创建联系人或发送消息，具体动作由生成的工具回调执行。
         self._service = service
         self._yolo = yolo
 
@@ -53,6 +54,7 @@ class ChannelToolkitFactory:
         self,
         policy: RoomPolicy,
     ) -> tuple[ManagerTool, ...]:
+        # 逻辑说明：先拒绝非管理员私聊，再把联系人服务的只读或变更方法包装成闭合 schema 工具；房间策略与 YOLO 标志继续交给统一权限层执行。
         if policy.kind is not RoomKind.ADMIN_DM:
             return ()
         specs = (

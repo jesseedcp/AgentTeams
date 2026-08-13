@@ -33,6 +33,7 @@ mkdir -p "${OUTPUT_DIR}"
 # ============================================================
 # Helpers
 # ============================================================
+# 逻辑说明：为只读迁移分析步骤添加时间戳，便于定位哪个扫描阶段发现依赖或路径问题。
 log() { echo "[agentteams-import $(date '+%H:%M:%S')] $1"; }
 
 # Known commands that are pre-installed in the AgentTeams worker base image
@@ -40,6 +41,7 @@ log() { echo "[agentteams-import $(date '+%H:%M:%S')] $1"; }
 #  gettext-base, openssh-client, ca-certificates, procps, tzdata, nodejs, pnpm, npm)
 BUILTIN_CMDS="bash sh cat ls cp mv rm mkdir rmdir chmod chown ln touch head tail tee wc sort uniq tr cut paste comm diff grep sed awk find xargs echo printf date sleep test expr env export read source true false cd pwd which whoami hostname uname id groups stat file du df free top ps kill pkill pgrep nohup timeout nice tar gzip gunzip bzip2 xz zip unzip less more strings od xxd base64 md5sum sha256sum openssl ssh ssh-keygen scp git python3 make g++ gcc curl wget jq nginx envsubst node npm npx pnpm mc openclaw mcporter skills"
 
+# 逻辑说明：判断命令是否已随 Worker 基础镜像提供，避免把系统工具误打进迁移包。
 is_builtin_cmd() {
     local cmd="$1"
     echo " ${BUILTIN_CMDS} " | grep -qw "${cmd}"

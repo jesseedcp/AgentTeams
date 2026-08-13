@@ -25,6 +25,9 @@ import (
 // — the function always runs to completion so partial failures don't
 // block unrelated rooms.
 func (r *HumanReconciler) reconcileHumanRooms(ctx context.Context, s *humanScope) {
+	// 逻辑说明：reconcileHumanRooms 接收 ctx(context.Context)、s(*humanScope)，依次借助 buildDesiredHumanRooms、InviteToRoom、ensureUserToken、V调谐Human的期望结果。
+	// 返回/状态：返回 无；可能查询或改变 Matrix 用户、房间、别名、成员或权限状态。
+	// 失败/重试：Matrix 请求失败会返回错误；上层下一轮先重新观测实际状态，再只补做尚未满足的步骤。
 	logger := log.FromContext(ctx)
 	h := s.human
 
@@ -100,6 +103,9 @@ func (r *HumanReconciler) reconcileHumanRooms(ctx context.Context, s *humanScope
 // /join", a Human whose spec is quiescent triggers zero Logins
 // regardless of requeue cadence.
 func (r *HumanReconciler) ensureUserToken(ctx context.Context, s *humanScope) string {
+	// 逻辑说明：ensureUserToken 接收 ctx(context.Context)、s(*humanScope)，依次借助 MatrixAppServiceEnabled、EnsureUserToken确保Human的期望结果。
+	// 返回/状态：返回 string；会更新 Human的内存状态，存在客户端调用时还可能同步相应外部资源。
+	// 失败/重试：输入或依赖调用失败会返回错误；是否重排由上层调谐器决定，本函数不隐藏失败。
 	if s.userToken != "" {
 		return s.userToken
 	}

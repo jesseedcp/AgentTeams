@@ -88,6 +88,7 @@ class DailyMemory:
     """Append a human-readable line exactly once per durable operation."""
 
     def __init__(self, *, storage: ArtifactPort, clock: Clock) -> None:
+        # 逻辑说明：`__init__` 校验并保存 `storage`、`clock`，为幂等通知建立进程内服务状态；配置不合法时立即抛错，且构造阶段不执行远端变更。
         self._storage = storage
         self._clock = clock
 
@@ -98,6 +99,7 @@ class DailyMemory:
         entry: str,
         day: date | None = None,
     ) -> MemoryReceipt:
+        # 逻辑说明：`append_once` 接收 `operation_id`、`entry`、`day`，追加 once，核心调用为 `join`、`split`、`ValueError`，返回 `MemoryReceipt`。 它可能读写仓库、Controller、Matrix 或对象存储；前置条件不满足时保留现有领域异常，防止错误状态继续传播。
         normalized = " ".join(entry.split())
         if not normalized:
             raise ValueError("memory entry must not be empty")
@@ -193,6 +195,7 @@ class NotificationService:
         admin_user_id: str,
         curated_memory: CuratedDailyMemory | None = None,
     ) -> None:
+        # 逻辑说明：`__init__` 校验并保存 `notifications`、`resolver`、`matrix`、`supervisor`、`memory`、`clock`、`admin_user_id`、`curated_memory`，为幂等通知建立进程内服务状态；配置不合法时立即抛错，且构造阶段不执行远端变更。
         self._notifications = notifications
         self._resolver = resolver
         self._matrix = matrix
@@ -203,6 +206,7 @@ class NotificationService:
         self._curated_memory = curated_memory
 
     async def resolve_room(self) -> str:
+        # 逻辑说明：`resolve_room` 让 ChannelResolver 为管理员用户挑选仍可用的通知房间并返回 room_id；它只解析路由，不创建房间或发送正文。
         return await self._resolver.notification_room(
             recipient=self._admin_user_id,
         )
@@ -214,6 +218,7 @@ class NotificationService:
         text: str,
     ) -> NotificationReceipt:
         """Deliver one approval prompt idempotently to the admin channel."""
+        # 逻辑说明：`send_confirmation_request` 接收 `confirmation_id`、`text`，发送 confirmation request，核心调用为 `send_once`，返回 `NotificationReceipt`。 它可能读写仓库、Controller、Matrix 或对象存储；下游异常按原语义向上传递，不会伪造成功结果。
         return await self.send_once(
             source_operation_id=f"confirmation:{confirmation_id}",
             text=text,
@@ -225,6 +230,7 @@ class NotificationService:
         source_operation_id: str,
         text: str,
     ) -> NotificationReceipt:
+        # 逻辑说明：`send_once` 接收 `source_operation_id`、`text`，发送 once，核心调用为 `_notification_id`、`_notification_source_key`、`get_by_source`，返回 `NotificationReceipt`。 它可能读写仓库、Controller、Matrix 或对象存储；下游异常按原语义向上传递，不会伪造成功结果。
         notification_id = _notification_id(source_operation_id)
         source_key = _notification_source_key(source_operation_id)
         existing = await self._notifications.get_by_source(
@@ -251,6 +257,7 @@ class NotificationService:
         operation: OperationRecord,
     ) -> NotificationReceipt:
         """Resume one journal-restored Matrix notification intent."""
+        # 逻辑说明：`resume_operation` 从持久化 operation/request 重建幂等通知上下文，通过 `ValueError`、`_deliver` 证明或补做下一阶段，最终返回 `NotificationReceipt`；字段缺失、状态冲突或效果不可证明时保持失败/歧义状态而不是重复执行。
         if operation.kind is not OperationKind.SEND_NOTIFICATION:
             raise ValueError("operation is not a Matrix notification")
         return await self._deliver(operation)
@@ -259,6 +266,7 @@ class NotificationService:
         self,
         operation: OperationRecord,
     ) -> NotificationReceipt:
+        # 逻辑说明：`_deliver` 接收 `operation`，投递 幂等通知，核心调用为 `_notification_intent`、`_notification_source_key`、`prepare`，返回 `NotificationReceipt`。 它可能读写仓库、Controller、Matrix 或对象存储；前置条件不满足时保留现有领域异常，防止错误状态继续传播。
         intent = _notification_intent(operation)
         notification_id = operation.operation_id
         source_operation_id = _notification_source_key(
@@ -360,6 +368,7 @@ class NotificationService:
         self,
         record: NotificationRecord,
     ) -> None:
+        # 逻辑说明：`_remember_delivery` 接收 `record`，写入记忆 delivery，核心调用为 `append_daily`、`astimezone`、`now`，返回 `None`。 它可能读写仓库、Controller、Matrix 或对象存储；下游异常按原语义向上传递，不会伪造成功结果。
         if self._curated_memory is None:
             return
         await self._curated_memory.append_daily(
@@ -376,6 +385,7 @@ class NotificationService:
         task: TaskRecord,
         summary: str,
     ) -> NotificationReceipt:
+        # 逻辑说明：`send_completion` 接收 `operation_id`、`task`、`summary`，发送 completion，核心调用为 `append_once`、`_typed_notification_source`、`send_once`，返回 `NotificationReceipt`。 它可能读写仓库、Controller、Matrix 或对象存储；下游异常按原语义向上传递，不会伪造成功结果。
         text = (
             f"[Task Completed] {task.task_id}: {task.title} — "
             f"assigned to {task.assigned_to}. {summary}"
@@ -395,6 +405,7 @@ class NotificationService:
         )
 
     async def already_sent(self, operation_id: str) -> bool:
+        # 逻辑说明：`already_sent` 由 operation_id 生成稳定 source key 并查询通知仓库，返回是否已有投递记录；这是幂等性只读检查，不会再次发送 Matrix 消息。
         for source_operation_id in (
             f"failure:{operation_id}",
             operation_id,
@@ -407,6 +418,7 @@ class NotificationService:
         return False
 
     async def send_terminal_failure(self, operation_id: str) -> None:
+        # 逻辑说明：`send_terminal_failure` 接收 `operation_id`，发送 terminal failure，核心调用为 `_typed_notification_source`、`send_once`，返回 `None`。 它可能读写仓库、Controller、Matrix 或对象存储；下游异常按原语义向上传递，不会伪造成功结果。
         text = f"[Manager Operation Failed] {operation_id}"
         source_operation_id = await self._typed_notification_source(
             operation_id=operation_id,
@@ -427,6 +439,7 @@ class NotificationService:
     ) -> str:
         """Keep legacy intents reusable without conflating final outcomes."""
 
+        # 逻辑说明：`_typed_notification_source` 接收 `operation_id`、`notification_kind`、`text`，处理 notification source，核心调用为 `get_by_source`、`_notification_source_key`，返回 `str`。 它可能读写仓库、Controller、Matrix 或对象存储；下游异常按原语义向上传递，不会伪造成功结果。
         legacy = await self._notifications.get_by_source(
             _notification_source_key(operation_id),
         )
@@ -436,12 +449,14 @@ class NotificationService:
 
 
 def _notification_id(source_operation_id: str) -> str:
+    # 逻辑说明：`_notification_id` 从稳定输入生成可重复的 id，返回 `str` 供幂等写入/发送使用；同一输入得到同一标识，不产生外部副作用。
     return hashlib.sha256(
         f"notification\0{source_operation_id}".encode("utf-8"),
     ).hexdigest()[:32]
 
 
 def _notification_source_key(source_operation_id: str) -> str:
+    # 逻辑说明：`_notification_source_key` 从稳定输入生成可重复的 source key，返回 `str` 供幂等写入/发送使用；同一输入得到同一标识，不产生外部副作用。
     if len(source_operation_id) == 32:
         return source_operation_id
     return hashlib.sha256(
@@ -452,6 +467,7 @@ def _notification_source_key(source_operation_id: str) -> str:
 def _notification_intent(
     operation: OperationRecord,
 ) -> dict[str, str]:
+    # 逻辑说明：`_notification_intent` 从 operation.request 取出 source_operation_id、room_id、text 与 transaction_id，补算稳定 notification_id 并返回投递意图；缺字段时抛 RecoveryError，禁止猜测收件房间。
     required = (
         "source_operation_id",
         "recipient",
@@ -484,6 +500,7 @@ def _notification_intent(
 def _notification_receipt(
     record: NotificationRecord,
 ) -> NotificationReceipt:
+    # 逻辑说明：`_notification_receipt` 从 `record` 构造 `NotificationReceipt`，统一调用方看到的幂等通知结果；它只转换数据，不执行远端 I/O。
     if record.event_id is None:
         raise ConflictError("notification has no Matrix event")
     return NotificationReceipt(

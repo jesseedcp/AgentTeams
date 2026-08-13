@@ -82,6 +82,7 @@ class _ProxyHeaderInput(_Input):
 
     @model_validator(mode="after")
     def authorization_scheme_matches_header(self) -> Self:
+        # 逻辑说明：当请求自动拼 bearer/basic 前缀时强制目标头为 Authorization；不匹配立即拒绝，防止把凭据以错误语义发给任意 Header。
         if (
             self.scheme != "raw"
             and self.name.casefold() != "authorization"
@@ -125,6 +126,7 @@ class _ConfigureMCPInput(_Input):
 
     @model_validator(mode="after")
     def validate_action_shape(self) -> Self:
+        # 逻辑说明：按 upsert 与 grant/revoke 两种形状校验互斥字段；确保服务端不会面对“既创建又授权”或缺少验证工具的含糊请求。
         if self.action == "upsert":
             if (
                 self.server is None
@@ -162,6 +164,7 @@ class _PublishServiceInput(_Input):
 
     @model_validator(mode="after")
     def require_unique_ports(self) -> Self:
+        # 逻辑说明：拒绝重复端口，避免一次发布请求生成重复路由或让恢复回执无法与输入一一对应。
         if len(self.ports) != len(set(self.ports)):
             raise ValueError("service ports must be unique")
         return self
@@ -189,6 +192,7 @@ class IntegrationToolkit:
         secret_resolver: SecretResolver | None = None,
         yolo: bool = False,
     ) -> None:
+        # 逻辑说明：组合集成 workflow、房间 policy、Secret resolver 与 mutation context，并生成允许的集成工具；不会在构造时连接外部系统。
         self._policy = policy
         self._service = service
         self._context_provider = (
@@ -199,6 +203,7 @@ class IntegrationToolkit:
         self.tools = self._build_tools()
 
     def _build_tools(self) -> tuple[ManagerTool, ...]:
+        # 逻辑说明：仅在管理员私聊构造 MCP 与服务发布工具，并按 room policy 白名单过滤；公开路由变更额外附带风险确认说明。
         if self._policy.kind is not RoomKind.ADMIN_DM:
             return ()
         tools = (
@@ -257,7 +262,9 @@ class IntegrationToolkit:
         is_read_only: bool = False,
         confirmation_message: str | None = None,
     ) -> ManagerTool:
+        # 逻辑说明：将 MCP/服务发布工具的闭合输入模型、确认属性和固定 handler 封装成 ManagerTool；调用时重新核验管理员权限，避免旧 toolkit 越权执行。
         async def invoke(**raw: Any) -> object:
+            # 逻辑说明：执行时复核管理员房间与 allowed_tools，验证闭合请求后才进入固定 workflow；权限或 schema 错误不会接触 Higress/Controller。
             if (
                 self._policy.kind is not RoomKind.ADMIN_DM
                 or name not in self._policy.allowed_tools
@@ -279,6 +286,7 @@ class IntegrationToolkit:
         )
 
     async def _context(self) -> MutationContext:
+        # 逻辑说明：解析同步或异步上下文提供器并强制 MutationContext 类型，使所有集成副作用都绑定稳定 Matrix event 与 tool-call ID。
         value = self._context_provider()
         if inspect.isawaitable(value):
             value = await value
@@ -287,6 +295,7 @@ class IntegrationToolkit:
         return value
 
     async def _list_mcp_servers(self, request: BaseModel) -> object:
+        # 逻辑说明：验证空输入、读取服务层的已脱敏 MCP 状态并转成 JSON 列表；不解析或返回任何 Secret。
         _ListMCPInput.model_validate(request)
         servers = await self._service.list_mcp_servers()
         return {
@@ -297,6 +306,7 @@ class IntegrationToolkit:
         }
 
     async def _configure_mcp(self, request: BaseModel) -> object:
+        # 逻辑说明：验证 action 并先取得幂等上下文；upsert 解析服务与 Secret 后配置，grant/revoke 则按名称修改 Worker 授权，非法分支在外部副作用前终止。
         item = _ConfigureMCPInput.model_validate(request)
         context = await self._context()
         if item.action == "upsert":
@@ -330,6 +340,7 @@ class IntegrationToolkit:
         self,
         server: _RestServerInput | _ProxyServerInput,
     ) -> RestMCPRequest | ProxyMCPRequest:
+        # 逻辑说明：REST 分支解析单个 credential，Proxy 分支逐头解析并按 scheme 拼装 SecretStr；任一引用失败就不返回半成品请求。
         if isinstance(server, _RestServerInput):
             credential = await self._resolve_secret(
                 server.credential_ref,
@@ -362,6 +373,7 @@ class IntegrationToolkit:
         )
 
     async def _resolve_secret(self, reference: str) -> SecretStr:
+        # 逻辑说明：要求已配置 resolver，兼容同步或异步结果并验证 SecretStr 非空；明文只在构造远端请求时短暂使用，不进入工具输出。
         if self._secret_resolver is None:
             raise RuntimeError(
                 "MCP secret references are not configured",
@@ -376,6 +388,7 @@ class IntegrationToolkit:
         return value
 
     async def _remove_mcp(self, request: BaseModel) -> object:
+        # 逻辑说明：验证 MCP 名称并携带当前幂等上下文调用删除 workflow；Higress 与 Controller 描述符的对账/恢复由服务层处理。
         item = _RemoveMCPInput.model_validate(request)
         return await self._service.delete_mcp(
             item.name,
@@ -383,6 +396,7 @@ class IntegrationToolkit:
         )
 
     async def _publish_service(self, request: BaseModel) -> object:
+        # 逻辑说明：验证 Worker 与唯一端口集合并取得操作上下文，再按 action 选择发布或取消发布；服务层负责 Controller reconcile 和最终状态验证。
         item = _PublishServiceInput.model_validate(request)
         context = await self._context()
         if item.action == "publish":
@@ -406,6 +420,7 @@ class IntegrationToolkitFactory:
         secret_resolver: SecretResolver | None = None,
         yolo: bool = False,
     ) -> None:
+        # 逻辑说明：保存共享集成服务和 Secret resolver，供各房间创建权限隔离 toolkit；Factory 本身不执行 Git、MCP 或渠道变更。
         self._service = service
         self._secret_resolver = secret_resolver
         self._yolo = yolo
@@ -414,6 +429,7 @@ class IntegrationToolkitFactory:
         self,
         policy: RoomPolicy,
     ) -> tuple[ManagerTool, ...]:
+        # 逻辑说明：针对每个 RoomPolicy 新建 IntegrationToolkit，并注入共享服务与 Secret resolver；只返回该房间当下允许的集成工具，不缓存权限结果。
         return IntegrationToolkit(
             policy=policy,
             service=self._service,
@@ -423,6 +439,7 @@ class IntegrationToolkitFactory:
 
 
 def _current_mutation_context() -> MutationContext:
+    # 逻辑说明：把当前 Matrix 工具调用身份映射为 Integration workflow 的 MutationContext；脱离已绑定 turn 的调用会被统一边界拒绝。
     invocation = current_tool_invocation()
     return MutationContext(
         room_id=invocation.room_id,

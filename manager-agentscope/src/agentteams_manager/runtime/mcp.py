@@ -66,6 +66,7 @@ class MCPRegistry:
         discovery_timeout: float = 30,
         execution_timeout: float = 30,
     ) -> None:
+        # 逻辑说明：校验发现与执行超时均为正数后保存 gateway 凭据、client factory 和保留工具名，并初始化 generation/租约表；构造阶段不读取 secret 明文、不创建或连接 MCP client。
         if discovery_timeout <= 0 or execution_timeout <= 0:
             raise ValueError("MCP timeouts must be positive")
         self._gateway_key = gateway_key
@@ -81,6 +82,7 @@ class MCPRegistry:
         runtime: RuntimeDocument,
     ) -> MCPGeneration:
         """Discover every proposed MCP before making it available."""
+        # 逻辑说明：按 runtime revision/digest 幂等复用已准备 generation，否则逐个校验传输、创建 client 并发现工具，拒绝跨 server 重名或保留名；全部成功才登记 generation，任何失败先逆序关闭临时 clients 再抛 MCPPreparationError。
         digest = _mcp_digest(runtime)
         existing = self._generations.get(runtime.revision)
         if existing is not None:
@@ -153,6 +155,7 @@ class MCPRegistry:
         revision: int | None = None,
     ) -> tuple[MCPClientPort, ...]:
         """Return only clients authorized for one immutable room policy."""
+        # 逻辑说明：从指定或最新已准备 revision 读取 generation；Admin DM 获得全部 clients，其他房间仅返回名称位于 policy.allowed_mcp_names 的 clients，缺失显式 revision 由映射访问报错且不做隐式准备。
         if revision is None:
             if not self._generations:
                 return ()
@@ -174,6 +177,7 @@ class MCPRegistry:
         revision: int | None = None,
     ) -> tuple[ToolBase, ...]:
         """Rediscover one configured server through its AgentScope client."""
+        # 逻辑说明：定位指定或最新 generation 中的 server client 并重新调用 list_tools，成功时复制为不可变元组；发现异常被压缩成只含 server 名和异常类型的 MCPPreparationError，避免泄露底层响应。
         client = self._client_for(server_name, revision=revision)
         try:
             return tuple(await client.list_tools())
@@ -192,6 +196,7 @@ class MCPRegistry:
         revision: int | None = None,
     ) -> object:
         """Invoke a discovered tool without a sidecar or model round trip."""
+        # 逻辑说明：先在指定 MCP server 重新发现工具并按 tool_name 精确查找，再以 arguments 调用同步或异步 ToolBase；未暴露、调用异常或 ERROR 结果统一转成不泄露内部详情的 MCPPreparationError，成功返回原结果。
         tools = await self.list_server_tools(
             server_name,
             revision=revision,
@@ -222,6 +227,7 @@ class MCPRegistry:
         return result
 
     def retain(self, revision: int) -> None:
+        # 逻辑说明：确认 revision 已完成 prepare 后将其 Agent 租约计数加一；未知 generation 抛 KeyError，确保未准备的 MCP client 不会被会话声明为在用。
         if revision not in self._generations:
             raise KeyError(f"MCP generation {revision} is not prepared")
         self._references[revision] += 1
@@ -232,6 +238,7 @@ class MCPRegistry:
         *,
         active_revision: int,
     ) -> None:
+        # 逻辑说明：将指定 revision 的租约减一；未知 revision 为空操作、计数已为零则报状态错误，减到零且不是 active_revision 时立即关闭该旧 generation，关闭失败向上传播。
         references = self._references.get(revision)
         if references is None:
             return
@@ -246,6 +253,7 @@ class MCPRegistry:
 
     async def close_generation(self, revision: int) -> None:
         """Close a generation only when no room Agent still owns it."""
+        # 逻辑说明：仅当 generation 存在且租约计数为零时严格关闭其全部 clients，成功后才删除 generation 与引用表；仍在使用或关闭失败时保留登记状态并抛错。
         generation = self._generations.get(revision)
         if generation is None:
             return
@@ -259,6 +267,7 @@ class MCPRegistry:
 
     async def close(self) -> None:
         """Close every generation after room sessions have been retired."""
+        # 逻辑说明：按 revision 从新到旧调用 close_generation 清理所有已准备 MCP generations；任一仍有租约或 client 关闭失败即停止并传播，防止静默遗留活连接。
         for revision in sorted(self._generations, reverse=True):
             await self.close_generation(revision)
 
@@ -268,6 +277,7 @@ class MCPRegistry:
         *,
         revision: int | None,
     ) -> MCPClientPort:
+        # 逻辑说明：在指定或最新已准备 generation 中按 server_name 精确查找 client；无 generation、revision 未准备或 server 不存在均抛带稳定上下文的 MCPPreparationError。
         if revision is None:
             if not self._generations:
                 raise MCPPreparationError("no MCP generation is prepared")
@@ -294,6 +304,7 @@ class MCPRegistry:
 
 
 def _validate_transport(transport: str, url: str) -> None:
+    # 逻辑说明：根据 URL path 是否以 /sse 或 /messages 结尾，校验 descriptor 的 sse/http transport 与端点形态一致；不匹配时拒绝准备，匹配时无返回和副作用。
     path = urlsplit(url).path.rstrip("/")
     looks_like_sse = path.endswith("/sse") or path.endswith("/messages")
     if transport == "sse" and not looks_like_sse:
@@ -307,6 +318,7 @@ def _validate_transport(transport: str, url: str) -> None:
 
 
 def _mcp_digest(runtime: RuntimeDocument) -> str:
+    # 逻辑说明：仅将 runtime.mcp_servers 描述符按稳定 JSON 规则编码并计算 SHA-256，用于判定同一 revision 的 MCP 配置是否相同；序列化错误直接传播。
     data = json.dumps(
         [
             descriptor.model_dump(mode="json")
@@ -325,6 +337,7 @@ async def _close_clients(
     *,
     ignore_errors: bool = True,
 ) -> None:
+    # 逻辑说明：按创建顺序的逆序尝试关闭全部 MCP clients，并记住首个异常但继续清理其余项；默认忽略清理错误，严格模式则在全部尝试后将首错归一为 MCPPreparationError。
     first_error: Exception | None = None
     for client in reversed(clients):
         try:

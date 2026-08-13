@@ -69,11 +69,13 @@ PORT_CONSOLE="${AGENTTEAMS_PORT_CONSOLE:-18001}"
 PASS=0
 FAIL=0
 
+# 逻辑说明：记录一项通过的部署契约并累计总数，最终汇总据此生成退出状态。
 check_pass() {
     echo "  [PASS] $1"
     PASS=$((PASS + 1))
 }
 
+# 逻辑说明：记录一项失败但继续执行其余检查，让用户一次看到完整故障清单。
 check_fail() {
     echo "  [FAIL] $1"
     FAIL=$((FAIL + 1))

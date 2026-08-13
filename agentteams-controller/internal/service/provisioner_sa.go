@@ -18,6 +18,9 @@ import (
 
 // EnsureServiceAccount creates a ServiceAccount for the worker if it doesn't exist.
 func (p *Provisioner) EnsureServiceAccount(ctx context.Context, workerName string) error {
+	// 逻辑说明：EnsureServiceAccount 接收 ctx(context.Context)、workerName(string)，依次借助 SAName、Get、ServiceAccounts、CoreV1确保ServiceAccount 与令牌的期望结果。
+	// 返回/状态：返回 error；可能读取或修改 Kubernetes API 中的账户、令牌、服务或存储对象。
+	// 失败/重试：API 冲突或暂时不可用会返回错误；上层重新读取 resourceVersion 与实际对象后幂等重试。
 	if p.k8sClient == nil {
 		return nil
 	}
@@ -54,6 +57,9 @@ func (p *Provisioner) EnsureServiceAccount(ctx context.Context, workerName strin
 
 // DeleteServiceAccount removes the ServiceAccount for the worker.
 func (p *Provisioner) DeleteServiceAccount(ctx context.Context, workerName string) error {
+	// 逻辑说明：DeleteServiceAccount 接收 ctx(context.Context)、workerName(string)，依次借助 SAName、Delete、ServiceAccounts、CoreV1删除ServiceAccount 与令牌的期望结果。
+	// 返回/状态：返回 error；可能读取或修改 Kubernetes API 中的账户、令牌、服务或存储对象。
+	// 失败/重试：API 冲突或暂时不可用会返回错误；上层重新读取 resourceVersion 与实际对象后幂等重试。
 	if p.k8sClient == nil {
 		return nil
 	}
@@ -69,6 +75,9 @@ func (p *Provisioner) DeleteServiceAccount(ctx context.Context, workerName strin
 
 // EnsureManagerServiceAccount creates a ServiceAccount for the Manager if it doesn't exist.
 func (p *Provisioner) EnsureManagerServiceAccount(ctx context.Context, managerName string) error {
+	// 逻辑说明：EnsureManagerServiceAccount 接收 ctx(context.Context)、managerName(string)，依次借助 SAName、Get、ServiceAccounts、CoreV1确保ServiceAccount 与令牌的期望结果。
+	// 返回/状态：返回 error；可能读取或修改 Kubernetes API 中的账户、令牌、服务或存储对象。
+	// 失败/重试：API 冲突或暂时不可用会返回错误；上层重新读取 resourceVersion 与实际对象后幂等重试。
 	if p.k8sClient == nil {
 		return nil
 	}
@@ -105,6 +114,9 @@ func (p *Provisioner) EnsureManagerServiceAccount(ctx context.Context, managerNa
 
 // DeleteManagerServiceAccount removes the ServiceAccount for the Manager.
 func (p *Provisioner) DeleteManagerServiceAccount(ctx context.Context, managerName string) error {
+	// 逻辑说明：DeleteManagerServiceAccount 接收 ctx(context.Context)、managerName(string)，依次借助 SAName、Delete、ServiceAccounts、CoreV1删除ServiceAccount 与令牌的期望结果。
+	// 返回/状态：返回 error；可能读取或修改 Kubernetes API 中的账户、令牌、服务或存储对象。
+	// 失败/重试：API 冲突或暂时不可用会返回错误；上层重新读取 resourceVersion 与实际对象后幂等重试。
 	if p.k8sClient == nil {
 		return nil
 	}
@@ -120,6 +132,9 @@ func (p *Provisioner) DeleteManagerServiceAccount(ctx context.Context, managerNa
 
 // RequestManagerSAToken issues a short-lived SA token for Manager in non-K8s backends.
 func (p *Provisioner) RequestManagerSAToken(ctx context.Context, managerName string) (string, error) {
+	// 逻辑说明：RequestManagerSAToken 接收 ctx(context.Context)、managerName(string)，依次借助 SAName、int64、CreateToken、ServiceAccounts申请ServiceAccount 与令牌的期望结果。
+	// 返回/状态：返回 string、error；可能读取或修改 Kubernetes API 中的账户、令牌、服务或存储对象。
+	// 失败/重试：API 冲突或暂时不可用会返回错误；上层重新读取 resourceVersion 与实际对象后幂等重试。
 	if p.k8sClient == nil {
 		return "", nil
 	}
@@ -162,6 +177,9 @@ func (p *Provisioner) RequestManagerSAToken(ctx context.Context, managerName str
 // Idempotent: returns nil if the SA already exists. Returns nil silently
 // when k8sClient is nil (incluster-without-bootstrap or unit-test paths).
 func (p *Provisioner) EnsureAdminServiceAccount(ctx context.Context) error {
+	// 逻辑说明：EnsureAdminServiceAccount 接收 ctx(context.Context)，依次借助 AdminName、Get、ServiceAccounts、CoreV1确保ServiceAccount 与令牌的期望结果。
+	// 返回/状态：返回 error；可能读取或修改 Kubernetes API 中的账户、令牌、服务或存储对象。
+	// 失败/重试：API 冲突或暂时不可用会返回错误；上层重新读取 resourceVersion 与实际对象后幂等重试。
 	if p.k8sClient == nil {
 		return nil
 	}
@@ -206,6 +224,9 @@ func (p *Provisioner) EnsureAdminServiceAccount(ctx context.Context) error {
 // work; we keep the long horizon to avoid surprise auth failures during
 // long-running interactive shells when the operator forgets to re-source.
 func (p *Provisioner) RequestAdminSAToken(ctx context.Context) (string, error) {
+	// 逻辑说明：RequestAdminSAToken 接收 ctx(context.Context)，依次借助 AdminName、int64、CreateToken、ServiceAccounts申请ServiceAccount 与令牌的期望结果。
+	// 返回/状态：返回 string、error；可能读取或修改 Kubernetes API 中的账户、令牌、服务或存储对象。
+	// 失败/重试：API 冲突或暂时不可用会返回错误；上层重新读取 resourceVersion 与实际对象后幂等重试。
 	if p.k8sClient == nil {
 		return "", nil
 	}
@@ -235,6 +256,9 @@ func (p *Provisioner) RequestAdminSAToken(ctx context.Context) (string, error) {
 // RequestSAToken issues a short-lived SA token for non-K8s backends (Docker)
 // and remote-managed Edge workers.
 func (p *Provisioner) RequestSAToken(ctx context.Context, workerName string) (string, time.Time, error) {
+	// 逻辑说明：RequestSAToken 接收 ctx(context.Context)、workerName(string)，依次借助 ProjectSAToken申请ServiceAccount 与令牌的期望结果。
+	// 返回/状态：返回 string、time.Time、error；可能读取或修改 Kubernetes API 中的账户、令牌、服务或存储对象。
+	// 失败/重试：API 冲突或暂时不可用会返回错误；上层重新读取 resourceVersion 与实际对象后幂等重试。
 	projection, err := p.ProjectSAToken(ctx, workerName, 3600)
 	if err != nil || projection == nil {
 		return "", time.Time{}, err
@@ -244,6 +268,9 @@ func (p *Provisioner) RequestSAToken(ctx context.Context, workerName string) (st
 
 // RequestSATokenWithExpiration issues an SA token with a caller-controlled TTL.
 func (p *Provisioner) RequestSATokenWithExpiration(ctx context.Context, workerName string, expirationSeconds int64) (string, error) {
+	// 逻辑说明：RequestSATokenWithExpiration 接收 ctx(context.Context)、workerName(string)、expirationSeconds(int64)，依次借助 ProjectSAToken申请ServiceAccount 与令牌的期望结果。
+	// 返回/状态：返回 string、error；可能读取或修改 Kubernetes API 中的账户、令牌、服务或存储对象。
+	// 失败/重试：API 冲突或暂时不可用会返回错误；上层重新读取 resourceVersion 与实际对象后幂等重试。
 	projection, err := p.ProjectSAToken(ctx, workerName, expirationSeconds)
 	if err != nil || projection == nil {
 		return "", err
@@ -254,6 +281,9 @@ func (p *Provisioner) RequestSATokenWithExpiration(ctx context.Context, workerNa
 // ProjectSAToken issues an SA token with a caller-controlled TTL and returns
 // the actual expiration timestamp reported by the Kubernetes TokenRequest API.
 func (p *Provisioner) ProjectSAToken(ctx context.Context, workerName string, expirationSeconds int64) (*SATokenProjection, error) {
+	// 逻辑说明：ProjectSAToken 接收 ctx(context.Context)、workerName(string)、expirationSeconds(int64)，依次借助 SAName、NormalizeAuthTokenExpirationSeconds、Now、CreateToken处理ServiceAccount 与令牌的期望结果。
+	// 返回/状态：返回 *SATokenProjection、error；可能读取或修改 Kubernetes API 中的账户、令牌、服务或存储对象。
+	// 失败/重试：API 冲突或暂时不可用会返回错误；上层重新读取 resourceVersion 与实际对象后幂等重试。
 	if p.k8sClient == nil {
 		return &SATokenProjection{}, nil
 	}
@@ -289,6 +319,9 @@ func (p *Provisioner) ProjectSAToken(ctx context.Context, workerName string, exp
 // EnsureRemoteNamespace creates the target namespace on the remote cluster if
 // it does not already exist.
 func (p *Provisioner) EnsureRemoteNamespace(ctx context.Context, clusterID, namespace string) error {
+	// 逻辑说明：EnsureRemoteNamespace 接收 ctx(context.Context)、clusterID/namespace(string)，依次借助 ResolveClient、ensureRemoteNamespace确保ServiceAccount 与令牌的期望结果。
+	// 返回/状态：返回 error；可能读取或修改 Kubernetes API 中的账户、令牌、服务或存储对象。
+	// 失败/重试：API 冲突或暂时不可用会返回错误；上层重新读取 resourceVersion 与实际对象后幂等重试。
 	if p.remoteCache == nil {
 		return fmt.Errorf("remote client provider not configured")
 	}
@@ -302,6 +335,9 @@ func (p *Provisioner) EnsureRemoteNamespace(ctx context.Context, clusterID, name
 }
 
 func ensureRemoteNamespace(ctx context.Context, cli backend.K8sCoreClient, clusterID, namespace string) error {
+	// 逻辑说明：ensureRemoteNamespace 接收 ctx(context.Context)、cli(backend.K8sCoreClient)、clusterID/namespace(string)，依次借助 Get、Namespaces、IsNotFound、Create确保ServiceAccount 与令牌的期望结果。
+	// 返回/状态：返回 error；可能读取或修改 Kubernetes API 中的账户、令牌、服务或存储对象。
+	// 失败/重试：API 冲突或暂时不可用会返回错误；上层重新读取 resourceVersion 与实际对象后幂等重试。
 	if _, err := cli.Namespaces().Get(ctx, namespace, metav1.GetOptions{}); err != nil {
 		if !apierrors.IsNotFound(err) {
 			return fmt.Errorf("check remote namespace %s in cluster %s: %w", namespace, clusterID, err)
@@ -323,6 +359,9 @@ func (p *Provisioner) EnsureRemoteServiceAccount(
 	ctx context.Context,
 	workerName, clusterID, namespace string,
 ) error {
+	// 逻辑说明：EnsureRemoteServiceAccount 接收 ctx(context.Context)、workerName/clusterID/namespace(string)，依次借助 ResolveClient、ensureRemoteNamespace、SAName、Create确保ServiceAccount 与令牌的期望结果。
+	// 返回/状态：返回 error；可能读取或修改 Kubernetes API 中的账户、令牌、服务或存储对象。
+	// 失败/重试：API 冲突或暂时不可用会返回错误；上层重新读取 resourceVersion 与实际对象后幂等重试。
 	if p.remoteCache == nil {
 		return fmt.Errorf("remote client provider not configured")
 	}
@@ -364,6 +403,9 @@ func (p *Provisioner) DeleteRemoteServiceAccount(
 	ctx context.Context,
 	workerName, clusterID, namespace string,
 ) error {
+	// 逻辑说明：DeleteRemoteServiceAccount 接收 ctx(context.Context)、workerName/clusterID/namespace(string)，依次借助 ResolveClient、SAName、Delete、ServiceAccounts删除ServiceAccount 与令牌的期望结果。
+	// 返回/状态：返回 error；可能读取或修改 Kubernetes API 中的账户、令牌、服务或存储对象。
+	// 失败/重试：API 冲突或暂时不可用会返回错误；上层重新读取 resourceVersion 与实际对象后幂等重试。
 	if p.remoteCache == nil {
 		return fmt.Errorf("remote client provider not configured")
 	}

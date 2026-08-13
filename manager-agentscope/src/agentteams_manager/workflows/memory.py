@@ -148,6 +148,7 @@ class ManagerMemoryService:
         projection_limit: int = 30,
         projection_character_limit: int = 10_000,
     ) -> None:
+        # 逻辑说明：`__init__` 校验并保存 `repository`、`now`、`projection_limit`、`projection_character_limit`，为分层记忆建立进程内服务状态；配置不合法时立即抛错，且构造阶段不执行远端变更。
         if projection_limit <= 0:
             raise ValueError("memory projection limit must be positive")
         if projection_character_limit <= 0:
@@ -169,6 +170,7 @@ class ManagerMemoryService:
         query: str | None = None,
         limit: int = 20,
     ) -> MemoryRecall:
+        # 逻辑说明：`recall` 从 repository 汇集近期每日记录、长期记忆、项目决策和 Worker 评估，按可见性、作用域、查询词与时间过滤排序后限制数量，返回只读 MemoryRecall。
         if limit <= 0 or limit > 100:
             raise ValueError("memory recall limit must be between 1 and 100")
         timestamp = self._now().astimezone(UTC)
@@ -253,6 +255,7 @@ class ManagerMemoryService:
         include_private: bool,
         project_id: str | None = None,
     ) -> str:
+        # 逻辑说明：`projection` 调用 recall 取得允许暴露的记忆，按类别和时间渲染为注入 Manager 提示词的文本，并遵守字符上限；不写入或重新整理记忆。
         recall = await self.recall(
             room_id=room_id,
             include_private=include_private,
@@ -294,6 +297,7 @@ class ManagerMemoryService:
         content: str,
         importance: float,
     ) -> MemoryWriteReceipt:
+        # 逻辑说明：`remember` 接收 `room_id`、`source_event_id`、`category`、`content`、`importance`，写入记忆 分层记忆，核心调用为 `astimezone`、`_now`、`curate_long_term`，返回 `MemoryWriteReceipt`。 它可能读写仓库、Controller、Matrix 或对象存储；下游异常按原语义向上传递，不会伪造成功结果。
         timestamp = self._now().astimezone(UTC)
         long_term = await self._repository.curate_long_term(
             scope="global",
@@ -326,6 +330,7 @@ class ManagerMemoryService:
         rationale: str,
         visibility: Literal["private", "project"] = "private",
     ) -> MemoryWriteReceipt:
+        # 逻辑说明：`record_project_decision` 接收 `room_id`、`source_event_id`、`project_id`、`decision`、`rationale`、`visibility`，记录 project decision，核心调用为 `astimezone`、`_now`、`record_project_decision`，返回 `MemoryWriteReceipt`。 它可能读写仓库、Controller、Matrix 或对象存储；下游异常按原语义向上传递，不会伪造成功结果。
         timestamp = self._now().astimezone(UTC)
         item = await self._repository.record_project_decision(
             project_id=project_id,
@@ -359,6 +364,7 @@ class ManagerMemoryService:
         score: float,
         evidence: str,
     ) -> MemoryWriteReceipt:
+        # 逻辑说明：`record_worker_assessment` 接收 `room_id`、`source_event_id`、`worker_name`、`capability`、`score`、`evidence`，记录 worker assessment，核心调用为 `astimezone`、`_now`、`assess_worker`，返回 `MemoryWriteReceipt`。 它可能读写仓库、Controller、Matrix 或对象存储；下游异常按原语义向上传递，不会伪造成功结果。
         timestamp = self._now().astimezone(UTC)
         item = await self._repository.assess_worker(
             worker_name=worker_name,
@@ -386,6 +392,7 @@ class ManagerMemoryService:
 
 
 def _daily_item(item: DailyMemory) -> MemoryItem:
+    # 逻辑说明：`_daily_item` 从 `item` 构造 `MemoryItem`，统一调用方看到的分层记忆结果；它只转换数据，不执行远端 I/O。
     return MemoryItem(
         kind="daily",
         scope=f"room:{item.room_id}",
@@ -396,6 +403,7 @@ def _daily_item(item: DailyMemory) -> MemoryItem:
 
 
 def _long_term_item(item: LongTermMemory) -> MemoryItem:
+    # 逻辑说明：`_long_term_item` 从 `item` 构造 `MemoryItem`，统一调用方看到的分层记忆结果；它只转换数据，不执行远端 I/O。
     return MemoryItem(
         kind="long_term",
         scope=item.scope,
@@ -407,6 +415,7 @@ def _long_term_item(item: LongTermMemory) -> MemoryItem:
 
 
 def _decision_item(item: ProjectDecision) -> MemoryItem:
+    # 逻辑说明：`_decision_item` 从 `item` 构造 `MemoryItem`，统一调用方看到的分层记忆结果；它只转换数据，不执行远端 I/O。
     return MemoryItem(
         kind="project_decision",
         scope=f"project:{item.project_id}",
@@ -417,6 +426,7 @@ def _decision_item(item: ProjectDecision) -> MemoryItem:
 
 
 def _assessment_item(item: WorkerAssessment) -> MemoryItem:
+    # 逻辑说明：`_assessment_item` 从 `item` 构造 `MemoryItem`，统一调用方看到的分层记忆结果；它只转换数据，不执行远端 I/O。
     return MemoryItem(
         kind="worker_assessment",
         scope=f"worker:{item.worker_name}",

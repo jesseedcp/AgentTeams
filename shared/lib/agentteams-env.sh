@@ -29,6 +29,7 @@ source /opt/agentteams/scripts/lib/base.sh 2>/dev/null || true
 # dynamic mount projects Worker-specific env into this directory. In the sandbox
 # pool path, AGENTTEAMS_WORKER_ENV_MOUNT_REQUIRED=1 makes this file a startup
 # prerequisite.
+# 逻辑说明：把常见布尔字符串归一化成 Shell 成功/失败状态，避免各调用点使用不同判断规则。
 _agentteams_truthy() {
     case "$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')" in
         1|true|yes|on) return 0 ;;
@@ -36,11 +37,13 @@ _agentteams_truthy() {
     esac
 }
 
+# 逻辑说明：env 投射是启动前置条件时统一报错并退出，防止 Worker 在缺少身份配置时继续运行。
 _agentteams_fail_source() {
     echo "[agentteams-env] ERROR: $1" >&2
     exit 1
 }
 
+# 逻辑说明：在 kubelet 尚未投射 Secret/ConfigMap 时限时等待目标文件，超时后明确指出缺失对象。
 _agentteams_wait_for_file() {
     local file="$1"
     local label="$2"
@@ -56,6 +59,7 @@ _agentteams_wait_for_file() {
     done
 }
 
+# 逻辑说明：临时关闭 errexit 读取动态 env，并恢复调用者原有 Shell 选项；读取失败由本函数显式返回。
 _agentteams_source_env_file() {
     local file="$1"
     local had_errexit=false
@@ -81,10 +85,12 @@ _agentteams_source_env_file() {
     return "${rc}"
 }
 
+# 逻辑说明：只在 Worker 名称与认证 token 文件都就绪时返回成功，作为动态投射完成的最小契约。
 _agentteams_required_worker_env_ready() {
     [ -n "${AGENTTEAMS_WORKER_NAME:-}" ] && [ -n "${AGENTTEAMS_AUTH_TOKEN_FILE:-}" ]
 }
 
+# 逻辑说明：反复重新读取可被 kubelet 原子替换的 env 文件，直到身份字段完整或达到超时上限。
 _agentteams_wait_for_worker_env_ready() {
     local file="$1"
     local timeout="${AGENTTEAMS_WORKER_ENV_MOUNT_TIMEOUT_SECONDS:-300}"
@@ -192,10 +198,12 @@ AGENTTEAMS_CMS_SERVICE_NAME="${AGENTTEAMS_CMS_SERVICE_NAME:-}"
 # In local mode, ensure_mc_credentials() is a no-op.
 source /opt/agentteams/scripts/lib/oss-credentials.sh 2>/dev/null || true
 
+# 逻辑说明：把存储别名转换成 MinIO Client 使用的动态环境变量名，避免调用方硬编码默认别名。
 agentteams_mc_host_var() {
     printf 'MC_HOST_%s' "${AGENTTEAMS_STORAGE_ALIAS:-agentteams}"
 }
 
+# 逻辑说明：间接读取动态 MC_HOST_* 变量，判断本进程是否已经拿到可用的对象存储连接。
 agentteams_mc_host_configured() {
     local var
     var="$(agentteams_mc_host_var)"

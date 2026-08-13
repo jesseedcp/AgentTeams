@@ -6,6 +6,7 @@ set -e
 
 # Wait for a TCP service to become available
 # Usage: waitForService "ServiceName" "host" port [timeout_seconds]
+# 逻辑说明：在启动下游进程前轮询 TCP 端口并设置上限；超时返回失败，避免依赖未就绪时继续初始化。
 waitForService() {
     local name="$1"
     local host="$2"
@@ -28,6 +29,7 @@ waitForService() {
 
 # Wait for an HTTP endpoint to return 200
 # Usage: waitForHTTP "ServiceName" "url" [timeout_seconds]
+# 逻辑说明：轮询真正的 HTTP 200 而不只检查端口打开，保证服务已经能处理应用请求。
 waitForHTTP() {
     local name="$1"
     local url="$2"
@@ -48,6 +50,7 @@ waitForHTTP() {
 
 # Generate a cryptographically secure random key
 # Usage: generateKey [length_bytes]
+# 逻辑说明：使用 OpenSSL 的密码学随机源生成十六进制秘密，调用方负责安全写入而不能打印到日志。
 generateKey() {
     local bytes="${1:-32}"
     openssl rand -hex "${bytes}"
@@ -55,6 +58,7 @@ generateKey() {
 
 # Log with timestamp
 # Usage: log "message"
+# 逻辑说明：统一初始化子进程的时间戳，便于按多进程启动顺序排查依赖问题。
 log() {
     echo "[agentteams $(date '+%Y-%m-%d %H:%M:%S')] $1"
 }

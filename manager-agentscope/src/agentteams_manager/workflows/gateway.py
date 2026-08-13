@@ -98,17 +98,20 @@ class GatewayService:
         gateway: GatewayClient | None,
         supervisor: ResourceSupervisor,
     ) -> None:
+        # 逻辑说明：`__init__` 接收 `gateway`、`supervisor`，初始化 `Higress Gateway 的 Provider、Route 与 Consumer 资源`，返回 `None`。 它只计算、校验或读取数据，不直接产生外部副作用；下游失败沿用现有错误语义，不会伪造成功回执。
         self._gateway = gateway
         self._supervisor = supervisor
 
     @property
     def available(self) -> bool:
+        # 逻辑说明：`available` 接收 当前服务依赖，判断可用性 `Higress Gateway 的 Provider、Route 与 Consumer 资源`，返回 `bool`。 它只计算、校验或读取数据，不直接产生外部副作用；下游失败沿用现有错误语义，不会伪造成功回执。
         return self._gateway is not None
 
     async def list(
         self,
         resource_kind: GatewayResourceKind,
     ) -> tuple[GatewayState, ...]:
+        # 逻辑说明：`list` 接收 `resource_kind`，列出 `Higress Gateway 的 Provider、Route 与 Consumer 资源`，依次复用 `_require_gateway`、`list_providers`、`list_routes`，返回 `tuple[GatewayState, ...]`。 它会推进 Higress Gateway 的 Provider、Route 与 Consumer 资源 的外部或持久状态；下游失败沿用现有错误语义，不会伪造成功回执。
         gateway = self._require_gateway()
         if resource_kind == "provider":
             return await gateway.list_providers()
@@ -121,6 +124,7 @@ class GatewayService:
         resource_kind: GatewayResourceKind,
         name: str,
     ) -> GatewayState:
+        # 逻辑说明：`get` 接收 `resource_kind`、`name`，读取 `Higress Gateway 的 Provider、Route 与 Consumer 资源`，依次复用 `_require_gateway`、`get_provider`、`get_route`，返回 `GatewayState`。 它会推进 Higress Gateway 的 Provider、Route 与 Consumer 资源 的外部或持久状态；下游失败沿用现有错误语义，不会伪造成功回执。
         gateway = self._require_gateway()
         if resource_kind == "provider":
             return await gateway.get_provider(name)
@@ -134,6 +138,7 @@ class GatewayService:
         *,
         context: MutationContext,
     ) -> GatewayReceipt:
+        # 逻辑说明：`upsert` 接收 `request`、`context`，创建或更新 `Higress Gateway 的 Provider、Route 与 Consumer 资源`，依次复用 `_request_kind`、`_safe_request`、`begin`，返回 `GatewayReceipt`。 它会推进 Higress Gateway 的 Provider、Route 与 Consumer 资源 的外部或持久状态；校验、并发或恢复证据不足时保留现有异常，防止把歧义状态当作成功。
         resource_kind = _request_kind(request)
         durable_request: dict[str, object] = {
             "action": "upsert",
@@ -211,6 +216,7 @@ class GatewayService:
         *,
         context: MutationContext,
     ) -> GatewayReceipt:
+        # 逻辑说明：`delete` 接收 `resource_kind`、`name`、`context`，删除 `Higress Gateway 的 Provider、Route 与 Consumer 资源`，依次复用 `begin`、`model_validate`、`resume_operation`，返回 `GatewayReceipt`。 它会推进 Higress Gateway 的 Provider、Route 与 Consumer 资源 的外部或持久状态；下游失败沿用现有错误语义，不会伪造成功回执。
         operation = await self._supervisor.begin(
             operation_id=context.operation_id,
             kind=OperationKind.CONFIGURE_GATEWAY,
@@ -231,6 +237,7 @@ class GatewayService:
         self,
         operation: OperationRecord,
     ) -> GatewayReceipt:
+        # 逻辑说明：`resume_operation` 接收 `operation`，根据 journal 恢复 `operation`，依次复用 `RecoveryError`、`model_validate`、`_operation_field`，返回 `GatewayReceipt`。 它会推进 Higress Gateway 的 Provider、Route 与 Consumer 资源 的外部或持久状态；校验、并发或恢复证据不足时保留现有异常，防止把歧义状态当作成功。
         if operation.kind is not OperationKind.CONFIGURE_GATEWAY:
             raise RecoveryError("operation is not a gateway mutation")
         if operation.status is OperationStatus.SUCCEEDED:
@@ -319,6 +326,7 @@ class GatewayService:
         self,
         operation: OperationRecord,
     ) -> GatewayReceipt:
+        # 逻辑说明：`_delete_from_operation` 接收 `operation`，删除 `from operation`，依次复用 `_resource_kind`、`_operation_field`、`before_effect`，返回 `GatewayReceipt`。 它会推进 Higress Gateway 的 Provider、Route 与 Consumer 资源 的外部或持久状态；校验、并发或恢复证据不足时保留现有异常，防止把歧义状态当作成功。
         resource_kind = _resource_kind(
             _operation_field(operation, "resource_kind"),
         )
@@ -390,6 +398,7 @@ class GatewayService:
         return receipt
 
     async def _upsert(self, request: GatewayRequest) -> GatewayState:
+        # 逻辑说明：`_upsert` 接收 `request`，创建或更新 `Higress Gateway 的 Provider、Route 与 Consumer 资源`，依次复用 `_require_gateway`、`upsert_provider`、`upsert_route`，返回 `GatewayState`。 它会推进 Higress Gateway 的 Provider、Route 与 Consumer 资源 的外部或持久状态；下游失败沿用现有错误语义，不会伪造成功回执。
         gateway = self._require_gateway()
         if isinstance(request, LLMProviderRequest):
             return await gateway.upsert_provider(request)
@@ -402,6 +411,7 @@ class GatewayService:
         resource_kind: GatewayResourceKind,
         name: str,
     ) -> None:
+        # 逻辑说明：`_delete` 接收 `resource_kind`、`name`，删除 `Higress Gateway 的 Provider、Route 与 Consumer 资源`，依次复用 `_require_gateway`、`delete_provider`、`delete_route`，返回 `None`。 它会推进 Higress Gateway 的 Provider、Route 与 Consumer 资源 的外部或持久状态；下游失败沿用现有错误语义，不会伪造成功回执。
         gateway = self._require_gateway()
         if resource_kind == "provider":
             await gateway.delete_provider(name)
@@ -415,12 +425,14 @@ class GatewayService:
         resource_kind: GatewayResourceKind,
         name: str,
     ) -> GatewayState | None:
+        # 逻辑说明：`_get_optional` 接收 `resource_kind`、`name`，读取 `optional`，依次复用 `get`，返回 `GatewayState | None`。 它会推进 Higress Gateway 的 Provider、Route 与 Consumer 资源 的外部或持久状态；下游失败沿用现有错误语义，不会伪造成功回执。
         try:
             return await self.get(resource_kind, name)
         except HigressNotFoundError:
             return None
 
     def _require_gateway(self) -> GatewayClient:
+        # 逻辑说明：`_require_gateway` 接收 当前服务依赖，校验并取得 `gateway`，依次复用 `RuntimeError`，返回 `GatewayClient`。 它只计算、校验或读取数据，不直接产生外部副作用；校验、并发或恢复证据不足时保留现有异常，防止把歧义状态当作成功。
         if self._gateway is None:
             raise RuntimeError(
                 "Higress gateway administration is unavailable",
@@ -429,6 +441,7 @@ class GatewayService:
 
 
 def _request_kind(request: GatewayRequest) -> GatewayResourceKind:
+    # 逻辑说明：`_request_kind` 接收 `request`，识别请求 `kind`，返回 `GatewayResourceKind`。 它只计算、校验或读取数据，不直接产生外部副作用；下游失败沿用现有错误语义，不会伪造成功回执。
     if isinstance(request, LLMProviderRequest):
         return "provider"
     if isinstance(request, AIRouteRequest):
@@ -437,6 +450,7 @@ def _request_kind(request: GatewayRequest) -> GatewayResourceKind:
 
 
 def _safe_request(request: GatewayRequest) -> dict[str, object]:
+    # 逻辑说明：`_safe_request` 接收 `request`，生成可持久化的安全副本 `request`，依次复用 `model_dump`，返回 `dict[str, object]`。 它只计算、校验或读取数据，不直接产生外部副作用；下游失败沿用现有错误语义，不会伪造成功回执。
     if isinstance(request, LLMProviderRequest):
         return {
             "name": request.name,
@@ -473,6 +487,7 @@ def _safe_request(request: GatewayRequest) -> dict[str, object]:
 
 
 def _state_summary(state: GatewayState) -> dict[str, object]:
+    # 逻辑说明：`_state_summary` 接收 `state`，提取状态 `summary`，依次复用 `model_dump`，返回 `dict[str, object]`。 它只计算、校验或读取数据，不直接产生外部副作用；下游失败沿用现有错误语义，不会伪造成功回执。
     return state.model_dump(mode="json")
 
 
@@ -480,6 +495,7 @@ def _route_matches(
     state: GatewayState,
     request: AIRouteRequest,
 ) -> bool:
+    # 逻辑说明：`_route_matches` 接收 `state`、`request`，判断路由 `matches`，返回 `bool`。 它只计算、校验或读取数据，不直接产生外部副作用；下游失败沿用现有错误语义，不会伪造成功回执。
     if not isinstance(state, AIRouteState):
         return False
     return (
@@ -493,12 +509,14 @@ def _route_matches(
 
 
 def _resource_kind(value: str) -> GatewayResourceKind:
+    # 逻辑说明：`_resource_kind` 接收 `value`，解析资源 `kind`，依次复用 `RecoveryError`，返回 `GatewayResourceKind`。 它只计算、校验或读取数据，不直接产生外部副作用；校验、并发或恢复证据不足时保留现有异常，防止把歧义状态当作成功。
     if value not in {"provider", "route", "consumer"}:
         raise RecoveryError("gateway resource kind is invalid")
     return value  # type: ignore[return-value]
 
 
 def _operation_field(operation: OperationRecord, name: str) -> str:
+    # 逻辑说明：`_operation_field` 接收 `operation`、`name`，读取 operation `field`，依次复用 `get`、`RecoveryError`，返回 `str`。 它只计算、校验或读取数据，不直接产生外部副作用；校验、并发或恢复证据不足时保留现有异常，防止把歧义状态当作成功。
     value = operation.request.get(name)
     if not isinstance(value, str) or not value:
         raise RecoveryError(f"gateway operation {name} is missing")

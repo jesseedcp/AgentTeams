@@ -32,6 +32,7 @@ type MinIOClient struct {
 
 // NewMinIOClient creates a StorageClient backed by the mc CLI.
 func NewMinIOClient(cfg Config) *MinIOClient {
+	// 逻辑说明：为未配置的 mc 可执行文件和 alias 补安全默认值，只保存连接配置；此时不启动进程也不验证凭据，首次操作才建立 alias。
 	if cfg.MCBinary == "" {
 		cfg.MCBinary = "mc"
 	}
@@ -45,6 +46,7 @@ func NewMinIOClient(cfg Config) *MinIOClient {
 // dynamically on every mc invocation. Intended for external-OSS deployments
 // where STS tokens expire periodically.
 func (c *MinIOClient) WithCredentialSource(src CredentialSource) *MinIOClient {
+	// 逻辑说明：复制 client 而不修改原实例，切换为每次命令动态解析 STS 凭据，并清除静态 alias 就绪标志，防止过期身份被复用。
 	clone := *c
 	clone.credSource = src
 	clone.aliasReady = false
@@ -52,6 +54,7 @@ func (c *MinIOClient) WithCredentialSource(src CredentialSource) *MinIOClient {
 }
 
 func (c *MinIOClient) ensureAlias(ctx context.Context) error {
+	// 逻辑说明：动态凭据模式交给每次 runMC 注入环境变量；静态模式仅在首次需要时执行 mc alias set，命令成功后才标记就绪以允许失败重试。
 	if c.credSource != nil {
 		// Dynamic mode: no persistent alias. MC_HOST_* env vars are
 		// prepared per call in runMC.
@@ -73,6 +76,7 @@ func (c *MinIOClient) fullPath(key string) string {
 }
 
 func (c *MinIOClient) PutObject(ctx context.Context, key string, data []byte) error {
+	// 逻辑说明：先确保访问身份可用，再把内存数据写入受控临时文件并委托 PutFile 计算摘要上传；任何写入失败都会关闭文件，defer 最终删除本地副本。
 	if err := c.ensureAlias(ctx); err != nil {
 		return err
 	}
@@ -92,6 +96,7 @@ func (c *MinIOClient) PutObject(ctx context.Context, key string, data []byte) er
 }
 
 func (c *MinIOClient) PutFile(ctx context.Context, localPath, key string) error {
+	// 逻辑说明：先准备 alias/动态身份，再通过 copyArgs 读取源文件计算 SHA-256 属性，最后执行 mc cp；源不可读或命令失败均不报告对象已上传。
 	if err := c.ensureAlias(ctx); err != nil {
 		return err
 	}
@@ -104,6 +109,7 @@ func (c *MinIOClient) PutFile(ctx context.Context, localPath, key string) error 
 }
 
 func (c *MinIOClient) copyArgs(localPath, key string) ([]string, error) {
+	// 逻辑说明：打开并完整读取本地源计算内容摘要，把摘要随 mc cp 写入对象元数据；这样后续可以校验上传内容，而打开/读取失败会在外部命令前返回。
 	file, err := os.Open(localPath)
 	if err != nil {
 		return nil, fmt.Errorf("open upload source: %w", err)
@@ -124,6 +130,7 @@ func (c *MinIOClient) copyArgs(localPath, key string) ([]string, error) {
 }
 
 func (c *MinIOClient) GetObject(ctx context.Context, key string) ([]byte, error) {
+	// 逻辑说明：通过 mc cat 读取加前缀后的对象；把 MinIO 的不存在/退出状态归一为 os.ErrNotExist，便于上层用 errors.Is 区分首次创建与其他存储故障。
 	if err := c.ensureAlias(ctx); err != nil {
 		return nil, err
 	}
@@ -139,6 +146,7 @@ func (c *MinIOClient) GetObject(ctx context.Context, key string) ([]byte, error)
 }
 
 func (c *MinIOClient) Stat(ctx context.Context, key string) error {
+	// 逻辑说明：查询带存储前缀的对象元数据，并将对象不存在的 CLI 文本归一为 os.ErrNotExist；其他执行错误保留给调用方处理。
 	if err := c.ensureAlias(ctx); err != nil {
 		return err
 	}
@@ -154,6 +162,7 @@ func (c *MinIOClient) Stat(ctx context.Context, key string) error {
 }
 
 func (c *MinIOClient) DeleteObject(ctx context.Context, key string) error {
+	// 逻辑说明：执行单对象删除并把“对象已不存在”当作幂等成功，使 reconcile 重试不会因目标已清理而持续失败。
 	if err := c.ensureAlias(ctx); err != nil {
 		return err
 	}
@@ -165,6 +174,7 @@ func (c *MinIOClient) DeleteObject(ctx context.Context, key string) error {
 }
 
 func (c *MinIOClient) Mirror(ctx context.Context, src, dst string, opts MirrorOptions) error {
+	// 逻辑说明：远端路径统一补 storage prefix，本地绝对路径保持原样；再把覆盖和排除规则翻译为 mc mirror 参数，命令失败原样返回以阻止错误对账。
 	if err := c.ensureAlias(ctx); err != nil {
 		return err
 	}
@@ -188,6 +198,7 @@ func (c *MinIOClient) Mirror(ctx context.Context, src, dst string, opts MirrorOp
 }
 
 func (c *MinIOClient) DeletePrefix(ctx context.Context, prefix string) error {
+	// 逻辑说明：确保身份后对规范化前缀执行递归强制删除；context 取消会终止 mc 子进程，调用方据返回值决定是否重试清理。
 	if err := c.ensureAlias(ctx); err != nil {
 		return err
 	}
@@ -196,6 +207,7 @@ func (c *MinIOClient) DeletePrefix(ctx context.Context, prefix string) error {
 }
 
 func (c *MinIOClient) ListObjects(ctx context.Context, prefix string) ([]string, error) {
+	// 逻辑说明：运行 mc ls 后逐行忽略空白，并从 CLI 的日期/大小/名称列中提取末列对象名；命令失败不返回可能不完整的列表。
 	if err := c.ensureAlias(ctx); err != nil {
 		return nil, err
 	}
@@ -221,6 +233,7 @@ func (c *MinIOClient) ListObjects(ctx context.Context, prefix string) ([]string,
 
 // EnsureBucket creates the configured bucket if it does not already exist.
 func (c *MinIOClient) EnsureBucket(ctx context.Context) error {
+	// 逻辑说明：在身份可用后对配置的 alias/bucket 执行带 --ignore-existing 的创建，使首次部署和重复 reconcile 使用同一幂等路径。
 	if err := c.ensureAlias(ctx); err != nil {
 		return err
 	}
@@ -230,10 +243,12 @@ func (c *MinIOClient) EnsureBucket(ctx context.Context) error {
 }
 
 func (c *MinIOClient) runMC(ctx context.Context, args ...string) (string, error) {
+	// 逻辑说明：无标准输入的普通 mc 操作统一委托 runMCWithInput，从而共享动态 STS 注入、context 取消和 stderr 错误处理。
 	return c.runMCWithInput(ctx, nil, args...)
 }
 
 func (c *MinIOClient) runMCWithInput(ctx context.Context, stdin []byte, args ...string) (string, error) {
+	// 逻辑说明：构造受 context 管理的 mc 子进程并分别捕获 stdout/stderr；动态模式每次解析最新 STS 三元组并只注入该进程环境，执行失败返回带命令与 stderr 的诊断。
 	cmd := exec.CommandContext(ctx, c.config.MCBinary, args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -279,6 +294,7 @@ func (c *MinIOClient) runMCWithInput(ctx context.Context, stdin []byte, args ...
 // credentials issued by Alibaba Cloud contain only characters (base64
 // alphabet plus "+/=") that Go's url.Parse accepts inside userinfo.
 func buildMCHostEnv(alias string, endpoint string, c Credentials) (string, error) {
+	// 逻辑说明：校验并规范 endpoint（裸主机默认 HTTPS），按 mc 要求把 AK/SK/可选 token 原样放入 userinfo，最终生成单个 MC_HOST_alias 环境绑定；无效地址在启动 mc 前失败。
 	if endpoint == "" {
 		return "", fmt.Errorf("storage endpoint is not configured (AGENTTEAMS_FS_ENDPOINT is empty)")
 	}

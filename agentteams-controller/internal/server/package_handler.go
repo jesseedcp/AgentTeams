@@ -16,6 +16,7 @@ type PackageHandler struct {
 }
 
 func NewPackageHandler(ossClient oss.StorageClient) *PackageHandler {
+	// 逻辑说明：注入对象存储接口而不立即访问外部服务；Upload 会在请求时验证 client 是否配置并处理实际上传。
 	return &PackageHandler{oss: ossClient}
 }
 
@@ -26,6 +27,7 @@ func NewPackageHandler(ossClient oss.StorageClient) *PackageHandler {
 //
 // Returns {"packageUri": "oss://agentteams-config/packages/{name}-{hash}.zip"}
 func (h *PackageHandler) Upload(w http.ResponseWriter, r *http.Request) {
+	// 逻辑说明：要求 OSS 可用并以 64 MiB 上限解析 multipart，校验 name/file 后完整读取内容；用 SHA-256 前缀生成内容寻址键并上传，只有存储成功才返回 oss:// URI。
 	if h.oss == nil {
 		httputil.WriteError(w, http.StatusServiceUnavailable, "OSS client not configured")
 		return

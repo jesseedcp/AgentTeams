@@ -23,6 +23,7 @@ class RoomDescribeDeps:
 
 
 def _session_room_id(arguments: dict[str, Any], payload: dict[str, Any], deps: RoomDescribeDeps) -> str:
+    # 逻辑说明：`_session_room_id` 按协议优先级选择 room/session 字段，并交给依赖规范化为稳定 room ID。
     raw = str(
         payload.get("sessionId")
         or payload.get("session_id")
@@ -41,6 +42,7 @@ def _session_room_id(arguments: dict[str, Any], payload: dict[str, Any], deps: R
 
 
 def _matrix_get_json(path: str, token: str) -> dict[str, Any]:
+    # 逻辑说明：`_matrix_get_json` 携带 bearer token 执行只读 GET，并只接受字典型 JSON 结果。
     request = urllib.request.Request(
         path,
         headers={"Authorization": f"Bearer {token}"},
@@ -52,6 +54,7 @@ def _matrix_get_json(path: str, token: str) -> dict[str, Any]:
 
 
 def _matrix_get_json_optional(path: str, token: str) -> dict[str, Any]:
+    # 逻辑说明：`_matrix_get_json_optional` 把可选 Matrix state 的 404 转为空值，其余鉴权/网络错误继续抛出。
     try:
         return _matrix_get_json(path, token)
     except urllib.error.HTTPError as exc:
@@ -66,6 +69,7 @@ def describe_room(arguments: dict[str, Any], payload: dict[str, Any], deps: Room
     ``dryRun`` 只返回将查询的规范化身份，不访问网络；真实查询把 404 当成缺少可选
     state，而连接/鉴权失败则返回显式错误，避免 Agent 把“服务不可用”误认为空房间。
     """
+    # 逻辑说明：`describe_room` 解析稳定 room ID，按需读取名称、主题和用户标签，再返回统一工具结果。
     room_id = _session_room_id(arguments, payload, deps)
     if not room_id:
         return {"ok": False, "tool": "roomflow", "action": "describe_room", "error": "sessionId or roomId is required"}

@@ -28,6 +28,7 @@ WORKER_NAME="${AGENTTEAMS_WORKER_NAME:?AGENTTEAMS_WORKER_NAME is required}"
 INSTALL_DIR="/root/agentteams-fs/agents"
 WORKSPACE="${INSTALL_DIR}/${WORKER_NAME}"
 
+# 逻辑说明：为 Hermes 启动和配置桥接日志增加 Worker 标识与时间戳，避免混入秘密配置内容。
 log() {
     echo "[agentteams-hermes-worker $(date '+%Y-%m-%d %H:%M:%S')] $1"
 }
@@ -69,6 +70,7 @@ ln -sfn "${WORKSPACE}/skills" "${HOME}/.agents/skills"
 
 # Background readiness reporter — report ready once the bridge has produced
 # the gateway's config.yaml (i.e. the worker can actually serve traffic).
+# 逻辑说明：后台轮询桥接器生成的 Matrix 配置，只有 Worker 真能服务时才向 Controller 报 Ready；超时只停止报告器，不杀死主进程。
 _start_readiness_reporter() {
     [ -z "${AGENTTEAMS_CONTROLLER_URL:-}" ] && return 0
 

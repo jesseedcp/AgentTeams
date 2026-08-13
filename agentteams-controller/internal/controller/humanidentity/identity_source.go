@@ -164,6 +164,9 @@ var (
 // from package-level init(); double-registration panics so wiring
 // mistakes surface at process start, not at reconcile time.
 func Register(key string, factory FactoryFn) {
+	// 逻辑说明：Register 接收 key(string)、factory(FactoryFn)，依次借助 Lock、Unlock、panic注册Human 身份来源的期望结果。
+	// 返回/状态：返回 无；会更新 Human 身份来源的内存状态，存在客户端调用时还可能同步相应外部资源。
+	// 失败/重试：输入或依赖调用失败会返回错误；是否重排由上层调谐器决定，本函数不隐藏失败。
 	registryMu.Lock()
 	defer registryMu.Unlock()
 	if _, exists := registry[key]; exists {
@@ -176,6 +179,9 @@ func Register(key string, factory FactoryFn) {
 // deps. Returns an error when no implementation has been registered
 // under key — callers should treat that as a configuration bug.
 func Resolve(key string, deps Deps) (IdentitySource, error) {
+	// 逻辑说明：Resolve 接收 key(string)、deps(Deps)，依次借助 RLock、RUnlock、factory解析Human 身份来源的期望结果。
+	// 返回/状态：返回 IdentitySource、error；会更新 Human 身份来源的内存状态，存在客户端调用时还可能同步相应外部资源。
+	// 失败/重试：输入或依赖调用失败会返回错误；是否重排由上层调谐器决定，本函数不隐藏失败。
 	registryMu.RLock()
 	factory, ok := registry[key]
 	registryMu.RUnlock()
@@ -188,6 +194,9 @@ func Resolve(key string, deps Deps) (IdentitySource, error) {
 // ResolveHuman selects an identity source from the Human spec, derives the
 // stable Matrix identity, and returns the bound source plus derived data.
 func ResolveHuman(spec *v1beta1.HumanSpec, metadataName string, deps Deps) (ResolvedIdentity, error) {
+	// 逻辑说明：ResolveHuman 接收 spec(*v1beta1.HumanSpec)、metadataName(string)、deps(Deps)，依次借助 Resolve、DeriveMatrixUserID、matrixLocalpart、ManagesInitialPassword解析Human 身份来源的期望结果。
+	// 返回/状态：返回 ResolvedIdentity、error；会更新 Human 身份来源的内存状态，存在客户端调用时还可能同步相应外部资源。
+	// 失败/重试：输入或依赖调用失败会返回错误；是否重排由上层调谐器决定，本函数不隐藏失败。
 	key := KeyLegacyPassword
 	if spec.IdentitySource != nil {
 		key = KeyExternalSSO
@@ -213,6 +222,9 @@ func ResolveHuman(spec *v1beta1.HumanSpec, metadataName string, deps Deps) (Reso
 }
 
 func matrixLocalpart(matrixUserID string) (string, error) {
+	// 逻辑说明：matrixLocalpart 接收 matrixUserID(string)，依次借助 HasPrefix、TrimPrefix、IndexByte处理Human 身份来源的期望结果。
+	// 返回/状态：返回 string、error；可能查询或改变 Matrix 用户、房间、别名、成员或权限状态。
+	// 失败/重试：Matrix 请求失败会返回错误；上层下一轮先重新观测实际状态，再只补做尚未满足的步骤。
 	if !strings.HasPrefix(matrixUserID, "@") {
 		return "", fmt.Errorf("matrix user id %q must start with @", matrixUserID)
 	}
@@ -227,6 +239,9 @@ func matrixLocalpart(matrixUserID string) (string, error) {
 // Keys returns a snapshot of all registered keys, sorted for
 // determinism. Useful for startup logging and CI audit.
 func Keys() []string {
+	// 逻辑说明：Keys 接收 无，依次借助 RLock、RUnlock处理Human 身份来源的期望结果。
+	// 返回/状态：返回 []string；会更新 Human 身份来源的内存状态，存在客户端调用时还可能同步相应外部资源。
+	// 失败/重试：输入或依赖调用失败会返回错误；是否重排由上层调谐器决定，本函数不隐藏失败。
 	registryMu.RLock()
 	defer registryMu.RUnlock()
 	out := make([]string, 0, len(registry))

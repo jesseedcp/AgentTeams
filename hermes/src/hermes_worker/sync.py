@@ -38,6 +38,7 @@ from typing import Any, Callable, Coroutine, Optional
 logger = logging.getLogger(__name__)
 
 def _storage_alias() -> str:
+    # 逻辑说明：优先采用显式对象存储 alias，否则从前缀推断，最后回落默认名。
     explicit = os.environ.get("AGENTTEAMS_STORAGE_ALIAS")
     if explicit:
         return explicit
@@ -53,6 +54,7 @@ _MC_ALIAS = _storage_alias()
 
 def _deep_merge(base: dict, override: dict) -> dict:
     """Deep merge override into base (override wins leaf conflicts)."""
+    # 逻辑说明：递归合并字典，嵌套继续合并，叶子冲突由 override 覆盖。
     result = dict(base)
     for key, val in override.items():
         if key in result and isinstance(result[key], dict) and isinstance(val, dict):
@@ -72,6 +74,7 @@ def _merge_openclaw_config(remote_text: str, local_text: str) -> str:
       - channels.matrix.accessToken: local wins (Worker re-login after restart).
       - plugins.entries: deep merge with local winning on shared keys; load.paths union.
     """
+    # 逻辑说明：解析远端与本地 JSON，按本地优先规则合并并返回格式化文本。
     remote = json.loads(remote_text)
     local = json.loads(local_text)
     merged: dict[str, Any] = dict(local)
@@ -114,6 +117,7 @@ def _merge_openclaw_config(remote_text: str, local_text: str) -> str:
 
 def _mc(*args: str, check: bool = True) -> subprocess.CompletedProcess:
     """Run an mc command and return the result."""
+    # 逻辑说明：定位 mc 二进制并捕获运行输出；程序缺失或 check 失败时抛错。
     mc_bin = shutil.which("mc")
     if not mc_bin:
         raise RuntimeError("mc binary not found on PATH. Please install mc first.")
@@ -127,11 +131,13 @@ def _mc(*args: str, check: bool = True) -> subprocess.CompletedProcess:
 
 
 def _looks_like_missing_object_error(stderr: str | None) -> bool:
+    # 逻辑说明：识别 MinIO/S3 常见“对象不存在”文案，使初始缺失按正常状态处理。
     text = stderr or ""
     return "Object does not exist" in text or "The specified key does not exist" in text
 
 
 def _preview_text(value: str | None, limit: int = 2000) -> str:
+    # 逻辑说明：压缩并截断日志文本，既保留线索又避免输出过大响应。
     if not value:
         return ""
     if len(value) <= limit:
@@ -165,6 +171,7 @@ class FileSync:
         secure: bool = False,
         local_dir: Optional[Path] = None,
     ) -> None:
+        # 逻辑说明：保存连接和本地路径、计算远端前缀；alias 与 I/O 延迟到调用时发生。
         self.endpoint = endpoint.rstrip("/")
         self.access_key = access_key
         self.secret_key = secret_key
@@ -189,6 +196,7 @@ class FileSync:
 
     def _refresh_cloud_credentials(self) -> None:
         """Refresh STS credentials via the shared shell function (lazy)."""
+        # 逻辑说明：执行共享脚本刷新临时凭据并载入环境；失败会阻止使用过期身份。
         result = subprocess.run(
             ["bash", "-c",
              "source /opt/agentteams/scripts/lib/oss-credentials.sh && "
@@ -206,6 +214,7 @@ class FileSync:
 
     def _ensure_alias(self) -> None:
         """Set up mc alias, refreshing STS credentials in cloud mode."""
+        # 逻辑说明：云模式先刷新 STS，再幂等配置 mc alias；连接或凭据错误向上报告。
         if self._cloud_mode:
             self._refresh_cloud_credentials()
             self._alias_set = True
@@ -230,6 +239,7 @@ class FileSync:
 
     def _cat(self, key: str) -> Optional[str]:
         """Download object content as text using mc cat."""
+        # 逻辑说明：确保 alias 后读取文本；对象缺失返回 None，其他错误携诊断抛出。
         self._ensure_alias()
         try:
             result = _mc("cat", self._object_path(key), check=True)
@@ -243,6 +253,7 @@ class FileSync:
 
     def _ls(self, prefix: str) -> list[str]:
         """List objects under prefix, return list of relative names."""
+        # 逻辑说明：递归列出前缀并解析相对对象名；前缀缺失返回空列表。
         self._ensure_alias()
         try:
             result = _mc("ls", "--recursive", self._object_path(prefix), check=True)
@@ -262,6 +273,7 @@ class FileSync:
 
     def _pull_startup_files(self) -> list[str]:
         """Pull known startup files when mc mirror cannot stat the prefix."""
+        # 逻辑说明：逐个拉取关键启动文件作为 mirror 回退，仅写入存在且变化的文件。
         changed: list[str] = []
         for rel_path in _STARTUP_SYNC_FILES:
             content = self._cat(f"{self._prefix}/{rel_path}")
@@ -280,6 +292,7 @@ class FileSync:
         After this, the running sync uses pull_all (Controller-managed only) and
         push_local (Worker-managed only).
         """
+        # 逻辑说明：镜像 Worker 私有前缀；缺失时回退关键文件，Leader 另同步团队共享目录。
         self._ensure_alias()
         remote = self._object_path(f"{self._prefix}/")
         local = str(self.local_dir) + "/"
@@ -339,6 +352,7 @@ class FileSync:
 
     def _get_team_id(self) -> Optional[str]:
         """Read team name from AGENTS.md team-context section."""
+        # 逻辑说明：从本地 AGENTS.md 受控 Team 上下文提取名称；文件或字段缺失返回 None。
         agents_path = self.local_dir / "AGENTS.md"
         if agents_path.exists():
             try:
@@ -360,6 +374,7 @@ class FileSync:
 
     def _is_team_leader(self) -> bool:
         """Check if this worker is a team leader."""
+        # 逻辑说明：读取 AGENTS.md 角色字段并兼容 Leader 写法；无法读取时安全返回 False。
         agents_path = self.local_dir / "AGENTS.md"
         if agents_path.exists():
             try:
@@ -371,6 +386,7 @@ class FileSync:
 
     def _get_shared_remote(self) -> str:
         """Return the MinIO remote path for shared/ directory."""
+        # 逻辑说明：由 Team ID 构造共享前缀；未加入 Team 时回落公共共享前缀。
         team_id = self._get_team_id()
         if team_id:
             return f"{_MC_ALIAS}/{self.bucket}/teams/{team_id}/shared/"
@@ -378,6 +394,7 @@ class FileSync:
 
     def get_config(self) -> dict[str, Any]:
         """Pull openclaw.json and return parsed dict."""
+        # 逻辑说明：读取远端配置并解析 JSON；缺失明确失败，格式错误也向上报告。
         text = self._cat(f"{self._prefix}/openclaw.json")
         if not text:
             raise RuntimeError(
@@ -396,6 +413,7 @@ class FileSync:
 
     def list_skills(self) -> list[str]:
         """Return list of skill names available in MinIO for this worker."""
+        # 逻辑说明：列出 skills 前缀并从 SKILL.md 路径提取去重技能名，返回排序列表。
         prefix = f"{self._prefix}/skills/"
         entries = self._ls(prefix)
         skill_names: list[str] = []
@@ -423,6 +441,7 @@ class FileSync:
         overwrite: local (Worker) is the base; MinIO overlays models, gateway,
         and channels (plus the plugin merge rules in merge-openclaw-config.sh).
         """
+        # 逻辑说明：拉取 Controller 管理文件并比较本地内容，原子写入变化项；不覆盖身份提示词。
         changed: list[str] = []
         files: dict[str, list[str]] = {
             "openclaw.json": [f"{self._prefix}/openclaw.json"],
@@ -533,6 +552,7 @@ async def sync_loop(
     on_pull: Callable[[list[str]], Coroutine],
 ) -> None:
     """Background task: pull files every ``interval`` seconds."""
+    # 逻辑说明：周期调用 pull_all；单轮失败记录后继续，任务取消时自然退出。
     while True:
         await asyncio.sleep(interval)
         try:
@@ -562,6 +582,7 @@ def push_local(sync: FileSync, since: float = 0) -> list[str]:
       - .hermes/config.yaml
       - .hermes/.env
     """
+    # 逻辑说明：扫描允许持久化且在 since 后变化的本地文件，逐个上传并返回远端键。
     _EXCLUDE_FILES = {
         "openclaw.json",
         "mcporter-servers.json",
@@ -681,6 +702,7 @@ def push_local(sync: FileSync, since: float = 0) -> list[str]:
 
 async def push_loop(sync: FileSync, check_interval: int = 5) -> None:
     """Background task: push local changes to MinIO every ``check_interval`` seconds."""
+    # 逻辑说明：以启动时刻为基线周期推送新变化；单轮错误记录重试，取消时退出。
     last_push_time: float = time.time()
 
     while True:

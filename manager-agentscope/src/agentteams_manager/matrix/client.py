@@ -119,6 +119,7 @@ class MatrixClient:
         registration_http: Any | None = None,
         sleeper: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
+        # 逻辑说明：记录 Matrix 配置、持久状态接口及可注入客户端，缓存明文令牌并初始化同步任务、就绪事件、健康时间戳和房间历史；构造阶段不发起网络请求。
         self.config = config
         self._state = state
         self._client = nio_client
@@ -139,6 +140,7 @@ class MatrixClient:
     @property
     def sync_healthy(self) -> bool:
         """Return whether the supervised loop is live and recently synced."""
+        # 逻辑说明：同时检查首次同步已就绪、监督任务仍运行且存在成功同步时间，再用单调时钟比较陈旧阈值；任一条件不满足便返回不健康且不修改状态。
         task = self._sync_task
         if (
             not self.ready.is_set()
@@ -163,6 +165,7 @@ class MatrixClient:
         admin: bool = False,
     ) -> dict[str, str | bool]:
         """Register through Matrix registration-token UIA with fallback."""
+        # 逻辑说明：先要求配置 registration token，再在共享 HTTP 客户端上下文中执行注册；普通账号优先采用 Matrix 标准 UIA，管理员或兼容性回退则由内层函数完成 Synapse nonce/HMAC 流程，任何服务器拒绝或无效 user_id 都直接报错，不留下伪成功结果。
         registration_token = self.config.registration_token
         if registration_token is None:
             raise RuntimeError(
@@ -170,6 +173,7 @@ class MatrixClient:
             )
 
         async def register(http: Any) -> dict[str, str | bool]:
+            # 逻辑说明：普通账号先走 registration-token UIA，只有端点缺失或独占用户名时回退 Synapse nonce/HMAC；管理员直接走回退端点，HTTP 或 user_id 校验失败均向上抛错。
             if not admin:
                 response = await http.post(
                     "/_matrix/client/v3/register",
@@ -254,6 +258,7 @@ class MatrixClient:
 
     async def start(self, handler: InboundHandler) -> None:
         """Prepare encryption state and start the owned sync loop."""
+        # 逻辑说明：绑定入站处理器，准备加密库与媒体目录，验证客户端加密身份后创建唯一同步监督任务；任何前置步骤失败都会阻止任务句柄发布。
         self.bind_handler(handler)
         self._needs_full_state = True
         CryptoStore(self.config.crypto_store).prepare()
@@ -269,6 +274,7 @@ class MatrixClient:
 
     async def wait_until_ready(self, *, timeout: float = 60) -> None:
         """Wait for the first durable sync or surface an exited sync task."""
+        # 逻辑说明：若尚未就绪，则并行等待 ready 事件或同步监督任务结束；监督任务异常原样传播，二者在期限内都未完成则抛超时，并始终取消临时等待任务。
         if self.ready.is_set():
             return
         if self._sync_task is None:
@@ -293,9 +299,11 @@ class MatrixClient:
 
     def bind_handler(self, handler: InboundHandler) -> None:
         """Bind the normalized inbound consumer without starting I/O."""
+        # 逻辑说明：替换后续 sync 事件要调用的规范化入站处理器；这里只保存引用，不启动同步或重放既有事件。
         self._handler = handler
 
     def _ensure_client(self) -> Any:
+        # 逻辑说明：惰性创建禁用 nio 内部重试的 AsyncClient，并给新建或无令牌实例补充访问令牌和用户身份；注入实例会被复用，返回值始终保存在 self._client。
         created = self._client is None
         if self._client is None:
             request_timeout = max(
@@ -326,6 +334,7 @@ class MatrixClient:
         return self._client
 
     async def _prepare_crypto(self, client: Any) -> None:
+        # 逻辑说明：启用加密时先用 whoami 核对令牌用户和设备 ID，再按设备加载本地 crypto store 并执行密钥维护；身份不符或缺少设备 ID 会中止启动。
         if not self.config.encryption:
             return
         whoami = getattr(client, "whoami", None)
@@ -351,6 +360,7 @@ class MatrixClient:
 
     async def stop(self) -> None:
         """Stop owned background work and close the injected client."""
+        # 逻辑说明：取消并等待同步监督任务，随后关闭当前客户端、清除 prepared 与 ready 状态；任务取消被正常吞掉，而客户端关闭错误仍会传播给调用方。
         if self._sync_task is not None:
             self._sync_task.cancel()
             try:
@@ -366,6 +376,7 @@ class MatrixClient:
 
     async def sync_once(self) -> None:
         """Run one resumable sync and durably advance its cursor."""
+        # 逻辑说明：从持久 sync token 恢复同步，重启时先全量水合房间缓存，再加入邀请房间并顺序派发已加入房间事件；仅派发成功后保存 next_batch、维护密钥并标记就绪。
         client = await self._ensure_prepared_client()
         since = await self._state.get_value("matrix.sync_token")
         try:
@@ -418,6 +429,7 @@ class MatrixClient:
 
     async def run_sync_loop(self) -> None:
         """Sync forever with bounded password-based token recovery."""
+        # 逻辑说明：用 watchdog 反复执行单次同步；令牌失效最多按 5/10/20 秒退避用密码刷新，超时或其他异常则清空就绪状态、重建自有客户端并延迟重试，取消信号原样退出。
         refresh_attempts = 0
         delays = (5, 10, 20)
         while True:
@@ -481,6 +493,7 @@ class MatrixClient:
 
     async def _supervise_sync_loop(self) -> None:
         """Restart a sync loop that exits outside the normal retry path."""
+        # 逻辑说明：持续托管 run_sync_loop；若其非取消异常地退出，则记录崩溃、清除 ready、重建传输并按配置等待后重启，因此监督层本身只响应取消而结束。
         while True:
             try:
                 await self.run_sync_loop()
@@ -497,6 +510,7 @@ class MatrixClient:
                 )
 
     def _on_sync_task_done(self, task: asyncio.Task[None]) -> None:
+        # 逻辑说明：同步监督任务完成时立即撤销就绪标志；取消无需告警，正常意外退出记 error，携带异常退出则保留 traceback 记录，但此回调不重启任务也不抛错。
         self.ready.clear()
         if task.cancelled():
             return
@@ -510,6 +524,7 @@ class MatrixClient:
         )
 
     async def _ensure_prepared_client(self) -> Any:
+        # 逻辑说明：取得现有或新建 nio 客户端，并在 prepared 标志为假时完成一次加密身份与密钥准备；只有 await 成功后才置位，失败时保留未准备状态供重试。
         client = self._ensure_client()
         if not self._client_prepared:
             await self._prepare_crypto(client)
@@ -518,6 +533,7 @@ class MatrixClient:
 
     async def _rebuild_client(self) -> None:
         """Close a failed owned transport so the next sync starts cleanly."""
+        # 逻辑说明：注入客户端保持原样；自有客户端则先从实例状态摘除并要求下次全量水合，再限时五秒关闭旧连接，关闭失败只记录日志以便后续同步仍能重建。
         if self._client_injected:
             return
         client = self._client
@@ -533,6 +549,7 @@ class MatrixClient:
             logger.exception("Failed to close stale Matrix transport")
 
     async def _refresh_token(self) -> bool:
+        # 逻辑说明：有配置密码时调用 nio login 获取新凭据，并把 access token、可选用户与设备 ID 同步回缓存和客户端；无密码或响应缺少令牌返回 False，登录异常直接传播。
         password = self.config.password
         if password is None:
             return False
@@ -559,6 +576,7 @@ class MatrixClient:
         self,
         joined: dict[str, Any],
     ) -> None:
+        # 逻辑说明：存在已绑定处理器时，按房间和 timeline 原顺序规范化事件；可用事件先追加历史再 await 上层处理，任一处理失败会中断派发并阻止本轮游标提交。
         if self._handler is None:
             return
         for room_id, room_info in joined.items():
@@ -575,6 +593,7 @@ class MatrixClient:
         room_id: str,
         event: Any,
     ) -> InboundEvent | None:
+        # 逻辑说明：拒绝自身、缺标识、redaction、替换、确认及 transient 事件；从 Matrix source 提取正文、时间、线程/回复关系、mentions 和媒体，结合房间缓存判定私聊后构造 InboundEvent。
         sender = getattr(event, "sender", "")
         event_id = getattr(event, "event_id", "")
         if not sender or not event_id or sender == self.config.user_id:
@@ -633,6 +652,7 @@ class MatrixClient:
         )
 
     def _is_direct_room(self, room_id: str, sender: str) -> bool:
+        # 逻辑说明：读取 nio 房间缓存中的成员键集合，仅当房间恰有 Manager 与当前 sender 两人时返回 True；缓存缺失或成员不匹配一律视为非私聊。
         rooms = getattr(self._client, "rooms", {}) or {}
         room = rooms.get(room_id)
         users = getattr(room, "users", {}) if room is not None else {}
@@ -648,6 +668,7 @@ class MatrixClient:
         content: dict[str, Any],
         body: str,
     ) -> tuple[MediaReference, ...]:
+        # 逻辑说明：仅把四类媒体消息转换为单个 MediaReference；加密附件从 file/key/hashes/iv 取解密元数据，明文附件读取 url，缺少明文字符串 URI 时返回空元组。
         msgtype = content.get("msgtype")
         if msgtype not in {"m.image", "m.file", "m.audio", "m.video"}:
             return ()
@@ -696,6 +717,7 @@ class MatrixClient:
         mentions: tuple[str, ...] = (),
     ) -> str:
         """Send one idempotent text event with structured relations."""
+        # 逻辑说明：把文本、可选线程关系和结构化 mentions 编成 Matrix 消息内容，再用调用方 txn_id 进入持久化幂等发送流程，返回 homeserver 分配的 event_id。
         content = self._text_content(
             text,
             thread_id=thread_id,
@@ -714,6 +736,7 @@ class MatrixClient:
         typing: bool,
         timeout_ms: int = 30_000,
     ) -> None:
+        # 逻辑说明：向指定房间发布或撤销本用户的 typing 状态并传入持续毫秒数；nio 返回空值或 Error 响应时统一抛出“set typing”运行时错误。
         response = await self._ensure_client().room_typing(
             room_id,
             typing,
@@ -722,6 +745,7 @@ class MatrixClient:
         _require_matrix_success(response, "set typing")
 
     async def mark_read(self, room_id: str, event_id: str) -> None:
+        # 逻辑说明：将同一 event_id 同时设置为房间 fully-read 与 read marker；远端拒绝或无响应由统一校验转换为“mark event read”异常，不产生返回值。
         response = await self._ensure_client().room_read_markers(
             room_id,
             fully_read_event=event_id,
@@ -730,6 +754,7 @@ class MatrixClient:
         _require_matrix_success(response, "mark event read")
 
     async def joined_rooms(self) -> tuple[str, ...]:
+        # 逻辑说明：请求当前账号已加入房间，要求响应 rooms 为纯字符串列表，再去重排序成不可变元组；Matrix 错误或畸形载荷均抛 RuntimeError。
         response = await self._ensure_client().joined_rooms()
         _require_matrix_success(response, "list joined rooms")
         rooms = getattr(response, "rooms", None)
@@ -740,6 +765,7 @@ class MatrixClient:
         return tuple(sorted(set(rooms)))
 
     async def members(self, room_id: str) -> tuple[str, ...]:
+        # 逻辑说明：查询指定房间的已加入成员，逐行验证非空 user_id 后去重排序返回；任一成员对象无合法身份即拒绝整个响应，不返回部分名单。
         response = await self._ensure_client().joined_members(room_id)
         _require_matrix_success(response, "list room members")
         rows = getattr(response, "members", None)
@@ -754,6 +780,7 @@ class MatrixClient:
         return tuple(sorted(user_ids))
 
     async def lookup_user(self, user_id: str) -> dict[str, str | None]:
+        # 逻辑说明：按 user_id 获取 Matrix profile，允许展示名和头像 URI 为 None、否则必须是字符串，最后连同输入身份返回字典；远端或字段类型错误直接失败。
         response = await self._ensure_client().get_profile(user_id)
         _require_matrix_success(response, "get user profile")
         display_name = getattr(response, "displayname", None)
@@ -776,6 +803,7 @@ class MatrixClient:
         invite: tuple[str, ...],
         creation_marker: dict[str, str | int],
     ) -> str:
+        # 逻辑说明：以 private_chat 预设创建非 direct 私密房间，同时发送名称、主题、邀请名单和 io.agentteams.creation 初始状态；仅接受非空 room_id 并将其返回。
         response = await self._ensure_client().room_create(
             visibility=RoomVisibility.private,
             name=name,
@@ -798,6 +826,7 @@ class MatrixClient:
         return room_id
 
     async def invite_user(self, room_id: str, user_id: str) -> None:
+        # 逻辑说明：调用 Matrix room_invite 将 user_id 邀入 room_id；成功时无返回数据，空响应或 Error 类型响应被转换为邀请成员失败异常。
         response = await self._ensure_client().room_invite(
             room_id,
             user_id,
@@ -811,6 +840,7 @@ class MatrixClient:
         *,
         reason: str,
     ) -> None:
+        # 逻辑说明：把 room_id、user_id 和 reason 原样交给 room_kick 移除当前成员但不封禁；服务端错误经统一检查抛出，调用成功返回 None。
         response = await self._ensure_client().room_kick(
             room_id,
             user_id,
@@ -825,6 +855,7 @@ class MatrixClient:
         *,
         reason: str,
     ) -> None:
+        # 逻辑说明：请求 room_ban 在指定房间封禁用户并记录 reason；仅 nio 非空且非 Error 响应视为成功，否则用操作名生成 RuntimeError。
         response = await self._ensure_client().room_ban(
             room_id,
             user_id,
@@ -833,6 +864,7 @@ class MatrixClient:
         _require_matrix_success(response, "ban room member")
 
     async def unban_user(self, room_id: str, user_id: str) -> None:
+        # 逻辑说明：请求 room_unban 撤销 room_id 中 user_id 的封禁，不附带原因；远端失败通过公共响应检查向调用方报告，成功无返回值。
         response = await self._ensure_client().room_unban(
             room_id,
             user_id,
@@ -843,6 +875,7 @@ class MatrixClient:
         self,
         room_id: str,
     ) -> tuple[dict[str, Any], ...]:
+        # 逻辑说明：拉取房间完整 state，要求 events 是全由字典组成的列表，并复制每个事件后以元组返回；错误响应或混入非字典元素时拒绝结果。
         response = await self._ensure_client().room_get_state(room_id)
         _require_matrix_success(response, "get room state")
         events = getattr(response, "events", None)
@@ -853,12 +886,14 @@ class MatrixClient:
         return tuple(dict(event) for event in events)
 
     async def upload_media(self, path: Path) -> str:
+        # 逻辑说明：用当前 nio 客户端构造短生命周期 MediaAdapter，把本地 Path 的存在性、MIME 推断与上传校验委托给它，并返回验证过的 mxc URI。
         return await MediaAdapter(self._ensure_client()).upload(path)
 
     async def download_media(
         self,
         reference: MediaReference,
     ) -> tuple[Any, ...]:
+        # 逻辑说明：将单个 MediaReference 交给基于当前 nio 客户端的 MediaAdapter 下载；适配器负责 URI、大小、加密元数据和 MIME 校验，结果以 DataBlock 元组透传。
         return await MediaAdapter(self._ensure_client()).download(reference)
 
     async def edit_text(
@@ -870,6 +905,7 @@ class MatrixClient:
         txn_id: str,
     ) -> str:
         """Replace a previously sent streaming text event."""
+        # 逻辑说明：生成新文本内容并同时放入顶层与 m.new_content，再用 m.replace 关系指向原 event_id；以独立 txn_id 幂等发送并返回替换事件 ID。
         final_content = self._text_content(text)
         content: dict[str, Any] = {
             **final_content,
@@ -889,6 +925,7 @@ class MatrixClient:
         thread_id: str | None = None,
         mentions: tuple[str, ...] = (),
     ) -> dict[str, Any]:
+        # 逻辑说明：构造同时含纯文本与 Markdown HTML 的 m.text 内容，按首次出现顺序去重 mentions，可选插入安全转义的 mention pills，并在有 thread_id 时附加线程关系。
         content: dict[str, Any] = {
             "msgtype": "m.text",
             "body": text,
@@ -921,6 +958,7 @@ class MatrixClient:
         *,
         txn_id: str,
     ) -> str:
+        # 逻辑说明：先以 txn_id 持久化 prepared 记录，再最多重试一次 room_send 超时；取得非空 event_id 后覆盖为 sent 记录并返回，非超时异常或无事件 ID 直接失败。
         state_key = f"matrix.txn.{txn_id}"
         await self._state.set_value(
             state_key,
@@ -969,11 +1007,13 @@ class MatrixClient:
 
 
 def _require_matrix_success(response: object, operation: str) -> None:
+    # 逻辑说明：把 None 或类名以 Error 结尾的 nio 响应视为失败，并把具体 operation 与响应写入 RuntimeError；其余对象仅表示调用成功，不返回数据。
     if response is None or type(response).__name__.endswith("Error"):
         raise RuntimeError(f"Matrix {operation} failed: {response}")
 
 
 def _is_unknown_token(value: object) -> bool:
+    # 逻辑说明：识别本地专用异常、nio ErrorResponse 的 M_UNKNOWN_TOKEN/含 token 的 401、通用 errcode 及 status/status_code 401；仅这些形态返回 True。
     if isinstance(value, MatrixUnknownTokenError):
         return True
     if isinstance(value, ErrorResponse):

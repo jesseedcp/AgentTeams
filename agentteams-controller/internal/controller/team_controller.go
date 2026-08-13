@@ -69,6 +69,9 @@ type teamAdminActor struct {
 // 同一 Team 可能在未修改 spec 时被多次调和，因此房间成员同步使用
 // desired set 与 actual set 做差集，而不是每次盲目重发 invite/kick。
 func (r *TeamReconciler) Reconcile(ctx context.Context, req reconcile.Request) (retres reconcile.Result, reterr error) {
+	// 逻辑说明：Reconcile 接收 ctx(context.Context)、req(reconcile.Request)，依次借助 Now、Observe、Get、IgnoreNotFound调谐Team的期望结果。
+	// 返回/状态：返回 retres、reterr；会调用下层服务修改外部资源，并把阶段、条件与已应用版本写回 CR status。
+	// 失败/重试：error 或 RequeueAfter 交给 controller-runtime；重复执行必须把同一 spec 收敛到同一状态。
 	start := time.Now()
 	defer func() { metrics.Observe("team", start, reterr) }()
 
@@ -110,6 +113,9 @@ func (r *TeamReconciler) Reconcile(ctx context.Context, req reconcile.Request) (
 }
 
 func (r *TeamReconciler) resolveTeamAdminActor(ctx context.Context, t *v1beta1.Team) (teamAdminActor, error) {
+	// 逻辑说明：resolveTeamAdminActor 接收 ctx(context.Context)、t(*v1beta1.Team)，依次借助 Get、ResolveHuman、MatrixAppServiceEnabled、EnsureUserToken解析Team的期望结果。
+	// 返回/状态：返回管理员的 Matrix 身份、令牌与身份来源；可能读取 Human CR，并在缺少令牌时通过身份来源补齐登录令牌。
+	// 失败/重试：输入或依赖调用失败会返回错误；是否重排由上层调谐器决定，本函数不隐藏失败。
 	if t.Spec.Admin == nil {
 		return teamAdminActor{}, nil
 	}
@@ -175,6 +181,9 @@ func (r *TeamReconciler) resolveTeamAdminActor(ctx context.Context, t *v1beta1.T
 // spec-provided matrixUserId is only kept when the referenced Human CR is
 // missing or not yet provisioned.
 func (r *TeamReconciler) deriveTeamWithResolvedIdentities(ctx context.Context, t *v1beta1.Team, adminActor teamAdminActor) *v1beta1.Team {
+	// 逻辑说明：deriveTeamWithResolvedIdentities 接收 ctx(context.Context)、t(*v1beta1.Team)、adminActor(teamAdminActor)，依次借助 DeepCopy、appendAccessibleTeamHumans、resolveHumanMemberMatrixUserID处理Team的期望结果。
+	// 返回/状态：返回 *v1beta1.Team；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	derived := t.DeepCopy()
 	if adminActor.MatrixUserID != "" {
 		if derived.Spec.Admin == nil {
@@ -190,6 +199,9 @@ func (r *TeamReconciler) deriveTeamWithResolvedIdentities(ctx context.Context, t
 }
 
 func (r *TeamReconciler) appendAccessibleTeamHumans(ctx context.Context, t *v1beta1.Team) {
+	// 逻辑说明：appendAccessibleTeamHumans 接收 ctx(context.Context)、t(*v1beta1.Team)，依次借助 List、InNamespace、containsString、resolveHumanMatrixUserID追加Human的期望结果。
+	// 返回/状态：返回 无；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	var humans v1beta1.HumanList
 	if err := r.List(ctx, &humans, client.InNamespace(t.Namespace)); err != nil {
 		log.FromContext(ctx).Error(err, "failed to list humans for accessibleTeams")
@@ -233,6 +245,9 @@ func (r *TeamReconciler) appendAccessibleTeamHumans(ctx context.Context, t *v1be
 }
 
 func (r *TeamReconciler) syncTeamRoomHumanStatuses(ctx context.Context, namespace, teamName, roomID string, members []v1beta1.TeamMemberSpec) {
+	// 逻辑说明：syncTeamRoomHumanStatuses 接收 ctx(context.Context)、namespace/teamName/roomID(string)、members([]v1beta1.TeamMemberSpec)，依次借助 List、InNamespace、containsString、DeepCopy同步Human的期望结果。
+	// 返回/状态：返回 无；可能查询或改变 Matrix 用户、房间、别名、成员或权限状态。
+	// 失败/重试：Matrix 请求失败会返回错误；上层下一轮先重新观测实际状态，再只补做尚未满足的步骤。
 	if roomID == "" {
 		return
 	}
@@ -279,6 +294,9 @@ func (r *TeamReconciler) syncTeamRoomHumanStatuses(ctx context.Context, namespac
 }
 
 func (r *TeamReconciler) resolveHumanMatrixUserID(human *v1beta1.Human) (string, error) {
+	// 逻辑说明：resolveHumanMatrixUserID 接收 human(*v1beta1.Human)，依次借助 ResolveHuman解析Human的期望结果。
+	// 返回/状态：返回 string、error；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	if human.Status.MatrixUserID != "" {
 		return human.Status.MatrixUserID, nil
 	}
@@ -302,6 +320,9 @@ func (r *TeamReconciler) resolveHumanMatrixUserID(human *v1beta1.Human) (string,
 // Human CR is missing or not yet provisioned, so managerConfig behavior (and callers
 // that pass an explicit matrixUserId without a backing Human CR) is preserved.
 func (r *TeamReconciler) resolveHumanMemberMatrixUserID(ctx context.Context, namespace string, member v1beta1.TeamMemberSpec) string {
+	// 逻辑说明：resolveHumanMemberMatrixUserID 接收 ctx(context.Context)、namespace(string)、member(v1beta1.TeamMemberSpec)，依次借助 Get解析Human的期望结果。
+	// 返回/状态：返回 string；可能查询或改变 Matrix 用户、房间、别名、成员或权限状态。
+	// 失败/重试：Matrix 请求失败会返回错误；上层下一轮先重新观测实际状态，再只补做尚未满足的步骤。
 	if strings.TrimSpace(member.Name) != "" {
 		var human v1beta1.Human
 		key := client.ObjectKey{Name: member.Name, Namespace: namespace}
@@ -313,6 +334,9 @@ func (r *TeamReconciler) resolveHumanMemberMatrixUserID(ctx context.Context, nam
 }
 
 func (r *TeamReconciler) reconcileTeamNormal(ctx context.Context, t *v1beta1.Team) (reconcile.Result, error) {
+	// 逻辑说明：reconcileTeamNormal 接收 ctx(context.Context)、t(*v1beta1.Team)，依次借助 MergeFrom、DeepCopy、Patch、Status调谐Team的期望结果。
+	// 返回/状态：返回 reconcile.Result、error；会调用下层服务修改外部资源，并把阶段、条件与已应用版本写回 CR status。
+	// 失败/重试：error 或 RequeueAfter 交给 controller-runtime；重复执行必须把同一 spec 收敛到同一状态。
 	patchBase := client.MergeFrom(t.DeepCopy())
 	if t.Status.Phase == "" {
 		t.Status.Phase = "Pending"
@@ -326,6 +350,9 @@ func (r *TeamReconciler) reconcileTeamNormal(ctx context.Context, t *v1beta1.Tea
 }
 
 func (r *TeamReconciler) handleDelete(ctx context.Context, t *v1beta1.Team) error {
+	// 逻辑说明：handleDelete 接收 ctx(context.Context)、t(*v1beta1.Team)，依次借助 handleDeleteTeam处理Team的期望结果。
+	// 返回/状态：返回 error；可能回收 Team关联的外部资源，调用者只在成功后移除 finalizer。
+	// 失败/重试：把“已不存在”视为成功；其他错误会保留 finalizer，下一轮从剩余资源继续清理。
 	return r.handleDeleteTeam(ctx, t)
 }
 
@@ -340,12 +367,18 @@ type teamWorkerMember struct {
 }
 
 func (r *TeamReconciler) teamMemberRuntime(member teamWorkerMember) string {
+	// 逻辑说明：teamMemberRuntime 接收 member(teamWorkerMember)，依次借助 ResolveRuntime处理Team的期望结果。
+	// 返回/状态：返回 string；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	return backend.ResolveRuntime(member.worker.Spec.Runtime, r.DefaultRuntime)
 }
 
 // reconcileTeam manages Team-owned organization (rooms, coordination context,
 // heartbeat injection, and status aggregation) for referenced Worker CRs.
 func (r *TeamReconciler) reconcileTeam(ctx context.Context, t *v1beta1.Team, patchBase client.Patch) (reconcile.Result, error) {
+	// 逻辑说明：reconcileTeam 接收 ctx(context.Context)、t(*v1beta1.Team)、patchBase(client.Patch)，依次借助 validateWorkerMembers、failTeam、resolveTeamMembers、Join调谐Team的期望结果。
+	// 返回/状态：返回 reconcile.Result、error；会调用下层服务修改外部资源，并把阶段、条件与已应用版本写回 CR status。
+	// 失败/重试：error 或 RequeueAfter 交给 controller-runtime；重复执行必须把同一 spec 收敛到同一状态。
 	logger := log.FromContext(ctx)
 
 	// 1. Validate workerMembers
@@ -574,6 +607,9 @@ func (r *TeamReconciler) reconcileTeam(ctx context.Context, t *v1beta1.Team, pat
 }
 
 func (r *TeamReconciler) setWorkerTeamAnnotation(ctx context.Context, worker *v1beta1.Worker, teamName string) error {
+	// 逻辑说明：setWorkerTeamAnnotation 接收 ctx(context.Context)、worker(*v1beta1.Worker)、teamName(string)，依次借助 DeepCopy、delete、Patch、MergeFrom设置Team的期望结果。
+	// 返回/状态：返回 error；可能读取或修改 Kubernetes API 中的账户、令牌、服务或存储对象。
+	// 失败/重试：API 冲突或暂时不可用会返回错误；上层重新读取 resourceVersion 与实际对象后幂等重试。
 	current := ""
 	if worker.Annotations != nil {
 		current = worker.Annotations[v1beta1.AnnotationWorkerTeamName]
@@ -594,6 +630,9 @@ func (r *TeamReconciler) setWorkerTeamAnnotation(ctx context.Context, worker *v1
 }
 
 func (r *TeamReconciler) resolveTeamMembers(ctx context.Context, t *v1beta1.Team) ([]teamWorkerMember, []string) {
+	// 逻辑说明：resolveTeamMembers 接收 ctx(context.Context)、t(*v1beta1.Team)，依次借助 Get、EffectiveWorkerName解析Team的期望结果。
+	// 返回/状态：返回已解析的 Worker 快照与尚未找到的名称；只读取 Worker CR，不修改团队或成员状态。
+	// 失败/重试：输入或依赖调用失败会返回错误；是否重排由上层调谐器决定，本函数不隐藏失败。
 	members := make([]teamWorkerMember, 0, len(t.Spec.WorkerMembers))
 	var degradedMsgs []string
 
@@ -614,6 +653,9 @@ func (r *TeamReconciler) resolveTeamMembers(ctx context.Context, t *v1beta1.Team
 }
 
 func teamLeaderMember(members []teamWorkerMember, leaderName string) teamWorkerMember {
+	// 逻辑说明：teamLeaderMember 接收 members([]teamWorkerMember)、leaderName(string)，按本函数中的条件与转换步骤处理Team的期望结果。
+	// 返回/状态：返回 teamWorkerMember；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	for _, member := range members {
 		if member.ref.Name == leaderName {
 			return member
@@ -623,6 +665,9 @@ func teamLeaderMember(members []teamWorkerMember, leaderName string) teamWorkerM
 }
 
 func teamWorkerRuntimeNames(members []teamWorkerMember, leaderName string) []string {
+	// 逻辑说明：teamWorkerRuntimeNames 接收 members([]teamWorkerMember)、leaderName(string)，按本函数中的条件与转换步骤处理Team的期望结果。
+	// 返回/状态：返回 []string；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	names := make([]string, 0, len(members))
 	for _, member := range members {
 		if member.ref.Name == leaderName {
@@ -634,6 +679,9 @@ func teamWorkerRuntimeNames(members []teamWorkerMember, leaderName string) []str
 }
 
 func teamWorkerEntries(members []teamWorkerMember, leaderName string) []service.TeamWorkerEntry {
+	// 逻辑说明：teamWorkerEntries 接收 members([]teamWorkerMember)、leaderName(string)，按本函数中的条件与转换步骤处理Team的期望结果。
+	// 返回/状态：返回 []service.TeamWorkerEntry；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	entries := make([]service.TeamWorkerEntry, 0, len(members))
 	for _, member := range members {
 		if member.ref.Name == leaderName {
@@ -656,6 +704,9 @@ func (r *TeamReconciler) deployTeamRuntimeConfigs(
 	leaderRuntimeName string,
 	rooms *service.TeamRoomResult,
 ) error {
+	// 逻辑说明：deployTeamRuntimeConfigs 接收 ctx(context.Context)、t(*v1beta1.Team)、members([]teamWorkerMember)、leaderName(string)、teamRuntimeName(string)、leaderRuntimeName(string)、rooms(*service.TeamRoomResult)，依次借助 runtimeConfigTeamMembers、IsZero、ResolveRuntime、runtimeConfigAIGatewayURL部署Team的期望结果。
+	// 返回/状态：返回 error；可能把配置、技能或运行文档写入本地目录或 MinIO/S3 的稳定对象键。
+	// 失败/重试：校验、序列化或 I/O 失败会返回错误；旧配置保持可用，上层可用相同对象键覆盖重试。
 	roster := runtimeConfigTeamMembers(t, members, leaderName)
 	for _, member := range members {
 		// Skip members being deleted — their runtime config no longer needs
@@ -721,6 +772,9 @@ func (r *TeamReconciler) deployTeamRuntimeConfigs(
 }
 
 func (r *TeamReconciler) runtimeConfigAIGatewayURL(ctx context.Context, spec v1beta1.WorkerSpec, memberName string) (string, error) {
+	// 逻辑说明：runtimeConfigAIGatewayURL 接收 ctx(context.Context)、spec(v1beta1.WorkerSpec)、memberName(string)，依次借助 ResolveModelProvider处理Team的期望结果。
+	// 返回/状态：返回 string、error；可能把配置、技能或运行文档写入本地目录或 MinIO/S3 的稳定对象键。
+	// 失败/重试：校验、序列化或 I/O 失败会返回错误；旧配置保持可用，上层可用相同对象键覆盖重试。
 	if spec.ModelProvider == "" || r.GatewayClient == nil {
 		return "", nil
 	}
@@ -735,6 +789,9 @@ func (r *TeamReconciler) runtimeConfigAIGatewayURL(ctx context.Context, spec v1b
 }
 
 func runtimeConfigTeamMembers(t *v1beta1.Team, members []teamWorkerMember, leaderName string) []service.RuntimeConfigTeamMember {
+	// 逻辑说明：runtimeConfigTeamMembers 接收 t(*v1beta1.Team)、members([]teamWorkerMember)、leaderName(string)，按本函数中的条件与转换步骤处理Team的期望结果。
+	// 返回/状态：返回 []service.RuntimeConfigTeamMember；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	roster := make([]service.RuntimeConfigTeamMember, 0, len(members)+len(t.Spec.HumanMembers))
 	for _, member := range members {
 		role := RoleTeamWorker
@@ -769,12 +826,18 @@ type teamChannelAllowLists struct {
 }
 
 func teamMemberStatusSnapshot(member teamWorkerMember, role MemberRole) v1beta1.TeamMemberStatus {
+	// 逻辑说明：teamMemberStatusSnapshot 接收 member(teamWorkerMember)、role(MemberRole)，依次借助 syncTeamMemberStatus处理Team的期望结果。
+	// 返回/状态：返回 v1beta1.TeamMemberStatus；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	ms := v1beta1.TeamMemberStatus{Name: member.ref.Name, Role: role.String()}
 	syncTeamMemberStatus(&ms, member)
 	return ms
 }
 
 func syncTeamMemberStatus(ms *v1beta1.TeamMemberStatus, member teamWorkerMember) {
+	// 逻辑说明：syncTeamMemberStatus 接收 ms(*v1beta1.TeamMemberStatus)、member(teamWorkerMember)，按本函数中的条件与转换步骤同步Team的期望结果。
+	// 返回/状态：返回 无；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	ms.RuntimeName = member.runtimeName
 	ms.MatrixUserID = member.worker.Status.MatrixUserID
 	ms.RoomID = member.worker.Status.RoomID
@@ -790,6 +853,9 @@ func syncTeamMemberStatus(ms *v1beta1.TeamMemberStatus, member teamWorkerMember)
 }
 
 func (r *TeamReconciler) cleanupStaleTeamMembers(ctx context.Context, t *v1beta1.Team, members []teamWorkerMember) error {
+	// 逻辑说明：cleanupStaleTeamMembers 接收 ctx(context.Context)、t(*v1beta1.Team)、members([]teamWorkerMember)，依次借助 Get、detachTeamMember清理Team的期望结果。
+	// 返回/状态：返回 error；可能回收 Team关联的外部资源，调用者只在成功后移除 finalizer。
+	// 失败/重试：把“已不存在”视为成功；其他错误会保留 finalizer，下一轮从剩余资源继续清理。
 	desired := make(map[string]struct{}, len(members))
 	for _, member := range members {
 		desired[member.ref.Name] = struct{}{}
@@ -811,6 +877,9 @@ func (r *TeamReconciler) cleanupStaleTeamMembers(ctx context.Context, t *v1beta1
 }
 
 func (r *TeamReconciler) detachTeamMember(ctx context.Context, t *v1beta1.Team, w *v1beta1.Worker) error {
+	// 逻辑说明：detachTeamMember 接收 ctx(context.Context)、t(*v1beta1.Team)、w(*v1beta1.Worker)，依次借助 EffectiveWorkerName、ResolveRuntime、setWorkerTeamAnnotation、RefreshWorkerCredentials处理Team的期望结果。
+	// 返回/状态：返回 error；可能回收 Team关联的外部资源，调用者只在成功后移除 finalizer。
+	// 失败/重试：把“已不存在”视为成功；其他错误会保留 finalizer，下一轮从剩余资源继续清理。
 	logger := log.FromContext(ctx)
 	runtimeName := w.Spec.EffectiveWorkerName(w.Name)
 	runtime := backend.ResolveRuntime(w.Spec.Runtime, r.DefaultRuntime)
@@ -882,6 +951,9 @@ func (r *TeamReconciler) detachTeamMember(ctx context.Context, t *v1beta1.Team, 
 }
 
 func (r *TeamReconciler) teamChannelPolicy(t *v1beta1.Team, members []teamWorkerMember, leaderName string, current teamWorkerMember, role MemberRole) teamChannelAllowLists {
+	// 逻辑说明：teamChannelPolicy 接收 t(*v1beta1.Team)、members([]teamWorkerMember)、leaderName(string)、current(teamWorkerMember)、role(MemberRole)，依次借助 HasPrefix、Enabled、MatrixUserID、teamLeaderMember处理Team的期望结果。
+	// 返回/状态：返回 teamChannelAllowLists；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	resolve := func(value string) string {
 		if value == "" || strings.HasPrefix(value, "@") {
 			return value
@@ -957,6 +1029,9 @@ func individualTeamChannelPolicy(t *v1beta1.Team, member teamWorkerMember, role 
 }
 
 func appendResolved(values []string, resolve func(string) string, items ...string) []string {
+	// 逻辑说明：appendResolved 接收 values([]string)、resolve(func(string) string)、items(...string)，依次借助 resolve追加Team的期望结果。
+	// 返回/状态：返回 []string；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	for _, item := range items {
 		values = append(values, resolve(item))
 	}
@@ -964,6 +1039,9 @@ func appendResolved(values []string, resolve func(string) string, items ...strin
 }
 
 func applyChannelAllowPolicy(base, allowExtra, denyExtra []string, resolve func(string) string) []string {
+	// 逻辑说明：applyChannelAllowPolicy 接收 base/allowExtra/denyExtra([]string)、resolve(func(string) string)，依次借助 appendResolved、resolve应用Team的期望结果。
+	// 返回/状态：返回 []string；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	out := append([]string{}, base...)
 	out = appendResolved(out, resolve, allowExtra...)
 	deny := make(map[string]struct{}, len(denyExtra)*2)
@@ -988,6 +1066,9 @@ func applyChannelAllowPolicy(base, allowExtra, denyExtra []string, resolve func(
 }
 
 func aggregateTeamStatus(t *v1beta1.Team, members []teamWorkerMember, leaderName string, totalWorkers int) (bool, int) {
+	// 逻辑说明：aggregateTeamStatus 接收 t(*v1beta1.Team)、members([]teamWorkerMember)、leaderName(string)、totalWorkers(int)，依次借助 pruneMembers、memberStatus、MemberRole、syncTeamMemberStatus处理Team的期望结果。
+	// 返回/状态：返回 bool、int；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	desiredNames := make(map[string]struct{}, len(t.Spec.WorkerMembers))
 	for _, ref := range t.Spec.WorkerMembers {
 		desiredNames[ref.Name] = struct{}{}
@@ -1025,6 +1106,9 @@ func aggregateTeamStatus(t *v1beta1.Team, members []teamWorkerMember, leaderName
 // removes registry entries, and deletes room aliases. It does NOT destroy
 // member Workers — they have independent lifecycles.
 func (r *TeamReconciler) handleDeleteTeam(ctx context.Context, t *v1beta1.Team) error {
+	// 逻辑说明：handleDeleteTeam 接收 ctx(context.Context)、t(*v1beta1.Team)，依次借助 EffectiveTeamName、syncTeamRoomHumanStatuses、Get、detachTeamMember处理Team的期望结果。
+	// 返回/状态：返回 error；可能回收 Team关联的外部资源，调用者只在成功后移除 finalizer。
+	// 失败/重试：把“已不存在”视为成功；其他错误会保留 finalizer，下一轮从剩余资源继续清理。
 	logger := log.FromContext(ctx)
 	logger.Info("deleting team (team-reference)", "name", t.Name)
 	teamRuntimeName := t.Spec.EffectiveTeamName(t.Name)
@@ -1090,6 +1174,9 @@ func (r *TeamReconciler) handleDeleteTeam(ctx context.Context, t *v1beta1.Team) 
 }
 
 func (r *TeamReconciler) teamLeaderRuntimeName(ctx context.Context, t *v1beta1.Team, leaderRef *v1beta1.TeamWorkerRef) string {
+	// 逻辑说明：teamLeaderRuntimeName 接收 ctx(context.Context)、t(*v1beta1.Team)、leaderRef(*v1beta1.TeamWorkerRef)，依次借助 Get、EffectiveWorkerName处理Team的期望结果。
+	// 返回/状态：返回 Leader 的实际运行时名称；只读取 Worker CR，读取失败时按既有状态选择安全回退值。
+	// 失败/重试：输入或依赖调用失败会返回错误；是否重排由上层调谐器决定，本函数不隐藏失败。
 	if leaderRef == nil {
 		return ""
 	}
@@ -1117,6 +1204,9 @@ func (r *TeamReconciler) teamLeaderRuntimeName(ctx context.Context, t *v1beta1.T
 }
 
 func (r *TeamReconciler) archiveTeamRooms(ctx context.Context, t *v1beta1.Team, teamRuntimeName, leaderRuntimeName string) {
+	// 逻辑说明：archiveTeamRooms 接收 ctx(context.Context)、t(*v1beta1.Team)、teamRuntimeName/leaderRuntimeName(string)，依次借助 resolveTeamAdminActor、ArchiveTeamRooms归档Team的期望结果。
+	// 返回/状态：返回 无；可能查询或改变 Matrix 用户、房间、别名、成员或权限状态。
+	// 失败/重试：Matrix 请求失败会返回错误；上层下一轮先重新观测实际状态，再只补做尚未满足的步骤。
 	logger := log.FromContext(ctx)
 	actorToken := ""
 	if t.Spec.Admin != nil {
@@ -1142,6 +1232,9 @@ func (r *TeamReconciler) archiveTeamRooms(ctx context.Context, t *v1beta1.Team, 
 // role=team_leader, no duplicates, non-empty names. Returns the leader ref,
 // the worker refs (excluding leader), and any validation error.
 func validateWorkerMembers(refs []v1beta1.TeamWorkerRef) (leader *v1beta1.TeamWorkerRef, workers []v1beta1.TeamWorkerRef, err error) {
+	// 逻辑说明：validateWorkerMembers 接收 refs([]v1beta1.TeamWorkerRef)，按本函数中的条件与转换步骤校验Team的期望结果。
+	// 返回/状态：返回 leader、workers、err；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	if len(refs) == 0 {
 		return nil, nil, fmt.Errorf("workerMembers must not be empty")
 	}
@@ -1183,6 +1276,9 @@ func validateWorkerMembers(refs []v1beta1.TeamWorkerRef) (leader *v1beta1.TeamWo
 }
 
 func (r *TeamReconciler) failTeam(ctx context.Context, t *v1beta1.Team, patchBase client.Patch, msg string) (reconcile.Result, error) {
+	// 逻辑说明：failTeam 接收 ctx(context.Context)、t(*v1beta1.Team)、patchBase(client.Patch)、msg(string)，依次借助 Patch、Status处理Team的期望结果。
+	// 返回/状态：返回 reconcile.Result、error；可能读取或修改 Kubernetes API 中的账户、令牌、服务或存储对象。
+	// 失败/重试：API 冲突或暂时不可用会返回错误；上层重新读取 resourceVersion 与实际对象后幂等重试。
 	t.Status.Phase = "Failed"
 	t.Status.Message = msg
 	if err := r.Status().Patch(ctx, t, patchBase); err != nil {
@@ -1202,6 +1298,9 @@ func (r *TeamReconciler) failTeam(ctx context.Context, t *v1beta1.Team, patchBas
 // pointer obtained here will not be invalidated by later memberStatus
 // appends.
 func memberStatus(s *v1beta1.TeamStatus, name string, role MemberRole) *v1beta1.TeamMemberStatus {
+	// 逻辑说明：memberStatus 接收 s(*v1beta1.TeamStatus)、name(string)、role(MemberRole)，依次借助 MemberByName处理Team的期望结果。
+	// 返回/状态：返回 *v1beta1.TeamMemberStatus；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	if existing := s.MemberByName(name); existing != nil {
 		if existing.Role == "" {
 			existing.Role = role.String()
@@ -1216,6 +1315,9 @@ func memberStatus(s *v1beta1.TeamStatus, name string, role MemberRole) *v1beta1.
 // keep. Called exactly once per reconcile (Step 3) so the memberStatus
 // pointer-stability invariant above holds.
 func pruneMembers(s *v1beta1.TeamStatus, keep map[string]struct{}) {
+	// 逻辑说明：pruneMembers 接收 s(*v1beta1.TeamStatus)、keep(map[string]struct{})，按本函数中的条件与转换步骤裁剪Team的期望结果。
+	// 返回/状态：返回 无；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	if len(s.Members) == 0 {
 		return
 	}
@@ -1234,6 +1336,9 @@ func pruneMembers(s *v1beta1.TeamStatus, keep map[string]struct{}) {
 }
 
 func containsString(values []string, target string) bool {
+	// 逻辑说明：containsString 接收 values([]string)、target(string)，按本函数中的条件与转换步骤判断包含关系Team的期望结果。
+	// 返回/状态：返回 bool；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	for _, value := range values {
 		if value == target {
 			return true
@@ -1243,6 +1348,9 @@ func containsString(values []string, target string) bool {
 }
 
 func removeString(values []string, target string) []string {
+	// 逻辑说明：removeString 接收 values([]string)、target(string)，按本函数中的条件与转换步骤移除Team的期望结果。
+	// 返回/状态：返回 []string；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	filtered := values[:0]
 	for _, value := range values {
 		if value != target {
@@ -1266,6 +1374,9 @@ func sortMembers(s *v1beta1.TeamStatus) {
 // Used only for logging ("team reconciled … members=[…]"). Unexported so the
 // log key stays controller-internal and tests do not lock it in.
 func observedMemberNames(s *v1beta1.TeamStatus) []string {
+	// 逻辑说明：observedMemberNames 接收 s(*v1beta1.TeamStatus)，依次借助 Strings处理Team的期望结果。
+	// 返回/状态：返回 []string；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	names := make([]string, 0, len(s.Members))
 	for _, ms := range s.Members {
 		if ms.Observed {
@@ -1277,6 +1388,9 @@ func observedMemberNames(s *v1beta1.TeamStatus) []string {
 }
 
 func (r *TeamReconciler) runtimeConfigTeamMembers(t *v1beta1.Team, desiredMembers []MemberContext) []service.RuntimeConfigTeamMember {
+	// 逻辑说明：runtimeConfigTeamMembers 接收 t(*v1beta1.Team)、desiredMembers([]MemberContext)，依次借助 MemberByName、MatrixUserID处理Team的期望结果。
+	// 返回/状态：返回 []service.RuntimeConfigTeamMember；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	roster := make([]service.RuntimeConfigTeamMember, 0, len(desiredMembers)+len(t.Spec.HumanMembers))
 	for _, member := range desiredMembers {
 		entry := service.RuntimeConfigTeamMember{
@@ -1308,6 +1422,9 @@ func (r *TeamReconciler) runtimeConfigTeamMembers(t *v1beta1.Team, desiredMember
 }
 
 func teamAdminMatrixID(t *v1beta1.Team) string {
+	// 逻辑说明：teamAdminMatrixID 接收 t(*v1beta1.Team)，按本函数中的条件与转换步骤处理Team的期望结果。
+	// 返回/状态：返回 string；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	if t.Spec.Admin == nil {
 		return ""
 	}
@@ -1315,6 +1432,9 @@ func teamAdminMatrixID(t *v1beta1.Team) string {
 }
 
 func teamAdminName(t *v1beta1.Team) string {
+	// 逻辑说明：teamAdminName 接收 t(*v1beta1.Team)，按本函数中的条件与转换步骤处理Team的期望结果。
+	// 返回/状态：返回 string；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	if t.Spec.Admin == nil {
 		return ""
 	}
@@ -1322,6 +1442,9 @@ func teamAdminName(t *v1beta1.Team) string {
 }
 
 func teamCoordinatorIDs(t *v1beta1.Team) []string {
+	// 逻辑说明：teamCoordinatorIDs 接收 t(*v1beta1.Team)，依次借助 teamAdminMatrixID、teamMemberIsCoordinator、uniqueTeamStrings处理Team的期望结果。
+	// 返回/状态：返回 []string；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	ids := make([]string, 0, 1+len(t.Spec.HumanMembers))
 	if adminID := teamAdminMatrixID(t); adminID != "" {
 		ids = append(ids, adminID)
@@ -1345,6 +1468,9 @@ func teamMemberIsCoordinator(member v1beta1.TeamMemberSpec) bool {
 }
 
 func uniqueTeamStrings(values []string) []string {
+	// 逻辑说明：uniqueTeamStrings 接收 values([]string)，按本函数中的条件与转换步骤处理Team的期望结果。
+	// 返回/状态：返回 []string；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	seen := make(map[string]struct{}, len(values))
 	out := make([]string, 0, len(values))
 	for _, value := range values {
@@ -1363,6 +1489,9 @@ func uniqueTeamStrings(values []string) []string {
 // SetupWithManager 注册 Team 及其引用的 Worker/Pod 观察关系。
 // 当任一成员 Pod 变为 Ready 或失败时，Team.Status 的聚合结果需要重新计算。
 func (r *TeamReconciler) SetupWithManager(mgr ctrl.Manager) (controller.Controller, error) {
+	// 逻辑说明：SetupWithManager 接收 mgr(ctrl.Manager)，依次借助 For、NewControllerManagedBy、Watches、EnqueueRequestsFromMapFunc设置Manager的期望结果。
+	// 返回/状态：返回 controller.Controller、error；会注册 watch、事件过滤器或对象到调谐请求的映射，不直接创建业务资源。
+	// 失败/重试：注册失败会阻止 Controller 正常启动；事件处理本身由 controller-runtime 持续驱动。
 	bldr := ctrl.NewControllerManagedBy(mgr).For(&v1beta1.Team{})
 
 	// Watch Worker CRs whose status changes. When a
@@ -1380,6 +1509,9 @@ func (r *TeamReconciler) SetupWithManager(mgr ctrl.Manager) (controller.Controll
 // workerToTeamRequests maps a Worker event to the Team(s) that reference it
 // via spec.workerMembers[*].name.
 func (r *TeamReconciler) workerToTeamRequests(ctx context.Context, obj client.Object) []reconcile.Request {
+	// 逻辑说明：workerToTeamRequests 接收 ctx(context.Context)、obj(client.Object)，依次借助 List、InNamespace、GetNamespace、GetName处理Team的期望结果。
+	// 返回/状态：返回 []reconcile.Request；会注册 watch、事件过滤器或对象到调谐请求的映射，不直接创建业务资源。
+	// 失败/重试：注册失败会阻止 Controller 正常启动；事件处理本身由 controller-runtime 持续驱动。
 	var teamList v1beta1.TeamList
 	if err := r.List(ctx, &teamList,
 		client.InNamespace(obj.GetNamespace()),
@@ -1399,6 +1531,9 @@ func (r *TeamReconciler) workerToTeamRequests(ctx context.Context, obj client.Ob
 // workerStatusChangePredicate triggers only on Worker status subresource
 // changes (Phase, MatrixUserID, RoomID) and delete events.
 func workerStatusChangePredicate() predicate.Predicate {
+	// 逻辑说明：workerStatusChangePredicate 接收 无，按本函数中的条件与转换步骤处理Team的期望结果。
+	// 返回/状态：返回 predicate.Predicate；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	return predicate.Funcs{
 		CreateFunc: func(e event.CreateEvent) bool {
 			return false
@@ -1427,6 +1562,9 @@ func workerStatusChangePredicate() predicate.Predicate {
 // --- Policy helpers ---
 
 func mergeChannelPolicy(teamPolicy, individualPolicy *v1beta1.ChannelPolicySpec) *v1beta1.ChannelPolicySpec {
+	// 逻辑说明：mergeChannelPolicy 接收 teamPolicy/individualPolicy(*v1beta1.ChannelPolicySpec)，按本函数中的条件与转换步骤合并Team的期望结果。
+	// 返回/状态：返回 *v1beta1.ChannelPolicySpec；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	if teamPolicy == nil && individualPolicy == nil {
 		return nil
 	}
@@ -1447,6 +1585,9 @@ func mergeChannelPolicy(teamPolicy, individualPolicy *v1beta1.ChannelPolicySpec)
 }
 
 func appendGroupAllowExtra(policy *v1beta1.ChannelPolicySpec, names ...string) *v1beta1.ChannelPolicySpec {
+	// 逻辑说明：appendGroupAllowExtra 接收 policy(*v1beta1.ChannelPolicySpec)、names(...string)，按本函数中的条件与转换步骤追加Team的期望结果。
+	// 返回/状态：返回 *v1beta1.ChannelPolicySpec；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	if len(names) == 0 {
 		return policy
 	}
@@ -1467,6 +1608,9 @@ func appendGroupAllowExtra(policy *v1beta1.ChannelPolicySpec, names ...string) *
 }
 
 func appendDmAllowExtra(policy *v1beta1.ChannelPolicySpec, names ...string) *v1beta1.ChannelPolicySpec {
+	// 逻辑说明：appendDmAllowExtra 接收 policy(*v1beta1.ChannelPolicySpec)、names(...string)，按本函数中的条件与转换步骤追加Team的期望结果。
+	// 返回/状态：返回 *v1beta1.ChannelPolicySpec；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	if len(names) == 0 {
 		return policy
 	}

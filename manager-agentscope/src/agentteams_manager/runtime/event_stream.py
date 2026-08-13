@@ -57,6 +57,7 @@ class EventStreamProjector:
         self.reset()
 
     def reset(self) -> None:
+        # 逻辑说明：清空累计文本、工具状态、媒体、待确认调用、确认 reply_id 与 thinking 标志，为下一条独立事件流建立全新投影；该方法只重置当前 projector 内存。
         self._text: list[str] = []
         self._tools: dict[str, ProjectedToolCall] = {}
         self._media: list[ProjectedMedia] = []
@@ -66,6 +67,7 @@ class EventStreamProjector:
 
     async def accept(self, event: AgentEvent) -> StreamProjection:
         """Apply one public event and return the current projection."""
+        # 逻辑说明：按 AgentEvent 类型增量更新公开文本、thinking 观察标志、工具生命周期、确认请求或媒体块，未知事件保持状态不变；处理后始终返回当前不可变快照，不输出工具参数或思考正文。
         if isinstance(event, TextBlockDeltaEvent):
             self._text.append(event.delta)
         elif isinstance(event, ThinkingBlockDeltaEvent):
@@ -122,6 +124,7 @@ class EventStreamProjector:
         return self.snapshot()
 
     def snapshot(self) -> StreamProjection:
+        # 逻辑说明：把当前可变文本列表、工具字典、媒体和确认列表复制为 StreamProjection 的字符串与元组，并携带确认 reply_id/thinking 标志；调用方不能通过返回值反向修改累计状态。
         return StreamProjection(
             text="".join(self._text),
             tool_calls=tuple(self._tools.values()),
@@ -135,6 +138,7 @@ class EventStreamProjector:
         self,
         events: AsyncIterable[AgentEvent],
     ) -> StreamProjection:
+        # 逻辑说明：先 reset 再顺序遍历异步 AgentEvent 流并逐项交给 accept，耗尽后返回最终投影；迭代或事件处理异常直接传播，避免返回伪完整结果。
         self.reset()
         async for event in events:
             await self.accept(event)

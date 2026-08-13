@@ -33,6 +33,9 @@ import (
 // "!admin users reset-password" and would silently overwrite a password
 // the user may have rotated via Cinny.
 func (r *HumanReconciler) reconcileHumanInfra(ctx context.Context, s *humanScope) error {
+	// 逻辑说明：reconcileHumanInfra 接收 ctx(context.Context)、s(*humanScope)，依次借助 WithValues、Key、EnsurePrecreated、ensureUserToken调谐Human的期望结果。
+	// 返回/状态：返回 error；会更新 Human的内存状态，存在客户端调用时还可能同步相应外部资源。
+	// 失败/重试：输入或依赖调用失败会返回错误；是否重排由上层调谐器决定，本函数不隐藏失败。
 	h := s.human
 	username := s.username
 	expectedUserID := s.identity.MatrixUserID

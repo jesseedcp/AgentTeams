@@ -71,6 +71,7 @@ class CodingCLIDelegationRequest(BaseModel):
 
     @model_validator(mode="after")
     def require_relative_workspace(self) -> Self:
+        # 逻辑说明：`require_relative_workspace` 把 `workspace` 解析为 POSIX 相对路径，拒绝反斜杠、绝对路径和 `..`，验证成功后返回原请求对象；此纯校验不改状态，非法路径直接抛错以阻止 Coding CLI 越出任务工作区。
         if "\\" in self.workspace:
             raise ValueError("coding CLI workspace must use POSIX separators")
         path = PurePosixPath(self.workspace)
@@ -129,6 +130,7 @@ class CodingCLIDelegationService:
         renewal_interval: float = 300,
         events: OperationEventReader | None = None,
     ) -> None:
+        # 逻辑说明：`__init__` 校验 lease 续期时间并保存 storage、CLI、Task、Matrix 与 supervisor 等依赖，建立后续委托所需的实例状态；配置非法时立即失败，不启动任何外部操作。
         if renewal_interval <= 0:
             raise ValueError("lease renewal interval must be positive")
         self._enabled = enabled
@@ -144,6 +146,7 @@ class CodingCLIDelegationService:
         self._events = events
 
     def status(self) -> dict[str, object]:
+        # 逻辑说明：`status` 汇总是否启用 Coding CLI 以及各 provider 的当前可用性并返回字典；这里只读配置与客户端状态，不申请 lease 或执行命令。
         return {
             "enabled": self._enabled,
             "providers": self._cli.status(),
@@ -156,6 +159,7 @@ class CodingCLIDelegationService:
         context: MutationContext,
         confirmed: bool = False,
     ) -> CodingCLIDelegationReceipt:
+        # 逻辑说明：`execute` 接收已校验请求和 mutation context，先做授权、读取 Task、隐藏 prompt 原文只保留摘要，再创建可恢复 operation 并进入执行阶段；Task 不存在或未确认时在产生外部效果前失败。
         self._authorize(context, confirmed=confirmed)
         task = await self._tasks.get(request.task_id)
         if task is None:
@@ -186,6 +190,7 @@ class CodingCLIDelegationService:
         request: CodingCLIDelegationRequest,
         task: TaskRecord,
     ) -> CodingCLIDelegationReceipt:
+        # 逻辑说明：`_execute_operation` 按“lease→mirror down→写 prompt→运行 CLI→mirror up→通知→释放 lease”编排一次委托，并用续期任务保护长运行操作；任何阶段失败都会进入既有恢复/清理路径，避免盲目重复外部命令。
         if operation.status is OperationStatus.SUCCEEDED:
             return CodingCLIDelegationReceipt.model_validate(
                 operation.result,
@@ -294,6 +299,7 @@ class CodingCLIDelegationService:
         self,
         operation: OperationRecord,
     ) -> CodingCLIDelegationReceipt:
+        # 逻辑说明：`resume_operation` 根据 operation journal、effect acknowledgement、lease 和结果日志判断 Coding CLI 委托已经完成、可继续还是存在歧义；恢复只补未证明完成的阶段，无法证明时抛 RecoveryError 交由人工处理。
         if operation.kind is not OperationKind.CODING_CLI_DELEGATION:
             raise ValueError("operation is not coding CLI delegation")
         if operation.status is OperationStatus.SUCCEEDED:
@@ -364,6 +370,7 @@ class CodingCLIDelegationService:
         *,
         confirmed: bool,
     ) -> None:
+        # 逻辑说明：`_authorize` 检查功能开关、管理员身份及显式确认标志，不通过时分别抛出明确错误；该检查必须在 lease、文件和 CLI 副作用之前完成。
         if not self._enabled:
             raise CodingCLIDelegationDisabled(
                 "coding CLI delegation is disabled",
@@ -382,6 +389,7 @@ class CodingCLIDelegationService:
         operation: OperationRecord,
         task_id: str,
     ) -> ProcessingLease:
+        # 逻辑说明：`_acquire_lease` 先在 supervisor 中登记 lease 外部效果意图，再为 Task 获取 processing lease 并记录回执；取得 lease 失败会保留可恢复证据，防止两个处理者同时修改同一 workspace。
         await self._supervisor.before_effect(
             operation.operation_id,
             ExternalEffect.STORAGE,
@@ -412,6 +420,7 @@ class CodingCLIDelegationService:
         prefix: str,
         task_cache: Path,
     ) -> None:
+        # 逻辑说明：`_mirror_down` 登记下载效果后把 Task 前缀镜像到本地 cache，并把 manifest 作为 acknowledgement 写入 journal；I/O 失败不会被标记成功。
         await self._supervisor.before_effect(
             operation.operation_id,
             ExternalEffect.STORAGE,
@@ -433,6 +442,7 @@ class CodingCLIDelegationService:
         task_cache: Path,
         prefix: str,
     ) -> None:
+        # 逻辑说明：`_mirror_prompt` 把仅存在于本地的 prompt 文件镜像回 Task 前缀并记录 manifest，使重启后能证明输入已持久化；上传失败沿用 supervisor 的失败语义。
         await self._supervisor.before_effect(
             operation.operation_id,
             ExternalEffect.STORAGE,
@@ -455,6 +465,7 @@ class CodingCLIDelegationService:
         task_cache: Path,
         prefix: str,
     ) -> Any:
+        # 逻辑说明：`_mirror_result` 把 CLI 修改后的 workspace 和结果日志镜像回共享存储并记录 manifest；只有远端确认后才承认该阶段完成。
         await self._supervisor.before_effect(
             operation.operation_id,
             ExternalEffect.STORAGE,
@@ -479,6 +490,7 @@ class CodingCLIDelegationService:
         result: CodingCLIReceipt,
         mirror_manifest_sha256: str,
     ) -> CodingCLIDelegationReceipt:
+        # 逻辑说明：`_notify` 从 CLI receipt 生成脱敏摘要和幂等 Matrix transaction，登记消息效果后通知任务房间并返回最终 receipt；发送结果不确定时保留 journal 供恢复，避免重复通知。
         summary = _result_summary(result)
         transaction_id = matrix_transaction_id(operation.operation_id, 0)
         prefix = "coding-result:" if result.success else "coding-failed:"
@@ -530,6 +542,7 @@ class CodingCLIDelegationService:
         stop: asyncio.Event,
         failures: list[Exception],
     ) -> None:
+        # 逻辑说明：`_renew_lease_until_stopped` 在 stop event 触发前按续期间隔刷新 processing lease，把续期异常收集到 `failures` 后结束；它不吞掉失败，因此主流程能阻止把失去所有权的运行误报成功。
         while True:
             try:
                 await asyncio.wait_for(
@@ -548,10 +561,12 @@ class CodingCLIDelegationService:
 
 
 def _prompt_digest(prompt: str) -> str:
+    # 逻辑说明：`_prompt_digest` 对 prompt 的 UTF-8 字节计算 SHA-256 并返回十六进制摘要；不保存或返回 prompt 原文，也不产生外部副作用。
     return hashlib.sha256(prompt.encode("utf-8")).hexdigest()
 
 
 def _prompt_path(task_cache: Path, operation_id: str) -> Path:
+    # 逻辑说明：`_prompt_path` 根据 Task cache 与 operation ID 构造本次委托的 prompt 文件路径并返回；只计算路径，不创建目录或文件。
     return task_cache / "coding-prompts" / f"{operation_id}.txt"
 
 
@@ -560,6 +575,7 @@ def _write_result_log(
     operation_id: str,
     receipt: CodingCLIReceipt,
 ) -> None:
+    # 逻辑说明：`_write_result_log` 在 Task cache 下创建结果目录，把 CLI receipt 以稳定 JSON 写入 operation 专属日志并返回路径；写盘失败直接传播，避免恢复阶段看到不存在的成功证据。
     path = task_cache / "coding-cli-logs" / f"{operation_id}.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
@@ -575,6 +591,7 @@ def _write_result_log(
 
 
 def _result_summary(receipt: CodingCLIReceipt) -> str:
+    # 逻辑说明：`_result_summary` 按 stdout、stderr、provider fallback 的优先级挑选非空文本，裁剪后返回适合通知的摘要；不修改 receipt 或外部状态。
     if receipt.success:
         detail = receipt.stdout.strip() or "Coding CLI completed."
         return detail[:2_000]

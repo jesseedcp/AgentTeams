@@ -29,6 +29,8 @@ class WorkerAPIServer:
         liveness_handler: Callable[[], Awaitable[dict[str, Any]]],
         readiness_handler: Callable[[], Awaitable[dict[str, Any]]],
     ) -> None:
+        # 逻辑说明：`__init__` 接收 host、port、liveness_handler、readiness_handler，初始化健康 HTTP API 状态，返回 None；
+        # 会更新对象内存状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
         self.host = host
         self.port = port
         self._liveness_handler = liveness_handler
@@ -36,6 +38,8 @@ class WorkerAPIServer:
         self._server: asyncio.AbstractServer | None = None
 
     async def start(self) -> None:
+        # 逻辑说明：若健康 API 尚未启动，则在配置的 host/port 创建 asyncio TCP server 并保存实际 server；重复调用直接返回以避免二次绑定。
+        # 端口占用或权限等监听失败由 asyncio 原样抛出，使 Worker 启动流程不能把未就绪的健康端点误报为成功。
         if self._server is not None:
             return
         self._server = await asyncio.start_server(self._handle, self.host, self.port)
@@ -43,11 +47,15 @@ class WorkerAPIServer:
 
     @property
     def bound_port(self) -> int:
+        # 逻辑说明：`bound_port` 接收 当前对象/进程状态，返回服务器实际绑定端口；尚未启动时返回配置端口，返回 int；不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；
+        # 本函数不额外重试，避免掩盖持续故障。
         if self._server is None or not self._server.sockets:
             return self.port
         return int(self._server.sockets[0].getsockname()[1])
 
     async def stop(self) -> None:
+        # 逻辑说明：对已启动的健康 API 停止接收新连接、等待监听 socket 完全关闭，再清空 `_server` 使对象可重新启动；未启动时幂等返回。
+        # wait_closed 失败会继续抛出，避免在操作系统仍持有监听资源时错误标记为已停止。
         if self._server is None:
             return
         self._server.close()
@@ -60,6 +68,8 @@ class WorkerAPIServer:
         reader: asyncio.StreamReader,
         writer: asyncio.StreamWriter,
     ) -> None:
+        # 逻辑说明：`_handle` 接收 reader、writer，读取一条 HTTP 请求，分派 livez/readyz handler 并始终关闭连接，返回 None；
+        # 会更新对象内存状态。失败策略：已知失败按现有 except 转为错误结果或日志，未覆盖异常继续上抛；本函数不额外重试，避免掩盖持续故障。
         try:
             request_line = await reader.readline()
             method, path = _parse_request_line(request_line)
@@ -90,6 +100,8 @@ class WorkerAPIServer:
 
 
 def _parse_request_line(request_line: bytes) -> tuple[str, str]:
+    # 逻辑说明：`_parse_request_line` 接收 request_line，从 HTTP 请求首行提取 method 与不含 query 的 path，返回 tuple[str, str]；
+    # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     parts = request_line.decode("ascii", errors="replace").strip().split()
     if len(parts) < 2:
         return "", ""
@@ -101,6 +113,8 @@ def _write_json(
     status: int,
     payload: dict[str, Any],
 ) -> None:
+    # 逻辑说明：`_write_json` 接收 writer、status、payload，创建父目录并把字典格式化写入 JSON 文件，返回 None；
+    # 会访问网络服务。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     reason = {
         200: "OK",

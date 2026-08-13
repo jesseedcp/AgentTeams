@@ -172,6 +172,8 @@ _MATRIX_CONTROL_EPOCH_KEY = "matrix_control_epoch"
 
 def _clean_control_response_text(text: str) -> str:
     """Hide channel-internal session ids from user-facing control replies."""
+    # 逻辑说明：`_clean_control_response_text` 接收 `text`，按既有分支组合输入并生成结果，并依次复用 `search`、`strip`，返回 `str`。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     if not text:
         return text
     match = _STOP_RESPONSE_RE.search(text)
@@ -184,20 +186,28 @@ def _clean_control_response_text(text: str) -> str:
 
 def _ends_with_no_reply_control(text: str) -> bool:
     """Return true when the final non-empty output line is NO_REPLY."""
+    # 逻辑说明：`_ends_with_no_reply_control` 接收 `text`，按既有分支组合输入并生成结果，并依次复用 `strip`、`splitlines`，返回 `bool`。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     return bool(text) and text.rstrip().splitlines()[-1].strip() == "NO_REPLY"
 
 
 def _is_teamharness_tool_display(text: str) -> bool:
+    # 逻辑说明：`_is_teamharness_tool_display` 接收 `text`，按既有分支组合输入并生成结果，并依次复用 `match`，返回 `bool`。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     return bool(text and TEAMHARNESS_TOOL_DISPLAY_RE.match(text))
 
 
 def _readiness_probe_reply(text: str) -> str | None:
     """Return the direct reply for the Matrix runtime readiness probe."""
+    # 逻辑说明：`_readiness_probe_reply` 接收 `text`，读取、筛选并规范化现有数据，并依次复用 `search`，返回 `str | None`。
+    # 执行过程中包含外部 I/O；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     return "READY" if _READINESS_REPLY_RE.search(text or "") else None
 
 
 def _enum_name(value: Any) -> str:
     """Return a stable enum-like name for runtime schemas."""
+    # 逻辑说明：`_enum_name` 接收 `value`，按既有分支组合输入并生成结果，并依次复用 `upper`、`rsplit`，返回 `str`。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     name = getattr(value, "name", None)
     if name:
         return str(name).upper()
@@ -205,6 +215,8 @@ def _enum_name(value: Any) -> str:
 
 
 def _dedupe_nonempty(values: List[str]) -> List[str]:
+    # 逻辑说明：`_dedupe_nonempty` 接收 `values`，按既有分支组合输入并生成结果，并依次复用 `strip`、`append`，返回 `List[str]`。
+    # 执行过程中包含实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     result = []
     seen = set()
     for value in values:
@@ -229,6 +241,8 @@ def _md_to_html(text: str) -> str:
 
     Falls back to simple HTML-escape + ``<br>`` if the library is missing.
     """
+    # 逻辑说明：`_md_to_html` 接收 Matrix 频道待发送的 Markdown 文本，优先用 markdown-it 渲染安全 formatted_body，缺少依赖时转为转义后的换行 HTML。
+    # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     try:
         from markdown_it import MarkdownIt
 
@@ -263,11 +277,15 @@ def _md_to_html(text: str) -> str:
 
 
 def _edit_fallback_html(text: str) -> str:
+    # 逻辑说明：`_edit_fallback_html` 接收 `text`，把输入转换为调用方需要的结构，并依次复用 `replace`、`escape`，返回 `str`。
+    # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     escaped = html.escape(text).replace("\n", "<br>\n")
     return f"<p>* {escaped}</p>"
 
 
 def _matrix_event_payload_size(content: Dict[str, Any]) -> int:
+    # 逻辑说明：`_matrix_event_payload_size` 接收 `content`，构造协议数据并完成外部传输，并依次复用 `encode`、`dumps`，返回 `int`。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     return len(
         json.dumps(
             content,
@@ -281,6 +299,8 @@ def _long_message_metadata(
     path: Path,
     media_uri: Optional[str],
 ) -> Optional[Dict[str, Any]]:
+    # 逻辑说明：`_long_message_metadata` 接收 `path`、`media_uri`，构造协议数据并完成外部传输，返回 `Optional[Dict[str, Any]]`。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     if not media_uri:
         return None
     return {
@@ -295,6 +315,8 @@ def _attach_long_message_metadata(
     content: Dict[str, Any],
     metadata: Optional[Dict[str, Any]],
 ) -> None:
+    # 逻辑说明：`_attach_long_message_metadata` 接收 `content`、`metadata`，构造协议数据并完成外部传输，不返回业务结果。
+    # 执行过程中包含实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     if metadata:
         content[MATRIX_LONG_MESSAGE_METADATA_KEY] = dict(metadata)
 
@@ -321,6 +343,8 @@ class QwenPawMatrixClient(AsyncClient):
         trace_context: Optional[Any] = None,
         timeout: Optional[float] = None,
     ) -> Any:
+        # 逻辑说明：`send` 接收 `method`、`path`、`data`、`headers`，构造协议数据并完成外部传输，并依次复用 `urlparse`、`parse_qs`，返回 `Any`。
+        # 执行过程中包含异步等待/流式产出、外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         if self.access_token and "access_token=" not in path:
             url = urllib.parse.urlparse(path)
             query = urllib.parse.parse_qs(url.query)
@@ -396,6 +420,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         enabled: bool = True,
         **_kwargs: Any,
     ) -> None:
+        # 逻辑说明：`__init__` 接收 `process`、`homeserver`、`matrix_user_id`、`access_token`，按既有分支组合输入并生成结果，并依次复用 `__init__`、`super`，不返回业务结果。
+        # 执行过程中包含实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         super().__init__(
             process=process,
             on_reply_sent=on_reply_sent,
@@ -448,6 +474,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
     # ------------------------------------------------------------------
 
     def get_debounce_key(self, payload: Any) -> str:
+        # 逻辑说明：`get_debounce_key` 接收 `payload`，读取、筛选并规范化现有数据，并依次复用 `get`，返回 `str`。
+        # 执行过程中包含外部 I/O；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         if isinstance(payload, dict):
             meta = payload.get("meta") or {}
             room_id = meta.get("room_id")
@@ -457,6 +485,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         return getattr(payload, "session_id", "") or ""
 
     def _room_control_epoch(self, room_id: str) -> int:
+        # 逻辑说明：`_room_control_epoch` 接收 `room_id`，按既有分支组合输入并生成结果，并依次复用 `get`，返回 `int`。
+        # 执行过程中包含实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         epochs = getattr(self, "_control_epochs", None)
         if epochs is None:
             epochs = {}
@@ -464,6 +494,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         return int(epochs.get(room_id, 0))
 
     def _advance_room_control_epoch(self, room_id: str) -> int:
+        # 逻辑说明：`_advance_room_control_epoch` 接收 `room_id`，计算目标值并更新持久或共享状态，并依次复用 `_room_control_epoch`，返回 `int`。
+        # 执行过程中包含实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         epoch = self._room_control_epoch(room_id) + 1
         self._control_epochs[room_id] = epoch
         return epoch
@@ -473,6 +505,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         room_id: str,
         meta: Optional[Dict[str, Any]],
     ) -> bool:
+        # 逻辑说明：`_response_is_stale` 接收 `room_id`、`meta`，按既有分支组合输入并生成结果，并依次复用 `get`、`_room_control_epoch`，返回 `bool`。
+        # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         if not isinstance(meta, dict):
             return False
         raw_epoch = meta.get(_MATRIX_CONTROL_EPOCH_KEY)
@@ -499,6 +533,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         workspace_dir: Path | None = None,
     ) -> "AgentTeamsMatrixChannel":
         # Support pydantic model, dict, or SimpleNamespace
+        # 逻辑说明：`from_config` 接收 `process`、`config`、`on_reply_sent`、`display_config`，按既有分支组合输入并生成结果，并依次复用 `hasattr`、`model_dump`，返回 `'AgentTeamsMatrixChannel'`。
+        # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         if isinstance(config, dict):
             raw = config
         else:
@@ -537,6 +573,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         process: Callable,
         on_reply_sent=None,
     ) -> "AgentTeamsMatrixChannel":
+        # 逻辑说明：`from_env` 接收 `process`、`on_reply_sent`，按既有分支组合输入并生成结果，并依次复用 `cls`、`get`，返回 `'AgentTeamsMatrixChannel'`。
+        # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         return cls(
             process=process,
             homeserver=os.environ.get("AGENTTEAMS_MATRIX_SERVER", ""),
@@ -561,6 +599,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         so the HTTP layer doesn't kill the connection while the
         homeserver is legitimately waiting for new events.
         """
+        # 逻辑说明：`_build_client_config` 接收 `encryption`，把输入转换为调用方需要的结构，并依次复用 `AsyncClientConfig`，返回 `AsyncClientConfig`。
+        # 执行过程中包含外部 I/O；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         sync_s = self.sync_timeout_ms / 1000
         request_timeout = max(sync_s + 30, 60)
         return AsyncClientConfig(
@@ -576,6 +616,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
 
     async def health_check(self) -> Dict[str, Any]:
         """Check Matrix client connection status."""
+        # 逻辑说明：`health_check` 不接收业务参数，依据频道开关、homeserver、客户端与同步任务状态返回 disabled、unhealthy 或 healthy 的探针结果。
+        # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         if not getattr(self, "enabled", True) or not self.homeserver:
             return {
                 "channel": self.channel,
@@ -615,6 +657,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         # When token or user_id/password is explicitly configured, do not
         # restore cached token, otherwise we may accidentally bypass the
         # intended auth path.
+        # 逻辑说明：`_restore_auth_state_before_start` 接收 `has_password_creds`、`has_token_cred`，推进组件生命周期并同步运行状态，并依次复用 `_load_auth_state`，不返回业务结果。
+        # 执行过程中包含外部 I/O；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
         has_explicit_identity = (
             has_password_creds or has_token_cred or self.matrix_user_id
         )
@@ -626,6 +670,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
     def _preflight_e2ee_dependencies(self) -> None:
         """Probe olm before creating AsyncClientConfig;
         disable E2EE if absent."""
+        # 逻辑说明：`_preflight_e2ee_dependencies` 在创建 nio 客户端前探测 olm；未启用加密时直接返回，缺少依赖时关闭 E2EE 并记录原因。
+        # 执行过程中包含实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         if not self.encryption:
             return
         try:
@@ -644,6 +690,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         # persists Olm/Megolm keys, and set config to auto-trust all devices
         # (appropriate for bot use cases where interactive verification is
         # impractical).
+        # 逻辑说明：`_init_async_client` 接收 `resolved_device_id`，推进组件生命周期并同步运行状态，并依次复用 `_e2ee_store_path`、`mkdir`，不返回业务结果。
+        # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         store_path = None
         if self.encryption:
             store_path = self._e2ee_store_path()
@@ -669,6 +717,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
     ) -> dict[str, Any]:
         # matrix-nio login() signature differs across versions. Build
         # kwargs from runtime signature to avoid argument collisions.
+        # 逻辑说明：`_password_login_kwargs_for_nio` 接收 `login_user`、`resolved_device_id`，推进组件生命周期并同步运行状态，并依次复用 `signature`，返回 `dict[str, Any]`。
+        # 执行过程中包含实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         login_sig = inspect.signature(self._client.login)
         login_kwargs: dict[str, Any] = {}
         login_params = login_sig.parameters
@@ -695,6 +745,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         login_kwargs: dict[str, Any],
         resolved_device_id: str,
     ) -> list[tuple[tuple[Any, ...], dict[str, Any]]]:
+        # 逻辑说明：`_password_login_attempts` 接收 `login_user`、`login_kwargs`、`resolved_device_id`，推进组件生命周期并同步运行状态，并依次复用 `append`，返回 `list[tuple[tuple[Any, ...], dict[str, Any]]]`。
+        # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         login_attempts: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
         if login_kwargs:
             login_attempts.append(((), login_kwargs))
@@ -722,6 +774,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         self,
         login_attempts: list[tuple[tuple[Any, ...], dict[str, Any]]],
     ) -> tuple[Any, Optional[TypeError]]:
+        # 逻辑说明：`_try_password_login_variants` 接收 `login_attempts`，推进组件生命周期并同步运行状态，并依次复用 `login`，返回 `tuple[Any, Optional[TypeError]]`。
+        # 执行过程中包含异步等待/流式产出、外部 I/O；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         last_exc: Optional[TypeError] = None
         for args, kwargs in login_attempts:
             try:
@@ -732,6 +786,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         return None, last_exc
 
     def _handle_password_login_success(self, resp: LoginResponse) -> None:
+        # 逻辑说明：`_handle_password_login_success` 接收 `resp`，按请求类型分派并编排后续步骤，并依次复用 `info`、`_save_auth_state`，不返回业务结果。
+        # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
         self._user_id = resp.user_id
         self._client.user_id = resp.user_id
         self._client.user = resp.user_id
@@ -765,6 +821,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         login_user: str,
         resolved_device_id: str,
     ) -> bool:
+        # 逻辑说明：`_login_with_password` 接收 `login_user`、`resolved_device_id`，推进组件生命周期并同步运行状态，并依次复用 `_password_login_kwargs_for_nio`、`_password_login_attempts`，返回 `bool`。
+        # 执行过程中包含异步等待/流式产出、外部 I/O；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         login_kwargs = self._password_login_kwargs_for_nio(
             login_user,
             resolved_device_id,
@@ -787,6 +845,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         return False
 
     async def _login_with_access_token(self) -> bool:
+        # 逻辑说明：`_login_with_access_token` 把已配置令牌交给 nio 客户端并调用 whoami，校验实际用户与配置用户一致后补齐客户端身份，返回令牌是否可用。
+        # 执行过程中包含异步等待/流式产出、外部 I/O、实例、文件或共享状态变更；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
         self._client.access_token = self.access_token
         whoami = await self._client.whoami()
         if isinstance(whoami, WhoamiResponse):
@@ -833,6 +893,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         return False
 
     def _register_plain_room_callbacks(self) -> None:
+        # 逻辑说明：`_register_plain_room_callbacks` 在非加密模式下把文本与媒体事件类型分别绑定到频道处理器，使 nio 同步结果进入正确回调。
+        # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         self._client.add_event_callback(
             self._on_room_event,
             (RoomMessageText,),
@@ -848,6 +910,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         )
 
     async def _setup_e2ee_after_login(self) -> bool:
+        # 逻辑说明：`_setup_e2ee_after_login` 在登录成功后按 nio 标志上传设备密钥并启用加密房间回调；任一步响应异常都返回 false 阻止带病启动。
+        # 执行过程中包含异步等待/流式产出、外部 I/O；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         if not self.encryption:
             return True
         if self._client.should_upload_keys:
@@ -899,6 +963,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         return True
 
     async def start(self) -> None:
+        # 逻辑说明：`start` 不接收业务参数，校验 homeserver/E2EE 依赖，创建并登录 Matrix 客户端，注册回调后启动唯一的后台同步任务。
+        # 执行过程中包含异步等待/流式产出、外部 I/O、实例、文件或共享状态变更；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
         if not self.homeserver:
             logger.warning(
                 "MatrixChannel: homeserver not configured, skipping component=matrix",
@@ -943,6 +1009,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         logger.info("MatrixChannel: sync loop started component=matrix")
 
     async def stop(self) -> None:
+        # 逻辑说明：`stop` 不接收业务参数，取消并等待同步任务退出，再关闭 nio 客户端并清空引用，确保重复停止不会泄露连接。
+        # 执行过程中包含异步等待、外部 I/O 与实例状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         if self._sync_task:
             self._sync_task.cancel()
             try:
@@ -977,11 +1045,15 @@ class AgentTeamsMatrixChannel(BaseChannel):
 
     @staticmethod
     def _ready_marker_path() -> Optional[Path]:
+        # 逻辑说明：`_ready_marker_path` 是静态配置解析器，从 AGENTTEAMS_MATRIX_CHANNEL_READY_FILE 读取就绪标记路径；未配置时返回 None。
+        # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         marker = os.environ.get("AGENTTEAMS_MATRIX_CHANNEL_READY_FILE", "").strip()
         return Path(marker) if marker else None
 
     def _mark_channel_ready(self) -> None:
         """Mark Matrix sync ready for worker-level readiness probes."""
+        # 逻辑说明：`_mark_channel_ready` 在 Matrix 首次同步成功后创建父目录并原子写入就绪标记，供容器 readiness probe 判断频道可用。
+        # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         path = self._ready_marker_path()
         if not path:
             return
@@ -1000,6 +1072,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         restore_identity: bool = True,
     ) -> None:
         """Best-effort load persisted access_token/user_id/device_id."""
+        # 逻辑说明：`_load_auth_state` 接收 `restore_token`、`restore_identity`，读取、筛选并规范化现有数据，并依次复用 `_auth_state_path`、`exists`，不返回业务结果。
+        # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
         path = self._auth_state_path()
         if not path.exists():
             return
@@ -1044,6 +1118,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
 
     def _save_auth_state(self) -> None:
         """Persist access_token/user_id/device_id for stable restarts."""
+        # 逻辑说明：`_save_auth_state` 从已登录 nio 客户端提取 access token、user ID 与 device ID，写入权限受限的认证状态文件以便重启复用。
+        # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
         if not self._client:
             return
         token = getattr(self._client, "access_token", "") or ""
@@ -1079,6 +1155,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         startup, so it's already on disk when this runs — even on a fresh
         container after destroy/recreate.
         """
+        # 逻辑说明：`_load_sync_token` 从 FileSync 已恢复的 next_batch 文件读取 Matrix 增量同步游标，文件缺失、为空或读取失败时返回 None。
+        # 执行过程中包含外部 I/O；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
         path = self._sync_token_path()
         if path and path.exists():
             try:
@@ -1098,6 +1176,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
 
     def _save_sync_token(self, token: str) -> None:
         """Persist next_batch token to disk (push_loop uploads it to MinIO)."""
+        # 逻辑说明：`_save_sync_token` 接收 `token`，计算目标值并更新持久或共享状态，并依次复用 `_sync_token_path`、`mkdir`，不返回业务结果。
+        # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
         path = self._sync_token_path()
         if path:
             try:
@@ -1118,6 +1198,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         - Claim one-time keys to establish Olm sessions
         - Send outgoing to-device messages (key shares, key requests)
         """
+        # 逻辑说明：`_e2ee_maintenance` 在每次同步后按 nio 待办状态上传/查询/领取密钥并发送 to-device 消息，维持加密会话可解密、可分享。
+        # 执行过程中包含异步等待/流式产出、外部 I/O；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         if not self.encryption or not self._client or not self._client.olm:
             return
         try:
@@ -1138,6 +1220,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         event: KeyVerificationEvent,
     ) -> None:
         """Complete the bot side of an Element SAS verification challenge."""
+        # 逻辑说明：`_on_key_verification_event` 接收 `event`，按既有分支组合输入并生成结果，并依次复用 `info`、`type`，不返回业务结果。
+        # 执行过程中包含异步等待/流式产出、外部 I/O；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         if not self._client or not self._client.olm:
             logger.info(
                 "MatrixChannel: verification event received "
@@ -1213,6 +1297,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         event: ToDeviceEvent,
     ) -> None:
         """Probe raw to-device verification event types for troubleshooting."""
+        # 逻辑说明：`_on_to_device_probe_event` 接收 `event`，按既有分支组合输入并生成结果，并依次复用 `get`、`startswith`，不返回业务结果。
+        # 执行过程中包含异步等待/流式产出、外部 I/O；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         raw_type = getattr(event, "type", "")
         if not raw_type:
             raw_type = getattr(event, "source", {}).get("type", "")
@@ -1247,6 +1333,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         event: RoomKeyRequest | RoomKeyRequestCancellation,
     ) -> None:
         """Log room-key request events that often require manual review."""
+        # 逻辑说明：`_on_room_key_request_event` 接收 `event`，按既有分支组合输入并生成结果，并依次复用 `warning`、`info`，不返回业务结果。
+        # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         if isinstance(event, RoomKeyRequest):
             logger.warning(
                 "MatrixChannel: room key request received; other device may "
@@ -1272,6 +1360,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         event: ToDeviceEvent,
     ) -> None:
         """Compat path for m.key.verification.request on older matrix-nio."""
+        # 逻辑说明：`_handle_unknown_key_verification_request` 接收 `event`，按请求类型分派并编排后续步骤，并依次复用 `get`、`debug`，不返回业务结果。
+        # 执行过程中包含异步等待/流式产出、外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         if not self._client or not self._client.olm:
             return
 
@@ -1366,6 +1456,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         event: ToDeviceEvent,
     ) -> None:
         """Handle done event emitted as UnknownToDeviceEvent on older nio."""
+        # 逻辑说明：`_handle_unknown_key_verification_done` 接收 `event`，按请求类型分派并编排后续步骤，并依次复用 `get`、`info`，不返回业务结果。
+        # 执行过程中包含异步等待/流式产出、外部 I/O；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         source = getattr(event, "source", {}) or {}
         content = source.get("content", {}) or {}
         tx = str(content.get("transaction_id", "") or "")
@@ -1384,6 +1476,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         event: KeyVerificationStart,
     ) -> None:
         """Accept Element's SAS start, querying device keys if needed."""
+        # 逻辑说明：`_handle_key_verification_start` 接收 `event`，按请求类型分派并编排后续步骤，并依次复用 `_recover_key_verification_start`、`warning`，不返回业务结果。
+        # 执行过程中包含异步等待/流式产出、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         if not self._client or not self._client.olm:
             return
         self._verification_tx_peers[event.transaction_id] = (
@@ -1434,6 +1528,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
 
     async def _send_verification_done(self, transaction_id: str) -> None:
         """Send m.key.verification.done for runtimes lacking done helpers."""
+        # 逻辑说明：`_send_verification_done` 接收 `transaction_id`，构造协议数据并完成外部传输，并依次复用 `get`、`warning`，不返回业务结果。
+        # 执行过程中包含异步等待/流式产出；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         if (
             not self._client
             or not transaction_id
@@ -1494,6 +1590,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         event: KeyVerificationStart,
     ) -> None:
         """Re-process start event after matrix-nio queried unknown devices."""
+        # 逻辑说明：`_recover_key_verification_start` 接收 `event`，推进组件生命周期并同步运行状态，并依次复用 `keys_query`、`warning`，不返回业务结果。
+        # 执行过程中包含异步等待/流式产出；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         assert self._client is not None
         assert self._client.olm is not None
 
@@ -1522,6 +1620,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         event: KeyVerificationKey,
     ) -> None:
         """Log the SAS challenge and confirm the bot side."""
+        # 逻辑说明：`_handle_key_verification_key` 接收 `event`，按请求类型分派并编排后续步骤，并依次复用 `get`、`warning`，不返回业务结果。
+        # 执行过程中包含异步等待/流式产出、外部 I/O；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
         if not self._client:
             return
 
@@ -1573,6 +1673,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
     @staticmethod
     def _format_sas_challenge(sas: Any) -> str:
         """Return a human-readable SAS challenge for logs."""
+        # 逻辑说明：`_format_sas_challenge` 接收 `sas`，把输入转换为调用方需要的结构，并依次复用 `callable`、`get_emoji`，返回 `str`。
+        # 执行过程中包含实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         parts: list[str] = []
 
         get_emoji = getattr(sas, "get_emoji", None)
@@ -1604,6 +1706,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
 
     # pylint: disable=too-many-branches,too-many-statements
     async def _sync_loop(self) -> None:
+        # 逻辑说明：`_sync_loop` 加载持久化 next_batch；首次部署先静默捕获游标防止重放旧消息，随后循环增量同步、E2EE 维护并保存新游标。
+        # 执行过程中包含异步等待/流式产出、外部 I/O、实例、文件或共享状态变更；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
         next_batch: Optional[str] = self._load_sync_token()
 
         # When no persisted token exists (old version upgrade or first
@@ -1760,6 +1864,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         is_dm: bool,
     ) -> bool:
         """Return True if chat type is muted at channel level."""
+        # 逻辑说明：`_is_channel_disabled` 接收 `sender_id`、`room_id`、`is_dm`，按既有分支组合输入并生成结果，并依次复用 `warning`，返回 `bool`。
+        # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         if is_dm and self.dm_disabled:
             logger.warning(
                 "MatrixChannel: dropping DM message (dm_disabled) sender=%s room=%s",
@@ -1779,6 +1885,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
 
     def _require_mention(self, room_id: str) -> bool:
         """Per-room config; default is require mention in group rooms."""
+        # 逻辑说明：`_require_mention` 接收 `room_id`，校验并规范化输入，并依次复用 `get`，返回 `bool`。
+        # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         room_cfg = self.groups.get(room_id) or self.groups.get("*")
         if room_cfg:
             if room_cfg.get("autoReply") is True:
@@ -1789,6 +1897,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
 
     # pylint: disable=too-many-return-statements
     def _was_mentioned(self, event: Any, text: str) -> bool:
+        # 逻辑说明：`_was_mentioned` 接收 `event`、`text`，按既有分支组合输入并生成结果，并依次复用 `get`、`escape`，返回 `bool`。
+        # 外部或状态副作用仅来自上述既有 helper 调用；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
         if not self._user_id:
             return False
         # 1. Check m.mentions (structured mention from Matrix spec)
@@ -1827,6 +1937,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
     def _teamharness_self_trigger(
         self, room_id: str, event: Any
     ) -> dict[str, Any] | None:
+        # 逻辑说明：`_teamharness_self_trigger` 接收 `room_id`、`event`，按既有分支组合输入并生成结果，并依次复用 `get`、`strip`，返回 `dict[str, Any] | None`。
+        # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         content = getattr(event, "source", {}).get("content", {})
         if not isinstance(content, dict):
             return None
@@ -1854,6 +1966,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         E.g. ``"@worker:hs.example /new"`` → ``"/new"``
              ``"math 💕: /clear"`` → ``"/clear"``.
         """
+        # 逻辑说明：`_strip_mention_prefix` 接收 `text`、`room`，按既有分支组合输入并生成结果，并依次复用 `escape`、`sub`，返回 `str`。
+        # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         if not self._user_id:
             return text
         # 1. Strip MXID (@user:server) at start
@@ -1905,6 +2019,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
 
     def _control_command_text(self, text: str) -> str | None:
         """Return normalized runtime control command text, if any."""
+        # 逻辑说明：`_control_command_text` 接收 `text`，按既有分支组合输入并生成结果，并依次复用 `strip`、`is_control_command`，返回 `str | None`。
+        # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         registry = getattr(self, "_command_registry", None)
         if registry is None:
             return None
@@ -1934,6 +2050,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         looking up the room in the nio client's rooms dict (which is
         populated by full_state sync at startup).
         """
+        # 逻辑说明：`_get_display_name` 接收 `room`、`user_id`，读取、筛选并规范化现有数据，并依次复用 `user_name`、`debug`，返回 `str`。
+        # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         # 1. Try the room object directly (passed by nio callback)
         try:
             name = room.user_name(user_id)
@@ -1979,6 +2097,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
 
     def _record_history(self, room_id: str, entry: HistoryEntry) -> None:
         """Append *entry* to the per-room history buffer (respect limit)."""
+        # 逻辑说明：`_record_history` 接收 `room_id`、`entry`，计算目标值并更新持久或共享状态，并依次复用 `setdefault`、`append`，不返回业务结果。
+        # 执行过程中包含实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         limit = self.history_limit
         if limit <= 0:
             return
@@ -1989,6 +2109,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
 
     def _build_history_prefix(self, room_id: str) -> str:
         """Format buffered history entries as a multi-line text block."""
+        # 逻辑说明：`_build_history_prefix` 接收 `room_id`，把输入转换为调用方需要的结构，并依次复用 `get`、`append`，返回 `str`。
+        # 执行过程中包含实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         entries = self._room_histories.get(room_id, [])
         if not entries:
             return ""
@@ -2015,6 +2137,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
 
         Returns a (possibly new) list — the original is not mutated.
         """
+        # 逻辑说明：`_apply_history_to_parts` 接收 `room_id`、`content_parts`，按既有分支组合输入并生成结果，并依次复用 `_build_history_prefix`、`get`，返回 `list[Any]`。
+        # 执行过程中包含实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         if self.history_limit <= 0:
             return content_parts
         history_text = self._build_history_prefix(room_id)
@@ -2051,6 +2175,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
 
     def _clear_history(self, room_id: str) -> None:
         """Drop the buffered history for *room_id*."""
+        # 逻辑说明：`_clear_history` 接收 `room_id`，按既有分支组合输入并生成结果，并依次复用 `pop`，不返回业务结果。
+        # 执行过程中包含实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         self._room_histories.pop(room_id, None)
 
     async def _record_media_history(
@@ -2066,6 +2192,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         and, for images when vision is enabled, downloads the actual file so it
         can be included as an image content part later.
         """
+        # 逻辑说明：`_record_media_history` 接收 `room`、`event`、`sender_id`、`room_id`，计算目标值并更新持久或共享状态，并依次复用 `lstrip`、`_download_mxc`，不返回业务结果。
+        # 执行过程中包含异步等待/流式产出、外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         body = event.body or ""
         media_parts: list[Any] = []
 
@@ -2127,6 +2255,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
 
     def _media_dir(self) -> Path:
         """Return (and create) the local media storage directory."""
+        # 逻辑说明：`_media_dir` 不接收参数，返回当前频道 workspace 下的 media 目录；没有专属 workspace 时退回全局工作目录。
+        # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         if self._workspace_dir:
             return self._workspace_dir / "media"
         return WORKING_DIR / "media"
@@ -2137,6 +2267,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         Returns the original URL unchanged if it is not an mxc:// URL or if
         the format is invalid.
         """
+        # 逻辑说明：`_mxc_to_http` 接收 `mxc_url`，按既有分支组合输入并生成结果，并依次复用 `startswith`、`split`，返回 `str`。
+        # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         if not mxc_url:
             return mxc_url
         if not mxc_url.startswith("mxc://"):
@@ -2153,6 +2285,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         filename: str,
     ) -> Optional[str]:
         """Download mxc:// to a local file; return path or None."""
+        # 逻辑说明：`_download_mxc` 接收 `mxc_url`、`filename`，构造协议数据并完成外部传输，并依次复用 `startswith`、`split`，返回 `Optional[str]`。
+        # 执行过程中包含异步等待/流式产出、外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         if not mxc_url.startswith("mxc://"):
             return None
         try:
@@ -2190,6 +2324,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         iv: str,
     ) -> Optional[str]:
         """Download an encrypted mxc:// URI, decrypt it, and save locally."""
+        # 逻辑说明：`_download_encrypted_mxc` 接收 `mxc_url`、`filename`、`key`、`hashes`，构造协议数据并完成外部传输，并依次复用 `startswith`、`split`，返回 `Optional[str]`。
+        # 执行过程中包含异步等待/流式产出、外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         if not mxc_url.startswith("mxc://") or not self._client:
             return None
         try:
@@ -2242,6 +2378,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         event: MegolmEvent,
     ) -> None:
         """Handle undecryptable encrypted events (missing session key)."""
+        # 逻辑说明：`_on_megolm_event` 接收 `room`、`event`，按既有分支组合输入并生成结果，并依次复用 `warning`，不返回业务结果。
+        # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         logger.warning(
             "MatrixChannel: could not decrypt event %s in %s (session_id=%s)",
             event.event_id,
@@ -2260,6 +2398,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         Delivered by matrix-nio after Megolm decrypt. File bytes are still
         AES-encrypted; download + decrypt with key/iv/hashes from the event.
         """
+        # 逻辑说明：`_on_room_encrypted_media_event` 接收 `room`、`event`，按既有分支组合输入并生成结果，并依次复用 `_is_dm_room`、`_is_channel_disabled`，不返回业务结果。
+        # 执行过程中包含异步等待/流式产出、外部 I/O、实例、文件或共享状态变更；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
         if event.sender == self._user_id:
             return
 
@@ -2442,6 +2582,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
 
     async def _upload_file(self, file_ref: str) -> Optional[str]:
         """Upload a local file to Matrix; return mxc:// URI or None."""
+        # 逻辑说明：`_upload_file` 接收 `file_ref`，构造协议数据并完成外部传输，并依次复用 `Path`、`file_url_to_local_path`，返回 `Optional[str]`。
+        # 执行过程中包含异步等待/流式产出、外部 I/O；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         if not self._client:
             return None
         try:
@@ -2491,6 +2633,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         sender_id: str,
     ) -> bool:
         """Best-effort DM check when joined_members API is unavailable."""
+        # 逻辑说明：`_is_dm_room_fallback` 接收 `room`、`sender_id`，按既有分支组合输入并生成结果，并依次复用 `_looks_like_teamharness_task_room`、`keys`，返回 `bool`。
+        # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         room_id = str(getattr(room, "room_id", "") or "")
         if self._looks_like_teamharness_task_room(room_id, room):
             return False
@@ -2510,6 +2654,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         room: Optional[MatrixRoom],
     ) -> bool:
         """Return True when room state looks like a TeamHarness task room."""
+        # 逻辑说明：`_room_has_teamharness_task_marker` 接收 `room`，计算目标值并更新持久或共享状态，并依次复用 `callable`、`strip`，返回 `bool`。
+        # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         if not room:
             return False
         for attr in ("topic", "name", "display_name"):
@@ -2523,6 +2669,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
 
     def _is_known_teamharness_task_room(self, room_id: str) -> bool:
         """Check local TeamHarness task metadata for an assignment room id."""
+        # 逻辑说明：`_is_known_teamharness_task_room` 接收 `room_id`，按既有分支组合输入并生成结果，并依次复用 `time`、`get`，返回 `bool`。
+        # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         if not room_id:
             return False
         now = int(time.time() * 1000)
@@ -2564,6 +2712,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         room_id: str,
         room: Optional[MatrixRoom] = None,
     ) -> bool:
+        # 逻辑说明：`_looks_like_teamharness_task_room` 接收 `room_id`、`room`，按既有分支组合输入并生成结果，并依次复用 `_room_has_teamharness_task_marker`、`_is_known_teamharness_task_room`，返回 `bool`。
+        # 执行过程中包含实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         if self._room_has_teamharness_task_marker(room):
             return True
         return self._is_known_teamharness_task_room(room_id)
@@ -2586,6 +2736,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         Returns:
             True if the room has exactly 2 members (self and sender)
         """
+        # 逻辑说明：`_is_dm_room` 接收 `room_id`、`sender_id`、`room`，按既有分支组合输入并生成结果，并依次复用 `_looks_like_teamharness_task_room`、`debug`，返回 `bool`。
+        # 执行过程中包含异步等待/流式产出、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         if not self._client or not self._user_id:
             return False
 
@@ -2671,6 +2823,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         room: MatrixRoom,
         event: RoomMessageText,
     ) -> None:
+        # 逻辑说明：`_on_room_event` 接收 `room`、`event`，按既有分支组合输入并生成结果，并依次复用 `_teamharness_self_trigger`、`_is_dm_room`，不返回业务结果。
+        # 执行过程中包含异步等待/流式产出、外部 I/O、实例、文件或共享状态变更；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
         room_id = room.room_id
         sender_id = event.sender
         teamharness_self_trigger = None
@@ -2857,6 +3011,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
     # pylint: disable=too-many-branches,too-many-statements
     async def _on_room_media_event(self, room: MatrixRoom, event: Any) -> None:
         """Handle incoming media messages (image, file, audio, video)."""
+        # 逻辑说明：`_on_room_media_event` 接收 `room`、`event`，按既有分支组合输入并生成结果，并依次复用 `_is_dm_room`、`_is_channel_disabled`，不返回业务结果。
+        # 执行过程中包含异步等待/流式产出、外部 I/O、实例、文件或共享状态变更；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
         if event.sender == self._user_id:
             return
 
@@ -3020,6 +3176,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
 
     async def _send_read_receipt(self, room_id: str, event_id: str) -> None:
         """Mark a message as read (sends both read receipt and read marker)."""
+        # 逻辑说明：`_send_read_receipt` 接收 `room_id`、`event_id`，读取、筛选并规范化现有数据，并依次复用 `room_read_markers`、`debug`，不返回业务结果。
+        # 执行过程中包含异步等待/流式产出、外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         if not self._client or not event_id:
             return
         try:
@@ -3048,6 +3206,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         before the server timeout, up to ``TYPING_MAX_DURATION_S``.
         When turning off, cancels the renewal task.
         """
+        # 逻辑说明：`_send_typing` 接收 `room_id`、`typing`、`timeout`，构造协议数据并完成外部传输，并依次复用 `pop`、`done`，不返回业务结果。
+        # 执行过程中包含异步等待/流式产出、外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         if not self._client:
             return
         # Cancel any existing renewal task for this room
@@ -3078,6 +3238,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         timeout: int = TYPING_SERVER_TIMEOUT_MS,
     ) -> None:
         """Re-send typing=true until cap or cancellation."""
+        # 逻辑说明：`_typing_renewal_loop` 接收 `room_id`、`timeout`，按既有分支组合输入并生成结果，并依次复用 `sleep`、`room_typing`，不返回业务结果。
+        # 执行过程中包含异步等待/流式产出、外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         elapsed = 0
         try:
             while elapsed < TYPING_MAX_DURATION_S:
@@ -3124,6 +3286,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
     # pylint: disable=too-many-return-statements
     def _build_content_part(self, p: dict[str, Any]) -> Any:
         """Convert a native content-part dict to a QwenPaw Content object."""
+        # 逻辑说明：`_build_content_part` 接收 `p`，把输入转换为调用方需要的结构，并依次复用 `get`、`TextContent`，返回 `Any`。
+        # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         t = p.get("type")
         if t == "text" and p.get("text"):
             return TextContent(type=ContentType.TEXT, text=p["text"])
@@ -3157,6 +3321,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         return None
 
     def build_agent_request_from_native(self, native_payload: Any) -> Any:
+        # 逻辑说明：`build_agent_request_from_native` 接收 `native_payload`，把输入转换为调用方需要的结构，并依次复用 `get`、`TextContent`，返回 `Any`。
+        # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         parts = native_payload.get("content_parts", [])
         meta = native_payload.get("meta", {})
         sender_id = native_payload.get("sender_id", "")
@@ -3184,6 +3350,7 @@ class AgentTeamsMatrixChannel(BaseChannel):
         return req
 
     def resolve_session_id(self, sender_id: str, channel_meta=None) -> str:
+        # 逻辑说明：`resolve_session_id` 优先从 Matrix 元数据读取 room_id，并添加 `matrix:` 前缀作为会话键；它只生成标识，不发送消息或修改房间。
         room_id = (channel_meta or {}).get("room_id", sender_id)
         return f"matrix:{room_id}"
 
@@ -3196,11 +3363,15 @@ class AgentTeamsMatrixChannel(BaseChannel):
         :meth:`resolve_session_id`; strip it so the value is a raw
         Matrix room_id that can be passed directly to ``room_send``.
         """
+        # 逻辑说明：`to_handle_from_target` 接收 `user_id`、`session_id`，按请求类型分派并编排后续步骤，并依次复用 `startswith`，返回 `str`。
+        # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         if session_id.startswith("matrix:"):
             return session_id[len("matrix:") :]
         return session_id
 
     def get_to_handle_from_request(self, request: Any) -> str:
+        # 逻辑说明：`get_to_handle_from_request` 接收 `request`，读取、筛选并规范化现有数据，并依次复用 `get`，返回 `str`。
+        # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         meta = getattr(request, "channel_meta", {}) or {}
         return meta.get("room_id", getattr(request, "user_id", ""))
 
@@ -3215,6 +3386,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
 
     def _extract_mentions_from_text(self, text: str) -> list[str]:
         """Extract all @user:domain Matrix IDs from message text."""
+        # 逻辑说明：`_extract_mentions_from_text` 接收 `text`，按既有顺序执行资源生命周期步骤，并依次复用 `findall`、`fromkeys`，返回 `list[str]`。
+        # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         matches = self._MATRIX_USER_ID_RE.findall(text)
         return list(dict.fromkeys(matches))  # dedupe, preserve order
 
@@ -3228,6 +3401,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         fallback_user_id: Optional[str] = None,
     ) -> None:
         """Attach Matrix mentions in both visible and structured forms."""
+        # 逻辑说明：`_apply_mention` 接收 `content`、`user_id`、`room_id`、`explicit_user_ids`，按既有分支组合输入并生成结果，并依次复用 `get`、`_extract_mentions_from_text`，不返回业务结果。
+        # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
         body = content.get("body", "") or ""
         if isinstance(explicit_user_ids, str):
             targets = [explicit_user_ids]
@@ -3270,6 +3445,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
 
     def _resolve_display_name(self, user_id: str, room_id: str) -> str:
         """Best-effort display name for *user_id* in *room_id*."""
+        # 逻辑说明：`_resolve_display_name` 接收 `user_id`、`room_id`，校验并规范化输入，并依次复用 `get`、`user_name`，返回 `str`。
+        # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         if self._client:
             room = self._client.rooms.get(room_id)
             if room:
@@ -3292,6 +3469,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         room: Optional[MatrixRoom] = None,
     ) -> None:
         """Keep nio's encrypted room state consistent for outbound sends."""
+        # 逻辑说明：`_mark_room_encrypted` 接收 `room_id`、`room`，计算目标值并更新持久或共享状态，并依次复用 `add`、`get`，不返回业务结果。
+        # 执行过程中包含实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         if not self._client:
             return
         encrypted_rooms = getattr(self._client, "encrypted_rooms", None)
@@ -3313,6 +3492,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
 
     def _room_will_encrypt(self, room_id: str) -> bool:
         """Return whether matrix-nio will encrypt room_send for this room."""
+        # 逻辑说明：`_room_will_encrypt` 接收 `room_id`，按既有分支组合输入并生成结果，并依次复用 `get`、`_mark_room_encrypted`，返回 `bool`。
+        # 执行过程中包含实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         if not self._client or not getattr(self._client, "olm", None):
             return False
         rooms = getattr(self._client, "rooms", {})
@@ -3335,6 +3516,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         tokens or partial state), sends are still plaintext and Element shows
         "not encrypted". Fetch room state once per send attempt when needed.
         """
+        # 逻辑说明：`_prepare_room_send` 接收 `room_id`，构造协议数据并完成外部传输，并依次复用 `warning`、`_e2ee_maintenance`，不返回业务结果。
+        # 执行过程中包含异步等待/流式产出、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         if not self.encryption:
             return
         if not self._client or not getattr(self._client, "olm", None):
@@ -3391,6 +3574,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
 
     def _is_thread_event(self, event: Any) -> bool:
         """Return True when an inbound Matrix event belongs to a thread."""
+        # 逻辑说明：`_is_thread_event` 接收 `event`，按既有分支组合输入并生成结果，并依次复用 `get`，返回 `bool`。
+        # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         source = getattr(event, "source", {}) or {}
         if not isinstance(source, dict):
             return False
@@ -3404,6 +3589,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
 
     def _targeted_readiness_probe_reply(self, event: Any, text: str) -> str | None:
         """Return a direct readiness reply if this event explicitly targets us."""
+        # 逻辑说明：`_targeted_readiness_probe_reply` 接收 `event`、`text`，读取、筛选并规范化现有数据，并依次复用 `_readiness_probe_reply`、`get`，返回 `str | None`。
+        # 执行过程中包含外部 I/O；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
         reply = _readiness_probe_reply(text)
         if not reply or not self._user_id:
             return None
@@ -3417,6 +3604,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
 
     async def _send_plain_text(self, room_id: str, text: str) -> None:
         """Send a plain Matrix text event without invoking the agent path."""
+        # 逻辑说明：`_send_plain_text` 接收 `room_id`、`text`，构造协议数据并完成外部传输，并依次复用 `error`、`_room_send_with_retry`，不返回业务结果。
+        # 执行过程中包含异步等待/流式产出、外部 I/O；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         if not self._client:
             logger.error("MatrixChannel: direct send called but client not ready")
             return
@@ -3443,6 +3632,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         thread_root_event_id: str,
     ) -> Dict[str, Any]:
         """Return send metadata pinned to a Matrix thread root."""
+        # 逻辑说明：`_with_thread_relation_meta` 接收 `meta`、`thread_root_event_id`，按既有分支组合输入并生成结果，并依次复用 `setdefault`，返回 `Dict[str, Any]`。
+        # 执行过程中包含实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         meta_dict = dict(meta or {})
         if thread_root_event_id:
             meta_dict[_MATRIX_THREAD_META_KEY] = thread_root_event_id
@@ -3456,6 +3647,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         meta: Optional[Dict[str, Any]],
     ) -> bool:
         """Send follow-up parts in the current thread, or queue until rooted."""
+        # 逻辑说明：`_send_or_queue_thread_parts` 接收 `room_id`、`parts`、`meta`，构造协议数据并完成外部传输，并依次复用 `_response_is_stale`、`get`，返回 `bool`。
+        # 执行过程中包含异步等待/流式产出、外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         meta_dict = meta if isinstance(meta, dict) else {}
         if self._response_is_stale(room_id, meta_dict):
             return True
@@ -3479,6 +3672,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         meta: Optional[Dict[str, Any]],
     ) -> None:
         """Flush queued follow-up parts after the first event becomes root."""
+        # 逻辑说明：`_flush_pending_thread_parts` 接收 `room_id`、`meta`，按既有分支组合输入并生成结果，并依次复用 `pop`、`_send_or_queue_thread_parts`，不返回业务结果。
+        # 执行过程中包含异步等待/流式产出、外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         meta_dict = meta if isinstance(meta, dict) else {}
         pending = meta_dict.pop(_MATRIX_PENDING_THREAD_PARTS_KEY, []) or []
         if pending:
@@ -3491,6 +3686,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         meta: Optional[Dict[str, Any]],
     ) -> None:
         """Flush a queued final message event into the established thread."""
+        # 逻辑说明：`_flush_pending_final_message_to_thread` 接收 `room_id`、`meta`，构造协议数据并完成外部传输，并依次复用 `pop`、`get`，不返回业务结果。
+        # 执行过程中包含异步等待/流式产出、外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         meta_dict = meta if isinstance(meta, dict) else {}
         pending = meta_dict.pop(_MATRIX_PENDING_FINAL_MESSAGE_KEY, None)
         if not pending:
@@ -3517,6 +3714,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         send_meta: Dict[str, Any],
     ) -> None:
         """Create a placeholder thread-root message if none exists yet."""
+        # 逻辑说明：`_ensure_thread_root` 接收 `to_handle`、`send_meta`，按既有分支组合输入并生成结果，并依次复用 `_response_is_stale`、`get`，不返回业务结果。
+        # 执行过程中包含异步等待/流式产出、外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         if self._response_is_stale(to_handle, send_meta):
             return
         if send_meta.get(_MATRIX_OWN_THREAD_ROOT_KEY):
@@ -3554,6 +3753,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         send_meta: Dict[str, Any],
         text: str,
     ) -> Optional[str]:
+        # 逻辑说明：`_send_streaming_thread_text` 接收 `to_handle`、`send_meta`、`text`，构造协议数据并完成外部传输，并依次复用 `_response_is_stale`、`get`，返回 `Optional[str]`。
+        # 执行过程中包含异步等待/流式产出、外部 I/O；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         if self._response_is_stale(to_handle, send_meta):
             return None
         thread_root = (
@@ -3598,6 +3799,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         msgtype: str = "m.notice",
         html: Optional[str] = None,
     ) -> None:
+        # 逻辑说明：`_edit_matrix_event` 接收 `to_handle`、`event_id`、`text`、`msgtype`，构造协议数据并完成外部传输，并依次复用 `_edit_fallback_html`、`_matrix_event_payload_size`，不返回业务结果。
+        # 执行过程中包含异步等待/流式产出、外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         if not event_id or not self._client:
             return
         new_content: dict[str, Any] = {"msgtype": msgtype, "body": text}
@@ -3648,6 +3851,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         from the original sender's event_id and would incorrectly thread
         every reply under the sender's message.
         """
+        # 逻辑说明：`_apply_thread_relation` 接收 `content`、`meta`，按既有分支组合输入并生成结果，并依次复用 `get`，不返回业务结果。
+        # 执行过程中包含实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         if not isinstance(content, dict) or not isinstance(meta, dict):
             return
         thread_root = meta.get(_MATRIX_THREAD_META_KEY) or meta.get(
@@ -3662,6 +3867,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         }
 
     def _attachment_parent_event_id(self, meta: Optional[Dict[str, Any]]) -> str:
+        # 逻辑说明：`_attachment_parent_event_id` 接收 `meta`，按既有分支组合输入并生成结果，并依次复用 `strip`、`get`，返回 `str`。
+        # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         if not isinstance(meta, dict):
             return ""
         for key in ATTACHMENT_PARENT_EVENT_KEYS:
@@ -3675,6 +3882,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         content: Dict[str, Any],
         meta: Optional[Dict[str, Any]],
     ) -> None:
+        # 逻辑说明：`_apply_attachment_relation` 接收 `content`、`meta`，按既有分支组合输入并生成结果，并依次复用 `_attachment_parent_event_id`，不返回业务结果。
+        # 执行过程中包含实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         parent_event_id = self._attachment_parent_event_id(meta)
         if not parent_event_id:
             return
@@ -3684,6 +3893,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         }
 
     def _matrix_attachment_context_path(self) -> Optional[Path]:
+        # 逻辑说明：`_matrix_attachment_context_path` 不接收参数，优先读取显式附件上下文文件，缺省时落到 QwenPaw 工作目录中的固定文件名；本函数不传输媒体。
+        # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         raw = os.environ.get("TEAMHARNESS_MATRIX_CONTEXT_FILE", "").strip()
         if raw:
             return Path(raw)
@@ -3696,6 +3907,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
             return None
 
     def _write_attachment_context(self, room_id: str, event_id: str) -> None:
+        # 逻辑说明：`_write_attachment_context` 接收 `room_id`、`event_id`，计算目标值并更新持久或共享状态，并依次复用 `_matrix_attachment_context_path`、`is_file`，不返回业务结果。
+        # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         if not room_id or not event_id:
             return
         path = self._matrix_attachment_context_path()
@@ -3739,6 +3952,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         matrix_msgtype: str,
         mxc_uri: str,
     ) -> Dict[str, Any]:
+        # 逻辑说明：`_matrix_media_event_content` 接收 `file_ref`、`matrix_msgtype`、`mxc_uri`，构造协议数据并完成外部传输，并依次复用 `file_url_to_local_path`、`basename`，返回 `Dict[str, Any]`。
+        # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         path_str = file_url_to_local_path(file_ref) or file_ref
         filename = os.path.basename(path_str) or "file"
         mime_type, _ = mimetypes.guess_type(path_str)
@@ -3765,6 +3980,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         mxc_uri: str,
         meta: Optional[Dict[str, Any]],
     ) -> Optional[str]:
+        # 逻辑说明：`_send_uploaded_media_event` 接收 `room_id`、`file_ref`、`matrix_msgtype`、`mxc_uri`，构造协议数据并完成外部传输，并依次复用 `_matrix_media_event_content`、`get`，返回 `Optional[str]`。
+        # 执行过程中包含异步等待/流式产出、外部 I/O；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
         event_content = self._matrix_media_event_content(
             file_ref,
             matrix_msgtype,
@@ -3798,6 +4015,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         *,
         html_body: Optional[str] = None,
     ) -> Dict[str, Any]:
+        # 逻辑说明：`_matrix_text_content` 接收 `room_id`、`text`、`meta`、`msgtype`，构造协议数据并完成外部传输，并依次复用 `_md_to_html`、`get`，返回 `Dict[str, Any]`。
+        # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
         content: dict[str, Any] = {
             "msgtype": msgtype,
             "body": text,
@@ -3826,6 +4045,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         meta: Optional[Dict[str, Any]],
     ) -> None:
         """Emit one bot-readable final event without duplicating visible text."""
+        # 逻辑说明：`_send_agentteams_final_signal` 接收 `room_id`、`text`、`meta`，构造协议数据并完成外部传输，并依次复用 `_visible_final_text`、`_ends_with_no_reply_control`，不返回业务结果。
+        # 执行过程中包含异步等待/流式产出、外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         if not self._client:
             return
         visible = self._visible_final_text(text)
@@ -3855,6 +4076,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
             )
 
     def _write_long_message_file(self, text: str) -> Path:
+        # 逻辑说明：`_write_long_message_file` 接收 `text`，计算目标值并更新持久或共享状态，并依次复用 `_media_dir`、`mkdir`，返回 `Path`。
+        # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         directory = self._media_dir() / "long-messages"
         directory.mkdir(parents=True, exist_ok=True)
         path = directory / f"matrix-long-message-{time.time_ns()}.md"
@@ -3868,6 +4091,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         media_uri: Optional[str],
         preview_chars: int,
     ) -> str:
+        # 逻辑说明：`_long_message_summary` 接收 `text`、`path`、`media_uri`、`preview_chars`，构造协议数据并完成外部传输，并依次复用 `stat`、`rstrip`，返回 `str`。
+        # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         size = path.stat().st_size
         if media_uri:
             notice = (
@@ -3891,6 +4116,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         media_uri: Optional[str],
         build_content: Callable[[str], Dict[str, Any]],
     ) -> Dict[str, Any]:
+        # 逻辑说明：`_bounded_long_message_content` 接收 `text`、`path`、`media_uri`、`build_content`，构造协议数据并完成外部传输，并依次复用 `_long_message_summary`、`build_content`，返回 `Dict[str, Any]`。
+        # 执行过程中包含外部 I/O；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         low = 0
         high = len(text or "")
         best_content: Optional[Dict[str, Any]] = None
@@ -3924,6 +4151,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         *,
         edit_event_id: str = "",
     ) -> Optional[str]:
+        # 逻辑说明：`_send_long_text_fallback` 接收 `room_id`、`text`、`meta`、`msgtype`，构造协议数据并完成外部传输，并依次复用 `_write_long_message_file`、`_upload_file`，返回 `Optional[str]`。
+        # 执行过程中包含异步等待/流式产出、外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         if not self._client:
             return None
         path = self._write_long_message_file(text)
@@ -3937,6 +4166,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         long_message_metadata = _long_message_metadata(path, media_uri)
 
         def build_content(summary: str) -> Dict[str, Any]:
+            # 逻辑说明：`build_content` 接收 `summary`，把输入转换为调用方需要的结构，并依次复用 `_md_to_html`、`_attach_long_message_metadata`，返回 `Dict[str, Any]`。
+            # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
             if edit_event_id:
                 html_body = _md_to_html(summary)
                 new_content: dict[str, Any] = {
@@ -4005,6 +4236,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         html: Optional[str] = None,
     ) -> None:
         """Edit the thread-root placeholder message content."""
+        # 逻辑说明：`_edit_thread_root` 接收 `to_handle`、`send_meta`、`text`、`msgtype`，按既有分支组合输入并生成结果，并依次复用 `get`、`_edit_matrix_event`，不返回业务结果。
+        # 执行过程中包含异步等待/流式产出、外部 I/O；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         root_id = send_meta.get(_MATRIX_OWN_THREAD_ROOT_KEY)
         await self._edit_matrix_event(
             to_handle,
@@ -4019,16 +4252,22 @@ class AgentTeamsMatrixChannel(BaseChannel):
     # ------------------------------------------------------------------
 
     def _is_completed_status(self, status: Any) -> bool:
+        # 逻辑说明：`_is_completed_status` 接收 `status`，按既有分支组合输入并生成结果，并依次复用 `_enum_name`，返回 `bool`。
+        # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         if RunStatus is not None and status == RunStatus.Completed:
             return True
         return _enum_name(status) == "COMPLETED"
 
     def _is_in_progress_status(self, status: Any) -> bool:
+        # 逻辑说明：`_is_in_progress_status` 接收 `status`，按既有分支组合输入并生成结果，并依次复用 `_enum_name`，返回 `bool`。
+        # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         if RunStatus is not None and status == RunStatus.InProgress:
             return True
         return _enum_name(status) == "INPROGRESS"
 
     def _is_reasoning_message(self, message_type: Any) -> bool:
+        # 逻辑说明：`_is_reasoning_message` 接收 `message_type`，构造协议数据并完成外部传输，并依次复用 `_enum_name`，返回 `bool`。
+        # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         if MessageType is not None and message_type == MessageType.REASONING:
             return True
         return _enum_name(message_type) == "REASONING"
@@ -4040,12 +4279,16 @@ class AgentTeamsMatrixChannel(BaseChannel):
         return _enum_name(message_type) in _TOOL_OUTPUT_MESSAGE_TYPE_NAMES
 
     def _is_message_event(self, message_type: Any) -> bool:
+        # 逻辑说明：`_is_message_event` 接收 `message_type`，构造协议数据并完成外部传输，并依次复用 `_enum_name`，返回 `bool`。
+        # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         if MessageType is not None and message_type == MessageType.MESSAGE:
             return True
         return _enum_name(message_type) == "MESSAGE"
 
     def _thread_content_parts(self, event: Any) -> List[Any]:
         """Render event for thread display with tool messages enabled."""
+        # 逻辑说明：`_thread_content_parts` 接收 `event`，把输入转换为调用方需要的结构，并依次复用 `dc_replace`、`__class__`，返回 `List[Any]`。
+        # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         from dataclasses import replace as dc_replace
 
         display_config = dc_replace(
@@ -4058,6 +4301,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         return renderer.message_to_parts(event)
 
     def _text_from_message_event(self, event: Any) -> str:
+        # 逻辑说明：`_text_from_message_event` 接收 `event`，构造协议数据并完成外部传输，并依次复用 `_message_to_content_parts`、`strip`，返回 `str`。
+        # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         parts = self._message_to_content_parts(event)
         return "\n".join(
             getattr(p, "text", "") or getattr(p, "refusal", "") or ""
@@ -4066,6 +4311,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         ).strip()
 
     def _visible_final_text(self, text: str) -> str:
+        # 逻辑说明：`_visible_final_text` 接收 `text`，按既有分支组合输入并生成结果，并依次复用 `strip`、`_clean_control_response_text`，返回 `str`。
+        # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         text = (text or "").strip()
         if not text:
             return ""
@@ -4073,6 +4320,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
 
     def _tool_output_media_parts(self, event: Any) -> List[Any]:
         """Extract media-only parts from a tool output event."""
+        # 逻辑说明：`_tool_output_media_parts` 接收 `event`，按既有分支组合输入并生成结果，并依次复用 `dc_replace`、`__class__`，返回 `List[Any]`。
+        # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         from dataclasses import replace as dc_replace
 
         display_config = dc_replace(
@@ -4092,6 +4341,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         send_meta: Dict[str, Any],
     ) -> bool:
         """Consume streaming tool progress without sending Matrix noise."""
+        # 逻辑说明：`on_event_content` 接收 `request`、`to_handle`、`event`、`send_meta`，把输入转换为调用方需要的结构，并依次复用 `_response_is_stale`、`_is_in_progress_status`，返回 `bool`。
+        # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         del request
         if self._response_is_stale(to_handle, send_meta):
             return True
@@ -4115,6 +4366,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         send_meta: Dict[str, Any],
     ) -> None:
         """Route completed messages behind a processing root."""
+        # 逻辑说明：`on_event_message_completed` 接收 `request`、`to_handle`、`event`、`send_meta`，构造协议数据并完成外部传输，并依次复用 `_response_is_stale`、`_is_reasoning_message`，不返回业务结果。
+        # 执行过程中包含异步等待/流式产出、外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         del request
         if self._response_is_stale(to_handle, send_meta):
             return
@@ -4173,6 +4426,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         stream_type: str,
         accumulated_text: str = "",
     ) -> None:
+        # 逻辑说明：`on_streaming_start` 接收 `request`、`to_handle`、`event`、`send_meta`，推进组件生命周期并同步运行状态，并依次复用 `_response_is_stale`、`pop`，不返回业务结果。
+        # 执行过程中包含异步等待/流式产出、外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         del request, accumulated_text
         if self._response_is_stale(to_handle, send_meta):
             return
@@ -4196,6 +4451,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         stream_type: str,
         accumulated_text: str = "",
     ) -> None:
+        # 逻辑说明：`on_streaming_delta` 接收一次流式增量及发送上下文；Matrix 频道不逐片编辑消息，因此显式丢弃这些参数，等待 `on_streaming_end` 统一发送最终文本。
+        # 本函数不执行网络 I/O、状态写入或重试；保留异步钩子只是为了满足频道接口并避免重复 Matrix 事件。
         del request, to_handle, event, send_meta, stream_type, accumulated_text
         return
 
@@ -4208,6 +4465,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         stream_type: str,
         accumulated_text: str = "",
     ) -> None:
+        # 逻辑说明：`on_streaming_end` 接收 `request`、`to_handle`、`event`、`send_meta`，按既有分支组合输入并生成结果，并依次复用 `_response_is_stale`、`strip`，不返回业务结果。
+        # 执行过程中包含异步等待/流式产出、外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         del request
         if self._response_is_stale(to_handle, send_meta):
             return
@@ -4249,6 +4508,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         Uses shared per-room state so the thread root persists across events
         within one proactive send stream.
         """
+        # 逻辑说明：`send_event` 接收 `user_id`、`session_id`、`event`、`meta`，构造协议数据并完成外部传输，并依次复用 `to_handle_from_target`、`get`，不返回业务结果。
+        # 执行过程中包含异步等待/流式产出、外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         obj = getattr(event, "object", None)
         status = getattr(event, "status", None)
         to_handle = self.to_handle_from_target(
@@ -4281,6 +4542,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         send_meta: Dict[str, Any],
     ) -> None:
         """Edit thread root with final reply, or send directly if no thread."""
+        # 逻辑说明：`_on_process_completed` 接收 `request`、`to_handle`、`send_meta`，按既有分支组合输入并生成结果，并依次复用 `_response_is_stale`、`pop`，不返回业务结果。
+        # 执行过程中包含异步等待/流式产出、外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         if self._response_is_stale(to_handle, send_meta):
             self._active_thread_roots.pop(to_handle, None)
             await self._send_typing(to_handle, False)
@@ -4380,6 +4643,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         err_text: str,
     ) -> None:
         """Edit thread root on error; suppress user-visible cancellation noise."""
+        # 逻辑说明：`_on_consume_error` 接收 `request`、`to_handle`、`err_text`，按既有分支组合输入并生成结果，并依次复用 `pop`、`_edit_thread_root`，不返回业务结果。
+        # 执行过程中包含异步等待/流式产出、外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         root_id = self._active_thread_roots.pop(to_handle, None)
         if root_id:
             fallback_meta = {_MATRIX_OWN_THREAD_ROOT_KEY: root_id}
@@ -4408,6 +4673,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
     @staticmethod
     def _is_retryable_send_error(exc: Exception) -> bool:
         """Return True if *exc* is a transient error worth retrying."""
+        # 逻辑说明：`_is_retryable_send_error` 接收 `exc`，构造协议数据并完成外部传输，返回 `bool`。
+        # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         # Network / transport layer errors — always retry
         if isinstance(exc, (ConnectionError, TimeoutError, OSError)):
             return True
@@ -4436,6 +4703,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         fall back to the HTTP status code carried inside
         ``transport_response`` when available.
         """
+        # 逻辑说明：`_is_retryable_room_send_response` 接收 `resp`，构造协议数据并完成外部传输，返回 `bool`。
+        # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         if not isinstance(resp, RoomSendError):
             return False
 
@@ -4479,6 +4748,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
 
         Returns the successful ``RoomSendResponse``.
         """
+        # 逻辑说明：`_room_send_with_retry` 接收 `room_id`、`message_type`、`content`、`max_retries`，构造协议数据并完成外部传输，并依次复用 `uuid4`、`range`，返回 `Any`。
+        # 执行过程中包含异步等待/流式产出、外部 I/O；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         tx_id = str(uuid4())
         last_exc: Optional[Exception] = None
         last_err_resp: Any = None
@@ -4593,6 +4864,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         text: str,
         meta: Optional[Dict[str, Any]] = None,
     ) -> None:
+        # 逻辑说明：`send` 接收 `to_handle`、`text`、`meta`，构造协议数据并完成外部传输，并依次复用 `error`、`get`，不返回业务结果。
+        # 执行过程中包含异步等待/流式产出、外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         if not self._client:
             logger.error(
                 "MatrixChannel: send called but client not ready component=matrix"
@@ -4691,6 +4964,8 @@ class AgentTeamsMatrixChannel(BaseChannel):
         meta: Optional[Dict[str, Any]] = None,
     ) -> Optional[str]:
         """Upload a local file to Matrix and send as m.image / m.file / etc."""
+        # 逻辑说明：`send_media` 接收 `to_handle`、`part`、`meta`，构造协议数据并完成外部传输，并依次复用 `get`、`_response_is_stale`，返回 `Optional[str]`。
+        # 执行过程中包含异步等待/流式产出、外部 I/O；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         if not self._client:
             return None
 

@@ -22,6 +22,7 @@ class CryptoStore:
     path: Path
 
     def prepare(self) -> Path:
+        # 逻辑说明：递归创建指定 crypto store 且绝不清空已有密钥，非 Windows 上把目录权限收紧为 0700；文件系统失败直接传播，成功返回同一个 Path。
         self.path.mkdir(parents=True, exist_ok=True)
         if os.name != "nt":
             self.path.chmod(0o700)
@@ -30,6 +31,7 @@ class CryptoStore:
 
 async def maintain_e2ee(client: Any, *, enabled: bool) -> None:
     """Perform the maintenance normally owned by ``sync_forever``."""
+    # 逻辑说明：加密关闭或客户端尚无 Olm 状态时立即返回；否则依照 nio 标志上传、查询、按待申领用户领取密钥，最后发送待处理的 to-device 消息，任一步失败即中止并传播。
     if not enabled or not getattr(client, "olm", None):
         return
     if getattr(client, "should_upload_keys", False):

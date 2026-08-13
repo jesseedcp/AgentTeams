@@ -51,6 +51,7 @@ class AdminAPIError(RuntimeError):
         *,
         details: object | None = None,
     ) -> None:
+        # 逻辑说明：保留安全的 HTTP 状态、稳定错误码和可选详情，传输层无需解析内部异常文本。
         super().__init__(message)
         self.status = status
         self.code = code
@@ -193,6 +194,7 @@ class _TeamPatch(BaseModel):
 
     @model_validator(mode="after")
     def require_change(self) -> _TeamPatch:
+        # 逻辑说明：PATCH 必须包含 confirmed 之外的真实字段，避免空请求进入资源 workflow。
         changed = self.model_fields_set - {"confirmed"}
         if not changed:
             raise ValueError("at least one Team field must change")
@@ -211,6 +213,7 @@ class _ProjectPatch(BaseModel):
 
     @model_validator(mode="after")
     def require_one_change_kind(self) -> _ProjectPatch:
+        # 逻辑说明：计划修订与成员变更走不同确认和恢复路径，因此一次请求只能选择一种。
         has_plan = self.plan is not None
         has_roster = bool(self.add or self.remove)
         if has_plan == has_roster:
@@ -238,6 +241,7 @@ class AdminCommandFacade:
         project_workflows: ProjectWorkflows,
         admin_room_id: str,
     ) -> None:
+        # 逻辑说明：绑定同一组 durable workflow，并拒绝缺失 Admin room 的无来源变更。
         if not admin_room_id:
             raise ValueError("admin_room_id is required")
         self._resources = resources
@@ -249,6 +253,7 @@ class AdminCommandFacade:
         self,
         command: AdminCommand,
     ) -> dict[str, object]:
+        # 逻辑说明：先校验 endpoint 与幂等键，再按资源分派；领域异常统一翻译为稳定 API 错误。
         try:
             if (
                 command.method == "POST"
@@ -308,6 +313,7 @@ class AdminCommandFacade:
         self,
         command: AdminCommand,
     ) -> dict[str, object]:
+        # 逻辑说明：读取直接序列化；写入构造稳定上下文，并为替换/删除设置显式确认门。
         if command.method == "GET":
             if command.name is None:
                 return _collection(await self._resources.list_workers())
@@ -363,6 +369,7 @@ class AdminCommandFacade:
         self,
         command: AdminCommand,
     ) -> dict[str, object]:
+        # 逻辑说明：PATCH 先与当前 Team 合并成完整 spec，移除成员或删除资源时强制确认。
         if command.method == "GET":
             if command.name is None:
                 return _collection(await self._resources.list_teams())
@@ -415,6 +422,7 @@ class AdminCommandFacade:
         self,
         command: AdminCommand,
     ) -> dict[str, object]:
+        # 逻辑说明：创建、计划修订、成员变更和关闭进入各自 workflow，并复用幂等上下文。
         if command.method == "GET":
             if command.name is None:
                 return _collection(await self._projects.list_all())
@@ -488,6 +496,7 @@ class AdminCommandFacade:
         command: AdminCommand,
         target: str,
     ) -> MutationContext:
+        # 逻辑说明：把 HTTP 幂等键映射为稳定 event/tool 标识，使重试命中原 Operation。
         key = command.idempotency_key
         if not key:
             raise AdminAPIError(
@@ -505,6 +514,7 @@ class AdminCommandFacade:
 
 
 def _without_transport(payload: dict[str, Any]) -> dict[str, Any]:
+    # 逻辑说明：confirmed/force 是传输控制字段，不能误传成 Controller 资源 spec。
     result = dict(payload)
     result.pop("confirmed", None)
     result.pop("force", None)
@@ -512,6 +522,7 @@ def _without_transport(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _collection(items: tuple[object, ...]) -> dict[str, object]:
+    # 逻辑说明：统一投影类型化资源，并让 total 与实际序列化结果保持一致。
     rendered = [_json_value(item) for item in items]
     return {"items": rendered, "total": len(rendered)}
 
@@ -542,6 +553,7 @@ def _deleted(
 
 
 def _json_value(item: object) -> Any:
+    # 逻辑说明：仅接受 Pydantic 模型或 dict，拒绝隐式字符串化可能泄露内部对象的结果。
     dump = getattr(item, "model_dump", None)
     if callable(dump):
         return dump(mode="json")
@@ -554,6 +566,7 @@ _T = TypeVar("_T")
 
 
 def _required(item: _T | None, kind: str, name: str) -> _T:
+    # 逻辑说明：把可空查询提升为带资源身份的稳定 404，避免后续对 None 执行变更。
     if item is None:
         raise AdminAPIError(
             404,
@@ -564,6 +577,7 @@ def _required(item: _T | None, kind: str, name: str) -> _T:
 
 
 def _require_name(command: AdminCommand) -> str:
+    # 逻辑说明：detail 写操作必须有目标名称，collection endpoint 不能被猜成某个资源。
     if command.name is None:
         raise AdminAPIError(
             400,
@@ -574,6 +588,7 @@ def _require_name(command: AdminCommand) -> str:
 
 
 def _require_confirmed(confirmed: bool, action: str) -> None:
+    # 逻辑说明：对不可逆动作集中执行确认门，失败时不产生任何外部副作用。
     if not confirmed:
         raise _confirmation_error(action)
 
@@ -590,6 +605,7 @@ def _worker_replacement(
     current: WorkerResource,
     request: WorkerUpdateRequest,
 ) -> bool:
+    # 逻辑说明：比较当前与期望 runtime/image，只在会触发 Pod 替换时要求额外确认。
     if (
         request.runtime is not None
         and request.runtime != getattr(current, "runtime", None)
@@ -607,6 +623,7 @@ def _merge_team(
     current: TeamResource,
     patch: _TeamPatch,
 ) -> TeamSpec:
+    # 逻辑说明：以当前权威 Team 为基线覆盖 PATCH 字段，生成完整且不可歧义的 spec。
     spec = getattr(current, "spec", {})
     if not isinstance(spec, dict):
         spec = {}

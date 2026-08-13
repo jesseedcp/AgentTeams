@@ -9,6 +9,7 @@ import (
 )
 
 func workerCmd() *cobra.Command {
+	// 逻辑说明：组合 Worker 唤醒、休眠、确保就绪、状态查询和 readiness/heartbeat 子命令。
 	cmd := &cobra.Command{
 		Use:   "worker",
 		Short: "Worker lifecycle operations",
@@ -26,6 +27,7 @@ func workerCmd() *cobra.Command {
 // ---------------------------------------------------------------------------
 
 func workerWakeCmd() *cobra.Command {
+	// 逻辑说明：验证 --name 后调用 wake 端点，并只在 Controller 返回成功时展示实际 phase。
 	var name string
 
 	cmd := &cobra.Command{
@@ -57,6 +59,7 @@ func workerWakeCmd() *cobra.Command {
 // ---------------------------------------------------------------------------
 
 func workerSleepCmd() *cobra.Command {
+	// 逻辑说明：验证 --name 后请求保存状态的 sleep 动作，并输出 Controller 观察到的阶段。
 	var name string
 
 	cmd := &cobra.Command{
@@ -88,6 +91,7 @@ func workerSleepCmd() *cobra.Command {
 // ---------------------------------------------------------------------------
 
 func workerEnsureReadyCmd() *cobra.Command {
+	// 逻辑说明：要求 Worker 名并调用幂等 ensure-ready 端点，后端决定是否需要真正启动容器。
 	var name string
 
 	cmd := &cobra.Command{
@@ -119,6 +123,7 @@ func workerEnsureReadyCmd() *cobra.Command {
 // ---------------------------------------------------------------------------
 
 func workerStatusCmd() *cobra.Command {
+	// 逻辑说明：单名路径直接查详情；团队路径先列成员再逐项取实时 status，最后按 JSON 或表格输出。
 	var (
 		name   string
 		team   string
@@ -196,6 +201,7 @@ func workerStatusCmd() *cobra.Command {
 // ---------------------------------------------------------------------------
 
 func workerReportReadyCmd() *cobra.Command {
+	// 逻辑说明：按 flag→CR 环境→runtime 环境解析 Worker 名，初次上报有界重试并刷新 token，可选进入持续 heartbeat 循环。
 	var (
 		name     string
 		interval time.Duration

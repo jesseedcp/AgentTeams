@@ -89,6 +89,7 @@ _SECRET_FIELD_PATTERN = re.compile(
 
 
 def redact_pii(text: str) -> str:
+    # 逻辑说明：依次应用凭据和个人信息模式，把日志中的敏感值替换为固定掩码；空文本原样返回，避免采集阶段制造新内容。
     if not text:
         return text
     for name, pattern in _PII_PATTERNS:
@@ -100,6 +101,7 @@ def redact_pii(text: str) -> str:
 
 
 def redact_json_strings(obj):
+    # 逻辑说明：递归遍历 JSON 兼容结构；敏感字段按键名整值遮盖，其余字符串再走模式脱敏，并保留列表/字典形状供排障读取。
     if isinstance(obj, str):
         return redact_pii(obj)
     if isinstance(obj, list):
@@ -120,6 +122,7 @@ def redact_json_strings(obj):
 # ---------------------------------------------------------------------------
 
 def parse_range(range_str: str) -> int:
+    # 逻辑说明：把用户输入的分钟、小时或天数转换为秒；格式不在白名单内就明确失败，防止导出错误时间范围。
     m = re.fullmatch(r"(\d+)\s*(m|min|h|hr|hour|d|day)s?", range_str.strip(), re.IGNORECASE)
     if not m:
         raise ValueError(f"Invalid range format: '{range_str}'. Use e.g. 10m, 1h, 1d")
@@ -128,6 +131,7 @@ def parse_range(range_str: str) -> int:
 
 
 def parse_ts(ts_str: str) -> float:
+    # 逻辑说明：把容器日志的 ISO 时间统一换算为 UTC epoch；缺失或损坏时间返回零，让调用方保守保留而不是终止整个导出。
     if not ts_str:
         return 0
     ts_str = ts_str.replace("Z", "+00:00")
@@ -141,10 +145,12 @@ def parse_ts(ts_str: str) -> float:
 
 
 def sanitize_filename(name: str) -> str:
+    # 逻辑说明：把外部房间名限制为短小安全的文件名片段，避免路径分隔符或超长名称逃出导出目录。
     return re.sub(r'[^\w\-. ]', '_', name).strip()[:80]
 
 
 def docker_exec(container: str, cmd: str) -> str:
+    # 逻辑说明：在指定容器内执行只读采集命令并返回标准输出；调用方按空输出处理缺失数据，命令有 30 秒硬超时。
     result = subprocess.run(
         ["docker", "exec", container, "sh", "-c", cmd],
         capture_output=True, text=True, timeout=30,
@@ -153,6 +159,7 @@ def docker_exec(container: str, cmd: str) -> str:
 
 
 def list_agentteams_containers() -> list[str]:
+    # 逻辑说明：从 Docker 查询 AgentTeams 命名空间内的运行容器并保持首次出现顺序去重，供各 runtime 会话探测复用。
     names: list[str] = []
     for prefix in ("agentteams-",):
         result = subprocess.run(
@@ -168,6 +175,7 @@ def list_agentteams_containers() -> list[str]:
 # ---------------------------------------------------------------------------
 
 def _docker_run(*args: str) -> subprocess.CompletedProcess[str]:
+    # 逻辑说明：统一执行 Docker 诊断子命令；CLI 缺失、启动失败或超时时转成非零 CompletedProcess，使一次采集失败不会崩溃整个导出。
     try:
         return subprocess.run(
             ["docker", *args],
@@ -187,6 +195,7 @@ def _docker_run(*args: str) -> subprocess.CompletedProcess[str]:
 def export_container_logs(out_dir: Path, since_epoch: float, redact: bool,
                           container_filter: str | None) -> int:
     """Export Docker state and logs for all AgentTeams containers."""
+    # 逻辑说明：筛选目标容器后分别写入 inspect/state/log 文件；默认先脱敏，单容器失败记录诊断并继续，返回实际导出的容器数。
     result = _docker_run("ps", "-a", "--format", "{{.Names}}", "--filter", "name=agentteams-")
     containers = [name.strip() for name in result.stdout.splitlines() if name.strip()]
     if container_filter:
@@ -244,6 +253,7 @@ def export_container_logs(out_dir: Path, since_epoch: float, redact: bool,
 # ---------------------------------------------------------------------------
 
 def load_env_file(path: str) -> dict[str, str]:
+    # 逻辑说明：只按 KEY=VALUE 读取安装器 env 文件用于定位服务，不执行其中的 Shell；文件不存在视为无法自动发现而非致命错误。
     env = {}
     try:
         with open(path) as f:
@@ -260,6 +270,7 @@ def load_env_file(path: str) -> dict[str, str]:
 
 
 def matrix_login(homeserver: str, user: str, password: str) -> str:
+    # 逻辑说明：向指定 homeserver 发起最小密码登录并只返回 access token；网络、认证或响应格式错误直接交给上层决定是否跳过 Matrix 导出。
     url = f"{homeserver.rstrip('/')}/_matrix/client/v3/login"
     payload = json.dumps({
         "type": "m.login.password",
@@ -273,6 +284,7 @@ def matrix_login(homeserver: str, user: str, password: str) -> str:
 
 
 def matrix_api(homeserver: str, token: str, endpoint: str, params: dict | None = None) -> dict:
+    # 逻辑说明：构造带 Bearer 的 Matrix GET 请求并解析 JSON；HTTP 错误只打印状态与响应诊断后重新抛出，不在日志中输出 token。
     url = f"{homeserver.rstrip('/')}/_matrix/client/v3/{endpoint}"
     if params:
         url += "?" + urllib.parse.urlencode(params)
@@ -287,6 +299,7 @@ def matrix_api(homeserver: str, token: str, endpoint: str, params: dict | None =
 
 
 def fetch_room_messages(homeserver: str, token: str, room_id: str, since_ts: int) -> list[dict]:
+    # 逻辑说明：从房间最新端反向分页，达到时间边界或无下一页即停止，最后恢复为时间正序供 JSONL 阅读。
     encoded = urllib.parse.quote(room_id)
     messages = []
     from_token = ""
@@ -315,6 +328,7 @@ def fetch_room_messages(homeserver: str, token: str, room_id: str, since_ts: int
 
 
 def format_event(event: dict, redact: bool) -> dict:
+    # 逻辑说明：把 Matrix 原始事件压缩成稳定诊断字段，并按事件类型保留必要内容；启用安全默认值时对整个结果递归脱敏。
     content = event.get("content", {})
     ts = event.get("origin_server_ts", 0)
     record = {
@@ -343,6 +357,7 @@ def export_matrix_messages(out_dir: Path, since_epoch: float, redact: bool,
                            homeserver: str, token: str,
                            messages_only: bool) -> tuple[int, int]:
     """Export Matrix messages. Returns (rooms_exported, message_count)."""
+    # 逻辑说明：从显式参数或安装 env 解析 homeserver/凭据，筛选已加入房间并分页写 JSONL；单房间失败不丢弃其他房间，返回房间与消息计数。
     env_path = env_file or os.path.expanduser("~/agentteams-manager.env")
     agentteams_env = load_env_file(env_path)
 
@@ -450,6 +465,7 @@ def detect_runtime(container: str) -> tuple[str, str]:
         copaw    -> /root/.agentteams-worker/<name>/.copaw/workspaces/default/sessions
         copaw    -> /root/agentteams-fs/.copaw/workspaces/default/sessions  (alt)
     """
+    # 逻辑说明：按 AgentScope、OpenClaw、CoPaw、Hermes 的权威路径顺序在容器内探测会话存储；首个命中决定后续解析器，均未命中返回空元组。
     manager_database = "/var/lib/agentteams-manager/state/manager.db"
     if (
         docker_exec(
@@ -502,6 +518,7 @@ def export_agentscope_sessions(
     redact: bool,
 ) -> tuple[int, int]:
     """Export redacted AgentScope state through a read-only SQLite snapshot."""
+    # 逻辑说明：在 Manager 容器内以只读 SQLite 查询时间范围内的会话和事件，再把 JSON 结果复制到宿主导出目录；失败返回零计数且不写数据库。
     extraction = f"""
 import datetime
 import json
@@ -622,6 +639,7 @@ print(json.dumps(result, ensure_ascii=False))
 
 def export_openclaw_sessions(container: str, sessions_dir: str, since_epoch: float,
                              out_dir: Path, redact: bool) -> tuple[int, int]:
+    # 逻辑说明：逐个读取 OpenClaw JSONL 会话，按事件时间过滤、可选递归脱敏并写独立文件；损坏行跳过，返回有效会话和事件总数。
     ls_output = docker_exec(container, f"ls '{sessions_dir}'/*.jsonl 2>/dev/null").strip()
     if not ls_output:
         return 0, 0
@@ -697,6 +715,7 @@ def export_openclaw_sessions(container: str, sessions_dir: str, since_epoch: flo
 
 def export_copaw_sessions(container: str, sessions_dir: str, since_epoch: float,
                           out_dir: Path, redact: bool) -> tuple[int, int]:
+    # 逻辑说明：发现 CoPaw JSON 会话文件并兼容其对象/消息布局，过滤时间后写统一 JSONL；单文件无法解析时继续采集其他会话。
     ls_output = docker_exec(container, f"find '{sessions_dir}' -name '*.json' -type f 2>/dev/null").strip()
     if not ls_output:
         return 0, 0
@@ -776,6 +795,7 @@ def export_copaw_sessions(container: str, sessions_dir: str, since_epoch: float,
 
 def export_hermes_sessions(container: str, sessions_dir: str, since_epoch: float,
                            out_dir: Path, redact: bool) -> tuple[int, int]:
+    # 逻辑说明：读取 Hermes JSONL 会话，兼容时间字段并只保留目标区间；可选脱敏后按会话落盘，坏事件不会阻断整批导出。
     ls_output = docker_exec(container, f"ls '{sessions_dir}'/*.jsonl 2>/dev/null").strip()
     if not ls_output:
         return 0, 0
@@ -856,6 +876,7 @@ def export_hermes_sessions(container: str, sessions_dir: str, since_epoch: float
 def export_agent_sessions(out_dir: Path, since_epoch: float, redact: bool,
                           container_filter: str | None) -> tuple[int, int]:
     """Export agent sessions from all containers. Returns (session_count, event_count)."""
+    # 逻辑说明：遍历目标容器、探测其 runtime 并分派到对应只读解析器；未知 runtime 或单容器错误仅告警，最后汇总所有成功计数。
     containers = list_agentteams_containers()
     if container_filter:
         containers = [c for c in containers if container_filter in c]
@@ -912,6 +933,7 @@ def export_agent_sessions(out_dir: Path, since_epoch: float, redact: bool,
 # ---------------------------------------------------------------------------
 
 def main():
+    # 逻辑说明：解析导出范围和安全选项，依次采集容器、Matrix 与 Agent 会话，生成摘要后以计数反映结果；默认始终启用脱敏。
     parser = argparse.ArgumentParser(
         description="Export AgentTeams debug logs (Matrix messages + agent sessions)"
     )

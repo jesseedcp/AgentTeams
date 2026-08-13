@@ -66,6 +66,7 @@ func (s *STSService) Configured() bool {
 // IssueForCaller asks the sidecar for an STS triple whose inline
 // policy matches the caller's resolved AccessEntries.
 func (s *STSService) IssueForCaller(ctx context.Context, caller *auth.CallerIdentity) (*STSToken, error) {
+	// 逻辑说明：先确认解析器与凭据侧车均已接线，再把调用者身份解析成最小权限条目并生成独立会话名；侧车签发成功后补上部署级 OSS 地址/桶名，任一步失败都不返回部分凭据。
 	if !s.Configured() {
 		return nil, fmt.Errorf("STS service not configured: no credential provider URL set")
 	}

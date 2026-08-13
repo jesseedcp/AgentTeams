@@ -126,6 +126,7 @@ class _ImportWorkerInput(_Input):
 
     @model_validator(mode="after")
     def choose_source(self) -> _ImportWorkerInput:
+        # 逻辑说明：强制 Worker 导入只能二选一：使用 discovery+候选名，或直接给 package URI；混用/缺失会在工具执行外部导入前失败。
         searched = (
             self.discovery is not None
             and self.candidate_name is not None
@@ -180,6 +181,7 @@ class _UpdateChannelInput(_Input):
 
     @model_validator(mode="after")
     def validate_action(self) -> _UpdateChannelInput:
+        # 逻辑说明：按 set_primary/trust 动作校验必须的 room 与 peer 字段，防止含糊请求进入 Matrix workflow 后产生不完整关系。
         if self.action == "set_primary" and not self.room_id:
             raise ValueError("set_primary requires room_id")
         if self.action == "trust" and (
@@ -196,6 +198,7 @@ class _DeleteChannelInput(_Input):
 
     @model_validator(mode="after")
     def validate_action(self) -> _DeleteChannelInput:
+        # 逻辑说明：移除信任关系时必须给出对端用户，其他 channel 删除动作不强加该字段，避免 workflow 收到含糊目标。
         if self.action == "remove_trusted" and not self.peer_user_id:
             raise ValueError("remove_trusted requires peer_user_id")
         return self
@@ -336,6 +339,7 @@ def authorize_resource_target(
     name: str,
 ) -> None:
     """Reject a target outside the Human's Controller-declared scope."""
+    # 逻辑说明：全局 scope 直接允许；否则按 team/worker 选择冻结白名单并校验名称，未知资源类型或越界目标在任何 Controller 副作用前拒绝。
     if policy.resource_scope_all:
         return
     if resource_type == "team":
@@ -367,6 +371,7 @@ class ResourceToolkit:
         context_provider: ContextProvider | None = None,
         yolo: bool = False,
     ) -> None:
+        # 逻辑说明：组合资源、Matrix、渠道 workflow、房间 policy 与 mutation context，并构建权限过滤后的资源工具；构造不创建任何 CR 或房间。
         self._policy = policy
         self._resources = resources
         self._matrix = matrix
@@ -380,6 +385,7 @@ class ResourceToolkit:
         self.tools = self._build_tools()
 
     def _build_tools(self) -> tuple[ManagerTool, ...]:
+        # 逻辑说明：声明所有资源、频道和 Matrix typed tools 的 schema/handler/只读属性，再按 room policy 白名单过滤；用户注册额外限制为 Manager Admin 房间。
         specs: tuple[
             tuple[
                 str,
@@ -681,7 +687,9 @@ class ResourceToolkit:
         handler: Callable[[BaseModel], Awaitable[object]],
         read_only: bool,
     ) -> ManagerTool:
+        # 逻辑说明：把一个资源操作封装成带闭合 schema 和并发安全标志的 ManagerTool；invoke 再查白名单并验证请求，只有只读工具才声明可并发。
         async def invoke(**raw: Any) -> object:
+            # 逻辑说明：执行时复核工具白名单、用 Pydantic 验证闭合输入，再调用固定 handler；权限或校验失败不会到达资源/Matrix 服务。
             self._require_tool(name)
             request = request_model.model_validate(raw)
             return await handler(request)
@@ -698,12 +706,14 @@ class ResourceToolkit:
         )
 
     def _require_tool(self, name: str) -> None:
+        # 逻辑说明：在调用任何资源 workflow 前核对当前房间的工具白名单；未授权名称直接拒绝且不产生 Controller/Matrix 副作用。
         if name not in self._policy.allowed_tools:
             raise PermissionDeniedError(
                 f"{name} is not allowed in {self._policy.kind.value}",
             )
 
     async def _context(self) -> MutationContext:
+        # 逻辑说明：解析同步或异步 context provider 并强制 MutationContext 类型，把外部副作用绑定到稳定 Matrix event/tool-call 身份。
         value = self._context_provider()
         if inspect.isawaitable(value):
             value = await value
@@ -719,10 +729,12 @@ class ResourceToolkit:
         )
 
     async def _find_worker(self, request: BaseModel) -> object:
+        # 逻辑说明：验证查询文本并调用只读发现服务，返回候选而不导入或创建 Worker；远端搜索失败原样传播。
         item = _FindWorkerInput.model_validate(request)
         return await self._resources.find_worker(item.query)
 
     async def _import_worker(self, request: BaseModel) -> object:
+        # 逻辑说明：验证 Worker 目标 scope；直接 URI 先走异步确认，发现候选走本地确认，再携带幂等上下文执行导入并返回脱敏资源回执。
         item = _ImportWorkerInput.model_validate(request)
         self._target("worker", item.worker_name)
         if item.package_uri is not None:
@@ -745,6 +757,7 @@ class ResourceToolkit:
         return _resource_receipt("import_worker", "worker", worker)
 
     async def _list_workers(self, request: BaseModel) -> object:
+        # 逻辑说明：读取所有 Worker 后按 policy 的资源 scope 投影可见集合，再统一编码回执；不会通过列表泄漏越权资源。
         del request
         workers = await self._resources.list_workers()
         if not self._policy.resource_scope_all:
@@ -756,12 +769,14 @@ class ResourceToolkit:
         return _collection("list_workers", workers)
 
     async def _get_worker(self, request: BaseModel) -> object:
+        # 逻辑说明：验证名称和目标 scope 后读取 Worker，存在或 not_found 都包装为稳定回执，不扩大权限。
         item = _NameInput.model_validate(request)
         self._target("worker", item.name)
         worker = await self._resources.get_worker(item.name)
         return _optional_resource("get_worker", "worker", item.name, worker)
 
     async def _create_worker(self, request: BaseModel) -> object:
+        # 逻辑说明：验证 Worker 规格与 scope，携带当前上下文调用异步创建 workflow；返回 accepted 和后台 provisioning 标记，不把 desired 写入冒充 ready。
         item = WorkerCreateRequest.model_validate(request)
         self._target("worker", item.name)
         worker = await self._resources.create_worker(
@@ -780,6 +795,7 @@ class ResourceToolkit:
         )
 
     async def _update_worker(self, request: BaseModel) -> object:
+        # 逻辑说明：验证更新输入与 Worker scope，调用可恢复更新 workflow 并返回最新资源回执；失败不返回部分 desired state。
         item = WorkerUpdateRequest.model_validate(request)
         self._target("worker", item.name)
         worker = await self._resources.update_worker(
@@ -789,12 +805,15 @@ class ResourceToolkit:
         return _resource_receipt("update_worker", "worker", worker)
 
     async def _sleep_worker(self, request: BaseModel) -> object:
+        # 逻辑说明：委托统一 Worker 生命周期路径执行 sleep，复用相同 scope、上下文与回执规则。
         return await self._worker_lifecycle("sleep", request)
 
     async def _wake_worker(self, request: BaseModel) -> object:
+        # 逻辑说明：委托统一 Worker 生命周期路径执行 wake，异常和 Controller 对账结果由服务层传播。
         return await self._worker_lifecycle("wake", request)
 
     async def _reset_worker(self, request: BaseModel) -> object:
+        # 逻辑说明：验证名称与 scope，取得幂等上下文后调用 reset workflow，并把 Controller 返回资源转成无 Secret 回执。
         item = _NameInput.model_validate(request)
         self._target("worker", item.name)
         worker = await self._resources.reset_worker(
@@ -812,6 +831,7 @@ class ResourceToolkit:
         action: str,
         request: BaseModel,
     ) -> object:
+        # 逻辑说明：统一验证 Worker 名称/scope，按受限 action 选择固定服务方法并传递上下文；完成后返回同格式资源回执。
         item = _NameInput.model_validate(request)
         self._target("worker", item.name)
         method = getattr(self._resources, f"{action}_worker")
@@ -826,6 +846,7 @@ class ResourceToolkit:
         )
 
     async def _delete_worker(self, request: BaseModel) -> object:
+        # 逻辑说明：验证 Worker 目标，携带当前 operation 上下文执行删除；服务成功后才返回 deleted，失败或对账中不会伪报终态。
         item = _NameInput.model_validate(request)
         self._target("worker", item.name)
         await self._resources.delete_worker(
@@ -835,6 +856,7 @@ class ResourceToolkit:
         return _deleted("delete_worker", "worker", item.name)
 
     async def _list_teams(self, request: BaseModel) -> object:
+        # 逻辑说明：读取 Team 后按 allowed_team_names 过滤 Human scope，再返回有界结构化集合。
         del request
         teams = await self._resources.list_teams()
         if not self._policy.resource_scope_all:
@@ -846,12 +868,14 @@ class ResourceToolkit:
         return _collection("list_teams", teams)
 
     async def _get_team(self, request: BaseModel) -> object:
+        # 逻辑说明：验证 Team 名称与 scope，读取并返回资源或 not_found 回执。
         item = _NameInput.model_validate(request)
         self._target("team", item.name)
         team = await self._resources.get_team(item.name)
         return _optional_resource("get_team", "team", item.name, team)
 
     async def _create_team(self, request: BaseModel) -> object:
+        # 逻辑说明：验证完整 TeamSpec 与目标 scope，携带幂等上下文创建 Controller desired state并返回资源回执。
         item = TeamSpec.model_validate(request)
         self._target("team", item.name)
         team = await self._resources.create_team(
@@ -861,6 +885,7 @@ class ResourceToolkit:
         return _resource_receipt("create_team", "team", team)
 
     async def _update_team(self, request: BaseModel) -> object:
+        # 逻辑说明：验证 TeamSpec 和 scope，调用 apply workflow 对账期望与实际 Team，并只返回提交后的资源表示。
         item = TeamSpec.model_validate(request)
         self._target("team", item.name)
         team = await self._resources.apply_team(
@@ -870,6 +895,7 @@ class ResourceToolkit:
         return _resource_receipt("update_team", "team", team)
 
     async def _delete_team(self, request: BaseModel) -> object:
+        # 逻辑说明：验证 Team scope 后执行可恢复删除，并在成功回执中明确保留的 Worker，避免用户误以为成员也被删除。
         item = _NameInput.model_validate(request)
         self._target("team", item.name)
         preserved_workers = await self._resources.delete_team(
@@ -887,6 +913,7 @@ class ResourceToolkit:
         )
 
     async def _list_humans(self, request: BaseModel) -> object:
+        # 逻辑说明：调用只读 Human 列表服务并统一序列化集合；工具注册策略已限定能看到该能力的房间。
         del request
         return _collection(
             "list_humans",
@@ -894,11 +921,13 @@ class ResourceToolkit:
         )
 
     async def _get_human(self, request: BaseModel) -> object:
+        # 逻辑说明：验证名称后读取 Human，统一返回资源或 not_found 回执，不暴露内部客户端对象。
         item = _NameInput.model_validate(request)
         human = await self._resources.get_human(item.name)
         return _optional_resource("get_human", "human", item.name, human)
 
     async def _create_human(self, request: BaseModel) -> object:
+        # 逻辑说明：验证 Human 权限规格并携带当前幂等上下文创建 Controller 资源，成功后返回脱敏回执。
         item = HumanCreateRequest.model_validate(request)
         human = await self._resources.create_human(
             item,
@@ -907,6 +936,7 @@ class ResourceToolkit:
         return _resource_receipt("create_human", "human", human)
 
     async def _update_human(self, request: BaseModel) -> object:
+        # 逻辑说明：验证 Human 更新及权限字段，调用可恢复 workflow；失败不会回传尚未生效的权限。
         item = HumanUpdateRequest.model_validate(request)
         human = await self._resources.update_human(
             item,
@@ -915,6 +945,7 @@ class ResourceToolkit:
         return _resource_receipt("update_human", "human", human)
 
     async def _delete_human(self, request: BaseModel) -> object:
+        # 逻辑说明：验证目标并带上下文执行删除，只有服务确认后返回 deleted；Matrix 账号处理边界仍由 workflow 决定。
         item = _NameInput.model_validate(request)
         await self._resources.delete_human(
             item.name,
@@ -923,6 +954,7 @@ class ResourceToolkit:
         return _deleted("delete_human", "human", item.name)
 
     async def _list_channels(self, request: BaseModel) -> object:
+        # 逻辑说明：并行语义上分别读取指定用户的 primary 与 trusted 关系并合成回执；任一数据库读取失败则整次调用失败，不返回不完整拓扑。
         item = _UserInput.model_validate(request)
         return ToolReceipt(
             tool="list_channels",
@@ -938,6 +970,7 @@ class ResourceToolkit:
         )
 
     async def _create_channel(self, request: BaseModel) -> object:
+        # 逻辑说明：验证房间名称、topic 与邀请列表，附上 policy revision 和幂等上下文调用 Matrix workflow；成功后返回新 room ID。
         item = _CreateChannelInput.model_validate(request)
         room_id = await self._matrix_workflows.create_channel(
             name=item.name,
@@ -954,6 +987,7 @@ class ResourceToolkit:
         )
 
     async def _update_channel(self, request: BaseModel) -> object:
+        # 逻辑说明：验证 action 对应字段后，携带当前上下文更新 primary/trusted 关系并返回 workflow 的对账结果。
         item = _UpdateChannelInput.model_validate(request)
         result = await self._matrix_workflows.update_channel(
             action=item.action,
@@ -969,6 +1003,7 @@ class ResourceToolkit:
         )
 
     async def _delete_channel(self, request: BaseModel) -> object:
+        # 逻辑说明：验证 clear/remove 动作及用户对，调用可恢复关系删除 workflow；只删除关系，不假设物理 Matrix 房间被删除。
         item = _DeleteChannelInput.model_validate(request)
         result = await self._matrix_workflows.delete_channel(
             action=item.action,
@@ -983,6 +1018,7 @@ class ResourceToolkit:
         )
 
     async def _send_notification(self, request: BaseModel) -> object:
+        # 逻辑说明：验证收件人与正文，携带幂等上下文执行 exactly-once 通知 workflow，再用实际 room/event 结果生成回执。
         item = _SendNotificationInput.model_validate(request)
         result = await self._matrix_workflows.send_notification(
             recipient=item.recipient,
@@ -998,6 +1034,7 @@ class ResourceToolkit:
         )
 
     async def _list_matrix_rooms(self, request: BaseModel) -> object:
+        # 逻辑说明：读取当前 Matrix bot 已加入房间并转换为带总数的结构化集合；不把未加入或不可见房间推测进结果。
         del request
         rooms = await self._matrix.joined_rooms()
         return ToolCollectionReceipt(
@@ -1007,6 +1044,7 @@ class ResourceToolkit:
         )
 
     async def _list_matrix_members(self, request: BaseModel) -> object:
+        # 逻辑说明：验证 room ID、读取 homeserver 当前成员并返回有序结构化集合；远端权限或网络失败直接传播。
         item = _RoomInput.model_validate(request)
         members = await self._matrix.members(item.room_id)
         return ToolCollectionReceipt(
@@ -1016,6 +1054,7 @@ class ResourceToolkit:
         )
 
     async def _lookup_matrix_user(self, request: BaseModel) -> object:
+        # 逻辑说明：验证 Matrix user ID 后调用只读用户查询，并把结果放入不含凭据的 ToolReceipt。
         item = _UserInput.model_validate(request)
         return ToolReceipt(
             tool="lookup_matrix_user",
@@ -1025,6 +1064,7 @@ class ResourceToolkit:
         )
 
     async def _register_matrix_user(self, request: BaseModel) -> object:
+        # 逻辑说明：验证用户名与受限环境变量名，从进程环境读取密码并包装 SecretStr 后调用注册 API；缺 Secret 立即失败，回执不包含密码。
         item = _RegisterMatrixUserInput.model_validate(request)
         raw_password = os.environ.get(item.password_env)
         if not raw_password:
@@ -1045,6 +1085,7 @@ class ResourceToolkit:
         )
 
     async def _get_matrix_room_state(self, request: BaseModel) -> object:
+        # 逻辑说明：验证 room ID，读取当前 state events 并附总数返回；不修改房间也不缓存为授权事实。
         item = _RoomInput.model_validate(request)
         events = await self._matrix.room_state(item.room_id)
         return ToolCollectionReceipt(
@@ -1054,6 +1095,7 @@ class ResourceToolkit:
         )
 
     async def _upload_matrix_media(self, request: BaseModel) -> object:
+        # 逻辑说明：验证本地路径字符串，绑定当前幂等上下文后由 Matrix workflow 上传；成功只返回 MXC URI，不回显文件内容。
         item = _UploadMediaInput.model_validate(request)
         uri = await self._matrix_workflows.upload_media(
             path=Path(item.path),
@@ -1067,6 +1109,7 @@ class ResourceToolkit:
         )
 
     async def _download_matrix_media(self, request: BaseModel) -> object:
+        # 逻辑说明：验证 MXC 与可选加密元数据，调用 Matrix 客户端下载/解密，再把消息块规范为 JSON；任一步失败不返回部分块。
         item = _DownloadMediaInput.model_validate(request)
         blocks = await self._matrix.download_media(
             MediaReference.model_validate(item.model_dump()),
@@ -1079,6 +1122,7 @@ class ResourceToolkit:
         )
 
     async def _invite_matrix_user(self, request: BaseModel) -> object:
+        # 逻辑说明：验证 room/user 并以 invite 动作调用统一成员 workflow，带幂等上下文完成远端效果和回执对账。
         item = _RoomUserInput.model_validate(request)
         result = await self._matrix_workflows.change_membership(
             action="invite",
@@ -1094,6 +1138,7 @@ class ResourceToolkit:
         )
 
     async def _kick_matrix_user(self, request: BaseModel) -> object:
+        # 逻辑说明：验证 room/user/reason，调用统一 membership workflow 执行 kick；成功后返回实际对账结果。
         item = _RoomUserReasonInput.model_validate(request)
         result = await self._matrix_workflows.change_membership(
             action="kick",
@@ -1109,6 +1154,7 @@ class ResourceToolkit:
         )
 
     async def _ban_matrix_user(self, request: BaseModel) -> object:
+        # 逻辑说明：验证目标和原因，携带当前操作上下文执行 ban；远端失败或结果不明确由 workflow 进入恢复，不伪报成功。
         item = _RoomUserReasonInput.model_validate(request)
         result = await self._matrix_workflows.change_membership(
             action="ban",
@@ -1124,6 +1170,7 @@ class ResourceToolkit:
         )
 
     async def _unban_matrix_user(self, request: BaseModel) -> object:
+        # 逻辑说明：验证 room/user 后以空 reason 执行 unban workflow，并返回标准 membership receipt。
         item = _RoomUserInput.model_validate(request)
         result = await self._matrix_workflows.change_membership(
             action="unban",
@@ -1152,6 +1199,7 @@ class ResourceToolkitFactory:
         manager_admin_room: str,
         yolo: bool = False,
     ) -> None:
+        # 逻辑说明：保存跨房间共享的资源与 Matrix 服务，Factory 只负责按 policy 装配 toolkit，不在此执行 Worker、Team 或 Project 变更。
         self._resources = resources
         self._matrix = matrix
         self._matrix_workflows = matrix_workflows
@@ -1163,6 +1211,7 @@ class ResourceToolkitFactory:
         self,
         policy: RoomPolicy,
     ) -> tuple[ManagerTool, ...]:
+        # 逻辑说明：使用共享资源、Matrix workflow 和渠道存储为当前 policy 创建隔离 toolkit，并返回经过 room kind、scope 与白名单过滤的工具集合。
         return ResourceToolkit(
             policy=policy,
             resources=self._resources,
@@ -1175,6 +1224,7 @@ class ResourceToolkitFactory:
 
 
 def _current_mutation_context() -> MutationContext:
+    # 逻辑说明：把当前 Matrix turn 的 room、event 和 tool-call ID 映射为资源 workflow 的稳定幂等上下文；未绑定调用被统一边界拒绝。
     invocation = current_tool_invocation()
     return MutationContext(
         room_id=invocation.room_id,
@@ -1188,6 +1238,7 @@ def _resource_receipt(
     resource_type: str,
     resource: WorkerResource | TeamResource | HumanResource,
 ) -> ToolReceipt:
+    # 逻辑说明：把强类型 Worker/Team/Human 资源转成 JSON-safe、无 Secret 的统一成功回执，保留工具名、资源类型和名称。
     return ToolReceipt(
         tool=tool,
         resource_type=resource_type,
@@ -1202,6 +1253,7 @@ def _optional_resource(
     name: str,
     resource: WorkerResource | TeamResource | HumanResource | None,
 ) -> ToolReceipt:
+    # 逻辑说明：将 None 映射为显式 not_found，否则复用资源回执；避免调用方把空结果误认为成功创建或删除。
     if resource is None:
         return ToolReceipt(
             tool=tool,
@@ -1219,6 +1271,7 @@ def _collection(
         ...,
     ],
 ) -> ToolCollectionReceipt:
+    # 逻辑说明：逐个序列化同类资源并计算总数，返回不可变集合回执，隐藏服务实现对象。
     items = tuple(
         resource.model_dump(mode="json")
         for resource in resources
@@ -1231,6 +1284,7 @@ def _collection(
 
 
 def _deleted(tool: str, resource_type: str, name: str) -> ToolReceipt:
+    # 逻辑说明：只有对应删除 workflow 已成功返回后才构造标准 deleted 回执，保留工具、资源类型和名称供审计。
     return ToolReceipt(
         tool=tool,
         resource_type=resource_type,
@@ -1258,6 +1312,7 @@ def _membership_receipt(
 
 
 def _block_value(block: Any) -> dict[str, Any]:
+    # 逻辑说明：Pydantic 消息块按 JSON 模式序列化；未知块降级为类型名与字符串，确保工具返回可编码而不改变原块。
     if isinstance(block, BaseModel):
         return block.model_dump(mode="json")
     return {"type": type(block).__name__, "value": str(block)}

@@ -21,10 +21,12 @@ _EMPHASIS = re.compile(r"(?<!\*)\*([^*\n]+)\*(?!\*)")
 
 def markdown_to_matrix_html(text: str) -> str:
     """Render a deliberately small Markdown subset after HTML escaping."""
+    # 逻辑说明：先转义全部模型文本，再依次恢复代码块、安全链接、行内样式和列表；因此返回值可放进 Matrix formatted_body，且不执行任何远程 I/O。
     escaped = html.escape(text, quote=True)
     fenced: list[str] = []
 
     def store_fence(match: re.Match[str]) -> str:
+        # 逻辑说明：把已转义的围栏代码暂存为编号占位符，避免后续 Markdown 正则误改代码内容，最终由外层函数按编号放回 HTML。
         language = html.escape(match.group(1).strip(), quote=True)
         body = match.group(2).strip("\n")
         class_name = f' class="language-{language}"' if language else ""
@@ -69,6 +71,7 @@ def markdown_to_matrix_html(text: str) -> str:
 
 
 def _safe_link(match: re.Match[str]) -> str:
+    # 逻辑说明：仅允许同时具有主机名的 http/https 链接生成锚点；javascript、相对地址等输入降级为可见纯文本，防止点击时执行危险协议。
     label, raw_url = match.groups()
     parsed = urlparse(html.unescape(raw_url))
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:

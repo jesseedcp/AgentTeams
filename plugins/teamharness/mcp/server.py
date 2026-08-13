@@ -567,6 +567,7 @@ TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
 
 
 def _tool_schema(name: str) -> dict[str, Any]:
+    # 逻辑说明：从受控 TOOL_SCHEMAS 表选择指定工具，只公开 MCP 协议需要的名称、说明和输入 schema；未知名称保持 KeyError 以暴露注册错误。
     schema = TOOL_SCHEMAS[name]
     return {
         "name": name,
@@ -576,11 +577,15 @@ def _tool_schema(name: str) -> dict[str, Any]:
 
 
 def list_tools() -> list[dict[str, Any]]:
+    # 逻辑说明：`list_tools` 不接收参数，依据当前运行角色筛选可见 TeamHarness 工具名，并把每个工具转换为 MCP 客户端可发现的 schema 列表。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     return [_tool_schema(name) for name in _visible_tool_names()]
 
 
 def call_tool(name: str, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
     """按固定白名单分派工具，未知名称不会被当作函数或 shell 命令执行。"""
+    # 逻辑说明：`call_tool` 接收 `name`、`arguments`，按请求类型分派并编排后续步骤，并依次复用 `_message_tool_blocked_for_runtime_role`、`_message`，返回 `dict[str, Any]`。
+    # 执行过程中包含外部 I/O；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     args = arguments or {}
     if name not in TOOL_NAMES:
         payload = {"ok": False, "error": "unknown_tool", "tool": name}
@@ -624,6 +629,8 @@ def call_tool(name: str, arguments: dict[str, Any] | None = None) -> dict[str, A
 
 
 def _matrix_target(target: str) -> tuple[str, str]:
+    # 逻辑说明：`_matrix_target` 接收 `target`，构造协议数据并完成外部传输，并依次复用 `strip`、`startswith`，返回 `tuple[str, str]`。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     raw = (target or "").strip()
     if raw.startswith("matrix:"):
         raw = raw[len("matrix:") :]
@@ -643,6 +650,8 @@ def _matrix_room_domain(room_id: str) -> str:
 
 
 def _mentions(text: str, room_id: str = "") -> list[str]:
+    # 逻辑说明：`_mentions` 接收 `text`、`room_id`，按既有分支组合输入并生成结果，并依次复用 `findall`、`_matrix_room_domain`，返回 `list[str]`。
+    # 执行过程中包含实例、文件或共享状态变更；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
     mentions = list(MATRIX_USER_RE.findall(text or ""))
     domain = _matrix_room_domain(room_id)
     if domain:
@@ -652,6 +661,8 @@ def _mentions(text: str, room_id: str = "") -> list[str]:
 
 
 def _compact_without_mentions(text: str, mentions: list[str]) -> str:
+    # 逻辑说明：`_compact_without_mentions` 接收 `text`、`mentions`，按既有分支组合输入并生成结果，并依次复用 `sub`、`split`，返回 `str`。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     without_mentions = MATRIX_USER_RE.sub("", text or "")
     for mxid in mentions:
         local = mxid.split(":", 1)[0]
@@ -664,6 +675,8 @@ def _compact_without_mentions(text: str, mentions: list[str]) -> str:
 
 
 def _ping_pong_error(text: str, mentions: list[str]) -> str | None:
+    # 逻辑说明：`_ping_pong_error` 接收 `text`、`mentions`，按既有分支组合输入并生成结果，并依次复用 `_compact_without_mentions`，返回 `str | None`。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
     if not mentions:
         return None
     compact = _compact_without_mentions(text, mentions)
@@ -673,6 +686,8 @@ def _ping_pong_error(text: str, mentions: list[str]) -> str | None:
 
 
 def _render_inline_matrix_html(text: str) -> str:
+    # 逻辑说明：`_render_inline_matrix_html` 接收 `text`，构造协议数据并完成外部传输，并依次复用 `split`、`startswith`，返回 `str`。
+    # 执行过程中包含实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     parts = re.split(r"(`[^`\n]+`)", text)
     rendered: list[str] = []
     for part in parts:
@@ -686,15 +701,21 @@ def _render_inline_matrix_html(text: str) -> str:
 
 
 def _table_cells(line: str) -> list[str]:
+    # 逻辑说明：`_table_cells` 接收 `line`，按既有分支组合输入并生成结果，并依次复用 `strip`、`split`，返回 `list[str]`。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     return [cell.strip() for cell in line.strip().strip("|").split("|")]
 
 
 def _is_table_separator(line: str) -> bool:
+    # 逻辑说明：`_is_table_separator` 接收 `line`，按既有分支组合输入并生成结果，并依次复用 `_table_cells`、`all`，返回 `bool`。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     cells = _table_cells(line)
     return bool(cells) and all(re.fullmatch(r":?-{3,}:?", cell or "") for cell in cells)
 
 
 def _render_fallback_table(lines: list[str]) -> str:
+    # 逻辑说明：`_render_fallback_table` 接收 `lines`，把输入转换为调用方需要的结构，并依次复用 `_table_cells`、`extend`，返回 `str`。
+    # 执行过程中包含实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     header = _table_cells(lines[0])
     rows = [_table_cells(line) for line in lines[2:]]
     parts = ["<table>", "<thead><tr>"]
@@ -712,6 +733,8 @@ def _render_fallback_table(lines: list[str]) -> str:
 
 
 def _md_to_html(text: str) -> str:
+    # 逻辑说明：`_md_to_html` 接收 TeamHarness 要写入 Matrix 的 Markdown 消息，启用链接、换行、删除线和表格渲染，并在依赖缺失时使用安全转义回退。
+    # 执行过程中包含实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     try:
         from markdown_it import MarkdownIt
 
@@ -842,6 +865,8 @@ def _md_to_html(text: str) -> str:
 
 
 def _formatted_body(text: str, mentions: list[str]) -> str:
+    # 逻辑说明：`_formatted_body` 接收 `text`、`mentions`，把输入转换为调用方需要的结构，并依次复用 `_md_to_html`、`quote`，返回 `str`。
+    # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     body = _md_to_html(text or "")
     for mxid in mentions:
         encoded = urllib.parse.quote(mxid, safe="")
@@ -865,6 +890,8 @@ def _formatted_body(text: str, mentions: list[str]) -> str:
 
 
 def _matrix_content(text: str, mentions: list[str]) -> dict[str, Any]:
+    # 逻辑说明：`_matrix_content` 接收 `text`、`mentions`，构造协议数据并完成外部传输，并依次复用 `_formatted_body`，返回 `dict[str, Any]`。
+    # 执行过程中包含实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     content: dict[str, Any] = {
         "msgtype": "m.text",
         "body": text,
@@ -877,6 +904,8 @@ def _matrix_content(text: str, mentions: list[str]) -> dict[str, Any]:
 
 
 def _matrix_send_text_event(room_id: str, text: str) -> dict[str, Any]:
+    # 逻辑说明：`_matrix_send_text_event` 接收 `room_id`、`text`，构造协议数据并完成外部传输，并依次复用 `_canonical_room_id`、`_mentions`，返回 `dict[str, Any]`。
+    # 执行过程中包含外部 I/O；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
     canonical_room_id = _canonical_room_id(room_id)
     if not canonical_room_id:
         return {"status": "skipped", "error": "Matrix room is unavailable"}
@@ -924,11 +953,15 @@ def _matrix_send_text_event(room_id: str, text: str) -> dict[str, Any]:
 
 
 def _reply_route(arguments: dict[str, Any]) -> dict[str, Any]:
+    # 逻辑说明：`_reply_route` 接收 `arguments`，按既有分支组合输入并生成结果，并依次复用 `get`，返回 `dict[str, Any]`。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     route = arguments.get("replyRoute") or arguments.get("reply_route")
     return route if isinstance(route, dict) else {}
 
 
 def _route_value(arguments: dict[str, Any], route: dict[str, Any], *names: str) -> str:
+    # 逻辑说明：`_route_value` 接收 `arguments`、`route`、`*names`，按既有分支组合输入并生成结果，并依次复用 `get`、`strip`，返回 `str`。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     for name in names:
         value = route.get(name)
         if value is None:
@@ -941,6 +974,8 @@ def _route_value(arguments: dict[str, Any], route: dict[str, Any], *names: str) 
 def _route_bool(
     arguments: dict[str, Any], route: dict[str, Any], *names: str, default: bool = False
 ) -> bool:
+    # 逻辑说明：`_route_bool` 接收 `arguments`、`route`、`default`、`*names`，按既有分支组合输入并生成结果，并依次复用 `_payload_bool`、`get`，返回 `bool`。
+    # 执行过程中包含外部 I/O；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     for name in names:
         if name in route:
             return _payload_bool(route.get(name), default)
@@ -952,6 +987,8 @@ def _route_bool(
 def _qwenpaw_message(
     arguments: dict[str, Any], route: dict[str, Any], channel: str, message: str
 ) -> dict[str, Any]:
+    # 逻辑说明：`_qwenpaw_message` 接收 `arguments`、`route`、`channel`、`message`，构造协议数据并完成外部传输，并依次复用 `_route_value`、`strip`，返回 `dict[str, Any]`。
+    # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
     target_user = _route_value(
         arguments, route, "targetUser", "target_user", "userId", "user_id"
     )
@@ -1112,6 +1149,8 @@ def _send_dingtalk_sender_mention(
     account_id: str,
     message: str,
 ) -> dict[str, Any]:
+    # 逻辑说明：`_send_dingtalk_sender_mention` 接收 `arguments`、`route`、`target_user`、`target_session`，构造协议数据并完成外部传输，并依次复用 `_dingtalk_session_webhook_entry`、`strip`，返回 `dict[str, Any]`。
+    # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     entry = _dingtalk_session_webhook_entry(target_user, target_session, account_id)
     webhook = str(entry.get("webhook") or "").strip()
     sender_staff_id = str(entry.get("sender_staff_id") or "").strip()
@@ -1201,6 +1240,8 @@ def _send_dingtalk_sender_mention(
 
 
 def _qwenpaw_workspace_dir(account_id: str) -> Path | None:
+    # 逻辑说明：`_qwenpaw_workspace_dir` 接收 `account_id`，按既有分支组合输入并生成结果，并依次复用 `_qwenpaw_working_dir`、`exists`，返回 `Path | None`。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     working_dir = _qwenpaw_working_dir()
     if working_dir is None:
         return None
@@ -1217,6 +1258,8 @@ def _qwenpaw_workspace_dir(account_id: str) -> Path | None:
 def _dingtalk_session_webhook_entry(
     target_user: str, target_session: str, account_id: str
 ) -> dict[str, Any]:
+    # 逻辑说明：`_dingtalk_session_webhook_entry` 接收 `target_user`、`target_session`、`account_id`，按既有分支组合输入并生成结果，并依次复用 `_qwenpaw_workspace_dir`、`_read_json`，返回 `dict[str, Any]`。
+    # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     workspace_dir = _qwenpaw_workspace_dir(account_id)
     if workspace_dir is None:
         return {}
@@ -1248,6 +1291,8 @@ def _session_safe(name: str) -> str:
 
 
 def _qwenpaw_working_dir() -> Path | None:
+    # 逻辑说明：`_qwenpaw_working_dir` 不接收参数，从 QWENPAW_WORKING_DIR 解析 QwenPaw 工作目录；环境变量为空时返回 None 而不猜测路径。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     for name in ("QWENPAW_WORKING_DIR", "COPAW_WORKING_DIR"):
         raw = os.getenv(name, "").strip()
         if raw:
@@ -1263,6 +1308,8 @@ def _qwenpaw_working_dir() -> Path | None:
 def _channel_session_path(
     channel: str, user_id: str, session_id: str, account_id: str
 ) -> Path | None:
+    # 逻辑说明：`_channel_session_path` 接收 `channel`、`user_id`、`session_id`、`account_id`，按既有分支组合输入并生成结果，并依次复用 `_qwenpaw_workspace_dir`、`_session_safe`，返回 `Path | None`。
+    # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
     workspace_dir = _qwenpaw_workspace_dir(account_id)
     if workspace_dir is None:
         return None
@@ -1288,6 +1335,8 @@ def _outbound_message_dict(
     account_id: str,
     metadata: dict[str, Any],
 ) -> dict[str, Any]:
+    # 逻辑说明：`_outbound_message_dict` 接收 `channel`、`text`、`message_id`、`account_id`，构造协议数据并完成外部传输，并依次复用 `strftime`、`localtime`，返回 `dict[str, Any]`。
+    # 执行过程中包含实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     now = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
     millis = int((time.time() % 1) * 1000)
     msg_metadata = {
@@ -1316,6 +1365,8 @@ def _record_outbound_to_session(
     account_id: str,
     metadata: dict[str, Any] | None = None,
 ) -> bool:
+    # 逻辑说明：`_record_outbound_to_session` 接收 `channel`、`user_id`、`session_id`、`text`，计算目标值并更新持久或共享状态，并依次复用 `lower`、`strip`，返回 `bool`。
+    # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     channel_key = channel.strip().lower() or "default"
     path = _channel_session_path(channel_key, user_id, session_id, account_id)
     if path is None:
@@ -1369,6 +1420,8 @@ def _record_outbound_to_session(
 def _record_matrix_outbound_to_session(
     room_id: str, text: str, message_id: str | None, account_id: str
 ) -> bool:
+    # 逻辑说明：`_record_matrix_outbound_to_session` 接收 `room_id`、`text`、`message_id`、`account_id`，计算目标值并更新持久或共享状态，并依次复用 `_record_outbound_to_session`、`_write_matrix_attachment_context_parent_event_id`，返回 `bool`。
+    # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     recorded = _record_outbound_to_session(
         channel="matrix",
         user_id=room_id,
@@ -1383,6 +1436,8 @@ def _record_matrix_outbound_to_session(
 
 
 def _message(arguments: dict[str, Any]) -> dict[str, Any]:
+    # 逻辑说明：`_message` 接收 `arguments`，构造协议数据并完成外部传输，并依次复用 `_message_impl`、`MessageToolDeps`，返回 `dict[str, Any]`。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     return _message_impl(
         arguments,
         MessageToolDeps(
@@ -1398,6 +1453,8 @@ def _message(arguments: dict[str, Any]) -> dict[str, Any]:
 
 
 def _matrix_env(tool: str) -> tuple[str, str]:
+    # 逻辑说明：`_matrix_env` 接收 `tool`，构造协议数据并完成外部传输，并依次复用 `rstrip`、`getenv`，返回 `tuple[str, str]`。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     homeserver = os.getenv("AGENTTEAMS_MATRIX_URL", "").rstrip("/")
     token = os.getenv("AGENTTEAMS_WORKER_MATRIX_TOKEN", "")
     if not homeserver or not token:
@@ -1408,6 +1465,8 @@ def _matrix_env(tool: str) -> tuple[str, str]:
 
 
 def _attachment_parent_event_id(*sources: dict[str, Any]) -> str:
+    # 逻辑说明：`_attachment_parent_event_id` 接收 `*sources`，按既有分支组合输入并生成结果，并依次复用 `strip`、`get`，返回 `str`。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     for source in sources:
         if not isinstance(source, dict):
             continue
@@ -1419,6 +1478,8 @@ def _attachment_parent_event_id(*sources: dict[str, Any]) -> str:
 
 
 def _matrix_attachment_context_path() -> Path | None:
+    # 逻辑说明：`_matrix_attachment_context_path` 不接收参数，优先采用显式上下文文件路径，否则拼出 QwenPaw 工作目录中的 Matrix 附件上下文文件；不执行媒体传输。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     raw = os.getenv("TEAMHARNESS_MATRIX_CONTEXT_FILE", "").strip()
     if raw:
         return Path(raw)
@@ -1429,6 +1490,8 @@ def _matrix_attachment_context_path() -> Path | None:
 
 
 def _matrix_attachment_context_parent_event_id(room_id: str) -> str:
+    # 逻辑说明：`_matrix_attachment_context_parent_event_id` 接收 `room_id`，构造协议数据并完成外部传输，并依次复用 `_matrix_attachment_context_path`、`is_file`，返回 `str`。
+    # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
     path = _matrix_attachment_context_path()
     if not path or not path.is_file():
         return ""
@@ -1460,6 +1523,8 @@ def _matrix_attachment_context_parent_event_id(room_id: str) -> str:
 def _write_matrix_attachment_context_parent_event_id(
     room_id: str, event_id: str | None
 ) -> bool:
+    # 逻辑说明：`_write_matrix_attachment_context_parent_event_id` 接收 `room_id`、`event_id`，计算目标值并更新持久或共享状态，并依次复用 `strip`、`_matrix_attachment_context_path`，返回 `bool`。
+    # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
     parent_event_id = str(event_id or "").strip()
     if not parent_event_id:
         return False
@@ -1516,6 +1581,8 @@ def _path_is_under(normalized: str, prefix: str) -> bool:
 
 
 def _shared_dir_candidates() -> list[Path]:
+    # 逻辑说明：`_shared_dir_candidates` 不接收参数，汇总显式共享目录、QwenPaw 工作目录和默认挂载位置，按优先级去重后供任务产物查找。
+    # 执行过程中包含实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     candidates: list[Path] = []
     for env_key in ("TEAMHARNESS_SHARED_DIR", "AGENTTEAMS_SHARED_DIR"):
         raw = os.getenv(env_key, "").strip()
@@ -1527,6 +1594,8 @@ def _shared_dir_candidates() -> list[Path]:
 def _artifact_is_under_runtime_shared(
     workspace: Path, local_path: Path, normalized: str
 ) -> bool:
+    # 逻辑说明：`_artifact_is_under_runtime_shared` 接收 `workspace`、`local_path`、`normalized`，按既有分支组合输入并生成结果，并依次复用 `_path_is_under`、`_shared_dir_candidates`，返回 `bool`。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
     if not _path_is_under(normalized, "shared"):
         return False
     candidates = _shared_dir_candidates()
@@ -1549,6 +1618,8 @@ def _artifact_is_under_runtime_shared(
 
 
 def _normalize_workspace_artifact_path(raw_path: str) -> tuple[str, bool]:
+    # 逻辑说明：`_normalize_workspace_artifact_path` 接收 `raw_path`，校验并规范化输入，并依次复用 `strip`、`startswith`，返回规范化路径及其目录标记。
+    # 该校验阻止绝对路径、反斜杠和目录穿越；保留现有异常语义，避免调用方越过限定的工作区边界。
     raw = (raw_path or "").strip()
     if not raw or raw.startswith("/") or "\\" in raw:
         raise ValueError("artifact path must be a relative workspace path")
@@ -1567,6 +1638,8 @@ def _normalize_workspace_artifact_path(raw_path: str) -> tuple[str, bool]:
 def _resolve_workspace_artifact_path(
     arguments: dict[str, Any], source_path: str, expected_prefix: str
 ) -> tuple[str, Path]:
+    # 逻辑说明：`_resolve_workspace_artifact_path` 接收 `arguments`、`source_path`、`expected_prefix`，校验并规范化输入，并依次复用 `_normalize_workspace_artifact_path`、`ValueError`，返回 `tuple[str, Path]`。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
     normalized, is_directory = _normalize_workspace_artifact_path(source_path)
     if is_directory:
         raise ValueError("artifact path must be a file")
@@ -1585,10 +1658,14 @@ def _resolve_workspace_artifact_path(
 
 
 def _artifact_mimetype(path: Path) -> str:
+    # 逻辑说明：`_artifact_mimetype` 接收 `path`，按既有分支组合输入并生成结果，并依次复用 `guess_type`，返回 `str`。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     return mimetypes.guess_type(str(path))[0] or "application/octet-stream"
 
 
 def _artifact_is_text(path: Path, mimetype: str) -> bool:
+    # 逻辑说明：`_artifact_is_text` 接收 `path`、`mimetype`，按既有分支组合输入并生成结果，并依次复用 `startswith`、`lower`，返回 `bool`。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     if mimetype.startswith("text/"):
         return True
     if mimetype in {
@@ -1627,6 +1704,8 @@ def _artifact_is_text(path: Path, mimetype: str) -> bool:
 
 
 def _artifact_text_has_sensitive_content(path: Path, mimetype: str) -> bool:
+    # 逻辑说明：`_artifact_text_has_sensitive_content` 接收 `path`、`mimetype`，把输入转换为调用方需要的结构，并依次复用 `_artifact_is_text`、`read_bytes`，返回 `bool`。
+    # 执行过程中包含外部 I/O；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     if not _artifact_is_text(path, mimetype):
         return False
     sample = path.read_bytes()[:TEXT_ARTIFACT_SAMPLE_BYTES]
@@ -1639,6 +1718,8 @@ def _artifact_text_has_sensitive_content(path: Path, mimetype: str) -> bool:
 def _matrix_upload_artifact(
     homeserver: str, token: str, path: Path, filename: str, mimetype: str
 ) -> str:
+    # 逻辑说明：`_matrix_upload_artifact` 接收 `homeserver`、`token`、`path`、`filename`，构造协议数据并完成外部传输，并依次复用 `quote`、`Request`，返回 `str`。
+    # 执行过程中包含外部 I/O；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     url = (
         f"{homeserver}/_matrix/media/v3/upload?filename={urllib.parse.quote(filename)}"
     )
@@ -1669,6 +1750,8 @@ def _matrix_send_file_event(
     mimetype: str,
     parent_event_id: str = "",
 ) -> str:
+    # 逻辑说明：`_matrix_send_file_event` 接收 `homeserver`、`token`、`room_id`、`filename`，构造协议数据并完成外部传输，并依次复用 `quote`、`_canonical_room_id`，返回 `str`。
+    # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
     content = {
         "msgtype": "m.file",
         "body": filename,
@@ -1714,6 +1797,8 @@ def _publish_workspace_artifact(
     expected_prefix: str,
     parent_event_id: str = "",
 ) -> dict[str, Any]:
+    # 逻辑说明：`_publish_workspace_artifact` 接收 `arguments`、`room_id`、`source_path`、`filename`，按既有分支组合输入并生成结果，并依次复用 `strip`、`_artifact_publish_result`，返回 `dict[str, Any]`。
+    # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
     parent_event_id = str(parent_event_id or "").strip()
     result = _artifact_publish_result(str(source_path), filename, parent_event_id)
     try:
@@ -1801,6 +1886,8 @@ def _publish_workspace_artifact(
 
 
 def _artifact_room_id(arguments: dict[str, Any]) -> str:
+    # 逻辑说明：`_artifact_room_id` 接收 `arguments`，按既有分支组合输入并生成结果，并依次复用 `_reply_route`、`get`，返回 `str`。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     route = _reply_route(arguments)
     target = (
         arguments.get("target")
@@ -1822,6 +1909,8 @@ def _artifact_room_id(arguments: dict[str, Any]) -> str:
 
 
 def _artifact(arguments: dict[str, Any]) -> dict[str, Any]:
+    # 逻辑说明：`_artifact` 接收 `arguments`，按既有分支组合输入并生成结果，并依次复用 `strip`、`get`，返回 `dict[str, Any]`。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     action = str(arguments.get("action") or "publish_file").strip()
     if action != "publish_file":
         return {
@@ -1879,6 +1968,8 @@ def _artifact(arguments: dict[str, Any]) -> dict[str, Any]:
 def _task_artifact_filename(
     task_id: str, source_path: str, result_artifact: bool = False
 ) -> str:
+    # 逻辑说明：`_task_artifact_filename` 接收 `task_id`、`source_path`、`result_artifact`，按既有分支组合输入并生成结果，并依次复用 `Path`、`rstrip`，返回 `str`。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     if result_artifact:
         suffix = Path(source_path).suffix or ".md"
         return f"{task_id}-result{suffix}"
@@ -1893,6 +1984,8 @@ def _publish_task_artifacts(
     deliverables: list[Any],
     parent_event_id: str = "",
 ) -> list[dict[str, Any]]:
+    # 逻辑说明：`_publish_task_artifacts` 接收 `arguments`、`task`、`task_id`、`deliverables`，按既有分支组合输入并生成结果，并依次复用 `get`、`_resolve_workspace_artifact_path`，返回 `list[dict[str, Any]]`。
+    # 执行过程中包含实例、文件或共享状态变更；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
     room_id = str(task.get("room_id") or "")
     expected_prefix = f"shared/tasks/{task_id}"
     result_source = f"{expected_prefix}/result.md"
@@ -1938,6 +2031,8 @@ def _publish_task_artifacts(
 
 
 def _project_artifact_room(project: dict[str, Any], task: dict[str, Any]) -> str:
+    # 逻辑说明：`_project_artifact_room` 接收 `project`、`task`，按既有分支组合输入并生成结果，并依次复用 `get`、`lower`，返回 `str`。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
     reply_route = (
         project.get("reply_route")
         if isinstance(project.get("reply_route"), dict)
@@ -1963,6 +2058,8 @@ def _publish_project_artifacts(
     task_id: str,
     parent_event_id: str = "",
 ) -> list[dict[str, Any]]:
+    # 逻辑说明：`_publish_project_artifacts` 接收 `arguments`、`project`、`project_id`、`task_id`，按既有分支组合输入并生成结果，并依次复用 `_read_json`、`_task_state_path`，返回 `list[dict[str, Any]]`。
+    # 执行过程中包含外部 I/O；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     task = _read_json(_task_state_path(arguments, task_id)) if task_id else {}
     source_path = f"shared/projects/{project_id}/result.md"
     return [
@@ -1978,6 +2075,8 @@ def _publish_project_artifacts(
 
 
 def _matrix_user_id() -> str:
+    # 逻辑说明：`_matrix_user_id` 不接收参数，按“显式环境变量 → member 运行时配置 → Worker 名与域名拼接”的优先级解析 TeamHarness 自身 Matrix ID。
+    # 执行过程中包含外部 I/O；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     explicit = os.getenv("AGENTTEAMS_MATRIX_USER_ID", "").strip()
     if explicit:
         return explicit
@@ -1995,6 +2094,8 @@ def _matrix_user_id() -> str:
 
 
 def _string_list(value: Any) -> list[str]:
+    # 逻辑说明：`_string_list` 接收 `value`，读取、筛选并规范化现有数据，并依次复用 `strip`、`loads`，返回 `list[str]`。
+    # 执行过程中包含外部 I/O；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     if value is None:
         return []
     if isinstance(value, str):
@@ -2012,6 +2113,8 @@ def _string_list(value: Any) -> list[str]:
 
 
 def _roomflow_room_meta() -> dict[str, Any]:
+    # 逻辑说明：`_roomflow_room_meta` 不接收参数，从运行时配置提取当前成员、团队和 Matrix 房间元数据，组合成 RoomFlow 消息路由所需的类型安全字典。
+    # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     config = _load_runtime_config()
     team = _section(config, "team")
     meta: dict[str, Any] = {
@@ -2084,6 +2187,8 @@ def _roomflow_room_meta() -> dict[str, Any]:
 
 
 def _write_matrix_room_meta(room_id: str, content: dict[str, Any]) -> None:
+    # 逻辑说明：`_write_matrix_room_meta` 接收 `room_id`、`content`，计算目标值并更新持久或共享状态，并依次复用 `_matrix_env`、`quote`，不返回业务结果。
+    # 执行过程中包含外部 I/O；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     homeserver, token = _matrix_env("roomflow")
     encoded_room = urllib.parse.quote(room_id, safe="")
     request = urllib.request.Request(
@@ -2100,6 +2205,8 @@ def _write_matrix_room_meta(room_id: str, content: dict[str, Any]) -> None:
 
 
 def _roomflow(arguments: dict[str, Any]) -> dict[str, Any]:
+    # 逻辑说明：`_roomflow` 接收 `arguments`，按既有分支组合输入并生成结果，并依次复用 `get`、`_payload`，返回 `dict[str, Any]`。
+    # 执行过程中包含外部 I/O；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     action = str(arguments.get("action") or "create_task_room")
     payload = _payload(arguments)
     if action == "create_task_room":
@@ -2127,6 +2234,8 @@ def _roomflow(arguments: dict[str, Any]) -> dict[str, Any]:
 
 
 def _task_room_name(value: Any) -> str:
+    # 逻辑说明：`_task_room_name` 接收 `value`，按既有分支组合输入并生成结果，并依次复用 `strip`、`lower`，返回 `str`。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     name = str(value or "").strip()
     lowered = name.lower()
     for prefix in ("task:", "task\uff1a"):
@@ -2139,6 +2248,8 @@ def _task_room_name(value: Any) -> str:
 def _create_task_room(
     arguments: dict[str, Any], payload: dict[str, Any]
 ) -> dict[str, Any]:
+    # 逻辑说明：`_create_task_room` 接收 `arguments`、`payload`，按既有顺序执行资源生命周期步骤，并依次复用 `get`、`_safe_id`，返回 `dict[str, Any]`。
+    # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
     try:
         raw_project_id = (
             payload.get("projectId")
@@ -2338,6 +2449,8 @@ def _create_task_room(
 def _roomflow_project_room_binding(
     arguments: dict[str, Any], payload: dict[str, Any], project_id: str
 ) -> dict[str, Any]:
+    # 逻辑说明：`_roomflow_project_room_binding` 接收 `arguments`、`payload`、`project_id`，按既有分支组合输入并生成结果，并依次复用 `_external_source_room_ref`、`_external_sender_ref`，返回 `dict[str, Any]`。
+    # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     source, source_room_id = _external_source_room_ref(payload)
     sender = _external_sender_ref(payload)
     project_room_key = f"project:{project_id}"
@@ -2367,6 +2480,8 @@ def _roomflow_project_room_binding(
 
 
 def _external_source_room_ref(payload: dict[str, Any]) -> tuple[str, str]:
+    # 逻辑说明：`_external_source_room_ref` 接收 `payload`，按既有分支组合输入并生成结果，并依次复用 `lower`、`strip`，返回 `tuple[str, str]`。
+    # 执行过程中包含外部 I/O；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     source = str(payload.get("source") or "").strip().lower()
     if not source or source == "matrix":
         return "", ""
@@ -2376,6 +2491,8 @@ def _external_source_room_ref(payload: dict[str, Any]) -> tuple[str, str]:
 
 
 def _external_sender_ref(payload: dict[str, Any]) -> str:
+    # 逻辑说明：`_external_sender_ref` 接收 `payload`，构造协议数据并完成外部传输，并依次复用 `strip`、`get`，返回 `str`。
+    # 执行过程中包含外部 I/O；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     for key in (
         "sender",
         "senderId",
@@ -2401,6 +2518,8 @@ def _external_sender_ref(payload: dict[str, Any]) -> str:
 
 
 def _bound_room_id(binding: dict[str, Any]) -> str:
+    # 逻辑说明：`_bound_room_id` 接收 `binding`，按既有分支组合输入并生成结果，并依次复用 `get`、`strip`，返回 `str`。
+    # 执行过程中包含实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     record = binding.get("record")
     if not isinstance(record, dict):
         return ""
@@ -2410,6 +2529,8 @@ def _bound_room_id(binding: dict[str, Any]) -> str:
 def _write_roomflow_project_room_binding(
     binding: dict[str, Any], room_id: str, base: dict[str, Any]
 ) -> None:
+    # 逻辑说明：`_write_roomflow_project_room_binding` 接收 `binding`、`room_id`、`base`，计算目标值并更新持久或共享状态，并依次复用 `get`、`update`，不返回业务结果。
+    # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     path = binding.get("path")
     if not isinstance(path, Path):
         return
@@ -2437,6 +2558,8 @@ def _write_roomflow_project_room_binding(
 
 
 def _ensure_matrix_room_members(room_id: str, invite: list[str]) -> None:
+    # 逻辑说明：`_ensure_matrix_room_members` 接收 `room_id`、`invite`，构造协议数据并完成外部传输，并依次复用 `_matrix_room_member_user_ids`、`_matrix_invite_to_room`，不返回业务结果。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     current = set(_matrix_room_member_user_ids(room_id))
     for user_id in invite:
         if user_id and user_id not in current:
@@ -2444,6 +2567,8 @@ def _ensure_matrix_room_members(room_id: str, invite: list[str]) -> None:
 
 
 def _matrix_invite_to_room(room_id: str, user_id: str) -> None:
+    # 逻辑说明：`_matrix_invite_to_room` 接收 `room_id`、`user_id`，构造协议数据并完成外部传输，并依次复用 `_matrix_env`、`quote`，不返回业务结果。
+    # 执行过程中包含外部 I/O；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     homeserver, token = _matrix_env("roomflow")
     encoded_room = urllib.parse.quote(room_id, safe="")
     request = urllib.request.Request(
@@ -2460,6 +2585,8 @@ def _matrix_invite_to_room(room_id: str, user_id: str) -> None:
 
 
 def _list_rooms(arguments: dict[str, Any]) -> dict[str, Any]:
+    # 逻辑说明：`_list_rooms` 接收 `arguments`，读取、筛选并规范化现有数据，并依次复用 `get`、`_matrix_env`，返回 `dict[str, Any]`。
+    # 执行过程中包含外部 I/O；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     if arguments.get("dryRun"):
         return {"ok": True, "tool": "roomflow", "action": "list_rooms", "dryRun": True}
     try:
@@ -2507,6 +2634,8 @@ def _list_rooms(arguments: dict[str, Any]) -> dict[str, Any]:
 
 
 def _archive_room(arguments: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+    # 逻辑说明：`_archive_room` 接收 `arguments`、`payload`，按既有分支组合输入并生成结果，并依次复用 `strip`、`get`，返回 `dict[str, Any]`。
+    # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     target = str(
         payload.get("roomId") or payload.get("room_id") or arguments.get("target") or ""
     ).strip()
@@ -2581,6 +2710,8 @@ def _archive_room(arguments: dict[str, Any], payload: dict[str, Any]) -> dict[st
 
 
 def _remote_root(value: str) -> str:
+    # 逻辑说明：`_remote_root` 接收 `value`，按既有分支组合输入并生成结果，并依次复用 `strip`、`ValueError`，返回 `str`。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     text = (value or "").strip()
     if not text:
         raise ValueError("storage sharedPrefix is required")
@@ -2588,6 +2719,8 @@ def _remote_root(value: str) -> str:
 
 
 def _load_runtime_config() -> dict[str, Any]:
+    # 逻辑说明：`_load_runtime_config` 不接收参数，从 TEAMHARNESS_RUNTIME_CONFIG 指向的文件读取 TeamHarness 成员/团队配置，依次尝试 JSON、PyYAML 与最小 YAML 解析器。
+    # 执行过程中包含外部 I/O；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
     runtime_config = os.getenv("TEAMHARNESS_RUNTIME_CONFIG", "").strip()
     if not runtime_config:
         return {}
@@ -2611,6 +2744,8 @@ def _load_runtime_config() -> dict[str, Any]:
 
 
 def _simple_yaml_sections(text: str) -> dict[str, Any]:
+    # 逻辑说明：`_simple_yaml_sections` 接收缺少 PyYAML 时的 TeamHarness 配置文本，只解析顶层、二级和三级字典缩进，并把叶子值交给 `_yaml_scalar` 转型。
+    # 执行过程中包含实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     data: dict[str, Any] = {}
     section: str | None = None
     nested_section: str | None = None
@@ -2648,6 +2783,8 @@ def _simple_yaml_sections(text: str) -> dict[str, Any]:
 
 
 def _yaml_scalar(value: str) -> Any:
+    # 逻辑说明：`_yaml_scalar` 接收 TeamHarness 最小 YAML 解析器截出的标量，将 null、布尔值和成对引号转换为 Python 值，其余内容保留字符串。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     if value in {"", "null", "Null", "NULL", "~"}:
         return ""
     if value in {"true", "True", "TRUE"}:
@@ -2662,11 +2799,15 @@ def _yaml_scalar(value: str) -> Any:
 
 
 def _section(data: dict[str, Any], name: str) -> dict[str, Any]:
+    # 逻辑说明：`_section` 接收 TeamHarness 运行时配置字典和节名，只在目标值确实是映射时返回它，否则返回空字典防止下游链式取值报错。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     value = data.get(name)
     return value if isinstance(value, dict) else {}
 
 
 def _runtime_team_admin_user_id() -> str:
+    # 逻辑说明：`_runtime_team_admin_user_id` 不接收参数，优先读取 team.admin 的 Matrix ID，缺失时退回 Leader 私聊中的管理员 ID。
+    # 执行过程中包含外部 I/O；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     config = _load_runtime_config()
     team = _section(config, "team")
     admin = _section(team, "admin")
@@ -2680,6 +2821,8 @@ def _runtime_team_admin_user_id() -> str:
 
 def _runtime_team_worker_user_ids() -> list[str]:
     """Return the current Team's Worker Matrix IDs as a safe invite fallback."""
+    # 逻辑说明：`_runtime_team_worker_user_ids` 不接收参数，遍历运行时 team.members，抽取并去重 Worker Matrix ID，作为邀请团队成员的安全回退名单。
+    # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     team = _section(_load_runtime_config(), "team")
     members = team.get("members")
     if not isinstance(members, list):
@@ -2700,6 +2843,8 @@ def _runtime_team_worker_user_ids() -> list[str]:
 
 
 def _runtime_leader_dm_admin_user_id(config: dict[str, Any]) -> str:
+    # 逻辑说明：`_runtime_leader_dm_admin_user_id` 接收 `config`，按既有分支组合输入并生成结果，并依次复用 `_section`、`strip`，返回 `str`。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     team = _section(config, "team")
     room_id = str(
         team.get("leaderDmRoomId") or team.get("leader_dm_room_id") or ""
@@ -2727,6 +2872,8 @@ def _runtime_leader_dm_admin_user_id(config: dict[str, Any]) -> str:
 
 
 def _matrix_room_member_user_ids(room_id: str) -> list[str]:
+    # 逻辑说明：`_matrix_room_member_user_ids` 接收 `room_id`，构造协议数据并完成外部传输，并依次复用 `_matrix_env`、`quote`，返回 `list[str]`。
+    # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     homeserver, token = _matrix_env("roomflow")
     encoded_room = urllib.parse.quote(room_id, safe="")
     request = urllib.request.Request(
@@ -2748,15 +2895,21 @@ def _matrix_room_member_user_ids(room_id: str) -> list[str]:
 
 
 def _runtime_team_room_id() -> str:
+    # 逻辑说明：`_runtime_team_room_id` 不接收参数，从运行时 team 节提取团队协作房间 ID；未配置或类型不符时返回空字符串。
+    # 执行过程中包含外部 I/O；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     team = _section(_load_runtime_config(), "team")
     return str(team.get("teamRoomId") or team.get("team_room_id") or "").strip()
 
 
 def _storage_root_prefix() -> str:
+    # 逻辑说明：`_storage_root_prefix` 不接收参数，规范化 AGENTTEAMS_STORAGE_ROOT_PREFIX，去除首尾斜杠后作为对象存储键的统一根前缀。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     return os.getenv("AGENTTEAMS_STORAGE_PREFIX", "").strip().strip("/")
 
 
 def _mc_host_url(endpoint: str, access_key: str, secret_key: str) -> str:
+    # 逻辑说明：`_mc_host_url` 接收 `endpoint`、`access_key`、`secret_key`，按既有分支组合输入并生成结果，并依次复用 `rstrip`、`strip`，返回 `str`。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     url = endpoint.strip().rstrip("/")
     if not url.startswith(("http://", "https://")):
         url = f"http://{url}"
@@ -2772,10 +2925,14 @@ def _mc_host_url(endpoint: str, access_key: str, secret_key: str) -> str:
 
 
 def _remote_uses_mc_alias(remote: str) -> bool:
+    # 逻辑说明：`_remote_uses_mc_alias` 接收 `remote`，按既有分支组合输入并生成结果，并依次复用 `startswith`、`strip`，返回 `bool`。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     return remote.strip().startswith(f"{MC_ALIAS}/")
 
 
 def _mc_alias_configured(env: dict[str, str]) -> bool:
+    # 逻辑说明：`_mc_alias_configured` 接收 `env`，按既有分支组合输入并生成结果，并依次复用 `run`，返回 `bool`。
+    # 执行过程中包含外部 I/O；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     try:
         completed = subprocess.run(
             ["mc", "alias", "list", MC_ALIAS],
@@ -2794,6 +2951,8 @@ def _mc_alias_configured(env: dict[str, str]) -> bool:
 def _controller_sts_mc_host(
     env: dict[str, str],
 ) -> tuple[str | None, str | None]:
+    # 逻辑说明：`_controller_sts_mc_host` 接收 `env`，按既有分支组合输入并生成结果，并依次复用 `strip`、`get`，返回 `tuple[str | None, str | None]`。
+    # 执行过程中包含外部 I/O；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     controller_url = env.get("AGENTTEAMS_CONTROLLER_URL", "").strip()
     if not controller_url:
         return None, None
@@ -2855,6 +3014,8 @@ def _controller_sts_mc_host(
 
 
 def _filesync_mc_env(remote: str) -> tuple[dict[str, str], str | None]:
+    # 逻辑说明：`_filesync_mc_env` 接收 `remote`，推进组件生命周期并同步运行状态，并依次复用 `_remote_uses_mc_alias`、`get`，返回 `tuple[dict[str, str], str | None]`。
+    # 执行过程中包含实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     env = dict(os.environ)
     if not _remote_uses_mc_alias(remote):
         return env, None
@@ -2887,6 +3048,8 @@ def _filesync_mc_env(remote: str) -> tuple[dict[str, str], str | None]:
 
 
 def _with_storage_root(prefix: str) -> str:
+    # 逻辑说明：`_with_storage_root` 接收 `prefix`，按既有分支组合输入并生成结果，并依次复用 `strip`、`_storage_root_prefix`，返回 `str`。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     clean = (prefix or "").strip().strip("/")
     root = _storage_root_prefix()
     if not root:
@@ -2900,6 +3063,8 @@ def _with_storage_root(prefix: str) -> str:
 
 def _default_workspace_dir() -> str:
     """Derive workspace dir from environment (set by qwenpaw-worker / copaw-worker)."""
+    # 逻辑说明：`_default_workspace_dir` 不接收参数，按显式变量、QwenPaw 目录和默认挂载顺序选择本 Agent 的工作区路径。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     shared_dir = (
         os.getenv("TEAMHARNESS_SHARED_DIR", "").strip()
         or os.getenv("AGENTTEAMS_SHARED_DIR", "").strip()
@@ -2915,6 +3080,8 @@ def _default_workspace_dir() -> str:
 
 def _default_shared_prefix() -> str:
     """Derive storage shared prefix from environment or runtime.yaml."""
+    # 逻辑说明：`_default_shared_prefix` 不接收参数，解析当前 Team 在对象存储中的共享前缀，并规范化为不带多余斜杠的相对键。
+    # 执行过程中包含外部 I/O；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     configured = os.getenv("AGENTTEAMS_SHARED_STORAGE_PREFIX", "").strip()
     if configured:
         return _with_storage_root(configured)
@@ -2930,6 +3097,8 @@ def _default_shared_prefix() -> str:
 
 def _default_global_shared_prefix() -> str:
     """Derive global-shared storage prefix from environment or runtime.yaml."""
+    # 逻辑说明：`_default_global_shared_prefix` 不接收参数，从环境或运行时存储节推导跨团队共享对象前缀，缺失时采用兼容默认值。
+    # 执行过程中包含外部 I/O；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     storage = _section(_load_runtime_config(), "storage")
     prefix = str(storage.get("globalSharedPrefix") or "").strip()
     if prefix:
@@ -2941,6 +3110,8 @@ def _default_global_shared_prefix() -> str:
 
 
 def _workspace_dir(arguments: dict[str, Any]) -> Path:
+    # 逻辑说明：`_workspace_dir` 接收 `arguments`，按既有分支组合输入并生成结果，并依次复用 `strip`、`get`，返回 `Path`。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     value = str(arguments.get("workspaceDir") or "").strip()
     if not value:
         value = _default_workspace_dir()
@@ -2950,6 +3121,8 @@ def _workspace_dir(arguments: dict[str, Any]) -> Path:
 
 
 def _optional_workspace_dir(arguments: dict[str, Any]) -> Path | None:
+    # 逻辑说明：`_optional_workspace_dir` 接收 `arguments`，按既有分支组合输入并生成结果，并依次复用 `strip`、`get`，返回 `Path | None`。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     value = str(arguments.get("workspaceDir") or "").strip()
     if not value:
         value = _default_workspace_dir()
@@ -2957,6 +3130,8 @@ def _optional_workspace_dir(arguments: dict[str, Any]) -> Path | None:
 
 
 def _normalize_exclude(value: Any) -> list[str]:
+    # 逻辑说明：`_normalize_exclude` 接收 `value`，校验并规范化输入，并依次复用 `strip`、`startswith`，返回 `list[str]`。
+    # 执行过程中包含外部 I/O；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     if not value:
         return []
     if isinstance(value, str):
@@ -2975,6 +3150,8 @@ def _normalize_exclude(value: Any) -> list[str]:
 
 
 def _normalize_shared_path(raw_path: str, action: str) -> tuple[str, bool]:
+    # 逻辑说明：`_normalize_shared_path` 接收 `raw_path`、`action`，校验并规范化输入，并依次复用 `strip`、`startswith`，返回 `tuple[str, bool]`。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     raw = (raw_path or "").strip()
     if not raw or raw.startswith("/") or "\\" in raw:
         raise ValueError("path must be a relative shared path")
@@ -3001,6 +3178,8 @@ def _normalize_shared_path(raw_path: str, action: str) -> tuple[str, bool]:
 
 
 def _resolve_filesync(arguments: dict[str, Any]) -> tuple[str, str, Path, str, bool]:
+    # 逻辑说明：`_resolve_filesync` 接收 `arguments`，校验并规范化输入，并依次复用 `strip`、`get`，返回 `tuple[str, str, Path, str, bool]`。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
     action = str(arguments.get("action") or "").strip()
     if action not in {"pull", "push", "list", "stat"}:
         raise ValueError("action is required; use pull, push, stat, or list")
@@ -3036,6 +3215,8 @@ def _resolve_filesync(arguments: dict[str, Any]) -> tuple[str, str, Path, str, b
 
 
 def _filesync(arguments: dict[str, Any]) -> dict[str, Any]:
+    # 逻辑说明：`_filesync` 接收 `arguments`，推进组件生命周期并同步运行状态，并依次复用 `_resolve_filesync`、`_normalize_exclude`，返回 `dict[str, Any]`。
+    # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
     try:
         action, normalized, local, remote, is_directory = _resolve_filesync(arguments)
         exclude = _normalize_exclude(arguments.get("exclude"))
@@ -3116,6 +3297,8 @@ def _filesync(arguments: dict[str, Any]) -> dict[str, Any]:
 
 
 def _filesync_command_error(completed: subprocess.CompletedProcess[str]) -> str:
+    # 逻辑说明：`_filesync_command_error` 接收 `completed`，推进组件生命周期并同步运行状态，并依次复用 `join`、`strip`，返回 `str`。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     output = "\n".join(
         part.strip() for part in (completed.stderr, completed.stdout) if part.strip()
     )
@@ -3127,6 +3310,8 @@ def _filesync_command_error(completed: subprocess.CompletedProcess[str]) -> str:
 
 
 def _payload(arguments: dict[str, Any]) -> dict[str, Any]:
+    # 逻辑说明：`_payload` 接收 `arguments`，按既有分支组合输入并生成结果，并依次复用 `get`、`strip`，返回 `dict[str, Any]`。
+    # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     payload = arguments.get("payload")
     if isinstance(payload, dict):
         data = dict(payload)
@@ -3204,6 +3389,8 @@ def _payload(arguments: dict[str, Any]) -> dict[str, Any]:
 
 
 def _safe_id(value: Any, field: str) -> str:
+    # 逻辑说明：`_safe_id` 接收 `value`、`field`，校验并规范化输入，并依次复用 `strip`、`fullmatch`，返回 `str`。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     text = str(value or "").strip()
     if not text or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", text):
         raise ValueError(f"{field} must be a safe id")
@@ -3211,6 +3398,8 @@ def _safe_id(value: Any, field: str) -> str:
 
 
 def _slugify(value: Any, fallback: str) -> str:
+    # 逻辑说明：`_slugify` 接收 `value`、`fallback`，按既有分支组合输入并生成结果，并依次复用 `strip`、`sub`，返回 `str`。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     text = re.sub(r"[^A-Za-z0-9]+", "-", str(value or "").strip().lower()).strip("-")
     return text or fallback
 
@@ -3220,6 +3409,8 @@ def _project_timestamp() -> str:
 
 
 def _unique_project_id(arguments: dict[str, Any], base_id: str) -> str:
+    # 逻辑说明：`_unique_project_id` 接收 `arguments`、`base_id`，按既有分支组合输入并生成结果，并依次复用 `_safe_id`、`exists`，返回 `str`。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
     project_id = _safe_id(base_id, "projectId")
     if not _project_state_path(arguments, project_id).exists():
         return project_id
@@ -3231,6 +3422,8 @@ def _unique_project_id(arguments: dict[str, Any], base_id: str) -> str:
 
 
 def _project_id_from_payload(arguments: dict[str, Any], payload: dict[str, Any]) -> str:
+    # 逻辑说明：`_project_id_from_payload` 接收 `arguments`、`payload`，按既有分支组合输入并生成结果，并依次复用 `get`、`_safe_id`，返回 `str`。
+    # 执行过程中包含外部 I/O；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
     explicit = payload.get("projectId") or payload.get("project_id")
     if explicit:
         project_id = _safe_id(explicit, "projectId")
@@ -3243,6 +3436,8 @@ def _project_id_from_payload(arguments: dict[str, Any], payload: dict[str, Any])
 
 
 def _normalize_reply_route(raw: Any) -> dict[str, str]:
+    # 逻辑说明：`_normalize_reply_route` 接收 `raw`，校验并规范化输入，并依次复用 `strip`、`get`，返回 `dict[str, str]`。
+    # 执行过程中包含实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     route = raw if isinstance(raw, dict) else {}
     channel = str(route.get("channel") or "").strip()
     target_user = str(
@@ -3294,6 +3489,8 @@ def _normalize_reply_route(raw: Any) -> dict[str, str]:
 
 
 def _reply_route_from_requester(requester: Any) -> dict[str, str]:
+    # 逻辑说明：`_reply_route_from_requester` 接收 `requester`，按既有分支组合输入并生成结果，并依次复用 `strip`、`startswith`，返回 `dict[str, str]`。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     text = str(requester or "").strip()
     if text.startswith("matrix:"):
         try:
@@ -3321,6 +3518,8 @@ def _reply_route_from_requester(requester: Any) -> dict[str, str]:
 def _source_room_id_from_payload(
     payload: dict[str, Any], reply_route: dict[str, str] | None = None
 ) -> str:
+    # 逻辑说明：`_source_room_id_from_payload` 接收 `payload`、`reply_route`，按既有分支组合输入并生成结果，并依次复用 `strip`、`get`，返回 `str`。
+    # 执行过程中包含外部 I/O；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     source_room_id = str(
         payload.get("sourceRoomId") or payload.get("source_room_id") or ""
     ).strip()
@@ -3340,6 +3539,8 @@ def _source_room_id_from_payload(
 
 
 def _canonical_room_id(value: Any) -> str:
+    # 逻辑说明：`_canonical_room_id` 接收 `value`，校验并规范化输入，并依次复用 `strip`、`startswith`，返回 `str`。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     text = str(value or "").strip()
     if text.startswith("room:"):
         text = text[len("room:") :].strip()
@@ -3347,6 +3548,8 @@ def _canonical_room_id(value: Any) -> str:
 
 
 def _external_requester_channel(project: dict[str, Any]) -> str:
+    # 逻辑说明：`_external_requester_channel` 接收 `project`，按既有分支组合输入并生成结果，并依次复用 `get`、`lower`，返回 `str`。
+    # 执行过程中包含外部 I/O；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     reply_route = (
         project.get("reply_route")
         if isinstance(project.get("reply_route"), dict)
@@ -3363,6 +3566,8 @@ def _external_requester_channel(project: dict[str, Any]) -> str:
 
 
 def _validate_assignment_room(project: dict[str, Any], room_id: str) -> None:
+    # 逻辑说明：`_validate_assignment_room` 接收 `project`、`room_id`，校验并规范化输入，并依次复用 `_external_requester_channel`、`_runtime_team_room_id`，不返回业务结果。
+    # 执行过程中包含外部 I/O；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
     channel = _external_requester_channel(project)
     if not channel:
         return
@@ -3379,6 +3584,8 @@ def _validate_assignment_room(project: dict[str, Any], room_id: str) -> None:
 def _validate_task_redelegation(
     arguments: dict[str, Any], project: dict[str, Any], task_id: str, room_id: str
 ) -> None:
+    # 逻辑说明：`_validate_task_redelegation` 接收 `arguments`、`project`、`task_id`、`room_id`，校验并规范化输入，并依次复用 `_external_requester_channel`、`_read_json`，不返回业务结果。
+    # 执行过程中包含外部 I/O；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
     if not _external_requester_channel(project):
         return
     existing = _read_json(_task_state_path(arguments, task_id))
@@ -3394,12 +3601,16 @@ def _validate_task_redelegation(
 
 
 def _read_json(path: Path, default: dict[str, Any] | None = None) -> dict[str, Any]:
+    # 逻辑说明：`_read_json` 接收 `path`、`default`，读取、筛选并规范化现有数据，并依次复用 `exists`、`loads`，返回 `dict[str, Any]`。
+    # 执行过程中包含外部 I/O；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     if not path.exists():
         return dict(default or {})
     return json.loads(path.read_text(encoding="utf-8"))
 
 
 def _write_json(path: Path, data: dict[str, Any]) -> None:
+    # 逻辑说明：`_write_json` 接收 `path`、`data`，计算目标值并更新持久或共享状态，并依次复用 `mkdir`、`write_text`，不返回业务结果。
+    # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
@@ -3440,6 +3651,8 @@ def _manager_parent_task_context(
     matching project routing avoids treating an unrelated same-named task as a
     Manager parent.
     """
+    # 逻辑说明：`_manager_parent_task_context` 接收 `arguments`、`project_id`、`project`，按既有分支组合输入并生成结果，并依次复用 `_read_json`、`_task_state_path`，返回 `dict[str, str]`。
+    # 执行过程中包含外部 I/O；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
     task = _read_json(_task_state_path(arguments, project_id))
     task_id = str(task.get("task_id") or task.get("taskId") or "").strip()
     if task and task_id != project_id:
@@ -3492,6 +3705,8 @@ def _prepare_manager_parent_task_completion(
     project: dict[str, Any],
     summary: str,
 ) -> dict[str, Any] | None:
+    # 逻辑说明：`_prepare_manager_parent_task_completion` 接收 `arguments`、`project`、`summary`，按既有顺序执行资源生命周期步骤，并依次复用 `strip`、`get`，返回 `dict[str, Any] | None`。
+    # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     project_id = str(project.get("project_id") or "").strip()
     context = _manager_parent_task_context(arguments, project_id, project)
     if not context:
@@ -3577,6 +3792,8 @@ def _notify_manager_parent_task_completion(
     project: dict[str, Any],
     summary: str,
 ) -> dict[str, Any]:
+    # 逻辑说明：`_notify_manager_parent_task_completion` 接收 `completion`、`project`、`summary`，按既有分支组合输入并生成结果，并依次复用 `strip`、`get`，返回 `dict[str, Any]`。
+    # 执行过程中包含外部 I/O；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     task_id = str(completion["task_id"])
     outcome = (
         summary.strip()
@@ -3593,6 +3810,8 @@ def _notify_manager_parent_task_completion(
 def _normalize_task(
     raw: dict[str, Any], previous: dict[str, Any] | None = None
 ) -> dict[str, Any]:
+    # 逻辑说明：`_normalize_task` 接收 `raw`、`previous`，校验并规范化输入，并依次复用 `_safe_id`、`get`，返回 `dict[str, Any]`。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
     task_id = _safe_id(raw.get("taskId") or raw.get("task_id"), "taskId")
     previous = previous or {}
     status = str(raw.get("status") or previous.get("status") or "planned")
@@ -3621,6 +3840,8 @@ def _normalize_task(
 
 
 def _validate_task_graph(tasks: list[dict[str, Any]]) -> None:
+    # 逻辑说明：`_validate_task_graph` 接收 `tasks`，校验并规范化输入，并依次复用 `get`、`ValueError`，不返回业务结果。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     seen: set[str] = set()
     task_ids: set[str] = set()
     for task in tasks:
@@ -3644,6 +3865,8 @@ def _validate_task_graph(tasks: list[dict[str, Any]]) -> None:
     }
 
     def visit(task_id: str, path: list[str]) -> None:
+        # 逻辑说明：`visit` 接收 `task_id`、`path`，按既有分支组合输入并生成结果，并依次复用 `ValueError`、`join`，不返回业务结果。
+        # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         if task_id in visited:
             return
         if task_id in visiting:
@@ -3661,6 +3884,8 @@ def _validate_task_graph(tasks: list[dict[str, Any]]) -> None:
 
 
 def _positive_int(value: Any, field: str) -> int:
+    # 逻辑说明：`_positive_int` 接收 `value`、`field`，按既有分支组合输入并生成结果，并依次复用 `ValueError`，返回 `int`。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     try:
         parsed = int(value)
     except (TypeError, ValueError):
@@ -3671,6 +3896,8 @@ def _positive_int(value: Any, field: str) -> int:
 
 
 def _non_negative_int(value: Any, field: str) -> int:
+    # 逻辑说明：`_non_negative_int` 接收 `value`、`field`，按既有分支组合输入并生成结果，并依次复用 `ValueError`，返回 `int`。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     try:
         parsed = int(value)
     except (TypeError, ValueError):
@@ -3681,6 +3908,8 @@ def _non_negative_int(value: Any, field: str) -> int:
 
 
 def _safe_loop_status(value: Any) -> str:
+    # 逻辑说明：`_safe_loop_status` 接收 `value`，校验并规范化输入，并依次复用 `strip`、`ValueError`，返回 `str`。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     status = str(value or "running").strip()
     allowed = {"running", "waiting_user", "completed", "blocked"}
     if status not in allowed:
@@ -3689,6 +3918,8 @@ def _safe_loop_status(value: Any) -> str:
 
 
 def _safe_loop_decision(value: Any) -> str:
+    # 逻辑说明：`_safe_loop_decision` 接收 `value`，校验并规范化输入，并依次复用 `strip`、`ValueError`，返回 `str`。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     decision = str(value or "").strip()
     allowed = {"continue", "replan", "ask_user", "stop_success", "stop_blocked"}
     if decision not in allowed:
@@ -3697,6 +3928,8 @@ def _safe_loop_decision(value: Any) -> str:
 
 
 def _write_project_plan(project_dir: Path, project: dict[str, Any]) -> None:
+    # 逻辑说明：`_write_project_plan` 接收 `project_dir`、`project`，计算目标值并更新持久或共享状态，并依次复用 `get`、`strip`，不返回业务结果。
+    # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     lines = [
         f"# {project.get('title') or project.get('project_id')}",
         "",
@@ -3773,6 +4006,8 @@ def _write_project_plan(project_dir: Path, project: dict[str, Any]) -> None:
 
 
 def _ready_nodes(project: dict[str, Any]) -> list[dict[str, Any]]:
+    # 逻辑说明：`_ready_nodes` 接收 `project`，读取、筛选并规范化现有数据，并依次复用 `get`、`ValueError`，返回 `list[dict[str, Any]]`。
+    # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     if project.get("plan_type") == "loop":
         raise ValueError(f"project plan is not a DAG: {project.get('project_id')}")
     if str(project.get("status") or "active") != "active":
@@ -3791,6 +4026,8 @@ def _ready_nodes(project: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _ready_loop_nodes(project: dict[str, Any]) -> list[dict[str, Any]]:
+    # 逻辑说明：`_ready_loop_nodes` 接收 `project`，读取、筛选并规范化现有数据，并依次复用 `get`、`ValueError`，返回 `list[dict[str, Any]]`。
+    # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     if str(project.get("status") or "active") != "active":
         return []
     loop = project.get("loop")
@@ -3814,6 +4051,8 @@ def _ready_loop_nodes(project: dict[str, Any]) -> list[dict[str, Any]]:
 def _resolve_project(
     arguments: dict[str, Any], payload: dict[str, Any]
 ) -> dict[str, Any]:
+    # 逻辑说明：`_resolve_project` 接收 `arguments`、`payload`，校验并规范化输入，并依次复用 `get`、`_safe_id`，返回 `dict[str, Any]`。
+    # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
     task: dict[str, Any] = {}
     project_id_value = payload.get("projectId") or payload.get("project_id")
     task_id_value = payload.get("taskId") or payload.get("task_id")
@@ -3848,6 +4087,8 @@ def _resolve_project(
 
 
 def _accepted_node_status(result_status: Any) -> str:
+    # 逻辑说明：`_accepted_node_status` 接收 `result_status`，按既有分支组合输入并生成结果，并依次复用 `strip`、`ValueError`，返回 `str`。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     status = str(result_status or "SUCCESS").strip()
     if status in {"SUCCESS", "SUCCESS_WITH_NOTES"}:
         return "completed"
@@ -3859,6 +4100,8 @@ def _accepted_node_status(result_status: Any) -> str:
 
 
 def _payload_bool(value: Any, default: bool) -> bool:
+    # 逻辑说明：`_payload_bool` 接收 `value`、`default`，按既有分支组合输入并生成结果，并依次复用 `lower`、`strip`，返回 `bool`。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     if value is None:
         return default
     if isinstance(value, bool):
@@ -3874,6 +4117,8 @@ def _payload_bool(value: Any, default: bool) -> bool:
 def _payload_bool_field(
     payload: dict[str, Any], names: tuple[str, ...], default: bool
 ) -> bool:
+    # 逻辑说明：`_payload_bool_field` 接收 `payload`、`names`、`default`，按既有分支组合输入并生成结果，并依次复用 `_payload_bool`、`get`，返回 `bool`。
+    # 执行过程中包含外部 I/O；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     for name in names:
         if name in payload:
             return _payload_bool(payload.get(name), default)
@@ -3883,6 +4128,8 @@ def _payload_bool_field(
 def _accept_task_result(
     arguments: dict[str, Any], payload: dict[str, Any]
 ) -> dict[str, Any]:
+    # 逻辑说明：`_accept_task_result` 接收 `arguments`、`payload`，按既有分支组合输入并生成结果，并依次复用 `_safe_id`、`get`，返回 `dict[str, Any]`。
+    # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
     project_id = _safe_id(
         payload.get("projectId") or payload.get("project_id"), "projectId"
     )
@@ -3978,6 +4225,8 @@ def _accept_task_result(
 def _mark_requester_report_sent(
     arguments: dict[str, Any], payload: dict[str, Any]
 ) -> dict[str, Any]:
+    # 逻辑说明：`_mark_requester_report_sent` 接收 `arguments`、`payload`，计算目标值并更新持久或共享状态，并依次复用 `_safe_id`、`get`，返回 `dict[str, Any]`。
+    # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
     project_id = _safe_id(
         payload.get("projectId") or payload.get("project_id"), "projectId"
     )
@@ -4018,6 +4267,8 @@ def _notification_needed(
     agent which room to notify and what changed, so the agent can follow up with
     a message tool call.
     """
+    # 逻辑说明：`_notification_needed` 接收 `action`、`project`、`task`、`summary`，按既有分支组合输入并生成结果，并依次复用 `get`、`strip`，返回 `dict[str, Any]`。
+    # 执行过程中包含实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     project_id = str(project.get("project_id") or "")
     title = str(project.get("title") or project_id)
     # Determine best target room
@@ -4050,6 +4301,8 @@ def _notification_needed(
 
 
 def _projectflow(arguments: dict[str, Any]) -> dict[str, Any]:
+    # 逻辑说明：`_projectflow` 接收 `arguments`，按请求类型分派并编排后续步骤，并依次复用 `strip`、`get`，返回 `dict[str, Any]`。
+    # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
     action = str(arguments.get("action") or "").strip()
     payload = _payload(arguments)
     try:
@@ -4488,6 +4741,8 @@ def _projectflow(arguments: dict[str, Any]) -> dict[str, Any]:
 
 
 def _normalize_role(role: str) -> str:
+    # 逻辑说明：`_normalize_role` 接收 `role`，校验并规范化输入，并依次复用 `lower`、`replace`，返回 `str`。
+    # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     value = (role or "").strip().replace("_", "-").lower()
     return {
         "team-leader": "leader",
@@ -4499,6 +4754,8 @@ def _normalize_role(role: str) -> str:
 
 
 def _runtime_role() -> str:
+    # 逻辑说明：`_runtime_role` 不接收参数，读取并规范化当前 Agent 的 runtime role，供工具可见性和权限裁剪使用。
+    # 执行过程中包含外部 I/O；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
     role = (
         os.getenv("AGENTTEAMS_AGENT_ROLE", "").strip()
         or os.getenv("AGENTTEAMS_WORKER_ROLE", "").strip()
@@ -4509,16 +4766,21 @@ def _runtime_role() -> str:
 
 
 def _visible_tool_names() -> list[str]:
+    # 逻辑说明：`_visible_tool_names` 不接收参数，从全部 TeamHarness 工具中移除当前角色禁止的消息工具，返回 MCP list_tools 实际公开的名称。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     if _message_tool_blocked_for_runtime_role():
         return [name for name in TOOL_NAMES if name != "message"]
     return list(TOOL_NAMES)
 
 
 def _message_tool_blocked_for_runtime_role() -> bool:
+    # 逻辑说明：读取并规范化当前 TeamHarness runtime 角色，判断其是否属于禁止直接使用 message 工具的 worker/remote-member；该安全门同时用于工具列表隐藏与调用时拒绝。
     return _runtime_role() in MESSAGE_TOOL_BLOCKED_ROLES
 
 
 def _role(arguments: dict[str, Any]) -> str:
+    # 逻辑说明：`_role` 接收 `arguments`，按既有分支组合输入并生成结果，并依次复用 `strip`、`get`，返回 `str`。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
     role = str(arguments.get("role") or "").strip()
     if not role:
         return _runtime_role()
@@ -4526,6 +4788,8 @@ def _role(arguments: dict[str, Any]) -> str:
 
 
 def _load_task(arguments: dict[str, Any], task_id: str) -> dict[str, Any]:
+    # 逻辑说明：`_load_task` 接收 `arguments`、`task_id`，读取、筛选并规范化现有数据，并依次复用 `_read_json`、`_task_state_path`，返回 `dict[str, Any]`。
+    # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     task = _read_json(_task_state_path(arguments, task_id))
     if not task:
         raise ValueError("task not found")
@@ -4535,6 +4799,8 @@ def _load_task(arguments: dict[str, Any], task_id: str) -> dict[str, Any]:
 
 
 def _first_text(*values: Any) -> str:
+    # 逻辑说明：`_first_text` 接收 `*values`，按既有分支组合输入并生成结果，并依次复用 `strip`，返回 `str`。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     for value in values:
         text = str(value or "").strip()
         if text:
@@ -4543,6 +4809,8 @@ def _first_text(*values: Any) -> str:
 
 
 def _utc_timestamp() -> str:
+    # 逻辑说明：`_utc_timestamp` 不接收参数，生成带 Z 后缀的 UTC ISO-8601 时间戳，供任务事件和持久状态统一记录时间。
+    # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     return (
         datetime.datetime.now(datetime.timezone.utc)
         .replace(microsecond=0)
@@ -4554,6 +4822,8 @@ def _utc_timestamp() -> str:
 def _project_task_for_meta(
     arguments: dict[str, Any], task: dict[str, Any]
 ) -> dict[str, Any]:
+    # 逻辑说明：`_project_task_for_meta` 接收 `arguments`、`task`，按既有分支组合输入并生成结果，并依次复用 `_first_text`、`get`，返回 `dict[str, Any]`。
+    # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     project_id = _first_text(task.get("project_id"), task.get("projectId"))
     task_id = _first_text(task.get("task_id"), task.get("taskId"))
     if not project_id or not task_id:
@@ -4581,6 +4851,8 @@ def _preserve_task_meta_fields(arguments: dict[str, Any], task: dict[str, Any]) 
     copy that omits ``room_id`` / ``assigned_to``.  Preserve non-empty local
     values and fall back to the project plan node when still missing.
     """
+    # 逻辑说明：`_preserve_task_meta_fields` 接收 `arguments`、`task`，按既有分支组合输入并生成结果，并依次复用 `_first_text`、`get`，不返回业务结果。
+    # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     task_id = _first_text(task.get("task_id"), task.get("taskId"))
     if not task_id:
         return
@@ -4605,6 +4877,8 @@ def _preserve_task_meta_fields(arguments: dict[str, Any], task: dict[str, Any]) 
 
 
 def _ensure_console_task_meta(arguments: dict[str, Any], task: dict[str, Any]) -> None:
+    # 逻辑说明：`_ensure_console_task_meta` 接收 `arguments`、`task`，按既有分支组合输入并生成结果，并依次复用 `_preserve_task_meta_fields`、`_project_task_for_meta`，不返回业务结果。
+    # 执行过程中包含实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     _preserve_task_meta_fields(arguments, task)
     project_task = _project_task_for_meta(arguments, task)
     task["task_id"] = _first_text(task.get("task_id"), task.get("taskId"))
@@ -4675,6 +4949,8 @@ def _ensure_console_task_meta(arguments: dict[str, Any], task: dict[str, Any]) -
 
 
 def _write_task(arguments: dict[str, Any], task: dict[str, Any]) -> None:
+    # 逻辑说明：`_write_task` 接收 `arguments`、`task`，计算目标值并更新持久或共享状态，并依次复用 `_ensure_console_task_meta`、`_write_json`，不返回业务结果。
+    # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     _ensure_console_task_meta(arguments, task)
     _write_json(_task_state_path(arguments, task["task_id"]), task)
 
@@ -4690,6 +4966,8 @@ ALLOWED_TASK_RESULT_STATUSES = {
 
 
 def _validate_task_deliverables(task_id: str, deliverables: list[Any]) -> list[str]:
+    # 逻辑说明：`_validate_task_deliverables` 接收 `task_id`、`deliverables`，校验并规范化输入，并依次复用 `strip`、`_normalize_workspace_artifact_path`，返回 `list[str]`。
+    # 执行过程中包含实例、文件或共享状态变更；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
     expected_prefix = f"shared/tasks/{task_id}"
     normalized_deliverables: list[str] = []
     for item in deliverables:
@@ -4711,6 +4989,8 @@ def _validate_task_deliverables(task_id: str, deliverables: list[Any]) -> list[s
 def _notify_task_submission(
     task: dict[str, Any], task_id: str, status: str, summary: str
 ) -> dict[str, Any]:
+    # 逻辑说明：`_notify_task_submission` 接收 `task`、`task_id`、`status`、`summary`，按既有分支组合输入并生成结果，并依次复用 `_canonical_room_id`、`get`，返回 `dict[str, Any]`。
+    # 执行过程中包含外部 I/O；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
     room_id = _canonical_room_id(task.get("room_id"))
     coordinator = str(task.get("coordinator_matrix_user_id") or "").strip()
     if not room_id:
@@ -4742,6 +5022,8 @@ def _notify_task_submission(
 
 
 def _task_result_from_meta(task: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    # 逻辑说明：`_task_result_from_meta` 接收 `task`，按既有分支组合输入并生成结果，并依次复用 `get`、`strip`，返回 `tuple[dict[str, Any], list[str]]`。
+    # 执行过程中包含实例、文件或共享状态变更；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
     deliverables = task.get("deliverables")
     if not isinstance(deliverables, list):
         deliverables = []
@@ -4770,6 +5052,8 @@ def _task_result_from_meta(task: dict[str, Any]) -> tuple[dict[str, Any], list[s
 def _sync_task(
     arguments: dict[str, Any], task_id: str, exclude: list[str] | None = None
 ) -> bool:
+    # 逻辑说明：`_sync_task` 接收 `arguments`、`task_id`、`exclude`，推进组件生命周期并同步运行状态，并依次复用 `update`、`_filesync`，返回 `bool`。
+    # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     sync_args = dict(arguments)
     sync_args.update(
         {
@@ -4784,6 +5068,8 @@ def _sync_task(
 
 
 def _pull_task(arguments: dict[str, Any], task_id: str) -> bool:
+    # 逻辑说明：`_pull_task` 接收 `arguments`、`task_id`，按既有分支组合输入并生成结果，并依次复用 `_read_json`、`_task_state_path`，返回 `bool`。
+    # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     existing = _read_json(_task_state_path(arguments, task_id))
     sync_args = dict(arguments)
     sync_args.update(
@@ -4818,6 +5104,8 @@ TERMINAL_TASK_STATUSES = {"completed", "revision", "blocked", "cancelled"}
 def _terminal_task_status(
     arguments: dict[str, Any], task: dict[str, Any], task_id: str
 ) -> str:
+    # 逻辑说明：`_terminal_task_status` 接收 `arguments`、`task`、`task_id`，按既有分支组合输入并生成结果，并依次复用 `get`、`_read_json`，返回 `str`。
+    # 执行过程中包含外部 I/O；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     project_id = str(task.get("project_id") or "")
     project = (
         _read_json(_project_state_path(arguments, project_id)) if project_id else {}
@@ -4839,6 +5127,8 @@ def _terminal_task_status(
 def _require_task_mutable(
     arguments: dict[str, Any], task: dict[str, Any], task_id: str, action: str
 ) -> None:
+    # 逻辑说明：`_require_task_mutable` 接收 `arguments`、`task`、`task_id`、`action`，校验并规范化输入，并依次复用 `_terminal_task_status`、`ValueError`，不返回业务结果。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     terminal_status = _terminal_task_status(arguments, task, task_id)
     if terminal_status:
         raise ValueError(f"{action} cannot update terminal task: {terminal_status}")
@@ -4847,6 +5137,8 @@ def _require_task_mutable(
 def _update_project_task(
     arguments: dict[str, Any], project_id: str, task_id: str, **updates: Any
 ) -> None:
+    # 逻辑说明：`_update_project_task` 接收 `arguments`、`project_id`、`task_id`、`**updates`，计算目标值并更新持久或共享状态，并依次复用 `_project_state_path`、`_read_json`，不返回业务结果。
+    # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     path = _project_state_path(arguments, project_id)
     project = _read_json(path)
     if not project:
@@ -4870,6 +5162,8 @@ def _update_project_task(
 
 
 def _taskflow(arguments: dict[str, Any]) -> dict[str, Any]:
+    # 逻辑说明：`_taskflow` 接收 `arguments`，按请求类型分派并编排后续步骤，并依次复用 `strip`、`get`，返回 `dict[str, Any]`。
+    # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
     action = str(arguments.get("action") or "").strip()
     payload = _payload(arguments)
     role = _role(arguments)
@@ -5144,6 +5438,8 @@ def _taskflow(arguments: dict[str, Any]) -> dict[str, Any]:
 
 
 def handle_request(request: dict[str, Any]) -> dict[str, Any] | None:
+    # 逻辑说明：`handle_request` 接收 `request`，按请求类型分派并编排后续步骤，并依次复用 `get`、`startswith`，返回 `dict[str, Any] | None`。
+    # 执行过程中包含外部 I/O；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     method = request.get("method")
     request_id = request.get("id")
     if (
@@ -5181,6 +5477,8 @@ def handle_request(request: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def main() -> int:
+    # 逻辑说明：`main` 不接收业务参数，从标准输入逐行读取 JSON-RPC 请求，分派 MCP 初始化、工具发现与调用，并把响应逐行写回标准输出。
+    # 执行过程中包含外部 I/O；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     for line in sys.stdin:
         line = line.strip()
         if not line:

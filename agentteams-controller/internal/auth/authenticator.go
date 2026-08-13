@@ -74,6 +74,7 @@ type cachedResult struct {
 // "agentteams-controller"); prefix is the tenant resource prefix used to parse
 // SA usernames back into CallerIdentity.
 func NewTokenReviewAuthenticator(client kubernetes.Interface, audience string, prefix ResourcePrefix) *TokenReviewAuthenticator {
+	// 逻辑说明：补齐默认 audience/prefix，并创建有 TTL 和容量上限的摘要缓存；缓存从不保存原始 bearer token。
 	if audience == "" {
 		audience = DefaultAudience
 	}
@@ -89,6 +90,7 @@ func NewTokenReviewAuthenticator(client kubernetes.Interface, audience string, p
 }
 
 func (a *TokenReviewAuthenticator) Authenticate(ctx context.Context, token string) (*CallerIdentity, error) {
+	// 逻辑说明：对 token 做 SHA-256 缓存查找；未命中才调用 Kubernetes TokenReview，再解析 SA 身份并缓存副本。
 	if token == "" {
 		return nil, fmt.Errorf("empty token")
 	}
@@ -127,6 +129,7 @@ func (a *TokenReviewAuthenticator) Authenticate(ctx context.Context, token strin
 }
 
 func (a *TokenReviewAuthenticator) getFromCache(key [32]byte) *CallerIdentity {
+	// 逻辑说明：读锁下仅返回尚未过期条目的值副本，调用方不能修改缓存中的共享身份对象。
 	a.cacheMu.RLock()
 	defer a.cacheMu.RUnlock()
 	if entry, ok := a.cache[key]; ok && time.Now().Before(entry.expiry) {
@@ -137,6 +140,7 @@ func (a *TokenReviewAuthenticator) getFromCache(key [32]byte) *CallerIdentity {
 }
 
 func (a *TokenReviewAuthenticator) putInCache(key [32]byte, identity *CallerIdentity) {
+	// 逻辑说明：写锁下先清过期项，容量仍满时淘汰最早到期项，再以身份副本和新 TTL 写入。
 	a.cacheMu.Lock()
 	defer a.cacheMu.Unlock()
 	if a.cacheMax > 0 && len(a.cache) >= a.cacheMax {
@@ -153,6 +157,7 @@ func (a *TokenReviewAuthenticator) putInCache(key [32]byte, identity *CallerIden
 
 // InvalidateCache removes all cached entries. Useful after SA deletion.
 func (a *TokenReviewAuthenticator) InvalidateCache() {
+	// 逻辑说明：在写锁内整体换新 map，使 SA 删除或权限变更后旧鉴权结果立即失效。
 	a.cacheMu.Lock()
 	defer a.cacheMu.Unlock()
 	a.cache = make(map[[32]byte]cachedResult)
@@ -161,6 +166,7 @@ func (a *TokenReviewAuthenticator) InvalidateCache() {
 // SweepExpired removes all entries whose expiry has passed. Returns the number
 // of removed entries. Safe to call concurrently with Authenticate.
 func (a *TokenReviewAuthenticator) SweepExpired() int {
+	// 逻辑说明：取得写锁并以同一当前时间批量删除过期项，返回数量供测试和监控判断清理效果。
 	a.cacheMu.Lock()
 	defer a.cacheMu.Unlock()
 	return a.sweepExpiredLocked(time.Now())
@@ -171,6 +177,7 @@ func (a *TokenReviewAuthenticator) SweepExpired() int {
 // cleanup interval is non-positive, leaving cache management purely
 // insert-driven.
 func (a *TokenReviewAuthenticator) StartCleanup(ctx context.Context) {
+	// 逻辑说明：按配置周期后台清理，ctx 取消时停止 ticker 并退出；非正周期则完全依赖插入时清理。
 	if a.cleanupInterval <= 0 {
 		return
 	}
@@ -189,6 +196,7 @@ func (a *TokenReviewAuthenticator) StartCleanup(ctx context.Context) {
 // sweepExpiredLocked deletes entries whose expiry is at or before now. Caller
 // must hold a.cacheMu for write.
 func (a *TokenReviewAuthenticator) sweepExpiredLocked(now time.Time) int {
+	// 逻辑说明：调用方持写锁时遍历缓存，删除到期时间不晚于 now 的条目并统计数量。
 	n := 0
 	for k, v := range a.cache {
 		if !now.Before(v.expiry) {
@@ -203,6 +211,7 @@ func (a *TokenReviewAuthenticator) sweepExpiredLocked(now time.Time) int {
 // LRU here because every insert uses the same TTL, so insertion order matches
 // expiry order. Caller must hold a.cacheMu for write.
 func (a *TokenReviewAuthenticator) evictOldestLocked() {
+	// 逻辑说明：容量压力下找到最早 expiry 的单项删除；相同 TTL 使其等价于淘汰最早插入项。
 	var oldestKey [32]byte
 	var oldestExp time.Time
 	found := false

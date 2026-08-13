@@ -76,10 +76,12 @@ fi
 # Utility functions
 # ============================================================
 
+# 逻辑说明：把 replay 阶段写到终端，stdout 不作为机器协议使用，因此可保留颜色前缀。
 log() {
     echo -e "\033[36m[replay]\033[0m $1"
 }
 
+# 逻辑说明：报告无法继续的 Matrix 请求或参数错误并退出，避免在未知房间继续发送测试消息。
 error() {
     echo -e "\033[31m[replay ERROR]\033[0m $1" >&2
     exit 1
@@ -89,6 +91,7 @@ error() {
 # Matrix API helpers (self-contained, no dependency on test libs)
 # ============================================================
 
+# 逻辑说明：集中组装 Matrix HTTP 方法、路径、JSON 和可选 Bearer；HTTP 失败原样返回给上层决定重试或终止。
 matrix_api() {
     local method="$1"
     local path="$2"
@@ -114,6 +117,7 @@ matrix_api() {
 }
 
 # Login to Matrix, return access_token
+# 逻辑说明：用管理员密码换取短期 access token，并只把 token 返回给调用者而不写 replay 日志。
 do_login() {
     local resp
     resp=$(matrix_api POST "/_matrix/client/v3/login" \
@@ -122,12 +126,14 @@ do_login() {
 }
 
 # Get joined rooms
+# 逻辑说明：读取当前管理员已加入的 room_id 列表，供后续定位 Manager DM，函数不改变房间状态。
 get_joined_rooms() {
     local token="$1"
     matrix_api GET "/_matrix/client/v3/joined_rooms" "" "${token}" | jq -r '.joined_rooms[]'
 }
 
 # Get room members
+# 逻辑说明：编码 room_id 后查询成员，只返回 Matrix user id，避免调用方自行拼接不安全 URL。
 get_room_members() {
     local token="$1"
     local room_id="$2"
@@ -138,6 +144,7 @@ get_room_members() {
 }
 
 # Find DM room with manager
+# 逻辑说明：遍历已加入房间并核对 Manager 成员身份；找到现有 DM 就复用，避免每次 replay 新建房间。
 find_manager_room() {
     local token="$1"
     local rooms
@@ -160,6 +167,7 @@ find_manager_room() {
 }
 
 # Create a DM room with the manager and return room_id
+# 逻辑说明：仅在没有现成 Manager DM 时创建可信私聊并邀请准确的 Manager MXID，返回新 room_id。
 create_dm_room() {
     local token="$1"
 
@@ -172,6 +180,7 @@ create_dm_room() {
 }
 
 # Send a message to a room
+# 逻辑说明：为每条 replay 消息生成唯一 transaction id，Matrix 重试时据此去重，返回发送事件 ID。
 send_message() {
     local token="$1"
     local room_id="$2"
@@ -190,6 +199,7 @@ send_message() {
 }
 
 # Read recent messages from a room
+# 逻辑说明：按上限逆向读取指定房间历史，结果保留完整 JSON 供等待和日志导出分别筛选。
 read_messages() {
     local token="$1"
     local room_id="$2"
@@ -202,6 +212,7 @@ read_messages() {
 # Wait for a reply from the manager
 # Outputs ONLY the reply body to stdout (for capture).
 # Progress messages go to stderr (visible in terminal but not captured).
+# 逻辑说明：从发送事件之后轮询 Manager 回复并设置超时；进度写 stderr，stdout 只返回最终正文供调用者捕获。
 wait_for_manager_reply() {
     local token="$1"
     local room_id="$2"
@@ -286,6 +297,7 @@ mkdir -p "${LOG_DIR}"
 LOG_TS=$(date '+%Y%m%d-%H%M%S')
 LOG_FILE="${LOG_DIR}/replay-${LOG_TS}.log"
 
+# 逻辑说明：把已经选择并脱敏的 replay 内容追加到本轮专用日志，不负责输出认证 token。
 write_log() {
     echo "$1" >> "${LOG_FILE}"
 }
@@ -388,6 +400,7 @@ if [ "${WAIT_FOR_REPLY}" = "1" ]; then
     log "--- Collecting room messages ---"
 
     # Helper: dump messages of a room into the log
+    # 逻辑说明：读取一个相关房间的消息并格式化进报告；查询失败只跳过该房间，不破坏已收集结果。
     dump_room_messages() {
         local token="$1"
         local rid="$2"

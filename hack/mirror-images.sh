@@ -78,19 +78,26 @@ CYAN='\033[0;36m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
+# 逻辑说明：输出镜像同步过程信息；这些日志不应包含 registry 密码或认证文件内容。
 log()   { echo -e "${CYAN}[mirror]${NC} $1"; }
+# 逻辑说明：标记单项复制或认证检查成功，供人工从批量输出中快速定位结果。
 ok()    { echo -e "${GREEN}[  OK  ]${NC} $1"; }
+# 逻辑说明：记录单项失败；是否终止由调用该函数的控制流决定，以便批量同步可以汇总。
 fail()  { echo -e "${RED}[ FAIL ]${NC} $1"; }
+# 逻辑说明：报告不阻断后续复制的风险或降级路径。
 warn()  { echo -e "${YELLOW}[ WARN ]${NC} $1"; }
 
+# 逻辑说明：返回宿主认证文件目录，容器运行 skopeo 时只挂载这个精确目录而不是整个 HOME。
 container_auth_dir() {
     dirname "${SKOPEO_AUTH_FILE}"
 }
 
+# 逻辑说明：把宿主认证文件映射为容器内 `/auth` 路径，文件名保持稳定供 skopeo 使用。
 container_auth_file() {
     printf '/auth/%s' "$(basename "${SKOPEO_AUTH_FILE}")"
 }
 
+# 逻辑说明：优先调用本机 skopeo；缺失时在受限挂载的容器中执行同一参数，并传递认证文件。
 run_skopeo() {
     if [ -n "${USE_CONTAINER}" ]; then
         local auth_dir auth_file
@@ -112,6 +119,7 @@ run_skopeo() {
 # Login check / prompt
 # ============================================================
 
+# 逻辑说明：先复用已有登录，缺失时按环境凭据登录；认证失败在复制镜像前终止，避免产生误导性部分结果。
 check_login() {
     log "Checking authentication to ${TARGET_REGISTRY}..."
 
@@ -157,6 +165,7 @@ check_login() {
 # Copy a single image
 # ============================================================
 
+# 逻辑说明：解析单个源/目标/tag 映射并用 skopeo 复制完整多架构 manifest；dry-run 只展示而不写 registry。
 copy_image() {
     local entry="$1"
     local source_image target_name target_tag
@@ -187,6 +196,7 @@ copy_image() {
 # Main
 # ============================================================
 
+# 逻辑说明：完成认证后按清单逐项复制并汇总失败；入口统一决定最终退出码供 CI/人工判断。
 main() {
     echo ""
     echo "============================================"

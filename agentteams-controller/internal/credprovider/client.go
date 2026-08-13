@@ -33,6 +33,7 @@ type HTTPClient struct {
 // A typical baseURL is "http://127.0.0.1:17070".
 // If httpClient is nil a default one with a 30 s timeout is used.
 func NewHTTPClient(baseURL string, httpClient *http.Client) *HTTPClient {
+	// 逻辑说明：为空的传入客户端补上 30 秒超时，并移除 Base URL 末尾斜杠后保存；返回对象可并发复用，但此处不会发起网络请求。
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: 30 * time.Second}
 	}
@@ -44,6 +45,7 @@ func NewHTTPClient(baseURL string, httpClient *http.Client) *HTTPClient {
 
 // Issue implements Client.
 func (c *HTTPClient) Issue(ctx context.Context, req IssueRequest) (*IssueResponse, error) {
+	// 逻辑说明：把权限签发请求编码为 JSON 并 POST 到凭据侧车 `/issue`；只接受 2xx 且 AK/SK 完整的响应，传输、状态码或解码错误均关闭响应体并返回上下文错误。
 	if c.baseURL == "" {
 		return nil, errors.New("credprovider: base URL not configured (AGENTTEAMS_CREDENTIAL_PROVIDER_URL)")
 	}

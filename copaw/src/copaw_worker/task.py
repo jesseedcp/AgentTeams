@@ -115,6 +115,8 @@ class FileSystemTaskStore:
     """
 
     def __init__(self, workspace_dir: Path | str | None = None) -> None:
+        # 逻辑说明：`__init__` 接收 workspace_dir，执行 Project/Task 本地状态机 中的“init”步骤，返回 None；
+        # 会更新对象内存状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
         self.workspace_dir = Path(workspace_dir) if workspace_dir else Path.cwd()
         self.shared_dir = self.workspace_dir / "shared"
 
@@ -125,6 +127,8 @@ class FileSystemTaskStore:
         return self.shared_dir / "tasks" / _safe_id(task_id)
 
     def read_project_meta(self, project_id: str) -> ProjectMeta:
+        # 逻辑说明：`read_project_meta` 接收 project_id，读取并解析Project 元数据，返回 ProjectMeta；
+        # 会更新对象内存状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
         path = self._project_dir(project_id) / "meta.json"
         data = _read_json(path)
         return ProjectMeta(
@@ -138,21 +142,29 @@ class FileSystemTaskStore:
         )
 
     def write_project_meta(self, meta: ProjectMeta) -> None:
+        # 逻辑说明：`write_project_meta` 接收 meta，校验并写入Project 元数据，返回 None；会更新对象内存状态。失败策略：底层异常继续上抛，由调用链统一处理；
+        # 本函数不额外重试，避免掩盖持续故障。
         path = self._project_dir(meta.project_id) / "meta.json"
         _write_json(path, _drop_none(asdict(meta)))
 
     def read_project_plan(self, project_id: str) -> str:
+        # 逻辑说明：`read_project_plan` 接收 project_id，读取并解析Project 计划，返回 str；
+        # 会更新对象内存状态。失败策略：非法输入或状态会立即抛错，其他底层异常继续上抛；本函数不额外重试，避免掩盖持续故障。
         path = self._project_dir(project_id) / "plan.md"
         if not path.exists():
             raise TaskflowError(f"project plan not found: {path}")
         return path.read_text()
 
     def write_project_plan(self, project_id: str, plan: str) -> None:
+        # 逻辑说明：`write_project_plan` 接收 project_id、plan，校验并写入Project 计划，返回 None；
+        # 会读写本地文件、会更新对象内存状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
         path = self._project_dir(project_id) / "plan.md"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(plan)
 
     def read_task_meta(self, task_id: str) -> TaskMeta:
+        # 逻辑说明：`read_task_meta` 接收 task_id，读取并解析Task 元数据，返回 TaskMeta；会更新对象内存状态。失败策略：底层异常继续上抛，由调用链统一处理；
+        # 本函数不额外重试，避免掩盖持续故障。
         path = self._task_dir(task_id) / "meta.json"
         data = _read_json(path)
         return TaskMeta(
@@ -169,21 +181,28 @@ class FileSystemTaskStore:
         )
 
     def write_task_meta(self, meta: TaskMeta) -> None:
+        # 逻辑说明：`write_task_meta` 接收 meta，校验并写入Task 元数据，返回 None；会更新对象内存状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
         path = self._task_dir(meta.task_id) / "meta.json"
         _write_json(path, _drop_none(asdict(meta)))
 
     def read_task_spec(self, task_id: str) -> str:
+        # 逻辑说明：`read_task_spec` 接收 task_id，读取并解析Task spec，返回 str；会更新对象内存状态。失败策略：非法输入或状态会立即抛错，其他底层异常继续上抛；
+        # 本函数不额外重试，避免掩盖持续故障。
         path = self._task_dir(task_id) / "spec.md"
         if not path.exists():
             raise TaskflowError(f"task spec not found: {path}")
         return path.read_text()
 
     def write_task_spec(self, task_id: str, spec: str) -> None:
+        # 逻辑说明：`write_task_spec` 接收 task_id、spec，校验并写入Task spec，返回 None；
+        # 会读写本地文件、会更新对象内存状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
         path = self._task_dir(task_id) / "spec.md"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(spec)
 
     def read_task_result(self, task_id: str) -> TaskResult:
+        # 逻辑说明：`read_task_result` 接收 task_id，读取并解析Task 结果，返回 TaskResult；
+        # 会更新对象内存状态。失败策略：非法输入或状态会立即抛错，其他底层异常继续上抛；本函数不额外重试，避免掩盖持续故障。
         path = self._task_dir(task_id) / "result.md"
         if not path.exists():
             raise TaskflowError(f"task result not found: {path}")
@@ -192,6 +211,8 @@ class FileSystemTaskStore:
         return result
 
     def write_task_result(self, task_id: str, result: TaskResult) -> None:
+        # 逻辑说明：`write_task_result` 接收 task_id、result，校验并写入Task 结果，返回 None；
+        # 会读写本地文件、会更新对象内存状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
         validate_task_result(task_id, result)
         path = self._task_dir(task_id) / "result.md"
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -208,6 +229,10 @@ def create_project(
     parent_task_id: str | None = None,
 ) -> ProjectMeta:
     """Create project meta and an empty DAG plan."""
+    # 逻辑说明：`create_project` 接收 store、project_id、title、source、requester、parent_task_id，校验 Project ID 未占用，
+    # 写入元数据和初始空计划，返回 ProjectMeta；
+    #
+    # 不修改外部状态。失败策略：非法输入或状态会立即抛错，其他底层异常继续上抛；本函数不额外重试，避免掩盖持续故障。
     safe = _safe_id(project_id)
     if _project_exists(store, safe):
         raise TaskflowError(f"project already exists: {safe}")
@@ -231,6 +256,8 @@ def add_tasks(
     tasks: list[dict[str, Any]],
 ) -> list[DagTask]:
     """Add or update pending DAG tasks and validate the graph."""
+    # 逻辑说明：`add_tasks` 接收 store、project_id、tasks，合并新增 Task、拒绝修改非 pending Task，并校验完整 DAG 后写回，返回 list[DagTask]；
+    # 不修改外部状态。失败策略：非法输入或状态会立即抛错，其他底层异常继续上抛；本函数不额外重试，避免掩盖持续故障。
     plan = store.read_project_plan(project_id)
     existing = {task.task_id: task for task in parse_dag_tasks(plan)}
     incoming_ids: set[str] = set()
@@ -261,6 +288,8 @@ def plan_dag(
     tasks: list[dict[str, Any]],
 ) -> list[DagTask]:
     """Replace the project DAG with the Leader's latest graph shape."""
+    # 逻辑说明：`plan_dag` 接收 store、project_id、tasks，把 Task 列表规划成 DAG 并持久化计划，返回 list[DagTask]；
+    # 不修改外部状态。失败策略：非法输入或状态会立即抛错，其他底层异常继续上抛；本函数不额外重试，避免掩盖持续故障。
     plan = store.read_project_plan(project_id)
     existing = {task.task_id: task for task in parse_dag_tasks(plan)}
     incoming_ids: set[str] = set()
@@ -301,6 +330,10 @@ def plan_loop(
     tasks: list[dict[str, Any]] | None = None,
 ) -> LoopPlan:
     """Replace the project execution plan with a Loop plan."""
+    # 逻辑说明：`plan_loop` 接收 store、Project ID、循环目标/停止条件、迭代上限和 Task，
+    # 创建带停止条件和迭代上限的循环计划，返回 LoopPlan；
+    #
+    # 不修改外部状态。失败策略：非法输入或状态会立即抛错，其他底层异常继续上抛；循环/重试受现有次数、超时或间隔限制。
     if max_iterations < 1:
         raise TaskflowError("maxIterations must be greater than zero")
     if current_iteration < 0:
@@ -350,6 +383,8 @@ def plan_loop(
 
 def ready_loop_nodes(store: TaskStore, *, project_id: str) -> list[DagTask]:
     """Return pending current-iteration Loop nodes whose dependencies are accepted."""
+    # 逻辑说明：`ready_loop_nodes` 接收 store、project_id，计算当前循环中依赖满足且可派发的 Task，返回 list[DagTask]；
+    # 不修改外部状态。失败策略：非法输入或状态会立即抛错，其他底层异常继续上抛；本函数不额外重试，避免掩盖持续故障。
     meta = store.read_project_meta(project_id)
     if meta.status == "paused":
         return []
@@ -383,6 +418,10 @@ def record_loop_iteration(
     next_action: str | None = None,
 ) -> LoopPlan:
     """Record a Leader decision for one Loop iteration."""
+    # 逻辑说明：`record_loop_iteration` 接收 store、project_id、iteration、decision、summary、next_action，
+    # 记录一次循环结果并推进迭代或停止状态，返回 LoopPlan；
+    #
+    # 不修改外部状态。失败策略：非法输入或状态会立即抛错，其他底层异常继续上抛；本函数不额外重试，避免掩盖持续故障。
     if iteration < 1:
         raise TaskflowError("iteration must be greater than zero")
     plan = store.read_project_plan(project_id)
@@ -420,6 +459,8 @@ def record_loop_iteration(
 
 def ready_nodes(store: TaskStore, *, project_id: str) -> list[DagTask]:
     """Return pending DAG nodes whose dependencies have been accepted."""
+    # 逻辑说明：`ready_nodes` 接收 store、project_id，计算 DAG 中依赖全部完成且可派发的 Task，返回 list[DagTask]；
+    # 不修改外部状态。失败策略：非法输入或状态会立即抛错，其他底层异常继续上抛；本函数不额外重试，避免掩盖持续故障。
     meta = store.read_project_meta(project_id)
     if meta.status == "paused":
         return []
@@ -450,6 +491,8 @@ def delegate_task(
     room_id: str | None = None,
 ) -> TaskMeta:
     """Create task meta/spec for a ready DAG node and mark it delegated."""
+    # 逻辑说明：`delegate_task` 接收 store、project_id、task_id、spec、room_id，把 Task 标为 delegated，写入任务元数据和说明，返回 TaskMeta；
+    # 会访问网络服务。失败策略：非法输入或状态会立即抛错，其他底层异常继续上抛；本函数不额外重试，避免掩盖持续故障。
     if not spec or not spec.strip():
         raise TaskflowError("spec is required")
     meta = store.read_project_meta(project_id)
@@ -505,6 +548,8 @@ def delegate_task(
 
 def pause_project(store: TaskStore, *, project_id: str) -> ProjectMeta:
     """Pause DAG scheduling by preventing ready nodes from being issued."""
+    # 逻辑说明：`pause_project` 接收 store、project_id，把活动 Project 转为 paused 并持久化，返回 ProjectMeta；
+    # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     meta = store.read_project_meta(project_id)
     updated = ProjectMeta(
         project_id=meta.project_id,
@@ -521,6 +566,8 @@ def pause_project(store: TaskStore, *, project_id: str) -> ProjectMeta:
 
 def resume_project(store: TaskStore, *, project_id: str) -> ProjectMeta:
     """Resume DAG scheduling without changing the graph."""
+    # 逻辑说明：`resume_project` 接收 store、project_id，把 paused Project 恢复为 active 并持久化，返回 ProjectMeta；
+    # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     meta = store.read_project_meta(project_id)
     updated = ProjectMeta(
         project_id=meta.project_id,
@@ -537,6 +584,8 @@ def resume_project(store: TaskStore, *, project_id: str) -> ProjectMeta:
 
 def complete_project(store: TaskStore, *, project_id: str) -> ProjectMeta:
     """Mark a project complete after the Leader has finalized project result files."""
+    # 逻辑说明：`complete_project` 接收 store、project_id，确认无未完成 Task 后把 Project 标为 completed，返回 ProjectMeta；
+    # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     meta = store.read_project_meta(project_id)
     updated = ProjectMeta(
         project_id=meta.project_id,
@@ -563,6 +612,8 @@ def is_effective_result(result: TaskResult) -> bool:
 
 def ack_task(store: TaskStore, *, task_id: str, actor: str | None = None) -> TaskMeta:
     """Mark a local task as acknowledged/in progress without touching graph."""
+    # 逻辑说明：`ack_task` 接收 store、task_id、actor，校验操作者和房间后确认接收 Task，返回 TaskMeta；不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；
+    # 本函数不额外重试，避免掩盖持续故障。
     meta = store.read_task_meta(task_id)
     _require_assigned_worker(meta, actor)
     _require_task_room(meta)
@@ -580,6 +631,8 @@ def submit_task(
     actor: str | None = None,
 ) -> TaskMeta:
     """Mark a local task submitted after result.md exists and is valid."""
+    # 逻辑说明：`submit_task` 接收 store、task_id、result、actor，校验任务归属与结果后写入 result，并推进 Task/计划状态，返回 TaskMeta；
+    # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     meta = store.read_task_meta(task_id)
     _require_assigned_worker(meta, actor)
     _require_task_room(meta)
@@ -594,6 +647,8 @@ def submit_task(
 
 
 def _require_assigned_worker(meta: TaskMeta, actor: str | None) -> None:
+    # 逻辑说明：`_require_assigned_worker` 接收 meta、actor，验证必需条件assigned Worker，返回 None；
+    # 不修改外部状态。失败策略：非法输入或状态会立即抛错，其他底层异常继续上抛；本函数不额外重试，避免掩盖持续故障。
     current = canonical_worker_id(actor)
     if not current:
         raise TaskflowError("current worker identity is required")
@@ -605,12 +660,15 @@ def _require_assigned_worker(meta: TaskMeta, actor: str | None) -> None:
 
 
 def _require_task_room(meta: TaskMeta) -> None:
+    # 逻辑说明：`_require_task_room` 接收 meta，验证必需条件Task 房间，返回 None；不修改外部状态。失败策略：非法输入或状态会立即抛错，其他底层异常继续上抛；本函数不额外重试，避免掩盖持续故障。
     if not (meta.room_id or "").strip():
         raise TaskflowError(f"task {meta.task_id} is missing room_id")
 
 
 def canonical_worker_id(value: str | None) -> str:
     """Normalize Matrix/display worker identities to the logical worker name."""
+    # 逻辑说明：`canonical_worker_id` 接收 value，执行 Project/Task 本地状态机 中的“canonical Worker ID”步骤，返回 str；
+    # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     text = (value or "").strip()
     if not text:
         return ""
@@ -625,6 +683,7 @@ def canonical_worker_id(value: str | None) -> str:
 
 def parse_dag_tasks(plan: str) -> list[DagTask]:
     """Parse DAG task lines from a project plan."""
+    # 逻辑说明：`parse_dag_tasks` 接收 plan，解析DAG tasks，返回 list[DagTask]；不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     tasks: list[DagTask] = []
     for line in (plan or "").splitlines():
         task = _parse_dag_line(line)
@@ -635,6 +694,7 @@ def parse_dag_tasks(plan: str) -> list[DagTask]:
 
 def parse_loop_tasks(plan: str) -> list[DagTask]:
     """Parse current-iteration task lines from a Loop plan."""
+    # 逻辑说明：`parse_loop_tasks` 接收 plan，解析循环 tasks，返回 list[DagTask]；不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；循环/重试受现有次数、超时或间隔限制。
     lines = (plan or "").splitlines()
     start = _heading_index(lines, "## Current Iteration")
     if start is None:
@@ -653,6 +713,7 @@ def parse_loop_tasks(plan: str) -> list[DagTask]:
 
 
 def parse_plan_type(plan: str) -> str:
+    # 逻辑说明：`parse_plan_type` 接收 plan，解析计划 type，返回 str；不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     for line in (plan or "").splitlines():
         if line.startswith("**Plan Type**:"):
             value = line[len("**Plan Type**:") :].strip().lower()
@@ -662,6 +723,7 @@ def parse_plan_type(plan: str) -> str:
 
 
 def parse_loop_plan(plan: str) -> LoopPlan | None:
+    # 逻辑说明：`parse_loop_plan` 接收 plan，解析循环 计划，返回 LoopPlan | None；会访问网络服务。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     lines = (plan or "").splitlines()
     if parse_plan_type(plan) != "loop":
         return None
@@ -691,6 +753,7 @@ def parse_loop_plan(plan: str) -> LoopPlan | None:
 
 def replace_dag_tasks(plan: str, tasks: list[DagTask]) -> str:
     """Replace the DAG task section while preserving project header/suffix."""
+    # 逻辑说明：`replace_dag_tasks` 接收 plan、tasks，替换DAG tasks，返回 str；会访问网络服务。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     lines = (plan or "").splitlines()
     heading_index = _execution_heading_index(lines)
     if heading_index is None:
@@ -720,6 +783,7 @@ def replace_dag_tasks(plan: str, tasks: list[DagTask]) -> str:
 
 def replace_loop_plan(plan: str, loop: LoopPlan) -> str:
     """Replace the Loop plan section while preserving project header/suffix."""
+    # 逻辑说明：`replace_loop_plan` 接收 plan、loop，替换循环 计划，返回 str；会访问网络服务。失败策略：底层异常继续上抛，由调用链统一处理；循环/重试受现有次数、超时或间隔限制。
     lines = (plan or "").splitlines()
     heading_index = _execution_heading_index(lines)
     if heading_index is None:
@@ -766,6 +830,7 @@ def replace_loop_plan(plan: str, loop: LoopPlan) -> str:
 
 
 def render_dag_task(task: DagTask) -> str:
+    # 逻辑说明：`render_dag_task` 接收 task，渲染DAG Task，返回 str；会访问网络服务。失败策略：非法输入或状态会立即抛错，其他底层异常继续上抛；本函数不额外重试，避免掩盖持续故障。
     marker = STATUS_TO_MARKER.get(task.status)
     if marker is None:
         raise TaskflowError(f"unknown task status: {task.status}")
@@ -777,6 +842,8 @@ def render_dag_task(task: DagTask) -> str:
 
 def validate_dag(tasks: list[DagTask]) -> None:
     """验证任务 ID、依赖存在性和无环性，避免永远无法进入 ready 的项目。"""
+    # 逻辑说明：`validate_dag` 接收 tasks，检查 Task ID 唯一性、依赖存在性和循环依赖，返回 None；会访问网络服务。失败策略：非法输入或状态会立即抛错，其他底层异常继续上抛；
+    # 本函数不额外重试，避免掩盖持续故障。
     ids = [task.task_id for task in tasks]
     if len(ids) != len(set(ids)):
         raise TaskflowError("duplicate task ids in graph")
@@ -810,6 +877,8 @@ def validate_dag(tasks: list[DagTask]) -> None:
 
 
 def parse_task_result(text: str) -> TaskResult:
+    # 逻辑说明：`parse_task_result` 接收 text，解析 result Markdown 的状态、摘要、交付物和备注，返回 TaskResult；
+    # 不修改外部状态。失败策略：非法输入或状态会立即抛错，其他底层异常继续上抛；本函数不额外重试，避免掩盖持续故障。
     status = ""
     summary = ""
     deliverables: list[str] = []
@@ -849,6 +918,7 @@ def parse_task_result(text: str) -> TaskResult:
 
 
 def render_task_result(result: TaskResult) -> str:
+    # 逻辑说明：`render_task_result` 接收 result，渲染Task 结果，返回 str；会访问网络服务。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     lines = [
         f"STATUS: {result.status}",
         f"SUMMARY: {_single_line(result.summary)}",
@@ -864,6 +934,8 @@ def render_task_result(result: TaskResult) -> str:
 
 def validate_task_result(task_id: str, result: TaskResult) -> None:
     """确认结果状态完整，并把交付物限制在当前 Task 的 shared 目录。"""
+    # 逻辑说明：`validate_task_result` 接收 task_id、result，验证结果状态与必填字段，拒绝无效提交，返回 None；
+    # 不修改外部状态。失败策略：非法输入或状态会立即抛错，其他底层异常继续上抛；本函数不额外重试，避免掩盖持续故障。
     if result.status not in RESULT_STATUSES:
         raise TaskflowError(f"invalid result status: {result.status or '<missing>'}")
     if not result.summary.strip():
@@ -882,6 +954,7 @@ def validate_task_result(task_id: str, result: TaskResult) -> None:
 
 
 def _parse_dag_line(line: str) -> DagTask | None:
+    # 逻辑说明：`_parse_dag_line` 接收 line，解析DAG line，返回 DagTask | None；不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     match = re.match(
         r"^\s*-\s+\[(?P<marker>[ x~!\u2192])\]\s+"
         r"(?P<id>[A-Za-z0-9_-]+)\s+(?:\u2014|-)\s+"
@@ -913,6 +986,8 @@ def _parse_dag_line(line: str) -> DagTask | None:
 
 
 def _dag_task_from_payload(payload: dict[str, Any]) -> DagTask:
+    # 逻辑说明：`_dag_task_from_payload` 接收 payload，执行 Project/Task 本地状态机 中的“DAG Task from 载荷”步骤，返回 DagTask；
+    # 不修改外部状态。失败策略：非法输入或状态会立即抛错，其他底层异常继续上抛；本函数不额外重试，避免掩盖持续故障。
     task_id = str(payload.get("taskId") or payload.get("task_id") or "").strip()
     title = str(payload.get("title") or "").strip()
     assigned_to = str(payload.get("assignedTo") or payload.get("assigned_to") or "").strip()
@@ -931,6 +1006,8 @@ def _dag_task_from_payload(payload: dict[str, Any]) -> DagTask:
 
 
 def _find_task(tasks: list[DagTask], task_id: str) -> DagTask:
+    # 逻辑说明：`_find_task` 接收 tasks、task_id，执行 Project/Task 本地状态机 中的“find Task”步骤，返回 DagTask；
+    # 不修改外部状态。失败策略：非法输入或状态会立即抛错，其他底层异常继续上抛；本函数不额外重试，避免掩盖持续故障。
     safe_id = _safe_id(task_id)
     for task in tasks:
         if task.task_id == safe_id:
@@ -943,6 +1020,8 @@ def _replace_task_status(
     task_id: str,
     status: str,
 ) -> list[DagTask]:
+    # 逻辑说明：`_replace_task_status` 接收 tasks、task_id、status，替换Task 状态，返回 list[DagTask]；
+    # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     safe_id = _safe_id(task_id)
     return [
         DagTask(
@@ -967,6 +1046,8 @@ def _initial_plan(meta: ProjectMeta) -> str:
 
 
 def _dag_heading_index(lines: list[str]) -> int | None:
+    # 逻辑说明：`_dag_heading_index` 接收 lines，执行 Project/Task 本地状态机 中的“DAG 标题 index”步骤，返回 int | None；
+    # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     for idx, line in enumerate(lines):
         if line.strip() == "## DAG Task Plan":
             return idx
@@ -974,6 +1055,8 @@ def _dag_heading_index(lines: list[str]) -> int | None:
 
 
 def _execution_heading_index(lines: list[str]) -> int | None:
+    # 逻辑说明：`_execution_heading_index` 接收 lines，执行 Project/Task 本地状态机 中的“execution 标题 index”步骤，返回 int | None；
+    # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     dag_idx = _dag_heading_index(lines)
     loop_idx = _heading_index(lines, "## Loop Plan")
     candidates = [idx for idx in (dag_idx, loop_idx) if idx is not None]
@@ -981,6 +1064,8 @@ def _execution_heading_index(lines: list[str]) -> int | None:
 
 
 def _heading_index(lines: list[str], heading: str) -> int | None:
+    # 逻辑说明：`_heading_index` 接收 lines、heading，执行 Project/Task 本地状态机 中的“标题 index”步骤，返回 int | None；
+    # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     for idx, line in enumerate(lines):
         if line.strip() == heading:
             return idx
@@ -988,6 +1073,8 @@ def _heading_index(lines: list[str], heading: str) -> int | None:
 
 
 def _plan_field(lines: list[str], field_name: str) -> str | None:
+    # 逻辑说明：`_plan_field` 接收 lines、field_name，执行 Project/Task 本地状态机 中的“计划 字段”步骤，返回 str | None；
+    # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     prefix = f"**{field_name}**:"
     for line in lines:
         if line.startswith(prefix):
@@ -996,6 +1083,8 @@ def _plan_field(lines: list[str], field_name: str) -> str | None:
 
 
 def _section_lines(lines: list[str], heading: str) -> list[str]:
+    # 逻辑说明：`_section_lines` 接收 lines、heading，执行 Project/Task 本地状态机 中的“section lines”步骤，返回 list[str]；
+    # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     start = _heading_index(lines, heading)
     if start is None:
         return []
@@ -1008,6 +1097,7 @@ def _section_lines(lines: list[str], heading: str) -> list[str]:
 
 
 def _parse_iteration(value: str) -> tuple[int, int]:
+    # 逻辑说明：`_parse_iteration` 接收 value，解析迭代，返回 tuple[int, int]；不修改外部状态。失败策略：非法输入或状态会立即抛错，其他底层异常继续上抛；本函数不额外重试，避免掩盖持续故障。
     match = re.match(r"^\s*(\d+)\s*/\s*(\d+)\s*$", value or "")
     if not match:
         raise TaskflowError(f"invalid loop iteration: {value}")
@@ -1015,6 +1105,8 @@ def _parse_iteration(value: str) -> tuple[int, int]:
 
 
 def _safe_loop_status(value: str) -> str:
+    # 逻辑说明：`_safe_loop_status` 接收 value，执行 Project/Task 本地状态机 中的“safe 循环 状态”步骤，返回 str；
+    # 不修改外部状态。失败策略：非法输入或状态会立即抛错，其他底层异常继续上抛；本函数不额外重试，避免掩盖持续故障。
     text = str(value or "").strip().lower()
     allowed = {"running", "waiting_results", "evaluating", "waiting_user", "completed", "blocked"}
     if text not in allowed:
@@ -1023,6 +1115,8 @@ def _safe_loop_status(value: str) -> str:
 
 
 def _safe_loop_decision(value: str) -> str:
+    # 逻辑说明：`_safe_loop_decision` 接收 value，执行 Project/Task 本地状态机 中的“safe 循环 decision”步骤，返回 str；
+    # 不修改外部状态。失败策略：非法输入或状态会立即抛错，其他底层异常继续上抛；本函数不额外重试，避免掩盖持续故障。
     text = str(value or "").strip().lower()
     allowed = {"continue", "stop_success", "stop_blocked", "ask_user", "replan"}
     if text not in allowed:
@@ -1031,6 +1125,8 @@ def _safe_loop_decision(value: str) -> str:
 
 
 def _safe_id(value: str) -> str:
+    # 逻辑说明：`_safe_id` 接收 value，执行 Project/Task 本地状态机 中的“safe ID”步骤，返回 str；
+    # 不修改外部状态。失败策略：非法输入或状态会立即抛错，其他底层异常继续上抛；本函数不额外重试，避免掩盖持续故障。
     text = str(value or "").strip()
     if not re.fullmatch(r"[A-Za-z0-9_-]+", text):
         raise TaskflowError(f"invalid id: {value}")
@@ -1038,20 +1134,27 @@ def _safe_id(value: str) -> str:
 
 
 def _now() -> str:
+    # 逻辑说明：为任务创建、分配、确认和提交元数据生成秒精度 UTC 时间戳，并用尾部 `Z` 形成稳定的持久化格式。
+    # 只读取系统时钟；真正把时间写入 task 元数据或 JSON 文件由调用方完成。
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _single_line(value: str) -> str:
+    # 逻辑说明：`_single_line` 接收 value，执行 Project/Task 本地状态机 中的“single line”步骤，返回 str；
+    # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     return re.sub(r"\s+", " ", value).strip()
 
 
 def _read_json(path: Path) -> dict[str, Any]:
+    # 逻辑说明：`_read_json` 接收 path，读取 JSON 对象；缺失、非法 JSON 或非对象内容会抛出 TaskflowError，返回 dict[str, Any]；
+    # 不修改外部状态。失败策略：非法输入或状态会立即抛错，其他底层异常继续上抛；本函数不额外重试，避免掩盖持续故障。
     if not path.exists():
         raise TaskflowError(f"file not found: {path}")
     return json.loads(path.read_text())
 
 
 def _write_json(path: Path, data: dict[str, Any]) -> None:
+    # 逻辑说明：`_write_json` 接收 path、data，创建父目录并把字典格式化写入 JSON 文件，返回 None；会读写本地文件。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n")
 
@@ -1061,6 +1164,8 @@ def _drop_none(data: dict[str, Any]) -> dict[str, Any]:
 
 
 def _project_exists(store: TaskStore, project_id: str) -> bool:
+    # 逻辑说明：`_project_exists` 接收 store、project_id，执行 Project/Task 本地状态机 中的“Project exists”步骤，返回 bool；
+    # 不修改外部状态。失败策略：已知失败按现有 except 转为错误结果或日志，未覆盖异常继续上抛；本函数不额外重试，避免掩盖持续故障。
     if isinstance(store, FileSystemTaskStore):
         return (store._project_dir(project_id) / "meta.json").exists()
 

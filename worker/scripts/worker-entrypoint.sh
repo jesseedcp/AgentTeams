@@ -22,6 +22,7 @@ FS_ENDPOINT="${AGENTTEAMS_FS_ENDPOINT:-}"
 FS_ACCESS_KEY="${AGENTTEAMS_FS_ACCESS_KEY:-}"
 FS_SECRET_KEY="${AGENTTEAMS_FS_SECRET_KEY:-}"
 
+# 逻辑说明：为 OpenClaw Worker 的启动和恢复阶段统一记录时间戳，不改变被启动进程的输出。
 log() {
     echo "[agentteams-worker $(date '+%Y-%m-%d %H:%M:%S')] $1"
 }

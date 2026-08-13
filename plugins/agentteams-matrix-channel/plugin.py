@@ -11,6 +11,7 @@ Register the AgentTeams-owned Matrix transport with QwenPaw.
 class AgentTeamsMatrixPlugin:
     """把 Matrix channel 暴露给 QwenPaw 的插件发现机制。"""
     def register(self, api):
+        # 逻辑说明：`register` 延迟导入 channel 并注册类型及配置 schema；不启动网络连接。
         from .agentteams_matrix.channel import AgentTeamsMatrixChannel
 
         api.register_channel(

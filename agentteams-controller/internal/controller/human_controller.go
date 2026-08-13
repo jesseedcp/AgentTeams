@@ -36,6 +36,9 @@ type HumanReconciler struct {
 // 它不创建 Pod；一轮典型处理是解析用户身份、确保账号存在，再将
 // 用户加入 desired rooms 并移出不再允许的 rooms。重复触发时结果必须相同。
 func (r *HumanReconciler) Reconcile(ctx context.Context, req reconcile.Request) (retres reconcile.Result, reterr error) {
+	// 逻辑说明：Reconcile 接收 ctx(context.Context)、req(reconcile.Request)，依次借助 Now、Observe、Get、IgnoreNotFound调谐Human的期望结果。
+	// 返回/状态：返回 retres、reterr；会调用下层服务修改外部资源，并把阶段、条件与已应用版本写回 CR status。
+	// 失败/重试：error 或 RequeueAfter 交给 controller-runtime；重复执行必须把同一 spec 收敛到同一状态。
 	start := time.Now()
 	defer func() { metrics.Observe("human", start, reterr) }()
 
@@ -112,6 +115,9 @@ func (r *HumanReconciler) Reconcile(ctx context.Context, req reconcile.Request) 
 // them, so a transient Matrix hiccup
 // on room invite/kick does not block the next reconcile.
 func (r *HumanReconciler) reconcileHumanNormal(ctx context.Context, s *humanScope) (reconcile.Result, error) {
+	// 逻辑说明：reconcileHumanNormal 接收 ctx(context.Context)、s(*humanScope)，依次借助 resolveHumanScope、reconcileHumanInfra、Is、reconcileHumanRooms调谐Human的期望结果。
+	// 返回/状态：返回 reconcile.Result、error；会更新 Human的内存状态，存在客户端调用时还可能同步相应外部资源。
+	// 失败/重试：输入或依赖调用失败会返回错误；是否重排由上层调谐器决定，本函数不隐藏失败。
 	if err := r.resolveHumanScope(s); err != nil {
 		s.human.Status.Phase = "Degraded"
 		s.human.Status.Message = err.Error()
@@ -131,6 +137,9 @@ func (r *HumanReconciler) reconcileHumanNormal(ctx context.Context, s *humanScop
 }
 
 func (r *HumanReconciler) resolveHumanScope(s *humanScope) error {
+	// 逻辑说明：resolveHumanScope 接收 s(*humanScope)，依次借助 ResolveHuman解析Human的期望结果。
+	// 返回/状态：返回 error；会更新 Human的内存状态，存在客户端调用时还可能同步相应外部资源。
+	// 失败/重试：输入或依赖调用失败会返回错误；是否重排由上层调谐器决定，本函数不隐藏失败。
 	resolved, err := humanidentity.ResolveHuman(&s.human.Spec, s.human.Name, humanidentity.Deps{
 		Provisioner: r.Provisioner,
 	})
@@ -157,6 +166,9 @@ func (r *HumanReconciler) resolveHumanScope(s *humanScope) error {
 }
 
 func (r *HumanReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	// 逻辑说明：SetupWithManager 接收 mgr(ctrl.Manager)，依次借助 Complete、For、NewControllerManagedBy设置Manager的期望结果。
+	// 返回/状态：返回 error；会注册 watch、事件过滤器或对象到调谐请求的映射，不直接创建业务资源。
+	// 失败/重试：注册失败会阻止 Controller 正常启动；事件处理本身由 controller-runtime 持续驱动。
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&v1beta1.Human{}).
 		Complete(r)

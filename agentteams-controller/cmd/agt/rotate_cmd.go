@@ -7,6 +7,7 @@ import (
 )
 
 func rotateCmd() *cobra.Command {
+	// 逻辑说明：创建凭据轮换命令组，目前只暴露 Matrix AppService token 的受控轮换入口。
 	cmd := &cobra.Command{
 		Use:   "rotate",
 		Short: "Rotate credentials",
@@ -16,6 +17,7 @@ func rotateCmd() *cobra.Command {
 }
 
 func rotateAppServiceTokenCmd() *cobra.Command {
+	// 逻辑说明：收集必需 as_token 和可选 hs_token，发送轮换请求，成功后明确提示持久配置与重启步骤。
 	var asToken, hsToken string
 	cmd := &cobra.Command{
 		Use:   "appservice-token",

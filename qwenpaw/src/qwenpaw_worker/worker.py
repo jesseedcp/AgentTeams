@@ -42,6 +42,7 @@ SESSION_FILE_PROMPT_POLICY_MARKER = "Session files are runtime-private state"
 
 
 def _qwenpaw_api_ready_timeout_seconds() -> float:
+    # 逻辑说明：解析 API 就绪超时环境变量并限制为正数；无效配置回落默认值。
     raw = os.getenv("QWENPAW_API_READY_TIMEOUT_SECONDS", "").strip()
     if not raw:
         return DEFAULT_QWENPAW_API_READY_TIMEOUT_SECONDS
@@ -53,6 +54,7 @@ def _qwenpaw_api_ready_timeout_seconds() -> float:
 
 
 def _is_directory_link(path: Path) -> bool:
+    # 逻辑说明：兼容 POSIX 符号链接和 Windows junction，判断是否为目录链接而非真实目录。
     if path.is_symlink():
         return True
     is_junction = getattr(os.path, "isjunction", None)
@@ -60,6 +62,7 @@ def _is_directory_link(path: Path) -> bool:
 
 
 def _remove_directory_link(path: Path) -> None:
+    # 逻辑说明：按链接类型安全移除链接本身；不会递归删除它指向的团队共享数据。
     if path.is_symlink():
         path.unlink()
         return
@@ -69,10 +72,12 @@ def _remove_directory_link(path: Path) -> None:
 
 
 def _duration_ms(started_at: float) -> int:
+    # 逻辑说明：用单调时钟计算非负毫秒耗时，供阶段日志记录。
     return max(0, int((time.monotonic() - started_at) * 1000))
 
 
 def _log_fields(**fields: object) -> str:
+    # 逻辑说明：把非空键值转成稳定的 key=value 日志尾部，避免无意义字段污染诊断。
     parts = []
     for key, value in fields.items():
         if value is None:
@@ -82,6 +87,7 @@ def _log_fields(**fields: object) -> str:
 
 
 def _redact_url_userinfo(value: str) -> str:
+    # 逻辑说明：日志输出前遮蔽 URL 中的 userinfo，普通地址原样保留且不影响实际连接。
     if "://" not in value or "@" not in value:
         return value
     scheme, rest = value.split("://", 1)
@@ -89,6 +95,7 @@ def _redact_url_userinfo(value: str) -> str:
 
 
 def _safe_error_code(exc: Exception) -> str:
+    # 逻辑说明：从异常文本归类少量安全错误码，不把可能含秘密的完整异常作为结构化字段。
     message = str(exc).lower()
     if "access denied" in message:
         return "storage_access_denied"
@@ -105,6 +112,7 @@ class Worker:
     配置再宣布 ready，否则 Manager 可能向尚未具备正确身份的 Worker 派工。
     """
     def __init__(self, config: WorkerConfig) -> None:
+        # 逻辑说明：初始化任务、子进程、同步器和 updater 槽位；实际副作用由 start 统一触发。
         self.config = config
         self.sync: Optional[FileSync] = None
         self.heartbeat = WorkerHeartbeat(config.qwenpaw_working_dir / "heartbeat.json")
@@ -126,6 +134,7 @@ class Worker:
         self._initial_runtime_config: Optional[MemberRuntimeConfig] = None
 
     async def run(self) -> None:
+        # 逻辑说明：启动成功后等待停止事件，最终无论正常或异常都调用 stop 清理资源。
         if not await self.start():
             return
         try:
@@ -136,6 +145,7 @@ class Worker:
     async def start(self) -> bool:
         # 启动阶段故意按顺序执行：先有可靠的本地工作区，再应用远端期望状态，最后
         # 才启动 QwenPaw。若顺序倒置，runtime 可能用默认模型或旧 Matrix 身份先回消息。
+        # 逻辑说明：按恢复存储、应用配置、启动 QwenPaw/API、后台循环的顺序建 Worker；失败会停止清理。
         self._stopping = False
         logger.info(
             "qwenpaw worker startup begin component=worker worker=%s cr_name=%s install_dir=%s storage_endpoint=%s bucket=%s "
@@ -230,6 +240,7 @@ class Worker:
         return True
 
     async def stop(self) -> None:
+        # 逻辑说明：幂等标记停止、取消后台任务并终止子进程，等待释放后设置 stopped 事件。
         self._stopping = True
         logger.info(
             "qwenpaw worker stop requested component=worker worker=%s has_process=%s has_push_task=%s has_update_task=%s "
@@ -271,6 +282,7 @@ class Worker:
         logger.info("qwenpaw worker stopped component=worker worker=%s", self.config.worker_name)
 
     def _log_worker_stage_begin(self, stage: str, **fields: object) -> float:
+        # 逻辑说明：记录阶段开始与上下文字段，并返回计时起点供完成/失败日志计算耗时。
         started_at = time.monotonic()
         logger.info(
             "startup component=worker stage=%s event=begin worker=%s %s",
@@ -281,6 +293,7 @@ class Worker:
         return started_at
 
     def _log_worker_stage_complete(self, stage: str, started_at: float, **fields: object) -> None:
+        # 逻辑说明：记录阶段成功、耗时和附加字段，不修改 Worker 状态。
         logger.info(
             "startup component=worker stage=%s event=complete worker=%s duration_ms=%s %s",
             stage,
@@ -290,6 +303,7 @@ class Worker:
         )
 
     def _log_worker_stage_failed(self, stage: str, started_at: float, exc: Exception, **fields: object) -> None:
+        # 逻辑说明：以安全错误类型/代码记录阶段失败和耗时，避免秘密随异常全文写入日志。
         logger.warning(
             "startup component=worker stage=%s event=failed worker=%s duration_ms=%s error_type=%s error_code=%s %s",
             stage,
@@ -301,6 +315,7 @@ class Worker:
         )
 
     def _log_plugin_step_begin(self, plugin_name: str, step: str, **fields: object) -> float:
+        # 逻辑说明：记录插件安装子步骤起点并返回计时值，便于定位慢步骤。
         started_at = time.monotonic()
         logger.info(
             "component=plugin plugin=%s step=%s event=begin worker=%s %s",
@@ -312,6 +327,7 @@ class Worker:
         return started_at
 
     def _log_plugin_step_complete(self, plugin_name: str, step: str, started_at: float, **fields: object) -> None:
+        # 逻辑说明：记录插件子步骤成功及耗时，不改变安装流程返回值。
         logger.info(
             "component=plugin plugin=%s step=%s event=complete worker=%s duration_ms=%s %s",
             plugin_name,
@@ -322,6 +338,7 @@ class Worker:
         )
 
     def _log_plugin_step_failed(self, plugin_name: str, step: str, started_at: float, exc: Exception, **fields: object) -> None:
+        # 逻辑说明：记录插件子步骤安全失败摘要和耗时，异常仍由调用方决定是否上抛。
         logger.warning(
             "component=plugin plugin=%s step=%s event=failed worker=%s duration_ms=%s error_type=%s %s",
             plugin_name,
@@ -333,6 +350,7 @@ class Worker:
         )
 
     def _prepare_env(self) -> None:
+        # 逻辑说明：把 Worker 身份、路径和端口写入子进程环境，并确保 QwenPaw 工作目录存在。
         os.environ["AGENTTEAMS_AGENT_NAME"] = self.config.agent_name
         os.environ["AGENTTEAMS_AGENT_ROLE"] = self.config.agent_role
         os.environ["AGENTTEAMS_AGENT_HOME"] = str(self.config.worker_home)
@@ -360,6 +378,7 @@ class Worker:
         工作区中的 ``shared`` 是链接，不是再次复制的数据。这样 Leader 和 Worker
         看到的是同一批产物；重建链接时只删除链接本身，绝不能递归删除其目标目录。
         """
+        # 逻辑说明：确保共享真实目录存在，将 workspace/shared 指向它；Windows 无权限时回落 junction。
         shared_dir = self._workspace_shared_dir or self.config.shared_dir
         workspace_shared = self.config.default_workspace_dir / "shared"
         shared_dir.mkdir(parents=True, exist_ok=True)
@@ -412,6 +431,7 @@ class Worker:
         )
 
     def _apply_runtime_storage(self, runtime_config) -> None:
+        # 逻辑说明：解析共享前缀、选择本地共享目录并拉取远端内容，再建立工作区链接。
         shared_prefix = self._runtime_shared_prefix(runtime_config)
         shared_dir = self._local_shared_dir_for_prefix(shared_prefix)
         self._workspace_shared_dir = shared_dir
@@ -431,6 +451,7 @@ class Worker:
             os.environ.pop("AGENTTEAMS_SHARED_STORAGE_PREFIX", None)
 
     def _reconcile_runtime_storage(self, runtime_config: MemberRuntimeConfig) -> None:
+        # 逻辑说明：仅在共享前缀或本地目录变化后重新镜像和链接，避免每轮重复 I/O。
         shared_prefix = self._runtime_shared_prefix(runtime_config)
         shared_dir = self._local_shared_dir_for_prefix(shared_prefix)
         if self._workspace_shared_dir is None:
@@ -446,6 +467,7 @@ class Worker:
         self._configure_builtin_plugin_mcp_policies()
 
     def _runtime_shared_prefix(self, runtime_config) -> str:
+        # 逻辑说明：优先使用 runtime storage.sharedPrefix，缺失时回落启动配置共享前缀。
         storage = getattr(runtime_config, "storage", {}) or {}
         prefix = str(storage.get("sharedPrefix") or "").strip() if isinstance(storage, dict) else ""
         if not prefix:
@@ -453,6 +475,7 @@ class Worker:
         return _relative_storage_prefix(prefix, self.config.fs_bucket)
 
     def _local_shared_dir_for_prefix(self, shared_prefix: str) -> Path:
+        # 逻辑说明：显式 override 优先；否则按前缀稳定派生本地目录，使不同 Team 数据隔离。
         if self.config.shared_dir_override is not None:
             return self.config.shared_dir
         prefix = shared_prefix.strip().strip("/")
@@ -470,6 +493,7 @@ class Worker:
         return self.config.install_dir.parent.joinpath(*path.parts)
 
     def _apply_runtime_identity(self, runtime_config) -> None:
+        # 逻辑说明：把 runtime 成员名和角色设置到环境，供插件和子进程识别自身身份。
         role = runtime_config.member_role
         if not role:
             return
@@ -478,6 +502,7 @@ class Worker:
         os.environ["AGENTTEAMS_WORKER_ROLE"] = role
 
     def _ensure_session_file_prompt_policy(self) -> None:
+        # 逻辑说明：确保工作区配置声明会话文件提示策略，原子写回且保留其他用户配置。
         self.config.default_workspace_dir.mkdir(parents=True, exist_ok=True)
         for file_name in ("AGENTS.md", "SOUL.md"):
             prompt_file = self.config.default_workspace_dir / file_name
@@ -492,12 +517,14 @@ class Worker:
             )
 
     def _apply_runtime_adapter(self) -> None:
+        # 逻辑说明：先准备默认插件，再调用 adapter_apply 让 Matrix 适配器读取最新配置。
         self._prepare_default_plugins()
         self._configure_builtin_plugin_mcp_clients()
         self._configure_builtin_plugin_mcp_policies()
         self._ensure_session_file_prompt_policy()
 
     def _prepare_default_plugins(self) -> None:
+        # 逻辑说明：定位镜像内置插件，逐个验证/复制到工作目录，并清理旧版重复技能副本。
         builtin_root = self._builtin_qwenpaw_plugins_dir()
         self._prepare_builtin_plugin(
             "agentteams-matrix-channel",
@@ -524,10 +551,12 @@ class Worker:
         )
 
     def _builtin_qwenpaw_plugins_dir(self) -> Path:
+        # 逻辑说明：优先采用环境指定内置插件根，否则回落镜像约定路径，返回规范 Path。
         configured = os.getenv("AGENTTEAMS_BUILTIN_QWENPAW_PLUGINS_DIR", "").strip()
         return Path(configured) if configured else DEFAULT_BUILTIN_QWENPAW_PLUGINS_DIR
 
     def _prepare_builtin_plugin(self, plugin_name: str, source_dir: Path) -> None:
+        # 逻辑说明：验证镜像源插件，比较 marker/digest 后按需替换工作目录副本并写来源标记。
         target_dir = self.config.qwenpaw_working_dir / "plugins" / plugin_name
         step_started = self._log_plugin_step_begin(
             plugin_name,
@@ -552,6 +581,7 @@ class Worker:
         self._log_plugin_step_complete(plugin_name, "prepare_builtin", step_started, action="copied")
 
     def _validate_builtin_plugin(self, plugin_name: str, plugin_dir: Path) -> None:
+        # 逻辑说明：检查内置插件目录及清单关键文件；缺失时阻止启动，避免加载半成品插件。
         if not plugin_dir.is_dir():
             raise RuntimeError(f"built-in {plugin_name} qwenpaw plugin missing: {plugin_dir}")
         for file_name in ("plugin.json", "plugin.py", BUILTIN_QWENPAW_PLUGIN_MARKER):
@@ -560,6 +590,7 @@ class Worker:
                 raise RuntimeError(f"built-in {plugin_name} qwenpaw plugin file missing: {path}")
 
     def _builtin_plugin_current(self, source_dir: Path, target_dir: Path) -> bool:
+        # 逻辑说明：比较源 marker 与目标记录或目录摘要，判断是否可跳过昂贵的插件复制。
         source_marker = source_dir / BUILTIN_QWENPAW_PLUGIN_MARKER
         target_marker = target_dir / BUILTIN_QWENPAW_PLUGIN_MARKER
         if not (
@@ -577,6 +608,7 @@ class Worker:
         )
 
     def _plugin_directory_digest(self, plugin_dir: Path) -> str:
+        # 逻辑说明：按相对路径和文件内容稳定计算 SHA256，用于检测镜像插件是否变化。
         digest = hashlib.sha256()
         for path in sorted(plugin_dir.rglob("*")):
             if not path.is_file() or path.name == BUILTIN_QWENPAW_PLUGIN_MARKER:
@@ -603,6 +635,7 @@ class Worker:
         Only byte-identical prefixed copies and their non-plugin manifest
         entries are removed; user-modified copies are preserved.
         """
+        # 逻辑说明：只删除与新插件技能内容完全相同的旧前缀副本，并同步清理技能清单记录。
         if not provider_dir.is_dir():
             return
         skill_pool = self.config.qwenpaw_working_dir / "skill_pool"
@@ -669,6 +702,7 @@ class Worker:
         skill_name: str,
         plugin_name: str,
     ) -> None:
+        # 逻辑说明：读取技能 manifest、删除精确匹配的旧条目并原子写回；格式未知时保守跳过。
         if not manifest_path.is_file():
             return
         try:
@@ -708,6 +742,7 @@ class Worker:
         )
 
     def _install_teamharness_plugin(self) -> None:
+        # 逻辑说明：从已准备的 TeamHarness 插件目录调用统一安装器，失败将阻止 Worker 就绪。
         plugin_source = Path(
             os.getenv(
                 "AGENTTEAMS_TEAMHARNESS_QWENPAW_PLUGIN_PACKAGE",
@@ -717,6 +752,7 @@ class Worker:
         self._install_qwenpaw_plugin_package("teamharness", plugin_source, "teamharness-qwenpaw-plugin-")
 
     def _install_workerflow_plugin(self) -> None:
+        # 逻辑说明：从已准备的 WorkerFlow 插件目录调用统一安装器，确保临时 Agent 工具可用。
         plugin_source = Path(
             os.getenv(
                 "AGENTTEAMS_WORKERFLOW_QWENPAW_PLUGIN_PACKAGE",
@@ -726,10 +762,12 @@ class Worker:
         self._install_qwenpaw_plugin_package("workerflow", plugin_source, "workerflow-qwenpaw-plugin-")
 
     def _install_default_plugins(self) -> None:
+        # 逻辑说明：按固定顺序安装 TeamHarness 与 WorkerFlow，便于依赖和日志结果保持确定。
         self._install_teamharness_plugin()
         self._install_workerflow_plugin()
 
     def _install_qwenpaw_plugin_package(self, plugin_name: str, plugin_source: Path, temp_prefix: str) -> None:
+        # 逻辑说明：识别插件目录或 zip，必要时解压后调用 CLI 安装，并记录各步骤失败。
         package_type = self._qwenpaw_plugin_package_type(plugin_source)
         step_started = self._log_plugin_step_begin(
             plugin_name,
@@ -755,6 +793,7 @@ class Worker:
         self._log_plugin_step_complete(plugin_name, "install", step_started, package_type=package_type)
 
     def _qwenpaw_plugin_package_type(self, plugin_source: Path) -> str:
+        # 逻辑说明：根据实际文件类型返回 directory/zip；不存在或不支持的来源直接报错。
         if plugin_source.is_dir():
             return "directory"
         if plugin_source.exists() and zipfile.is_zipfile(plugin_source):
@@ -764,11 +803,13 @@ class Worker:
         return "unsupported"
 
     def _run_qwenpaw_plugin_install(self, qwenpaw_bin: str, package_dir: Path) -> None:
+        # 逻辑说明：运行 qwenpaw plugin install --force 并捕获输出；非零退出由 subprocess 上抛。
         command = [qwenpaw_bin, "plugin", "install", str(package_dir), "--force"]
         logger.info("installing qwenpaw plugin package=%s", package_dir)
         subprocess.run(command, check=True)
 
     def _extract_qwenpaw_plugin_zip(self, zip_path: Path, target_dir: Path) -> Path:
+        # 逻辑说明：验证 zip 内所有路径位于临时目标后解压，并返回实际插件内容根。
         with zipfile.ZipFile(zip_path) as archive:
             target_root = target_dir.resolve()
             for name in archive.namelist():
@@ -789,6 +830,7 @@ class Worker:
         return packages[0]
 
     async def _run_qwenpaw(self) -> None:
+        # 逻辑说明：启动 QwenPaw 子进程并并发转发输出；异常退出会触发 Worker 停止与失败状态。
         # asyncio 让子进程等待、心跳和同步轮询能在一个事件循环中并行推进；这里的
         # await 不会冻结整个服务，只会暂停当前协程直到对应 I/O 完成。
         qwenpaw_bin = shutil.which("qwenpaw") or str(Path(sys.executable).with_name("qwenpaw"))
@@ -946,6 +988,7 @@ class Worker:
             )
 
     async def _wait_for_qwenpaw_api(self) -> None:
+        # 逻辑说明：在总超时内轮询本机 API 版本；子进程提前退出或超时则报告启动失败。
         timeout_seconds = _qwenpaw_api_ready_timeout_seconds()
         deadline = time.monotonic() + timeout_seconds
         last_error: Optional[Exception] = None
@@ -971,6 +1014,7 @@ class Worker:
         operation: Callable[[], object],
     ) -> object:
         """Retry transient localhost API failures while QwenPaw finishes warming up."""
+        # 逻辑说明：执行启动期 API 操作，连接类错误按固定次数退避；业务错误立即上抛。
         for attempt in range(1, QWENPAW_API_BOOTSTRAP_ATTEMPTS + 1):
             if self._process is not None and self._process.returncode is not None:
                 raise RuntimeError(
@@ -1002,6 +1046,7 @@ class Worker:
         raise AssertionError("unreachable")
 
     def _configure_builtin_plugin_mcp_clients(self) -> None:
+        # 逻辑说明：为内置插件补建或更新 MCP 客户端并等待工具发现，保留用户自有客户端。
         existing = {str(item.get("key")) for item in self.api_client.list_mcp()}
         for plugin_id in ("teamharness", "workerflow"):
             plugin_dir = self.config.qwenpaw_working_dir / "plugins" / plugin_id
@@ -1042,6 +1087,7 @@ class Worker:
                 self.api_client.create_mcp(plugin_id, payload)
 
     def _configure_builtin_plugin_mcp_policies(self) -> None:
+        # 逻辑说明：为内置 MCP 写入最小允许策略并读回验证，使插件工具能被默认 Agent 调用。
         allow_policy = {
             "default_effect": "allow",
             "client_overrides": [],
@@ -1053,6 +1099,7 @@ class Worker:
             self.api_client.put_mcp_policy(plugin_id, allow_policy)
 
     async def _heartbeat_probe_loop(self) -> None:
+        # 逻辑说明：把 Worker 配置交给通用心跳循环，持续更新本地状态和 Controller 活跃时间。
         await run_worker_heartbeat_loop(
             self.heartbeat,
             worker_name=self.config.worker_cr_name,

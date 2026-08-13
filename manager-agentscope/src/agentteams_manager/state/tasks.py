@@ -23,6 +23,7 @@ from .database import Database
 
 
 def _task_from_row(row: sqlite3.Row) -> TaskRecord:
+    # 逻辑说明：解析 metadata JSON 与时间/路由字段，把数据库行统一恢复为 TaskRecord；损坏记录显式失败，不以默认值掩盖调度状态。
     return TaskRecord(
         task_id=row["task_id"],
         task_type=row["task_type"],
@@ -44,10 +45,13 @@ def _task_from_row(row: sqlite3.Row) -> TaskRecord:
 
 class TaskRepository:
     def __init__(self, database: Database) -> None:
+        # 逻辑说明：保存 Task 生命周期快照的事务入口；构造时不创建任务，所有状态变更仍由显式方法校验旧状态后提交。
         self._database = database
 
     async def create(self, task: TaskRecord) -> TaskRecord:
+        # 逻辑说明：在写事务插入完整任务快照并返回输入记录；重复 task ID 由唯一约束拒绝，创建 workflow 再按 operation 幂等处理。
         def write(connection: sqlite3.Connection) -> None:
+            # 逻辑说明：稳定序列化 metadata，并把生命周期、调度与路由字段一次原子落库。
             connection.execute(
                 """
                 INSERT INTO tasks(
@@ -93,7 +97,9 @@ class TaskRepository:
         return task
 
     async def get(self, task_id: str) -> TaskRecord | None:
+        # 逻辑说明：按 task ID 查询当前持久快照，不存在返回 None，不隐式创建或改变状态。
         def read(connection: sqlite3.Connection) -> TaskRecord | None:
+            # 逻辑说明：执行参数化单行查询并通过统一转换器校验记录。
             row = connection.execute(
                 "SELECT * FROM tasks WHERE task_id=?",
                 (task_id,),
@@ -104,8 +110,10 @@ class TaskRepository:
 
     async def list_all(self) -> tuple[TaskRecord, ...]:
         """Return every durable task in stable creation order."""
+        # 逻辑说明：在一致读快照返回全部任务，按创建时间和 ID 稳定排序供管理页面与恢复使用。
 
         def read(connection: sqlite3.Connection) -> tuple[TaskRecord, ...]:
+            # 逻辑说明：一次查询批量转换任务记录，不产生调度副作用。
             rows = connection.execute(
                 """
                 SELECT * FROM tasks
@@ -126,10 +134,12 @@ class TaskRepository:
         next_scheduled_at: datetime | None = None,
         metadata: dict[str, object] | None = None,
     ) -> TaskRecord | None:
+        # 逻辑说明：要求非空 expected 状态集合，并以 compare-and-set 同时更新生命周期、调度时间和可选 metadata；并发状态已变则返回 None。
         if not expected:
             raise ValueError("expected statuses must not be empty")
 
         def write(connection: sqlite3.Connection) -> TaskRecord | None:
+            # 逻辑说明：条件 UPDATE 与回读在同一事务，影响零行表示不存在或 CAS 失败，不覆盖获胜者的新状态。
             placeholders = ",".join("?" for _ in expected)
             cursor = connection.execute(
                 f"""
@@ -187,8 +197,10 @@ class TaskRepository:
         metadata: dict[str, object],
     ) -> TaskRecord:
         """Move a task to its authoritative room without changing status."""
+        # 逻辑说明：在事务中只替换权威 room 和 metadata 并更新时间，保持任务状态不变；任务不存在时报错，不产生孤立路由。
 
         def write(connection: sqlite3.Connection) -> TaskRecord:
+            # 逻辑说明：执行更新、检查影响行数并回读实际记录，保证返回路由已提交。
             now = datetime.now(UTC)
             cursor = connection.execute(
                 """
@@ -219,7 +231,9 @@ class TaskRepository:
         return await self._database.write(write)
 
     async def due_schedules(self, now: datetime) -> tuple[TaskRecord, ...]:
+        # 逻辑说明：查询 active 且到期、尚未执行当前周期的 recurring/infinite 任务，并按下一次时间稳定返回；这里只选候选，不抢占执行。
         def read(connection: sqlite3.Connection) -> tuple[TaskRecord, ...]:
+            # 逻辑说明：在单一读快照比较 ISO 时间与 last_executed 游标，避免同一查询内看到混合状态。
             rows = connection.execute(
                 """
                 SELECT * FROM tasks
@@ -243,9 +257,11 @@ class TaskRepository:
         self,
         project_id: str,
     ) -> tuple[TaskRecord, ...]:
+        # 逻辑说明：按 project ID 读取全部任务并按创建顺序返回，用于构建项目图与验收；不改变 ready 状态。
         def read(
             connection: sqlite3.Connection,
         ) -> tuple[TaskRecord, ...]:
+            # 逻辑说明：参数化查询并批量转换项目任务。
             rows = connection.execute(
                 """
                 SELECT * FROM tasks
@@ -295,6 +311,7 @@ class ProjectGraphRepository:
     """Normalized project DAG, actor transitions, people, and plans."""
 
     def __init__(self, database: Database) -> None:
+        # 逻辑说明：保存 Project DAG、参与者、计划版本和事件表共用的数据库边界；图边与任务归属只在后续事务中一起校验和更新。
         self._database = database
 
     async def set_dependencies(
@@ -302,9 +319,11 @@ class ProjectGraphRepository:
         task_id: str,
         dependencies: tuple[str, ...],
     ) -> None:
+        # 逻辑说明：先去重依赖顺序，再在事务中确认任务属于项目、替换全部边并验证同项目、非自依赖和无环；失败时旧依赖整体保留。
         normalized = tuple(dict.fromkeys(dependencies))
 
         def write(connection: sqlite3.Connection) -> None:
+            # 逻辑说明：删除旧边、逐条校验和插入新边均在同一事务，并用递归路径查询阻止形成环。
             task = connection.execute(
                 "SELECT project_id FROM tasks WHERE task_id=?",
                 (task_id,),
@@ -360,7 +379,9 @@ class ProjectGraphRepository:
         await self._database.write(write)
 
     async def dependencies(self, task_id: str) -> tuple[str, ...]:
+        # 逻辑说明：读取任务的直接依赖并按 ID 稳定返回；不展开传递闭包，也不推进任务状态。
         def read(connection: sqlite3.Connection) -> tuple[str, ...]:
+            # 逻辑说明：在一致快照查询依赖边的目标列。
             rows = connection.execute(
                 """
                 SELECT depends_on_task_id
@@ -383,10 +404,12 @@ class ProjectGraphRepository:
         actor_id: str,
         reason: str | None = None,
     ) -> TaskRecord:
+        # 逻辑说明：要求 expected 集合，在事务内检查当前 project task 状态和允许转移图，条件更新并记录审计 transition；非法或并发变化报冲突。
         if not expected:
             raise ValueError("expected project task states cannot be empty")
 
         def write(connection: sqlite3.Connection) -> TaskRecord:
+            # 逻辑说明：读取、领域校验、状态写入、transition sequence 追加和回读作为一个原子事务完成。
             row = connection.execute(
                 "SELECT * FROM tasks WHERE task_id=?",
                 (task_id,),
@@ -442,8 +465,10 @@ class ProjectGraphRepository:
         operation_id: str,
     ) -> TaskRecord:
         """Atomically revoke the old assignment and prepare a new dispatch."""
+        # 逻辑说明：在一个事务确认可重分配状态、撤销旧指派、写入新 Worker/room/storage 路由与 operation ID，并记录回到 ready 的审计转移。
 
         def write(connection: sqlite3.Connection) -> TaskRecord:
+            # 逻辑说明：所有身份、状态和 metadata 修改要么一起提交，要么失败回滚，防止 Worker 房间已换但任务仍指向旧负责人。
             row = connection.execute(
                 "SELECT * FROM tasks WHERE task_id=?",
                 (task_id,),
@@ -529,9 +554,11 @@ class ProjectGraphRepository:
         self,
         project_id: str,
     ) -> tuple[TaskRecord, ...]:
+        # 逻辑说明：找出 project 中所有依赖已 completed 的 pending 任务，在事务中批量提升为 ready 并为每项写 transition，返回刚提升的记录。
         def write(
             connection: sqlite3.Connection,
         ) -> tuple[TaskRecord, ...]:
+            # 逻辑说明：候选查询、状态更新和审计追加使用同一事务，避免依赖状态与 ready 结果分离。
             rows = connection.execute(
                 """
                 SELECT task.* FROM tasks AS task
@@ -583,9 +610,11 @@ class ProjectGraphRepository:
         self,
         task_id: str,
     ) -> tuple[ProjectTaskTransition, ...]:
+        # 逻辑说明：按 task ID 读取完整状态迁移历史并依 sequence 排序，恢复可选旧状态和时间供审计展示。
         def read(
             connection: sqlite3.Connection,
         ) -> tuple[ProjectTaskTransition, ...]:
+            # 逻辑说明：在一致读快照逐行转换状态枚举与时间。
             rows = connection.execute(
                 """
                 SELECT * FROM project_task_transitions
@@ -619,7 +648,9 @@ class ProjectGraphRepository:
         *,
         now: datetime,
     ) -> None:
+        # 逻辑说明：在事务中 upsert 项目参与者并清除 removed_at；重复添加刷新 joined_at，保证当前集合只有一条有效关系。
         def write(connection: sqlite3.Connection) -> None:
+            # 逻辑说明：单条 upsert 原子恢复或创建参与关系。
             connection.execute(
                 """
                 INSERT INTO project_participants(
@@ -641,7 +672,9 @@ class ProjectGraphRepository:
         *,
         now: datetime,
     ) -> bool:
+        # 逻辑说明：仅把当前仍活跃的参与关系标记 removed_at，并返回是否真正移除；重复调用幂等返回 False。
         def write(connection: sqlite3.Connection) -> bool:
+            # 逻辑说明：条件 UPDATE 与影响行数共同实现 compare-and-set 移除。
             cursor = connection.execute(
                 """
                 UPDATE project_participants SET removed_at=?
@@ -655,7 +688,9 @@ class ProjectGraphRepository:
         return await self._database.write(write)
 
     async def participants(self, project_id: str) -> tuple[str, ...]:
+        # 逻辑说明：查询 removed_at 为空的当前参与者并按名称稳定返回；历史移除记录不会泄漏到调度集合。
         def read(connection: sqlite3.Connection) -> tuple[str, ...]:
+            # 逻辑说明：在同一快照读取活跃 participant rows。
             rows = connection.execute(
                 """
                 SELECT worker_name FROM project_participants
@@ -678,8 +713,10 @@ class ProjectGraphRepository:
         now: datetime,
     ) -> tuple[str, ...]:
         """Update participant rows and project metadata in one transaction."""
+        # 逻辑说明：在单事务核对项目、阻止移除仍有活跃任务的 Worker、应用增删，并同步 project metadata 的成员与用户映射；返回最终有序集合。
 
         def write(connection: sqlite3.Connection) -> tuple[str, ...]:
+            # 逻辑说明：参与关系和项目 metadata 共用事务，任何权限/任务占用冲突都回滚全部变化，避免 Matrix 成员与持久计划依据分裂。
             project = connection.execute(
                 "SELECT metadata_json FROM projects WHERE project_id=?",
                 (project_id,),
@@ -779,7 +816,9 @@ class ProjectGraphRepository:
         created_by: str,
         now: datetime,
     ) -> ProjectPlanRevision:
+        # 逻辑说明：读取最新 revision；若正文、类型和作者完全相同则幂等返回，否则创建下一版本，保证并发写在 SQLite 事务内串行编号。
         def write(connection: sqlite3.Connection) -> ProjectPlanRevision:
+            # 逻辑说明：最新检查、revision+1 插入和回读作为一个事务，避免重复或跳号。
             latest = connection.execute(
                 """
                 SELECT * FROM project_plan_revisions
@@ -840,8 +879,10 @@ class ProjectGraphRepository:
         now: datetime,
     ) -> ProjectPlanRevision:
         """Version a plan and make it current in one SQLite transaction."""
+        # 逻辑说明：确认项目存在，比较最新计划实现幂等；新版本插入后同步更新 project metadata 当前计划、原因与 revision，最后返回已提交版本。
 
         def write(connection: sqlite3.Connection) -> ProjectPlanRevision:
+            # 逻辑说明：版本表和项目当前指针在同一事务更新，任何 JSON/SQL 失败都不会出现指针指向不存在版本。
             project = connection.execute(
                 "SELECT metadata_json FROM projects WHERE project_id=?",
                 (project_id,),
@@ -928,9 +969,11 @@ class ProjectGraphRepository:
         self,
         project_id: str,
     ) -> tuple[ProjectPlanRevision, ...]:
+        # 逻辑说明：按 project ID 读取所有计划版本并依 revision 升序返回，供计划审计和回滚决策使用。
         def read(
             connection: sqlite3.Connection,
         ) -> tuple[ProjectPlanRevision, ...]:
+            # 逻辑说明：一致快照查询并统一转换时间与版本字段。
             rows = connection.execute(
                 """
                 SELECT * FROM project_plan_revisions
@@ -999,6 +1042,7 @@ def _path_exists(
     start: str,
     target: str,
 ) -> bool:
+    # 逻辑说明：用递归 CTE 判断从 start 沿依赖边能否到达 target，供插边前检测环；只查询当前事务内可见图。
     row = connection.execute(
         """
         WITH RECURSIVE path(task_id) AS (
@@ -1027,6 +1071,7 @@ def _record_transition(
     reason: str | None,
     now: datetime,
 ) -> None:
+    # 逻辑说明：在当前事务计算该任务下一审计 sequence 并插入 from/to、actor、reason 和时间；与调用方状态更新共同提交。
     row = connection.execute(
         """
         SELECT COALESCE(MAX(sequence), 0) + 1 AS sequence
@@ -1054,6 +1099,7 @@ def _record_transition(
 
 
 def _plan_revision_from_row(row: sqlite3.Row) -> ProjectPlanRevision:
+    # 逻辑说明：把计划版本行转换为不可变领域对象并解析创建时间，统一所有计划历史查询的字段语义。
     return ProjectPlanRevision(
         project_id=row["project_id"],
         revision=row["revision"],

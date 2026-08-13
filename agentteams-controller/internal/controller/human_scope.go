@@ -35,6 +35,9 @@ type humanScope struct {
 //     (reconcile is stuck before it can report a real state), or the
 //     previous Phase otherwise (transient errors keep us in "Active").
 func computeHumanPhase(h *v1beta1.Human, reconcileErr error) string {
+	// 逻辑说明：computeHumanPhase 接收 h(*v1beta1.Human)、reconcileErr(error)，按本函数中的条件与转换步骤计算Human的期望结果。
+	// 返回/状态：返回 string；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	if h.Status.Phase == "Degraded" && h.Status.Message != "" {
 		return "Degraded"
 	}
@@ -66,6 +69,9 @@ func computeHumanPhase(h *v1beta1.Human, reconcileErr error) string {
 // the reconciler does membership comparisons against the observed
 // Status.Rooms set.
 func buildDesiredHumanRooms(ctx context.Context, c client.Client, h *v1beta1.Human) map[string]struct{} {
+	// 逻辑说明：buildDesiredHumanRooms 接收 ctx(context.Context)、c(client.Client)、h(*v1beta1.Human)，依次借助 Get构造Human的期望结果。
+	// 返回/状态：返回 map[string]struct{}；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	desired := make(map[string]struct{})
 	for _, workerName := range h.Spec.AccessibleWorkers {
 		var worker v1beta1.Worker

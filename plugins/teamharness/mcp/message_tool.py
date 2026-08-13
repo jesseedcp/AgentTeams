@@ -39,10 +39,12 @@ def _dict(value: Any) -> dict[str, Any]:
 
 
 def _text(value: Any) -> str:
+    # 逻辑说明：`_text` 把可选输入转换并去除首尾空白，空值返回空字符串，供后续路由和消息校验统一使用；不产生外部副作用。
     return str(value).strip() if value is not None else ""
 
 
 def _message_object(arguments: dict[str, Any]) -> dict[str, Any]:
+    # 逻辑说明：`_message_object` 接受 dict 或 JSON 字符串消息；解析失败返回空对象而不执行发送。
     message = arguments.get("message")
     if isinstance(message, dict):
         return message
@@ -58,6 +60,7 @@ def _message_object(arguments: dict[str, Any]) -> dict[str, Any]:
 
 
 def _message_text(arguments: dict[str, Any]) -> str:
+    # 逻辑说明：`_message_text` 按兼容字段优先级提取正文，并统一转换成字符串交给路由校验。
     message = arguments.get("message")
     message_obj = _message_object(arguments)
     if message_obj:
@@ -72,6 +75,7 @@ def _message_text(arguments: dict[str, Any]) -> str:
 
 
 def _message_type(arguments: dict[str, Any]) -> str:
+    # 逻辑说明：`_message_type` 从顶层或嵌套 message 读取类型；缺失时返回空值供普通消息路径处理。
     for key in ("type", "messageType", "message_type"):
         value = arguments.get(key)
         if value is not None:
@@ -86,6 +90,7 @@ def _message_type(arguments: dict[str, Any]) -> str:
 
 
 def _agent_from(value: Any) -> str:
+    # 逻辑说明：`_agent_from` 从多版本 agent 身份字段中选择首个非空值，避免协议别名导致身份丢失。
     data = _dict(value)
     for key in ("agent", "agentId", "agent_id", "accountId", "account_id", "runtimeName", "runtime_name", "name"):
         text = _text(data.get(key))
@@ -95,6 +100,7 @@ def _agent_from(value: Any) -> str:
 
 
 def _current_agent(arguments: dict[str, Any]) -> str:
+    # 逻辑说明：`_current_agent` 优先使用请求身份，再回退 runtime 环境和 default；只返回规范字符串。
     for key in ("agentId", "agent_id", "accountId", "account_id"):
         value = _text(arguments.get(key))
         if value:
@@ -103,11 +109,13 @@ def _current_agent(arguments: dict[str, Any]) -> str:
 
 
 def _is_matrix_user_id(value: str) -> bool:
+    # 逻辑说明：`_is_matrix_user_id` 做最小 MXID 形状判断，供后续目标路由拒绝明显非法身份。
     text = value.strip()
     return text.startswith("@") and ":" in text
 
 
 def _session_id_from(value: Any) -> str:
+    # 逻辑说明：`_session_id_from` 从字符串或多版本嵌套 session 字段提取稳定会话标识。
     if isinstance(value, str):
         return value.strip()
     data = _dict(value)
@@ -148,6 +156,7 @@ def _session_id_from(value: Any) -> str:
 
 
 def _target_value(arguments: dict[str, Any], route: dict[str, Any]) -> str:
+    # 逻辑说明：`_target_value` 按显式参数优先于 reply route 的顺序选择目标，首个有效 session 即返回。
     for value in (
         arguments.get("target"),
         route.get("target"),
@@ -167,6 +176,7 @@ def _target_value(arguments: dict[str, Any], route: dict[str, Any]) -> str:
 
 
 def _source_value(arguments: dict[str, Any], route: dict[str, Any]) -> str:
+    # 逻辑说明：`_source_value` 汇总 requester/sender 的兼容字段，避免 self-trigger 校验猜测来源。
     for value in (
         arguments.get("sourceSession"),
         arguments.get("source_session"),
@@ -186,6 +196,7 @@ def _source_value(arguments: dict[str, Any], route: dict[str, Any]) -> str:
 
 
 def _channel_from(value: Any) -> str:
+    # 逻辑说明：`_channel_from` 从直接或嵌套 session 中提取 channel，并统一为小写。
     data = _dict(value)
     for key in ("channel", "channelId", "channel_id"):
         text = _text(data.get(key)).lower()
@@ -201,6 +212,7 @@ def _channel_from(value: Any) -> str:
 
 
 def _source_channel(arguments: dict[str, Any], route: dict[str, Any], source_session: str) -> str:
+    # 逻辑说明：`_source_channel` 先读显式来源渠道，再从 session 前缀推导；不修改 route。
     for value in (
         arguments.get("sourceChannel"),
         arguments.get("source_channel"),
@@ -225,6 +237,7 @@ def _source_channel(arguments: dict[str, Any], route: dict[str, Any], source_ses
 
 
 def _matrix_room_id_from_session(value: str) -> str:
+    # 逻辑说明：`_matrix_room_id_from_session` 去除兼容前缀并仅接受 `!` 开头的稳定 Matrix room ID。
     raw = (value or "").strip()
     if raw.startswith("matrix:"):
         raw = raw[len("matrix:") :]
@@ -234,6 +247,7 @@ def _matrix_room_id_from_session(value: str) -> str:
 
 
 def _canonical_session(channel: str, session: str) -> str:
+    # 逻辑说明：`_canonical_session` 补齐 channel 前缀；Matrix 特别规范为 `matrix:<room-id>`。
     raw = session.strip()
     source_channel = channel.strip().lower()
     if source_channel == "matrix":
@@ -245,6 +259,7 @@ def _canonical_session(channel: str, session: str) -> str:
 
 
 def _route_bool(route: dict[str, Any], *names: str) -> bool | None:
+    # 逻辑说明：`_route_bool` 按字段顺序解析常见布尔写法；缺失返回 None 以保留默认策略。
     for name in names:
         if name not in route:
             continue
@@ -263,6 +278,7 @@ def _route_bool(route: dict[str, Any], *names: str) -> bool | None:
 
 
 def _normalize_reply_route(route: dict[str, Any]) -> dict[str, Any]:
+    # 逻辑说明：`_normalize_reply_route` 合并 reply route 的兼容别名，并只输出统一字段供跨渠道回复。
     channel = _text(route.get("channel")).lower()
     target_user = _text(
         route.get("targetUser")
@@ -309,6 +325,7 @@ def _normalize_reply_route(route: dict[str, Any]) -> dict[str, Any]:
 
 
 def _visible_reply_route_error(message_text: str, reply_route: dict[str, Any]) -> str:
+    # 逻辑说明：`_visible_reply_route_error` 要求外部渠道回路信息在可见正文中出现，防止 Leader 丢失回复路径。
     channel = _text(reply_route.get("channel")).lower()
     if channel and channel != "matrix" and channel not in message_text:
         return "PROJECT_REQUESTED message text must include replyRoute.channel so the task-room Leader can pass it to projectflow"
@@ -328,6 +345,7 @@ def _self_trigger_intent(
     channel: str,
     target_id: str,
 ) -> dict[str, Any] | None:
+    # 逻辑说明：`_self_trigger_intent` 只为允许的项目请求生成自触发 metadata，并拒绝来源/目标不一致。
     message_type = _message_type(arguments)
     if message_type not in SELF_TRIGGER_MESSAGE_TYPES:
         return None
@@ -385,6 +403,7 @@ def message(arguments: dict[str, Any], deps: MessageToolDeps) -> dict[str, Any]:
     才记录到 session。其他 channel 委托 QwenPaw 的原生消息实现，保持同一 MCP
     schema 而不在这里复制每个平台协议。
     """
+    # 逻辑说明：`message` 解析 route 与正文、执行目标/mention/ping-pong 校验，发送成功后才补写 session。
     action = arguments.get("action") or "send"
     route = deps.reply_route(arguments)
     channel = str(arguments.get("channel") or route.get("channel") or "matrix")

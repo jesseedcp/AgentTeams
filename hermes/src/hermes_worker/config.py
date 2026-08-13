@@ -21,6 +21,7 @@ class WorkerConfig:
         sync_interval: int = 300,
         install_dir: Path | None = None,
     ) -> None:
+        # 逻辑说明：保存 Worker 身份、存储连接和本地根目录；构造阶段不访问网络或创建文件。
         self.worker_name = worker_name
         self.minio_endpoint = minio_endpoint
         self.minio_access_key = minio_access_key

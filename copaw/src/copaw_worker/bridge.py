@@ -24,6 +24,8 @@ logger = logging.getLogger(__name__)
 
 def _port_remap(url: str, is_container: bool) -> str:
     """Remap container-internal :8080 to host-exposed gateway port when needed."""
+    # 逻辑说明：`_port_remap` 接收 url、is_container，根据是否位于容器内，把内部网关端口转换为宿主机可达端口，返回 str；
+    # 会读写本地文件。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     if not is_container and url and ":8080" in url:
         gateway_port = os.environ.get("AGENTTEAMS_PORT_GATEWAY", "18080")
         return url.replace(":8080", f":{gateway_port}")
@@ -31,11 +33,14 @@ def _port_remap(url: str, is_container: bool) -> str:
 
 
 def _is_in_container() -> bool:
+    # 逻辑说明：检查 Docker 与 Podman 常用的两个容器标志文件，只要任一存在就判定为容器环境；仅查询文件元数据，不创建或修改文件。
     return Path("/.dockerenv").exists() or Path("/run/.containerenv").exists()
 
 
 def _secret_dir(working_dir: Path) -> Path:
     """Return the secret dir path that copaw uses alongside working_dir."""
+    # 逻辑说明：`_secret_dir` 接收 working_dir，根据 runtime 工作目录计算 CoPaw 敏感配置目录，返回 Path；
+    # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     return Path(str(working_dir) + ".secret")
 
 
@@ -49,6 +54,8 @@ def _patch_copaw_paths(working_dir: Path) -> None:
     把旧环境变量保存成模块全局常量；这里只改 ``os.environ`` 已经太晚，必须同步
     修正已加载模块中的路径。漏掉任何一个副本，文件就可能被写进默认 Agent 目录。
     """
+    # 逻辑说明：`_patch_copaw_paths` 接收 working_dir，创建敏感目录，并修正已导入 CoPaw 模块缓存的路径常量，返回 None；
+    # 会读写本地文件。失败策略：已知失败按现有 except 转为错误结果或日志，未覆盖异常继续上抛；本函数不额外重试，避免掩盖持续故障。
     secret_dir = _secret_dir(working_dir)
     secret_dir.mkdir(parents=True, exist_ok=True)
 
@@ -122,6 +129,10 @@ def bridge_controller_to_copaw(
     path constants so the running process uses the correct directory.
 
     """
+    # 逻辑说明：`bridge_controller_to_copaw` 接收 openclaw_cfg、working_dir、profile、agent，验证 profile 和 agent 名称，
+    # 把 Controller 配置写成 CoPaw 的 config、agent 与 provider 文件，返回 None；
+    #
+    # 会读写本地文件、会修改进程环境。失败策略：非法输入或状态会立即抛错，其他底层异常继续上抛；本函数不额外重试，避免掩盖持续故障。
     if profile not in {"manager", "worker"}:
         raise ValueError(f"unknown bridge profile: {profile}")
     if not agent or "/" in agent or "\\" in agent or agent in {".", ".."}:
@@ -167,6 +178,8 @@ def _resolve_active_model(cfg: dict[str, Any]) -> dict[str, Any] | None:
     Prefers agents.defaults.model.primary ("provider_id/model_id");
     falls back to the first model of the first provider.
     """
+    # 逻辑说明：`_resolve_active_model` 接收 cfg，按 primary 配置优先、首个模型兜底的顺序选择活动模型，返回 dict[str, Any] | None；
+    # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     providers_raw = cfg.get("models", {}).get("providers", {})
     if not providers_raw:
         return None
@@ -196,6 +209,8 @@ def _resolve_active_model(cfg: dict[str, Any]) -> dict[str, Any] | None:
 
 def _resolve_context_window(cfg: dict[str, Any]) -> int | None:
     """Return the contextWindow of the active (or first) model, or None."""
+    # 逻辑说明：`_resolve_context_window` 接收 cfg，从活动模型读取上下文窗口，返回 int | None；不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；
+    # 本函数不额外重试，避免掩盖持续故障。
     m = _resolve_active_model(cfg)
     if m and "contextWindow" in m:
         return int(m["contextWindow"])
@@ -209,6 +224,7 @@ def _resolve_vision_enabled(cfg: dict[str, Any]) -> bool:
     (e.g. ["text", "image"]).  If the field is absent we assume text-only to
     avoid sending images to a model that cannot handle them.
     """
+    # 逻辑说明：`_resolve_vision_enabled` 接收 cfg，从活动模型声明判断能否接收图片，返回 bool；不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     m = _resolve_active_model(cfg)
     if m is None:
         return False
@@ -222,6 +238,8 @@ def _resolve_matrix_user_id(
     profile: str = "worker",
 ) -> str:
     """Resolve the Matrix MXID that CoPaw tools use for proactive sends."""
+    # 逻辑说明：`_resolve_matrix_user_id` 接收 matrix_raw、profile，从显式 MXID、用户名与 homeserver 域名推导 Matrix 用户 ID，返回 str；
+    # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     explicit = matrix_raw.get("userId") or matrix_raw.get("user_id")
     if explicit:
         return str(explicit)
@@ -255,6 +273,8 @@ def _write_config_json(
     *,
     profile: str = "worker",
 ) -> None:
+    # 逻辑说明：`_write_config_json` 接收 cfg、working_dir、in_container、profile，合并并写入 CoPaw 全局 config.json，返回 None；
+    # 会读写本地文件。失败策略：已知失败按现有 except 转为错误结果或日志，未覆盖异常继续上抛；本函数不额外重试，避免掩盖持续故障。
     config_path = working_dir / "config.json"
     if config_path.exists():
         try:
@@ -317,6 +337,8 @@ def _write_config_json(
 # ---------------------------------------------------------------------------
 
 def _merge_unique(existing: object, incoming: object) -> list[str]:
+    # 逻辑说明：`_merge_unique` 接收 existing、incoming，保持原顺序合并并去重字符串列表，返回 list[str]；不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；
+    # 本函数不额外重试，避免掩盖持续故障。
     values: list[str] = []
     for source in (existing, incoming):
         if not isinstance(source, list):
@@ -332,6 +354,8 @@ def _deep_merge_local_wins(
     remote: dict[str, Any],
     local: dict[str, Any],
 ) -> dict[str, Any]:
+    # 逻辑说明：`_deep_merge_local_wins` 接收 remote、local，递归合并字典，并在叶子冲突时保留本地值，返回 dict[str, Any]；
+    # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     result: dict[str, Any] = dict(remote)
     for key, local_value in local.items():
         remote_value = result.get(key)
@@ -353,6 +377,8 @@ def _drop_none_dict_values(value: Any) -> Any:
     non-null values with defaults, so a standard-to-lite switch otherwise
     fails validation before any channel starts.
     """
+    # 逻辑说明：`_drop_none_dict_values` 接收 value，递归删除字典中的 None，保留列表结构，返回 Any；不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；
+    # 本函数不额外重试，避免掩盖持续故障。
     if isinstance(value, dict):
         return {
             key: _drop_none_dict_values(item)
@@ -372,6 +398,10 @@ def _overlay_matrix_channel(
     profile: str,
 ) -> None:
     """Refresh controller-owned Matrix fields without erasing user fields."""
+    # 逻辑说明：`_overlay_matrix_channel` 接收 matrix_ch、cfg、in_container、profile，
+    # 把 Controller 管理的 Matrix 字段覆盖到现有本地 channel 配置，返回 None；
+    #
+    # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     matrix_raw = cfg.get("channels", {}).get("matrix", {})
     matrix_raw = matrix_raw if isinstance(matrix_raw, dict) else {}
     homeserver = _port_remap(
@@ -440,6 +470,10 @@ def _resolve_embedding_config(
     *,
     in_container: bool,
 ) -> dict[str, Any] | None:
+    # 逻辑说明：`_resolve_embedding_config` 接收 cfg、in_container，解析 memorySearch 并生成 CoPaw embedding 配置，
+    # 返回 dict[str, Any] | None；
+    #
+    # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     memory_search = (
         cfg.get("agents", {})
         .get("defaults", {})
@@ -468,6 +502,8 @@ def _resolve_embedding_config(
 
 
 def _openclaw_heartbeat(cfg: dict[str, Any]) -> dict[str, Any] | None:
+    # 逻辑说明：`_openclaw_heartbeat` 接收 cfg，读取并规范化 OpenClaw heartbeat 配置，返回 dict[str, Any] | None；
+    # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     source = (
         cfg.get("agents", {})
         .get("defaults", {})
@@ -502,6 +538,10 @@ def _write_agent_json(
     The template provides defaults; we overlay controller-owned fields
     (Matrix access_token, homeserver, allowlists, context window).
     """
+    # 逻辑说明：`_write_agent_json` 接收 cfg、working_dir、in_container、profile、agent，生成指定 workspace 的 agent.json，
+    # 同时保留允许的本地字段，返回 None；
+    #
+    # 会读写本地文件。失败策略：已知失败按现有 except 转为错误结果或日志，未覆盖异常继续上抛；本函数不额外重试，避免掩盖持续故障。
     workspace_dir = working_dir / "workspaces" / agent
     workspace_dir.mkdir(parents=True, exist_ok=True)
     agent_path = workspace_dir / "agent.json"
@@ -594,6 +634,8 @@ def _write_providers_json(
     working_dir: Path,
     in_container: bool,
 ) -> None:
+    # 逻辑说明：`_write_providers_json` 接收 cfg、working_dir、in_container，把活动模型 Provider 与凭据写入 CoPaw provider 文件，返回 None；
+    # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     providers_raw = cfg.get("models", {}).get("providers", {})
 
     custom_providers: dict[str, Any] = {}
@@ -670,6 +712,10 @@ def sync_outer_prompt_files_to_inner(
     runtime_dir: Path,
 ) -> None:
     """Project canonical prompt files into CoPaw's default workspace."""
+    # 逻辑说明：`sync_outer_prompt_files_to_inner` 接收 standard_dir、runtime_dir，
+    # 把标准工作区的提示文件投影到 CoPaw default workspace，返回 None；
+    #
+    # 会读写本地文件。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     workspace_dir = _workspace_dir(runtime_dir)
     workspace_dir.mkdir(parents=True, exist_ok=True)
 
@@ -689,6 +735,10 @@ def sync_mcporter_config_to_runtime(
     runtime_dir: Path,
 ) -> Path | None:
     """Project the current or legacy mcporter config into the workspace."""
+    # 逻辑说明：`sync_mcporter_config_to_runtime` 接收 standard_dir、runtime_dir，从当前或旧路径选择 mcporter 配置并复制到 runtime，
+    # 返回 Path | None；
+    #
+    # 会读写本地文件。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     candidates = (
         standard_dir / "config" / "mcporter.json",
         standard_dir / "mcporter-servers.json",
@@ -703,6 +753,7 @@ def sync_mcporter_config_to_runtime(
 
 
 def _remove_path(path: Path) -> None:
+    # 逻辑说明：`_remove_path` 接收 path，按文件、符号链接或目录类型安全删除指定路径，返回 None；会读写本地文件。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     if path.is_symlink() or path.is_file():
         path.unlink(missing_ok=True)
     elif path.exists():
@@ -710,6 +761,8 @@ def _remove_path(path: Path) -> None:
 
 
 def _load_skill_manifest(path: Path) -> dict[str, Any]:
+    # 逻辑说明：`_load_skill_manifest` 接收 path，读取 Skill manifest；文件不存在或内容无效时返回空配置，返回 dict[str, Any]；
+    # 不修改外部状态。失败策略：已知失败按现有 except 转为错误结果或日志，未覆盖异常继续上抛；本函数不额外重试，避免掩盖持续故障。
     if path.exists():
         try:
             value = json.loads(path.read_text(encoding="utf-8"))
@@ -730,6 +783,10 @@ def sync_skills_to_runtime(
     skill_names: Iterable[str],
 ) -> list[str]:
     """Expose the exact Controller-owned skill set to CoPaw."""
+    # 逻辑说明：`sync_skills_to_runtime` 接收 standard_dir、runtime_dir、skill_names，
+    # 让 runtime 中的 Skill 集合精确匹配 Controller 指定列表，返回 list[str]；
+    #
+    # 会读写本地文件。失败策略：已知失败按现有 except 转为错误结果或日志，未覆盖异常继续上抛；本函数不额外重试，避免掩盖持续故障。
     requested = list(dict.fromkeys(str(name) for name in skill_names if name))
     requested_set = set(requested)
     standard_skills = standard_dir / "skills"
@@ -809,6 +866,8 @@ def _seed_prompt_fallback(
     path: Path,
     loader: Callable[[], str] | None,
 ) -> None:
+    # 逻辑说明：`_seed_prompt_fallback` 接收 path、loader，仅在提示文件缺失时用 loader 结果创建兜底文件，返回 None；
+    # 会读写本地文件。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     if path.exists() or loader is None:
         return
     value = loader()
@@ -825,6 +884,10 @@ def bridge_standard_to_runtime(
     profile: str = "worker",
 ) -> None:
     """Apply config and project canonical Worker files into CoPaw."""
+    # 逻辑说明：`bridge_standard_to_runtime` 接收 standard_dir、runtime_dir、openclaw_cfg、skill_names、profile，
+    # 依次翻译配置并投影提示、Skill 和 MCP 文件到 CoPaw runtime，返回 None；
+    #
+    # 会读写本地文件。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     standard_dir.mkdir(parents=True, exist_ok=True)
     bridge_controller_to_copaw(
         openclaw_cfg,
@@ -851,6 +914,10 @@ def refresh_standard_to_runtime(
     profile: str = "worker",
 ) -> None:
     """Refresh CoPaw after Controller-owned files change."""
+    # 逻辑说明：`refresh_standard_to_runtime` 接收标准/runtime 目录、配置、Skill 和提示 loader，
+    # 在 Controller 管理文件更新后刷新 runtime 投影，返回 None；
+    #
+    # 会读写本地文件。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     standard_dir.mkdir(parents=True, exist_ok=True)
     _seed_prompt_fallback(standard_dir / "SOUL.md", get_soul)
     _seed_prompt_fallback(standard_dir / "AGENTS.md", get_agents_md)
@@ -881,11 +948,14 @@ def refresh_standard_to_runtime(
 
 def bridge_runtime_to_standard(standard_dir):
     """Materialize runtime-space edits back into the standard sync root."""
+    # 逻辑说明：把 CoPaw runtime workspace 中由 Agent 修改且较新的 AGENTS.md、SOUL.md、HEARTBEAT.md 回写到标准同步根；具体比较、容错和文件写入由同步 helper 统一处理。
     sync_inner_prompt_files_to_outer(standard_dir)
 
 
 def sync_inner_prompt_files_to_outer(local_dir):
     """Copy agent-edited prompt files from CoPaw workspace back to sync root."""
+    # 逻辑说明：`sync_inner_prompt_files_to_outer` 接收 local_dir，把 CoPaw 内部可持久提示文件同步回标准工作区，返回 约定结果；
+    # 会读写本地文件。失败策略：已知失败按现有 except 转为错误结果或日志，未覆盖异常继续上抛；本函数不额外重试，避免掩盖持续故障。
     inner_outer_files = ("AGENTS.md", "SOUL.md", "HEARTBEAT.md")
     copaw_ws_dir = Path(local_dir) / ".copaw" / "workspaces" / "default"
     for name in inner_outer_files:
@@ -914,6 +984,7 @@ def sync_inner_prompt_files_to_outer(local_dir):
 # ---------------------------------------------------------------------------
 
 def _main_cli(argv=None):
+    # 逻辑说明：`_main_cli` 接收 argv，解析 bridge 子命令参数并执行对应同步方向，返回 约定结果；会读写本地文件。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     import argparse
 
     parser = argparse.ArgumentParser(

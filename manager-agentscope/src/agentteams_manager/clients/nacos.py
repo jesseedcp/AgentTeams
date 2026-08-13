@@ -80,6 +80,7 @@ class _AgentSpecResource(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     def digest_value(self) -> dict[str, Any]:
+        # 逻辑说明：只把协议定义字段和非空 metadata 纳入稳定摘要输入，忽略服务端额外字段。
         value: dict[str, Any] = {
             "name": self.name,
             "type": self.type,
@@ -101,6 +102,7 @@ class _AgentSpec(BaseModel):
     resource: dict[str, _AgentSpecResource] = Field(default_factory=dict)
 
     def digest_value(self) -> dict[str, Any]:
+        # 逻辑说明：按 Controller 的字段名组装规范摘要对象，并递归规范化每个资源条目。
         value: dict[str, Any] = {
             "namespaceId": self.namespace_id,
             "name": self.name,
@@ -127,6 +129,7 @@ class _V3Envelope(BaseModel):
 
 class _Registry:
     def __init__(self, raw_uri: str) -> None:
+        # 逻辑说明：解析并严格限定 nacos URI/单一 namespace，分离凭据后构造不含凭据的 HTTP 与包基址。
         parsed = urlsplit(raw_uri)
         if parsed.scheme != "nacos" or not parsed.hostname:
             raise ValueError(
@@ -171,6 +174,7 @@ class NacosClient:
         max_results: int = 3,
         page_size: int = 100,
     ) -> None:
+        # 逻辑说明：验证结果/分页上限，按显式参数→URI→环境读取凭据，并记录 HTTP client 所有权。
         if not 1 <= max_results <= 20:
             raise ValueError("max_results must be between 1 and 20")
         if not 1 <= page_size <= 100:
@@ -209,6 +213,7 @@ class NacosClient:
         http_client: httpx.AsyncClient | None = None,
         max_results: int = 3,
     ) -> NacosClient:
+        # 逻辑说明：从环境读取注册中心 URI（无配置时用公开市场），其余校验和凭据解析仍走正式构造器。
         return cls(
             registry_uri=os.getenv(
                 "AGENTTEAMS_NACOS_REGISTRY_URI",
@@ -219,6 +224,7 @@ class NacosClient:
         )
 
     async def close(self) -> None:
+        # 逻辑说明：仅关闭本实例创建的 HTTP client，调用方或测试注入的共享 client 不在此释放。
         if self._owns_http:
             await self._http.aclose()
 
@@ -226,6 +232,7 @@ class NacosClient:
         self,
         query: str,
     ) -> tuple[NacosWorker, ...]:
+        # 逻辑说明：规范化查询、拉取在线摘要、确定性评分截取，再逐项获取完整 spec 并生成摘要绑定候选。
         normalized_query = " ".join(query.split()).casefold()
         if not normalized_query:
             raise ValueError("Worker search query cannot be empty")
@@ -274,6 +281,7 @@ class NacosClient:
         return tuple(candidates)
 
     async def verify_worker(self, candidate: NacosWorker) -> None:
+        # 逻辑说明：确认候选 URI 仍属于配置 registry，按原 selector 重取 spec，并比较确认时的 digest。
         expected_base = (
             f"{self._registry.package_base}/"
             f"{quote(candidate.name, safe='')}"
@@ -306,6 +314,7 @@ class NacosClient:
 
     async def inspect_worker_uri(self, package_uri: str) -> NacosWorker:
         """Resolve one explicit URI without performing a market search."""
+        # 逻辑说明：严格检查 authority/namespace/路径，按版本或 label 获取 spec，再生成同搜索路径一致的候选。
         parsed = urlsplit(package_uri)
         if parsed.scheme != "nacos" or not parsed.hostname:
             raise ValueError("Worker package must use a valid nacos:// URI")
@@ -364,6 +373,7 @@ class NacosClient:
         version: str | None,
         label: str | None = None,
     ) -> _AgentSpec:
+        # 逻辑说明：只为实际提供的 version/label 追加参数，调用统一认证请求并校验 v3 envelope 与 AgentSpec。
         params = {
             "namespaceId": self._registry.namespace,
             "name": name,
@@ -386,6 +396,7 @@ class NacosClient:
         *,
         params: dict[str, str] | None = None,
     ) -> object:
+        # 逻辑说明：需要时先登录，再带 bearer token 请求；HTTP/状态/JSON 错误分类且所有诊断先脱敏。
         if (
             not self._access_token
             and self._username
@@ -425,6 +436,7 @@ class NacosClient:
             ) from exc
 
     async def _login(self) -> None:
+        # 逻辑说明：依次尝试 Nacos v3/v1 登录接口，只有解析到非空 token 才更新会话；错误文本不含凭据。
         form = {
             "username": self._username,
             "password": self._password,
@@ -476,6 +488,7 @@ class NacosClient:
         model: type[BaseModel],
         raw: object,
     ) -> Any:
+        # 逻辑说明：先校验统一 v3 envelope 和成功 code，再用目标 Pydantic 模型验证 data 的具体形状。
         try:
             envelope = _V3Envelope.model_validate(raw)
         except ValidationError as exc:
@@ -495,6 +508,7 @@ class NacosClient:
 
 
 def _score(summary: _Summary, query: str) -> int:
+    # 逻辑说明：按精确名、子串和全部 token 匹配累积分数，供稳定排序；零分候选不会进入网络详情查询。
     name = summary.name.casefold()
     description = summary.description.casefold()
     if name == query:
@@ -529,6 +543,7 @@ def _candidate(
     *,
     version: str,
 ) -> NacosWorker:
+    # 逻辑说明：解析 manifest、验证 runtime、合并展示字段并构造版本 URI，最终绑定整个 spec 的规范摘要。
     try:
         manifest = json.loads(spec.content)
     except json.JSONDecodeError as exc:
@@ -580,6 +595,7 @@ def _candidate(
 
 
 def _manifest_version(content: str) -> str:
+    # 逻辑说明：从可解析对象中读取非空 version；任何旧版/畸形内容安全回退 latest，不在此执行导入。
     try:
         manifest = json.loads(content)
     except json.JSONDecodeError:
@@ -591,6 +607,7 @@ def _manifest_version(content: str) -> str:
 
 
 def _digest(value: dict[str, Any]) -> str:
+    # 逻辑说明：按确定键序列化并复刻 Go JSON 的 HTML 转义，再计算 SHA-256，确保 Python/Controller 摘要一致。
     try:
         encoded = json.dumps(
             value,
@@ -615,6 +632,7 @@ def _digest(value: dict[str, Any]) -> str:
 
 
 def _redact(message: str, secrets: tuple[str, ...]) -> str:
+    # 逻辑说明：先遮蔽 Nacos URI userinfo，再替换所有已知凭据并截断，网络异常可诊断但不可泄密。
     safe = re.sub(
         r"(?i)(nacos://)[^/@\s]+:[^/@\s]+@",
         r"\1[REDACTED]@",

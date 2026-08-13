@@ -36,6 +36,7 @@ type AppserviceHandler struct {
 
 // NewAppserviceHandler creates a handler for Matrix appservice transaction pushes.
 func NewAppserviceHandler(hsToken string, c client.Client, namespace string) *AppserviceHandler {
+	// 逻辑说明：保存 homeserver token、Kubernetes client 和作用域，并初始化可替换时钟与事件去重表；构造时不访问 Matrix 或 CR。
 	return &AppserviceHandler{
 		hsToken:   hsToken,
 		client:    c,
@@ -68,6 +69,7 @@ type transactionBody struct {
 // The homeserver pushes batches of events here; we filter for m.room.message
 // events with m.mentions, then wake matching sleeping workers.
 func (h *AppserviceHandler) HandleTransactions(w http.ResponseWriter, r *http.Request) {
+	// 逻辑说明：先验证 homeserver token，再解析批量事件并筛选带 m.mentions 的消息；每个被提及用户独立尝试唤醒，单项失败记日志但整笔 transaction 始终 200，避免 homeserver 无限重放。
 	logger := log.FromContext(r.Context()).WithName("appservice")
 	txnID := txnIDFromPath(r.URL.Path)
 
@@ -133,6 +135,7 @@ func (h *AppserviceHandler) HandleTransactions(w http.ResponseWriter, r *http.Re
 // txnIDFromPath extracts the trailing path segment from
 // /_matrix/app/v1/transactions/{txnId}. Best-effort: returns "" on miss.
 func txnIDFromPath(p string) string {
+	// 逻辑说明：提取最后一个非空路径段供日志关联；路径无尾段时返回空串，因为 transaction 处理不依赖该辅助值完成认证。
 	if i := strings.LastIndex(p, "/"); i >= 0 && i < len(p)-1 {
 		return p[i+1:]
 	}
@@ -142,6 +145,7 @@ func txnIDFromPath(p string) string {
 // HandleUserQuery handles GET /_matrix/app/v1/users/{userId}.
 // We don't manage virtual users; always return empty object.
 func (h *AppserviceHandler) HandleUserQuery(w http.ResponseWriter, _ *http.Request) {
+	// 逻辑说明：本 AppService 不声明自动创建虚拟用户，因此按 Matrix 协议返回成功空对象；真实受管用户由 Controller 的显式供应流程创建。
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprint(w, "{}")
@@ -150,6 +154,7 @@ func (h *AppserviceHandler) HandleUserQuery(w http.ResponseWriter, _ *http.Reque
 // HandleRoomQuery handles GET /_matrix/app/v1/rooms/{roomAlias}.
 // We don't manage room aliases; always return empty object.
 func (h *AppserviceHandler) HandleRoomQuery(w http.ResponseWriter, _ *http.Request) {
+	// 逻辑说明：本 AppService 不声明自动创建 room alias，查询固定返回成功空对象；房间与 alias 仍由显式 Matrix 客户端操作管理。
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprint(w, "{}")
@@ -158,6 +163,7 @@ func (h *AppserviceHandler) HandleRoomQuery(w http.ResponseWriter, _ *http.Reque
 // --- Internal logic ---
 
 func (h *AppserviceHandler) verifyHSToken(r *http.Request) bool {
+	// 逻辑说明：优先按 Bearer header 比对注册时 hs_token；对不发送该 header 的 homeserver 兼容 access_token query，但两种入口都必须与同一秘密精确匹配。
 	auth := r.Header.Get("Authorization")
 	if !strings.HasPrefix(auth, "Bearer ") {
 		// Also check query param (some homeserver implementations).
@@ -167,6 +173,7 @@ func (h *AppserviceHandler) verifyHSToken(r *http.Request) bool {
 }
 
 func (h *AppserviceHandler) handleMention(ctx context.Context, roomID, eventID, sender, userID string) error {
+	// 逻辑说明：以 room/event/user 组合在互斥锁下去重 Matrix 重投事件，再依次检查独立 Worker 与 Team Worker；任一 CR 更新失败返回，使上层记录具体 mention 故障。
 	logger := log.FromContext(ctx).WithName("appservice")
 
 	// Dedup by roomID/eventID/userID.
@@ -199,6 +206,7 @@ func (h *AppserviceHandler) handleMention(ctx context.Context, roomID, eventID, 
 // wakeStandaloneWorker wakes a standalone Worker whose MatrixUserID matches
 // the mentioned user, provided the mention occurred in the worker's own room.
 func (h *AppserviceHandler) wakeStandaloneWorker(ctx context.Context, roomID, userID string) error {
+	// 逻辑说明：列出命名空间内 Worker，只选择 Matrix user 匹配、期望状态 Sleeping 且消息来自其自身房间者；符合时用当前 UTC 时间切到 Running，其余原因分别计数用于诊断越权或无效 mention。
 	logger := log.FromContext(ctx).WithName("appservice")
 
 	var workers v1beta1.WorkerList
@@ -261,6 +269,7 @@ func (h *AppserviceHandler) wakeStandaloneWorker(ctx context.Context, roomID, us
 // own DM room OR the team's shared room. Mentions from other rooms (e.g.
 // another team's room) are rejected — this prevents cross-team wake.
 func (h *AppserviceHandler) wakeTeamWorker(ctx context.Context, roomID, userID string) error {
+	// 逻辑说明：扫描 Team status 成员并匹配 worker 身份；仅允许来自成员私聊房间或本 Team 共享房间的 mention，随后确认 Spec 引用和 Worker CR 仍存在且 Sleeping，再更新状态以阻止跨团队唤醒。
 	logger := log.FromContext(ctx).WithName("appservice")
 
 	var teams v1beta1.TeamList
@@ -358,6 +367,7 @@ func (h *AppserviceHandler) wakeTeamWorker(ctx context.Context, roomID, userID s
 // --- CR mutation helpers (mirrored from mention_watcher.go) ---
 
 func (h *AppserviceHandler) setStandaloneWorkerRunning(ctx context.Context, name, lastActiveAt string) error {
+	// 逻辑说明：先用 RetryOnConflict 重新读取并仅在仍为 Sleeping 时更新 Spec.State，随后另一次冲突重试单独更新较新的 Status.LastActiveAt；分开 spec/status 写入符合 Kubernetes 子资源版本语义。
 	logger := log.FromContext(ctx).WithName("appservice")
 	running := "Running"
 	specPatched := false
@@ -403,6 +413,7 @@ func (h *AppserviceHandler) setStandaloneWorkerRunning(ctx context.Context, name
 // --- Appservice-local helpers ---
 
 func isTeamWorkerRef(team *v1beta1.Team, name string) bool {
+	// 逻辑说明：在期望 WorkerMembers 中确认名称存在且角色为空或 worker；仅出现在 Status 的过期成员不能据此获得唤醒权限。
 	for _, ref := range team.Spec.WorkerMembers {
 		if ref.Name == name {
 			return ref.Role == "" || ref.Role == roleTeamWorker
@@ -412,6 +423,7 @@ func isTeamWorkerRef(team *v1beta1.Team, name string) bool {
 }
 
 func isLastActiveNewer(next, current string) bool {
+	// 逻辑说明：空的新时间绝不覆盖，当前为空则接受；两者都有值时按 RFC3339 比较，拒绝无效 next，而无效 current 可由有效 next 修复。
 	if next == "" {
 		return false
 	}

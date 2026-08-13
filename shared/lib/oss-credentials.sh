@@ -34,6 +34,7 @@ _OSS_CRED_REFRESH_MARGIN=600  # refresh if less than 10 minutes remaining
 # Resolve the bearer token used to authenticate against the controller.
 # Priority: active contract AUTH_TOKEN > active contract AUTH_TOKEN_FILE.
 # Emits the token on stdout; empty string if none found.
+# 逻辑说明：按“直接 token 优先、token 文件次之”读取 Controller Bearer；只通过 stdout 返回，不写日志。
 _oss_resolve_bearer() {
     if [ -n "${AGENTTEAMS_AUTH_TOKEN:-}" ]; then
         printf '%s' "${AGENTTEAMS_AUTH_TOKEN}"
@@ -46,15 +47,18 @@ _oss_resolve_bearer() {
     return 0
 }
 
+# 逻辑说明：检测当前进程是否使用 AgentTeams 新变量契约，供兼容层选择正确的凭据来源。
 _oss_use_agentteams_env() {
     [ -n "${AGENTTEAMS_WORKER_NAME:-}" ] || [ -n "${AGENTTEAMS_CONTROLLER_URL:-}" ] || \
         [ -n "${AGENTTEAMS_AUTH_TOKEN:-}" ] || [ -n "${AGENTTEAMS_AUTH_TOKEN_FILE:-}" ]
 }
 
+# 逻辑说明：集中返回 Controller 地址，使 STS 刷新逻辑不在多个调用点重复读取环境变量。
 _oss_controller_url() {
     printf '%s' "${AGENTTEAMS_CONTROLLER_URL:-}"
 }
 
+# 逻辑说明：优先采用显式别名，否则从存储前缀推导稳定的 mc 别名，保持旧安装可升级。
 _oss_storage_alias() {
     local prefix
     if [ -n "${AGENTTEAMS_STORAGE_ALIAS:-}" ]; then
@@ -68,18 +72,22 @@ _oss_storage_alias() {
     esac
 }
 
+# 逻辑说明：生成不含秘密值的错误字段名，帮助排错而不会泄露 Bearer。
 _oss_auth_error_vars() {
     printf '%s' "AGENTTEAMS_AUTH_TOKEN / AGENTTEAMS_AUTH_TOKEN_FILE"
 }
 
+# 逻辑说明：导出当前别名对应的 MC_HOST_* 连接，让后续 mc 子进程继承临时或静态凭据。
 _oss_export_mc_host() {
     export "MC_HOST_$(_oss_storage_alias)"
 }
 
+# 逻辑说明：返回动态 MC_HOST_* 变量名，供刷新判断通过间接展开读取其值。
 _oss_mc_host_var() {
     printf 'MC_HOST_%s' "$(_oss_storage_alias)"
 }
 
+# 逻辑说明：把 Controller URL 是否可用转换成 Shell 状态码，供静态/STS 路径分流。
 _oss_has_controller_url() {
     [ -n "$(_oss_controller_url)" ]
 }
@@ -88,12 +96,14 @@ _oss_has_controller_url() {
 # Path 1: static credentials for local/self-hosted storage
 # --------------------------------------------------------------------------
 
+# 逻辑说明：只有 endpoint、access key、secret key 三者都存在才进入静态凭据路径，防止使用半套配置。
 _oss_has_static_credentials() {
     [ -n "${AGENTTEAMS_FS_ENDPOINT:-}" ] && \
         [ -n "${AGENTTEAMS_FS_ACCESS_KEY:-}" ] && \
         [ -n "${AGENTTEAMS_FS_SECRET_KEY:-}" ]
 }
 
+# 逻辑说明：规范化对象存储 endpoint 并组装 mc 连接变量；变量仅导出给进程，不打印秘密。
 _oss_export_static_credentials() {
     local endpoint="${AGENTTEAMS_FS_ENDPOINT}"
     local creds="${AGENTTEAMS_FS_ACCESS_KEY}:${AGENTTEAMS_FS_SECRET_KEY}"
@@ -113,6 +123,7 @@ _oss_export_static_credentials() {
 # Path 2: STS via Controller
 # --------------------------------------------------------------------------
 
+# 逻辑说明：携带 Bearer 向 Controller 换取短期 STS，校验响应后原子缓存并更新 mc 连接；任一步失败都不覆盖旧凭据。
 _oss_refresh_sts_via_controller() {
     local _controller_url="$(_oss_controller_url)"
     local bearer resp http_code
@@ -185,6 +196,7 @@ EOF
 # Public API
 # --------------------------------------------------------------------------
 
+# 逻辑说明：静态自托管凭据优先，缺失时才走 Controller STS；成功返回意味着 mc 已有完整连接配置。
 ensure_mc_credentials() {
     # Local/self-hosted mode can still have a controller URL and bearer token.
     # Complete static credentials therefore take priority over cloud-only STS.
@@ -208,6 +220,7 @@ ensure_mc_credentials() {
 }
 
 # Shared lazy-refresh logic: call the given refresh function only if needed.
+# 逻辑说明：读取缓存到期时间，仅在缺失或接近过期时调用指定刷新函数，避免每次同步都请求 Controller。
 _oss_ensure_refresh() {
     local refresh_fn="$1"
     local now needs_refresh=false

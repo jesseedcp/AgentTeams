@@ -104,6 +104,7 @@ class ManagerIdentityRequest(BaseModel):
     )
     @classmethod
     def normalize_text(cls, value: str) -> str:
+        # 逻辑说明：`normalize_text` 把身份名称、沟通风格或默认语言中的连续空白折叠成单空格并返回；规范化后为空则拒绝，避免保存无意义身份字段。
         normalized = " ".join(value.split())
         if not normalized:
             raise ValueError("identity field must not be blank")
@@ -115,6 +116,7 @@ class ManagerIdentityRequest(BaseModel):
         cls,
         value: tuple[str, ...],
     ) -> tuple[str, ...]:
+        # 逻辑说明：`normalize_guidelines` 逐条折叠行为准则中的多余空白并保持 tuple 顺序；任何条目变为空时抛错，避免身份文档出现空规则。
         normalized = tuple(" ".join(item.split()) for item in value)
         if any(not item for item in normalized):
             raise ValueError("behavior guidelines must not be blank")
@@ -224,6 +226,7 @@ class MCPConfiguration(BaseModel):
     @field_validator("workers")
     @classmethod
     def validate_workers(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        # 逻辑说明：`validate_workers` 保持 Worker 名称原顺序并检查是否重复；发现重复立即抛错，避免同一 Worker 被重复写入 MCP consumer/descriptor 更新。
         if len(value) != len(set(value)):
             raise ValueError("MCP Worker names must be unique")
         return value
@@ -234,11 +237,13 @@ class MCPConfiguration(BaseModel):
         cls,
         value: dict[str, JsonValue],
     ) -> dict[str, JsonValue]:
+        # 逻辑说明：`reject_sensitive_verification_arguments` 校验并规范化 `value`，成功返回 `dict[str, JsonValue]`；非法名称、路径、范围或敏感字段直接抛错，使错误输入不会进入 journal 或外部系统。
         _validate_safe_verification_arguments(value)
         return value
 
     @model_validator(mode="after")
     def tool_belongs_to_server(self) -> MCPConfiguration:
+        # 逻辑说明：`tool_belongs_to_server` 要求验证工具名以当前 MCP server 的 `mcp__<name>__` 前缀开头并返回自身；不匹配时阻止拿其他 server 的工具冒充验收结果。
         prefix = f"mcp__{self.server.name}__"
         if not self.verification_tool.startswith(prefix):
             raise ValueError(
@@ -284,6 +289,7 @@ class ServicePublishingReceipt(BaseModel):
 
     @model_validator(mode="after")
     def routes_match_domains(self) -> ServicePublishingReceipt:
+        # 逻辑说明：`routes_match_domains` 核对 domains 与 routes 中的 domain 顺序完全一致，并确保 unsupported 回执不携带路由；违反收据内部一致性时拒绝构造对象。
         if self.domains != tuple(route.domain for route in self.routes):
             raise ValueError("service route domains must match routes")
         if not self.supported and (self.routes or self.domains):
@@ -317,6 +323,7 @@ class IntegrationService:
         runtime_mode: str = "local",
         mcp_propagation_timeout: float = 30,
     ) -> None:
+        # 逻辑说明：`__init__` 校验并保存 `agt`、`gateway`、`supervisor`、`clock`、`manager_name`、`registry`、`watcher`、`sleep`、`poll_attempts`、`poll_interval`、`higress`、`mcp_verifier`、`worker_notifications`、`runtime_mode`、`mcp_propagation_timeout`，为模型、身份、MCP 与服务发布建立进程内服务状态；配置不合法时立即抛错，且构造阶段不执行远端变更。
         if not manager_name:
             raise ValueError("manager_name must not be empty")
         if poll_attempts < 1 or poll_interval < 0:
@@ -345,6 +352,7 @@ class IntegrationService:
         *,
         context: MutationContext,
     ) -> ModelSwitchReceipt:
+        # 逻辑说明：`switch_manager_model` 接收 `request`、`context`，切换 manager model，核心调用为 `preflight`、`begin`、`model_dump`，返回 `ModelSwitchReceipt`。 它可能读写仓库、Controller、Matrix 或对象存储；前置条件不满足时保留现有领域异常，防止错误状态继续传播。
         capabilities = await self._gateway.preflight(request)
         baseline_revision = self._registry.revision
         operation = await self._supervisor.begin(
@@ -435,6 +443,7 @@ class IntegrationService:
         request: ModelSwitchRequest,
         context: MutationContext,
     ) -> ModelSwitchReceipt:
+        # 逻辑说明：`switch_worker_model` 接收 `worker`、`request`、`context`，切换 worker model，核心调用为 `preflight`、`begin`、`model_dump`，返回 `ModelSwitchReceipt`。 它可能读写仓库、Controller、Matrix 或对象存储；前置条件不满足时保留现有领域异常，防止错误状态继续传播。
         capabilities = await self._gateway.preflight(request)
         operation = await self._supervisor.begin(
             operation_id=context.operation_id,
@@ -517,6 +526,7 @@ class IntegrationService:
         *,
         context: MutationContext,
     ) -> ManagerIdentityReceipt:
+        # 逻辑说明：`update_manager_identity` 接收 `request`、`context`，更新 manager identity，核心调用为 `_render_manager_identity`、`begin`、`model_dump`，返回 `ManagerIdentityReceipt`。 它可能读写仓库、Controller、Matrix 或对象存储；前置条件不满足时保留现有领域异常，防止错误状态继续传播。
         identity = _render_manager_identity(request)
         baseline_revision = self._registry.revision
         operation = await self._supervisor.begin(
@@ -583,6 +593,7 @@ class IntegrationService:
         *,
         context: MutationContext,
     ) -> MCPManagementReceipt:
+        # 逻辑说明：`configure_mcp` 接收 `request`、`context`，配置 mcp，核心调用为 `_require_local_mcp`、`_require_mcp_dependencies`、`_safe_configuration_request`，返回 `MCPManagementReceipt`。 它可能读写仓库、Controller、Matrix 或对象存储；前置条件不满足时保留现有领域异常，防止错误状态继续传播。
         self._require_local_mcp()
         higress, verifier = self._require_mcp_dependencies(
             require_verifier=True,
@@ -733,6 +744,7 @@ class IntegrationService:
         return receipt
 
     async def list_mcp_servers(self) -> tuple[MCPServerState, ...]:
+        # 逻辑说明：`list_mcp_servers` 接收 当前服务状态，列出 mcp servers，核心调用为 `_require_mcp_dependencies`、`list_mcp_servers`，返回 `tuple[MCPServerState, ...]`。 它可能读写仓库、Controller、Matrix 或对象存储；下游异常按原语义向上传递，不会伪造成功结果。
         higress, _ = self._require_mcp_dependencies()
         return await higress.list_mcp_servers()
 
@@ -743,6 +755,7 @@ class IntegrationService:
         workers: tuple[str, ...],
         context: MutationContext,
     ) -> MCPManagementReceipt:
+        # 逻辑说明：`grant_mcp` 接收 `name`、`workers`、`context`，授权 mcp，核心调用为 `_require_local_mcp`、`_require_mcp_dependencies`、`_validate_worker_names`，返回 `MCPManagementReceipt`。 它可能读写仓库、Controller、Matrix 或对象存储；下游异常按原语义向上传递，不会伪造成功结果。
         self._require_local_mcp()
         higress, _ = self._require_mcp_dependencies()
         _validate_worker_names(workers)
@@ -799,6 +812,7 @@ class IntegrationService:
         workers: tuple[str, ...],
         context: MutationContext,
     ) -> MCPManagementReceipt:
+        # 逻辑说明：`revoke_mcp` 接收 `name`、`workers`、`context`，撤销授权 mcp，核心调用为 `_require_local_mcp`、`_require_mcp_dependencies`、`_validate_worker_names`，返回 `MCPManagementReceipt`。 它可能读写仓库、Controller、Matrix 或对象存储；下游异常按原语义向上传递，不会伪造成功结果。
         self._require_local_mcp()
         higress, _ = self._require_mcp_dependencies()
         _validate_worker_names(workers)
@@ -849,6 +863,7 @@ class IntegrationService:
         *,
         context: MutationContext,
     ) -> MCPManagementReceipt:
+        # 逻辑说明：`delete_mcp` 接收 `name`、`context`，删除 mcp，核心调用为 `_require_local_mcp`、`_require_mcp_dependencies`、`begin`，返回 `MCPManagementReceipt`。 它可能读写仓库、Controller、Matrix 或对象存储；前置条件不满足时保留现有领域异常，防止错误状态继续传播。
         self._require_local_mcp()
         higress, _ = self._require_mcp_dependencies()
         operation = await self._supervisor.begin(
@@ -920,6 +935,7 @@ class IntegrationService:
         ports: tuple[int, ...],
         context: MutationContext,
     ) -> ServicePublishingReceipt:
+        # 逻辑说明：`publish_service` 接收 `worker`、`ports`、`context`，发布 service，核心调用为 `_validated_ports`、`begin`、`model_validate`，返回 `ServicePublishingReceipt`。 它可能读写仓库、Controller、Matrix 或对象存储；下游异常按原语义向上传递，不会伪造成功结果。
         requested = _validated_ports(ports)
         operation = await self._supervisor.begin(
             operation_id=context.operation_id,
@@ -986,6 +1002,7 @@ class IntegrationService:
         ports: tuple[int, ...],
         context: MutationContext,
     ) -> ServicePublishingReceipt:
+        # 逻辑说明：`unpublish_service` 接收 `worker`、`ports`、`context`，取消发布 service，核心调用为 `_validated_ports`、`begin`、`model_validate`，返回 `ServicePublishingReceipt`。 它可能读写仓库、Controller、Matrix 或对象存储；下游异常按原语义向上传递，不会伪造成功结果。
         requested = _validated_ports(ports)
         operation = await self._supervisor.begin(
             operation_id=context.operation_id,
@@ -1050,6 +1067,7 @@ class IntegrationService:
         | ServicePublishingReceipt
     ):
         """Converge one durable integration intent from external facts."""
+        # 逻辑说明：`resume_operation` 从持久化 operation/request 重建模型、身份、MCP 与服务发布上下文，通过 `model_validate`、`RecoveryError`、`effect_ambiguous` 证明或补做下一阶段，最终返回 `ModelSwitchReceipt | ManagerIdentityReceipt | MCPManagementReceipt | ServicePublishingReceipt`；字段缺失、状态冲突或效果不可证明时保持失败/歧义状态而不是重复执行。
         if operation.status is OperationStatus.SUCCEEDED:
             if operation.kind is OperationKind.SWITCH_MODEL:
                 return ModelSwitchReceipt.model_validate(operation.result)
@@ -1093,6 +1111,7 @@ class IntegrationService:
         self,
         operation: OperationRecord,
     ) -> ManagerIdentityReceipt:
+        # 逻辑说明：`_resume_manager_identity` 从持久化 operation/request 重建模型、身份、MCP 与服务发布上下文，通过 `_recovery_identity_request`、`_recovery_string`、`_render_manager_identity` 证明或补做下一阶段，最终返回 `ManagerIdentityReceipt`；字段缺失、状态冲突或效果不可证明时保持失败/歧义状态而不是重复执行。
         request = _recovery_identity_request(operation.request)
         identity = _recovery_string(operation.request, "identity")
         if identity != _render_manager_identity(request):
@@ -1156,6 +1175,7 @@ class IntegrationService:
         self,
         operation: OperationRecord,
     ) -> ModelSwitchReceipt:
+        # 逻辑说明：`_resume_model_switch` 从持久化 operation/request 重建模型、身份、MCP 与服务发布上下文，通过 `_recovery_string`、`get`、`RecoveryError` 证明或补做下一阶段，最终返回 `ModelSwitchReceipt`；字段缺失、状态冲突或效果不可证明时保持失败/歧义状态而不是重复执行。
         target = _recovery_string(operation.request, "target")
         name = _recovery_string(operation.request, "name")
         model = _recovery_string(operation.request, "model")
@@ -1197,6 +1217,7 @@ class IntegrationService:
         name: str,
         capabilities: ModelCapabilities,
     ) -> ModelSwitchReceipt:
+        # 逻辑说明：`_resume_manager_model` 从持久化 operation/request 重建模型、身份、MCP 与服务发布上下文，通过 `RecoveryError`、`get_manager`、`before_effect` 证明或补做下一阶段，最终返回 `ModelSwitchReceipt`；字段缺失、状态冲突或效果不可证明时保持失败/歧义状态而不是重复执行。
         if name != self._manager_name:
             raise RecoveryError(
                 "model recovery targets a different Manager",
@@ -1260,6 +1281,7 @@ class IntegrationService:
         name: str,
         capabilities: ModelCapabilities,
     ) -> ModelSwitchReceipt:
+        # 逻辑说明：`_resume_worker_model` 从持久化 operation/request 重建模型、身份、MCP 与服务发布上下文，通过 `_require_worker`、`before_effect`、`update_worker` 证明或补做下一阶段，最终返回 `ModelSwitchReceipt`；字段缺失、状态冲突或效果不可证明时保持失败/歧义状态而不是重复执行。
         worker = await self._require_worker(name)
         if worker.model != capabilities.model:
             await self._supervisor.before_effect(
@@ -1316,6 +1338,7 @@ class IntegrationService:
         self,
         operation: OperationRecord,
     ) -> MCPManagementReceipt:
+        # 逻辑说明：`_resume_mcp` 从持久化 operation/request 重建模型、身份、MCP 与服务发布上下文，通过 `_require_local_mcp`、`_recovery_string`、`_resume_mcp_configuration` 证明或补做下一阶段，最终返回 `MCPManagementReceipt`；字段缺失、状态冲突或效果不可证明时保持失败/歧义状态而不是重复执行。
         self._require_local_mcp()
         action = _recovery_string(operation.request, "action")
         if action == "configure":
@@ -1332,6 +1355,7 @@ class IntegrationService:
         self,
         operation: OperationRecord,
     ) -> MCPManagementReceipt:
+        # 逻辑说明：`_resume_mcp_configuration` 从持久化 operation/request 重建模型、身份、MCP 与服务发布上下文，通过 `_require_mcp_dependencies`、`_recovery_string`、`_recovery_workers` 证明或补做下一阶段，最终返回 `MCPManagementReceipt`；字段缺失、状态冲突或效果不可证明时保持失败/歧义状态而不是重复执行。
         higress, verifier = self._require_mcp_dependencies(
             require_verifier=True,
         )
@@ -1445,6 +1469,7 @@ class IntegrationService:
         self,
         operation: OperationRecord,
     ) -> MCPManagementReceipt:
+        # 逻辑说明：`_resume_mcp_grant` 从持久化 operation/request 重建模型、身份、MCP 与服务发布上下文，通过 `_require_mcp_dependencies`、`_recovery_string`、`_recovery_workers` 证明或补做下一阶段，最终返回 `MCPManagementReceipt`；字段缺失、状态冲突或效果不可证明时保持失败/歧义状态而不是重复执行。
         higress, _ = self._require_mcp_dependencies()
         name = _recovery_string(operation.request, "name")
         workers = _recovery_workers(operation.request)
@@ -1486,6 +1511,7 @@ class IntegrationService:
         self,
         operation: OperationRecord,
     ) -> MCPManagementReceipt:
+        # 逻辑说明：`_resume_mcp_revoke` 从持久化 operation/request 重建模型、身份、MCP 与服务发布上下文，通过 `_require_mcp_dependencies`、`_recovery_string`、`_recovery_workers` 证明或补做下一阶段，最终返回 `MCPManagementReceipt`；字段缺失、状态冲突或效果不可证明时保持失败/歧义状态而不是重复执行。
         higress, _ = self._require_mcp_dependencies()
         name = _recovery_string(operation.request, "name")
         workers = _recovery_workers(operation.request)
@@ -1523,6 +1549,7 @@ class IntegrationService:
         self,
         operation: OperationRecord,
     ) -> MCPManagementReceipt:
+        # 逻辑说明：`_resume_mcp_delete` 从持久化 operation/request 重建模型、身份、MCP 与服务发布上下文，通过 `_require_mcp_dependencies`、`_recovery_string`、`get_manager` 证明或补做下一阶段，最终返回 `MCPManagementReceipt`；字段缺失、状态冲突或效果不可证明时保持失败/歧义状态而不是重复执行。
         higress, _ = self._require_mcp_dependencies()
         name = _recovery_string(operation.request, "name")
         manager = await self._agt.get_manager(self._manager_name)
@@ -1590,6 +1617,7 @@ class IntegrationService:
         self,
         operation: OperationRecord,
     ) -> ServicePublishingReceipt:
+        # 逻辑说明：`_resume_service_publishing` 从持久化 operation/request 重建模型、身份、MCP 与服务发布上下文，通过 `_recovery_string`、`RecoveryError`、`_recovery_ports` 证明或补做下一阶段，最终返回 `ServicePublishingReceipt`；字段缺失、状态冲突或效果不可证明时保持失败/歧义状态而不是重复执行。
         action = _recovery_string(operation.request, "action")
         if action not in {"publish", "unpublish"}:
             raise RecoveryError("service recovery action is invalid")
@@ -1661,6 +1689,7 @@ class IntegrationService:
         worker: str,
         ports: tuple[int, ...],
     ) -> ServicePublishingReceipt:
+        # 逻辑说明：`_unsupported_service_receipt` 从 `operation_id`、`action`、`worker`、`ports` 构造 `ServicePublishingReceipt`，统一调用方看到的模型、身份、MCP 与服务发布结果；它只转换数据，不执行远端 I/O。
         await self._supervisor.before_effect(
             operation_id,
             ExternalEffect.CONTROLLER,
@@ -1689,6 +1718,7 @@ class IntegrationService:
         return receipt
 
     async def _require_worker(self, name: str) -> WorkerResource:
+        # 逻辑说明：`_require_worker` 通过 `get_worker`、`ConflictError` 读取并验证 worker，返回 `WorkerResource`；目标不存在、依赖未启用或数据不合法时在产生后续副作用前抛出领域错误。
         worker = await self._agt.get_worker(name)
         if worker is None:
             raise ConflictError(f"worker/{name} is not readable")
@@ -1702,6 +1732,7 @@ class IntegrationService:
         *,
         current: WorkerResource,
     ) -> WorkerResource:
+        # 逻辑说明：`_replace_expose` 先登记外部效果意图，再通过 `before_effect`、`_desired_expose`、`update_worker_expose` 替换 expose 并记录回执，返回 `WorkerResource`；并发版本冲突或远端结果不确定时保留可恢复证据。
         await self._supervisor.before_effect(
             operation_id,
             ExternalEffect.CONTROLLER,
@@ -1748,6 +1779,7 @@ class IntegrationService:
         removed: tuple[int, ...],
         first: WorkerResource,
     ) -> WorkerResource:
+        # 逻辑说明：`_wait_for_service_state` 在有限次数内轮询for service state（复用 `casefold`、`effect_failed`），收敛后返回 `WorkerResource`；超时会记录 ambiguous effect，避免把尚未生效的控制面变更报告为成功。
         observed = first
         for attempt in range(self._poll_attempts):
             phase = (observed.phase or "").casefold()
@@ -1783,6 +1815,7 @@ class IntegrationService:
         )
 
     def _require_local_mcp(self) -> None:
+        # 逻辑说明：`_require_local_mcp` 通过 `CloudMCPManagementUnsupported` 读取并验证 local mcp，返回 `None`；目标不存在、依赖未启用或数据不合法时在产生后续副作用前抛出领域错误。
         if self._runtime_mode == "aliyun":
             raise CloudMCPManagementUnsupported(
                 "local Higress MCP administration is unavailable when "
@@ -1794,6 +1827,7 @@ class IntegrationService:
         *,
         require_verifier: bool = False,
     ) -> tuple[HigressMCPPort, MCPVerificationPort | None]:
+        # 逻辑说明：`_require_mcp_dependencies` 通过 `MCPIntegrationUnavailable` 读取并验证 mcp dependencies，返回 `tuple[HigressMCPPort, MCPVerificationPort | None]`；目标不存在、依赖未启用或数据不合法时在产生后续副作用前抛出领域错误。
         if self._higress is None:
             raise MCPIntegrationUnavailable(
                 "Higress MCP administration is not configured",
@@ -1809,6 +1843,7 @@ class IntegrationService:
         higress: HigressMCPPort,
         name: str,
     ) -> None:
+        # 逻辑说明：`_require_mcp_server` 通过 `list_mcp_servers`、`RecoveryError` 读取并验证 mcp server，返回 `None`；目标不存在、依赖未启用或数据不合法时在产生后续副作用前抛出领域错误。
         if not any(
             server.name == name
             for server in await higress.list_mcp_servers()
@@ -1825,6 +1860,7 @@ class IntegrationService:
         *,
         higress: HigressMCPPort,
     ) -> frozenset[str]:
+        # 逻辑说明：`_replace_consumers` 先登记外部效果意图，再通过 `before_effect`、`replace_consumers`、`_record_external_failure` 替换 consumers 并记录回执，返回 `frozenset[str]`；并发版本冲突或远端结果不确定时保留可恢复证据。
         complete = {"manager", *consumers}
         await self._supervisor.before_effect(
             operation_id,
@@ -1864,6 +1900,7 @@ class IntegrationService:
         intended: set[str],
         higress: HigressMCPPort,
     ) -> frozenset[str]:
+        # 逻辑说明：`_converge_consumers` 接收 `operation_id`、`name`、`observed`、`intended`、`higress`，收敛 consumers，核心调用为 `_replace_consumers`，返回 `frozenset[str]`。 它可能读写仓库、Controller、Matrix 或对象存储；下游异常按原语义向上传递，不会伪造成功结果。
         complete = frozenset({"manager", *intended})
         if frozenset(observed) == complete:
             return complete
@@ -1881,6 +1918,7 @@ class IntegrationService:
         *,
         workers: tuple[str, ...],
     ) -> None:
+        # 逻辑说明：`_install_descriptor` 接收 `operation_id`、`descriptor`、`workers`，安装 descriptor，核心调用为 `get_manager`、`ConflictError`、`_upsert_descriptor`，返回 `None`。 它可能读写仓库、Controller、Matrix 或对象存储；前置条件不满足时保留现有领域异常，防止错误状态继续传播。
         manager = await self._agt.get_manager(self._manager_name)
         if manager is None:
             raise ConflictError(
@@ -1918,6 +1956,7 @@ class IntegrationService:
         operation_id: str,
         servers: tuple[MCPServerDocument, ...],
     ) -> None:
+        # 逻辑说明：`_replace_manager_descriptors` 先登记外部效果意图，再通过 `before_effect`、`model_dump`、`replace_manager_mcp_servers` 替换 manager descriptors 并记录回执，返回 `None`；并发版本冲突或远端结果不确定时保留可恢复证据。
         await self._supervisor.before_effect(
             operation_id,
             ExternalEffect.CONTROLLER,
@@ -1961,6 +2000,7 @@ class IntegrationService:
         worker: str,
         servers: tuple[MCPServerDocument, ...],
     ) -> None:
+        # 逻辑说明：`_replace_worker_descriptors` 先登记外部效果意图，再通过 `before_effect`、`model_dump`、`replace_worker_mcp_servers` 替换 worker descriptors 并记录回执，返回 `None`；并发版本冲突或远端结果不确定时保留可恢复证据。
         await self._supervisor.before_effect(
             operation_id,
             ExternalEffect.CONTROLLER,
@@ -2001,6 +2041,7 @@ class IntegrationService:
         name: str,
         workers: tuple[str, ...],
     ) -> None:
+        # 逻辑说明：`_remove_worker_descriptor` 接收 `operation_id`、`name`、`workers`，移除 worker descriptor，核心调用为 `get_worker`、`ConflictError`、`_worker_mcp_servers`，返回 `None`。 它可能读写仓库、Controller、Matrix 或对象存储；前置条件不满足时保留现有领域异常，防止错误状态继续传播。
         for worker_name in workers:
             worker = await self._agt.get_worker(worker_name)
             if worker is None:
@@ -2025,6 +2066,7 @@ class IntegrationService:
         operation_id: str,
         descriptor: MCPServerDocument,
     ) -> int:
+        # 逻辑说明：`_runtime_revision_for_descriptor` 接收 `operation_id`、`descriptor`，处理 runtime revision for descriptor，核心调用为 `_wait_for_runtime_descriptor`、`max`，返回 `int`。 它可能读写仓库、Controller、Matrix 或对象存储；下游异常按原语义向上传递，不会伪造成功结果。
         generation = getattr(self._registry, "current", None)
         document = getattr(generation, "document", None)
         if (
@@ -2045,6 +2087,7 @@ class IntegrationService:
         *,
         baseline_revision: int,
     ) -> int:
+        # 逻辑说明：`_wait_for_runtime_descriptor` 在有限次数内轮询for runtime descriptor（复用 `poll_once`、`_wait`），收敛后返回 `int`；超时会记录 ambiguous effect，避免把尚未生效的控制面变更报告为成功。
         for _ in range(self._poll_attempts):
             await self._watcher.poll_once()
             generation = getattr(self._registry, "current", None)
@@ -2071,6 +2114,7 @@ class IntegrationService:
         operation_id: str,
         model: str,
     ) -> int:
+        # 逻辑说明：`_wait_for_runtime_model` 在有限次数内轮询for runtime model（复用 `poll_once`、`_wait`），收敛后返回 `int`；超时会记录 ambiguous effect，避免把尚未生效的控制面变更报告为成功。
         for _ in range(self._poll_attempts):
             generation = getattr(self._registry, "current", None)
             document = getattr(generation, "document", None)
@@ -2098,6 +2142,7 @@ class IntegrationService:
         *,
         baseline_revision: int,
     ) -> int:
+        # 逻辑说明：`_wait_for_new_runtime_revision` 在有限次数内轮询for new runtime revision（复用 `poll_once`、`_wait`），收敛后返回 `int`；超时会记录 ambiguous effect，避免把尚未生效的控制面变更报告为成功。
         for _ in range(self._poll_attempts):
             if self._registry.revision > baseline_revision:
                 return self._registry.revision
@@ -2123,6 +2168,7 @@ class IntegrationService:
         *,
         first: WorkerResource,
     ) -> WorkerResource:
+        # 逻辑说明：`_wait_for_worker_model` 在有限次数内轮询for worker model（复用 `casefold`、`effect_failed`），收敛后返回 `WorkerResource`；超时会记录 ambiguous effect，避免把尚未生效的控制面变更报告为成功。
         observed = first
         for attempt in range(self._poll_attempts):
             phase = (observed.phase or "").casefold()
@@ -2158,6 +2204,7 @@ class IntegrationService:
         revision: int,
         verifier: MCPVerificationPort,
     ) -> None:
+        # 逻辑说明：`_wait_for_verification_tool` 在有限次数内轮询for verification tool（复用 `timeout`、`list_server_tools`），收敛后返回 `None`；超时会记录 ambiguous effect，避免把尚未生效的控制面变更报告为成功。
         last_error = "tool_not_discovered"
         try:
             async with asyncio.timeout(self._mcp_propagation_timeout):
@@ -2210,6 +2257,7 @@ class IntegrationService:
         name: str,
         workers: tuple[str, ...],
     ) -> None:
+        # 逻辑说明：`_notify_mcp_workers` 接收 `operation_id`、`name`、`workers`，通知 mcp workers，核心调用为 `MCPIntegrationUnavailable`、`before_effect`、`notify_worker`，返回 `None`。 它可能读写仓库、Controller、Matrix 或对象存储；前置条件不满足时保留现有领域异常，防止错误状态继续传播。
         if not workers:
             return
         if self._worker_notifications is None:
@@ -2253,6 +2301,7 @@ class IntegrationService:
             )
 
     async def _wait(self) -> None:
+        # 逻辑说明：`_wait` 接收 当前服务状态，等待收敛 模型、身份、MCP 与服务发布，核心调用为 `_sleep`、`isawaitable`，返回 `None`。 它可能读写仓库、Controller、Matrix 或对象存储；下游异常按原语义向上传递，不会伪造成功结果。
         value = self._sleep(self._poll_interval)
         if inspect.isawaitable(value):
             await value
@@ -2263,6 +2312,7 @@ class IntegrationService:
         effect: ExternalEffect,
         exc: Exception,
     ) -> None:
+        # 逻辑说明：`_record_external_failure` 把模型、MCP 或服务发布的客户端异常按是否具有歧义分流到 effect_ambiguous/effect_failed，并保留异常类型与安全摘要供 IntegrationRecovery 判断。
         if isinstance(
             exc,
             (
@@ -2294,6 +2344,7 @@ def _model_receipt(
     phase: str,
     runtime_revision: int | None = None,
 ) -> ModelSwitchReceipt:
+    # 逻辑说明：`_model_receipt` 从 `operation_id`、`target`、`capabilities`、`phase`、`runtime_revision` 构造 `ModelSwitchReceipt`，统一调用方看到的模型、身份、MCP 与服务发布结果；它只转换数据，不执行远端 I/O。
     return ModelSwitchReceipt(
         operation_id=operation_id,
         target=target,
@@ -2308,6 +2359,7 @@ def _model_receipt(
 
 
 def _render_manager_identity(request: ManagerIdentityRequest) -> str:
+    # 逻辑说明：`_render_manager_identity` 从 `request` 构造 `str`，统一调用方看到的模型、身份、MCP 与服务发布结果；它只转换数据，不执行远端 I/O。
     lines = [
         f"- Name: {request.name}",
         f"- Default language: {request.default_language}",
@@ -2332,6 +2384,7 @@ def _identity_receipt(
     phase: str,
     runtime_revision: int,
 ) -> ManagerIdentityReceipt:
+    # 逻辑说明：`_identity_receipt` 从 `operation_id`、`manager`、`request`、`phase`、`runtime_revision` 构造 `ManagerIdentityReceipt`，统一调用方看到的模型、身份、MCP 与服务发布结果；它只转换数据，不执行远端 I/O。
     return ManagerIdentityReceipt(
         operation_id=operation_id,
         manager=manager,
@@ -2349,6 +2402,7 @@ def _safe_configuration_request(
     *,
     baseline_revision: int,
 ) -> dict[str, object]:
+    # 逻辑说明：`_safe_configuration_request` 把 `request`、`baseline_revision` 转成适合持久化或日志的 `dict[str, object]`，删除/隐藏敏感值并限制不安全结构；该过程不修改原对象。
     server = request.server
     common: dict[str, object] = {
         "action": "configure",
@@ -2391,6 +2445,7 @@ def _safe_configuration_request(
 def _validate_safe_verification_arguments(
     value: dict[str, JsonValue],
 ) -> None:
+    # 逻辑说明：`_validate_safe_verification_arguments` 递归检查验证参数的键和值，拒绝 token、password、secret 等敏感键以及过深/过大的结构；函数只验证，不改写原参数。
     forbidden = (
         "apikey",
         "authorization",
@@ -2401,6 +2456,7 @@ def _validate_safe_verification_arguments(
     )
 
     def inspect_value(item: JsonValue) -> None:
+        # 逻辑说明：`inspect_value` 接收 `item`，检查 value，核心调用为 `items`、`join`、`casefold`，返回 `None`。 它只在内存中计算、校验或组装数据；前置条件不满足时保留现有领域异常，防止错误状态继续传播。
         if isinstance(item, dict):
             for key, child in item.items():
                 normalized = "".join(
@@ -2425,6 +2481,7 @@ def _notification_source_id(
     operation_id: str,
     worker: str,
 ) -> str:
+    # 逻辑说明：`_notification_source_id` 从稳定输入生成可重复的 source id，返回 `str` 供幂等写入/发送使用；同一输入得到同一标识，不产生外部副作用。
     material = f"{operation_id}\0mcp-ready\0{worker}".encode()
     return hashlib.sha256(material).hexdigest()[:32]
 
@@ -2433,6 +2490,7 @@ def _recovery_string(
     request: dict[str, object],
     key: str,
 ) -> str:
+    # 逻辑说明：`_recovery_string` 从 `request`、`key` 解析并规范化 string，返回 `str`；格式缺失或越界时显式失败，避免恢复流程凭猜测继续。
     value = request.get(key)
     if not isinstance(value, str) or not value:
         raise RecoveryError(
@@ -2442,6 +2500,7 @@ def _recovery_string(
 
 
 def _recovery_revision(request: dict[str, object]) -> int:
+    # 逻辑说明：`_recovery_revision` 从 `request` 解析并规范化 revision，返回 `int`；格式缺失或越界时显式失败，避免恢复流程凭猜测继续。
     value = request.get("baseline_revision")
     if not isinstance(value, int) or isinstance(value, bool) or value < 0:
         raise RecoveryError(
@@ -2453,6 +2512,7 @@ def _recovery_revision(request: dict[str, object]) -> int:
 def _recovery_identity_request(
     request: dict[str, object],
 ) -> ManagerIdentityRequest:
+    # 逻辑说明：`_recovery_identity_request` 从 `request` 解析并规范化 identity request，返回 `ManagerIdentityRequest`；格式缺失或越界时显式失败，避免恢复流程凭猜测继续。
     try:
         return ManagerIdentityRequest.model_validate(
             {
@@ -2475,6 +2535,7 @@ def _recovery_identity_request(
 def _recovery_workers(
     request: dict[str, object],
 ) -> tuple[str, ...]:
+    # 逻辑说明：`_recovery_workers` 从 `request` 解析并规范化 workers，返回 `tuple[str, ...]`；格式缺失或越界时显式失败，避免恢复流程凭猜测继续。
     raw = request.get("workers", [])
     if (
         not isinstance(raw, list)
@@ -2496,6 +2557,7 @@ def _recovery_workers(
 def _recovery_verification_arguments(
     request: dict[str, object],
 ) -> dict[str, JsonValue]:
+    # 逻辑说明：`_recovery_verification_arguments` 从 `request` 解析并规范化 verification arguments，返回 `dict[str, JsonValue]`；格式缺失或越界时显式失败，避免恢复流程凭猜测继续。
     raw = request.get("verification_arguments")
     try:
         arguments = TypeAdapter(
@@ -2512,6 +2574,7 @@ def _recovery_verification_arguments(
 def _recovery_ports(
     request: dict[str, object],
 ) -> tuple[int, ...]:
+    # 逻辑说明：`_recovery_ports` 从 `request` 解析并规范化 ports，返回 `tuple[int, ...]`；格式缺失或越界时显式失败，避免恢复流程凭猜测继续。
     raw = request.get("ports")
     if not isinstance(raw, list):
         raise RecoveryError(
@@ -2526,11 +2589,13 @@ def _recovery_ports(
 
 
 def _worker_consumer(worker: str) -> str:
+    # 逻辑说明：`_worker_consumer` 接收 `worker`，处理 Worker consumer，核心调用为 `_validate_worker_names`，返回 `str`。 它只在内存中计算、校验或组装数据；下游异常按原语义向上传递，不会伪造成功结果。
     _validate_worker_names((worker,))
     return f"worker-{worker}"
 
 
 def _validate_worker_names(workers: tuple[str, ...]) -> None:
+    # 逻辑说明：`_validate_worker_names` 要求 Worker 列表非空、名称不重复且都符合控制器命名规则；失败时在修改 Higress consumer 或 runtime descriptor 前终止。
     if len(workers) != len(set(workers)):
         raise ValueError("MCP Worker names must be unique")
     for worker in workers:
@@ -2551,6 +2616,7 @@ def _upsert_descriptor(
     servers: tuple[MCPServerDocument, ...],
     descriptor: MCPServerDocument,
 ) -> tuple[MCPServerDocument, ...]:
+    # 逻辑说明：`_upsert_descriptor` 接收 `servers`、`descriptor`，创建或更新 descriptor，返回 `tuple[MCPServerDocument, ...]`。 它只在内存中计算、校验或组装数据；下游异常按原语义向上传递，不会伪造成功结果。
     by_name = {
         server.name: server
         for server in servers
@@ -2565,6 +2631,7 @@ def _upsert_descriptor(
 def _worker_mcp_servers(
     worker: WorkerResource,
 ) -> tuple[MCPServerDocument, ...]:
+    # 逻辑说明：`_worker_mcp_servers` 接收 `worker`，处理 Worker mcp servers，核心调用为 `get`、`ConflictError`、`model_validate`，返回 `tuple[MCPServerDocument, ...]`。 它只在内存中计算、校验或组装数据；前置条件不满足时保留现有领域异常，防止错误状态继续传播。
     raw = worker.spec.get("mcpServers", [])
     if not isinstance(raw, list):
         raise ConflictError(
@@ -2582,6 +2649,7 @@ def _worker_mcp_servers(
 
 
 def _validated_ports(ports: tuple[int, ...]) -> tuple[int, ...]:
+    # 逻辑说明：`_validated_ports` 把端口转成去重排序 tuple，要求每项是 1–65535 的整数且数量受限；非法端口在生成 Higress route 前被拒绝。
     if not ports:
         raise ValueError("at least one service port is required")
     if len(ports) != len(set(ports)):
@@ -2598,6 +2666,7 @@ def _validated_ports(ports: tuple[int, ...]) -> tuple[int, ...]:
 
 
 def _desired_expose(worker: WorkerResource) -> tuple[int, ...]:
+    # 逻辑说明：`_desired_expose` 接收 `worker`，处理 expose，核心调用为 `get`、`ConflictError`，返回 `tuple[int, ...]`。 它只在内存中计算、校验或组装数据；前置条件不满足时保留现有领域异常，防止错误状态继续传播。
     raw = worker.spec.get("expose", [])
     if not isinstance(raw, list):
         raise ConflictError(
@@ -2617,6 +2686,7 @@ def _desired_expose(worker: WorkerResource) -> tuple[int, ...]:
 
 
 def _observed_routes(worker: WorkerResource) -> dict[int, str]:
+    # 逻辑说明：`_observed_routes` 接收 `worker`，处理 routes，核心调用为 `get`、`ConflictError`，返回 `dict[int, str]`。 它只在内存中计算、校验或组装数据；前置条件不满足时保留现有领域异常，防止错误状态继续传播。
     raw = worker.status.get("exposedPorts", [])
     if not isinstance(raw, list):
         raise ConflictError(

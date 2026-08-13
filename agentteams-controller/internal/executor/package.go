@@ -33,6 +33,7 @@ type PackageResolver struct {
 }
 
 func NewPackageResolver(importDir string) *PackageResolver {
+	// 逻辑说明：在导入根下建立固定 `extracted` 缓存目录并返回 resolver；目录创建为尽力操作，真正写入失败会在 ResolveAndExtract 中带上下文报告。
 	extractDir := filepath.Join(importDir, "extracted")
 	os.MkdirAll(extractDir, 0755)
 	return &PackageResolver{ImportDir: importDir, ExtractDir: extractDir}
@@ -42,6 +43,7 @@ func NewPackageResolver(importDir string) *PackageResolver {
 // For nacos:// URIs the result is a directory; for all others it is a ZIP file.
 // Supported schemes: file://, http://, https://, nacos://
 func (p *PackageResolver) Resolve(ctx context.Context, uri string) (string, error) {
+	// 逻辑说明：解析 package URI 并按 file/http/nacos/oss/相对 MinIO 路径分派下载器；日志先移除 URL 密码，各路径利用本地缓存，下载失败不返回部分路径。
 	if uri == "" {
 		return "", nil
 	}
@@ -135,6 +137,7 @@ func (p *PackageResolver) Resolve(ctx context.Context, uri string) (string, erro
 //	├── skills/ (optional)
 //	└── Dockerfile (optional)
 func (p *PackageResolver) ResolveAndExtract(ctx context.Context, uri, name string) (string, error) {
+	// 逻辑说明：先解析来源；Nacos 已物化为目录时直接返回，zip 则清理该 Agent 的旧提取目录、重建后调用 unzip 覆盖解压，失败保留命令诊断。
 	if uri == "" {
 		return "", nil
 	}
@@ -175,6 +178,7 @@ func (p *PackageResolver) ResolveAndExtract(ctx context.Context, uri, name strin
 // files between the local write and the mc mirror push), we push to MinIO FIRST from
 // the extracted directory (immune to background sync), then copy to the local agent dir.
 func (p *PackageResolver) DeployToMinIO(ctx context.Context, extractedDir, workerName string, excludeMemory bool, storage oss.StorageClient) error {
+	// 逻辑说明：扫描包内 config/skills/crons，按“对象存储先、本地 Agent 目录后”且仅目标不存在时播种，避免同步竞态与覆盖运行期修改；更新模式保留 Controller 管理文件，关键 I/O 失败中止。
 	logger := log.FromContext(ctx)
 	agentDir := fmt.Sprintf("/root/agentteams-fs/agents/%s", workerName)
 	if err := os.MkdirAll(agentDir, 0755); err != nil {
@@ -437,6 +441,7 @@ func (p *PackageResolver) DeployToMinIO(ctx context.Context, extractedDir, worke
 
 // mcPut writes data to a MinIO path via temp file + mc cp.
 func mcPut(ctx context.Context, minioPath string, data []byte) error {
+	// 逻辑说明：把内存数据先写临时文件，再通过受 context 控制的 `mc cp` 上传目标并清理临时文件；创建、写入或命令失败带阶段返回，不记录数据正文。
 	tmpFile, err := os.CreateTemp("", "agentteams-deploy-*")
 	if err != nil {
 		return fmt.Errorf("create temp file: %w", err)
@@ -458,6 +463,7 @@ func mcPut(ctx context.Context, minioPath string, data []byte) error {
 }
 
 func putPackageObjectSeedOnly(ctx context.Context, storage oss.StorageClient, useStorageClient bool, target string, data []byte) (bool, error) {
+	// 逻辑说明：选择 StorageClient 或 mc 实现；StorageClient 路径先检查目标，存在返回 false 保留用户修改，仅明确缺失才写入并返回 true。
 	if !useStorageClient {
 		return true, mcPut(ctx, target, data)
 	}
@@ -470,6 +476,7 @@ func putPackageObjectSeedOnly(ctx context.Context, storage oss.StorageClient, us
 }
 
 func putPackageFileSeedOnly(ctx context.Context, storage oss.StorageClient, localPath, target string) (bool, error) {
+	// 逻辑说明：对目标对象执行存在性门禁，存在不覆盖，明确 NotExist 才上传本地文件；返回 bool 表示本次是否实际播种。
 	if err := storage.Stat(ctx, target); err == nil {
 		return false, nil
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -479,6 +486,7 @@ func putPackageFileSeedOnly(ctx context.Context, storage oss.StorageClient, loca
 }
 
 func seedPackageDirectoryObject(ctx context.Context, storage oss.StorageClient, agentPrefix string) error {
+	// 逻辑说明：StorageClient 可用时为 Agent 前缀播种隐藏占位对象以建立逻辑目录；目标已存在不会覆盖，nil client 直接跳过兼容 mc 路径。
 	if storage == nil {
 		return nil
 	}
@@ -490,6 +498,7 @@ func seedPackageDirectoryObject(ctx context.Context, storage oss.StorageClient, 
 }
 
 func seedDirToStorage(ctx context.Context, storage oss.StorageClient, srcDir, dstPrefix string) error {
+	// 逻辑说明：递归遍历源码目录、跳过目录与符号链接，把普通文件相对路径映射到对象前缀并以 seed-only 上传；遍历/路径/上传错误立即停止。
 	return filepath.WalkDir(srcDir, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -508,6 +517,7 @@ func seedDirToStorage(ctx context.Context, storage oss.StorageClient, srcDir, ds
 }
 
 func writeFileSeedOnly(path string, data []byte) (bool, error) {
+	// 逻辑说明：本地目标存在时不覆盖，只有确认 NotExist 才创建父目录并以 0644 写入；返回是否实际播种，其他 stat 错误保留。
 	if _, err := os.Stat(path); err == nil {
 		return false, nil
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -520,6 +530,7 @@ func writeFileSeedOnly(path string, data []byte) (bool, error) {
 }
 
 func copyDirSeedOnly(srcDir, dstDir string) error {
+	// 逻辑说明：递归重建目录结构、跳过符号链接，并用 seed-only 写普通文件；已有目的文件保持不变，任一遍历或读取失败终止。
 	return filepath.WalkDir(srcDir, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -550,6 +561,7 @@ func copyDirSeedOnly(srcDir, dstDir string) error {
 // If markers already exist, the content is returned as-is.
 // YAML frontmatter (---...---) is preserved before the markers.
 func wrapWithBuiltinMarkers(data []byte) []byte {
+	// 逻辑说明：已有内置边界时原样返回；否则识别并保留 YAML frontmatter，在用户正文前插入与升级脚本一致的受管区域标记，返回新字节切片。
 	content := string(data)
 	if strings.Contains(content, "<!-- agentteams-builtin-start -->") {
 		return data // already has markers
@@ -589,6 +601,7 @@ func wrapWithBuiltinMarkers(data []byte) []byte {
 // supports a separate IDENTITY.md file.
 // This function is called AFTER DeployToMinIO so inline fields override package files.
 func WriteInlineConfigs(agentDir, runtime, identity, soul, agents string) error {
+	// 逻辑说明：确保 Agent 目录后按 runtime 写身份文件：CoPaw/Hermes 把 identity 合并进 SOUL，其他 runtime 分开写；AGENTS 加受管标记，inline 最后写入以覆盖包默认。
 	if err := os.MkdirAll(agentDir, 0755); err != nil {
 		return fmt.Errorf("create agent dir %s: %w", agentDir, err)
 	}
@@ -637,6 +650,7 @@ func WriteInlineConfigs(agentDir, runtime, identity, soul, agents string) error 
 // getMinIOETag returns the ETag (content MD5) of a MinIO object via mc stat.
 // Returns empty string if mc stat fails.
 func getMinIOETag(ctx context.Context, minioPath string) string {
+	// 逻辑说明：调用 `mc stat --json` 并从成功输出提取、清理 ETag 作为内容缓存键；命令失败或格式缺失返回空串，让上层改用 URI hash。
 	cmd := exec.CommandContext(ctx, "mc", "stat", "--json", minioPath)
 	out, err := cmd.Output()
 	if err != nil {
@@ -660,6 +674,7 @@ func getMinIOETag(ctx context.Context, minioPath string) string {
 }
 
 func safePackageURI(raw string) string {
+	// 逻辑说明：解析 URL 后删除 userinfo 中的密码、最多保留用户名再返回日志安全 URI；无法解析或无 userinfo 时原样返回。
 	u, err := url.Parse(raw)
 	if err != nil || u.User == nil {
 		return raw
@@ -673,6 +688,7 @@ func safePackageURI(raw string) string {
 }
 
 func packagePathFormat(path string) string {
+	// 逻辑说明：通过 stat 与扩展名把落地路径分类为 directory/zip/file；不可访问返回 unknown，只用于结构化日志。
 	info, err := os.Stat(path)
 	if err != nil {
 		return "unknown"
@@ -687,6 +703,7 @@ func packagePathFormat(path string) string {
 }
 
 func topLevelDirNames(dir string) []string {
+	// 逻辑说明：读取目录并只收集一级子目录名，排序后返回用于包布局日志；读取失败返回 nil，不影响实际部署。
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil
@@ -702,6 +719,7 @@ func topLevelDirNames(dir string) []string {
 }
 
 func listPackageFiles(root string, limit int) ([]string, int, bool) {
+	// 逻辑说明：容错遍历包文件，统计总数并只保存前 limit 个相对路径，排序后同时返回是否截断；单个遍历错误忽略，仅用于有界诊断。
 	var files []string
 	count := 0
 	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
@@ -727,6 +745,7 @@ func listPackageFiles(root string, limit int) ([]string, int, bool) {
 // The filename contains the content hash, so it's naturally content-addressable:
 // same hash → same content → cache hit.
 func (p *PackageResolver) resolveOSS(ctx context.Context, u *url.URL) (string, error) {
+	// 逻辑说明：从 oss URI 生成对象路径和安全本地文件名；命中内容地址缓存直接返回，否则用 mc 下载到 ImportDir，失败附命令输出。
 	// oss://agentteams-config/packages/alice-abc123.zip → agentteams-config/packages/alice-abc123.zip
 	ossPath := strings.TrimPrefix(u.Host+u.Path, "/")
 	filename := filepath.Base(ossPath)
@@ -753,6 +772,7 @@ func (p *PackageResolver) resolveOSS(ctx context.Context, u *url.URL) (string, e
 }
 
 func (p *PackageResolver) resolveFile(u *url.URL) (string, error) {
+	// 逻辑说明：优先查找 ImportDir 中同 basename 的导入文件，缺失再接受 URI 指向的现有宿主文件；两处都不存在返回列明候选路径的错误。
 	filename := filepath.Base(u.Path)
 	localPath := filepath.Join(p.ImportDir, filename)
 
@@ -766,6 +786,7 @@ func (p *PackageResolver) resolveFile(u *url.URL) (string, error) {
 }
 
 func (p *PackageResolver) resolveHTTP(ctx context.Context, uri string) (string, error) {
+	// 逻辑说明：为 URL 派生本地 zip 名并复用已有缓存；未命中时执行受 context 控制的 GET，只接受 200，流式写入失败会删除残缺文件。
 	filename := filepath.Base(uri)
 	if !strings.HasSuffix(filename, ".zip") {
 		filename += ".zip"
@@ -810,6 +831,7 @@ func (p *PackageResolver) resolveHTTP(ctx context.Context, uri string) (string, 
 // Optional query: authType=nacos|sts-agentteams|none (empty = auto from userinfo, same as NewNacosAIClient).
 // The Nacos server address (and optional credentials) are extracted from the URI authority.
 func (p *PackageResolver) resolveNacos(ctx context.Context, u *url.URL) (string, error) {
+	// 逻辑说明：解析 namespace/spec/version 或 label，清理旧目标后按 URI 认证构造 Nacos client 并物化 AgentSpec；可选 SHA-256 常量时间比较，最后验证目标确为目录。
 	// Parse URI path segments: /{namespace}/{agentspec-name}/{version}
 	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
 	if len(parts) < 2 {
@@ -883,6 +905,7 @@ func (p *PackageResolver) resolveNacos(ctx context.Context, u *url.URL) (string,
 }
 
 func validateNacosDigest(value string) error {
+	// 逻辑说明：严格要求 `sha256:` 加 64 位小写十六进制；长度、解码或大小写不符均拒绝，避免比较多种非规范摘要表示。
 	const prefix = "sha256:"
 	if !strings.HasPrefix(value, prefix) {
 		return fmt.Errorf("invalid expectedDigest: must use sha256:<hex>")
@@ -917,6 +940,7 @@ type ValidateNacosURIOptions struct {
 // reachable, and any embedded credentials are accepted.  It is intended as a
 // preflight check before persisting a Worker resource.
 func ValidateNacosURI(ctx context.Context, raw string, opts ValidateNacosURIOptions) error {
+	// 逻辑说明：验证 nacos scheme/host/路径/可选 digest，按运行时同样规则构造 client 完成 TCP 与认证预检，再确认目标 AgentSpec/version/label 在线。
 	u, err := url.Parse(raw)
 	if err != nil {
 		return fmt.Errorf("invalid nacos URI %q: %w", raw, err)

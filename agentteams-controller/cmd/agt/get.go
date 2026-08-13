@@ -9,6 +9,7 @@ import (
 )
 
 func getCmd() *cobra.Command {
+	// 逻辑说明：组合四类资源的 list/detail 查询子命令，具体输出格式由各子命令独立处理。
 	cmd := &cobra.Command{
 		Use:   "get",
 		Short: "Display resources",
@@ -25,6 +26,7 @@ func getCmd() *cobra.Command {
 // ---------------------------------------------------------------------------
 
 func getWorkersCmd() *cobra.Command {
+	// 逻辑说明：有名称时读取详情；否则可按团队列举，按 JSON 或稳定列的表格输出并处理空列表。
 	var team string
 	var output string
 
@@ -96,6 +98,7 @@ func getWorkersCmd() *cobra.Command {
 // ---------------------------------------------------------------------------
 
 func getTeamsCmd() *cobra.Command {
+	// 逻辑说明：在单 Team 详情和全部 Team 汇总之间分流，并计算 ready/total 的展示值。
 	var output string
 
 	cmd := &cobra.Command{
@@ -161,6 +164,7 @@ func getTeamsCmd() *cobra.Command {
 // ---------------------------------------------------------------------------
 
 func getHumansCmd() *cobra.Command {
+	// 逻辑说明：按可选名称读取 Human 详情或列表，成功后选择 JSON/表格且不把空集合当错误。
 	var output string
 
 	cmd := &cobra.Command{
@@ -224,6 +228,7 @@ func getHumansCmd() *cobra.Command {
 // ---------------------------------------------------------------------------
 
 func getManagersCmd() *cobra.Command {
+	// 逻辑说明：查询单个或全部 Manager，并用 AgentScope 兼容详情或列表格式展示权威 Controller 状态。
 	var output string
 
 	cmd := &cobra.Command{
@@ -415,6 +420,7 @@ type managerListResp struct {
 // ---------------------------------------------------------------------------
 
 func workerDetail(w workerResp) []KeyValue {
+	// 逻辑说明：选取排障所需公开字段并为缺省 phase/runtime 补展示值，不修改原响应。
 	return []KeyValue{
 		{"Name", w.Name},
 		{"Phase", or(w.Phase, "Pending")},
@@ -431,6 +437,7 @@ func workerDetail(w workerResp) []KeyValue {
 }
 
 func teamDetail(t teamResp) []KeyValue {
+	// 逻辑说明：把团队结构、heartbeat、成员就绪和房间状态转成有序详情字段，便于人类逐项阅读。
 	return []KeyValue{
 		{"Name", t.Name},
 		{"TeamName", t.TeamName},
@@ -451,6 +458,7 @@ func teamDetail(t teamResp) []KeyValue {
 }
 
 func optionalBoolText(value *bool) string {
+	// 逻辑说明：保留 nil 表示“未配置”，非 nil 才渲染 true/false，避免与显式 false 混淆。
 	if value == nil {
 		return ""
 	}
@@ -458,6 +466,7 @@ func optionalBoolText(value *bool) string {
 }
 
 func teamHeartbeatText(hb *teamHeartbeatResp) string {
+	// 逻辑说明：优先显示具体周期；无周期时按 enabled 显示状态，nil 则表示未配置。
 	if hb == nil {
 		return ""
 	}
@@ -471,6 +480,7 @@ func teamHeartbeatText(hb *teamHeartbeatResp) string {
 }
 
 func humanDetail(h humanResp) []KeyValue {
+	// 逻辑说明：把权限范围、Matrix 身份和同步状态拼成有序详情，列表字段用逗号连接便于 CLI 阅读。
 	return []KeyValue{
 		{"Name", h.Name},
 		{"Phase", or(h.Phase, "Pending")},
@@ -488,6 +498,7 @@ func humanDetail(h humanResp) []KeyValue {
 }
 
 func managerDetail(m managerResp) []KeyValue {
+	// 逻辑说明：显式渲染 onboarding 布尔值，并把 AgentScope Manager 的模型、身份、房间和版本按固定顺序输出。
 	welcome := "false"
 	if m.WelcomeSent {
 		welcome = "true"

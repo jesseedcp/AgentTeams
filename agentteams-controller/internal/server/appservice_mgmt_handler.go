@@ -15,6 +15,7 @@ type AppServiceHandler struct {
 
 // NewAppServiceHandler creates an AppServiceHandler.
 func NewAppServiceHandler(cfg matrix.Config) *AppServiceHandler {
+	// 逻辑说明：保存当前 Matrix 配置作为 token 轮换基线；真正的注册、验证和外部副作用只在 RotateToken 请求中发生。
 	return &AppServiceHandler{matrixCfg: cfg}
 }
 
@@ -33,6 +34,7 @@ type rotateTokenRequest struct {
 // update the controller env var / Secret and restart for the new token to
 // take effect permanently.
 func (h *AppServiceHandler) RotateToken(w http.ResponseWriter, r *http.Request) {
+	// 逻辑说明：解析并校验新 as_token，复制现有配置并可选替换 hs_token；用临时客户端重注册后执行 smoke test，两步都成功才返回提示，持久化 Secret/重启明确留给调用方。
 	var req rotateTokenRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, fmt.Sprintf("invalid request body: %v", err), http.StatusBadRequest)

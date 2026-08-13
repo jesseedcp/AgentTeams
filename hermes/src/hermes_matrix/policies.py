@@ -27,6 +27,7 @@ _MATRIX_USER_ID_RE = re.compile(
 
 def normalize_user_id(uid: str) -> str:
     """Lowercase MXIDs and ensure a leading ``@`` for set membership."""
+    # 逻辑说明：清理并小写 ID，缺少 @ 时补齐，使 allowlist 比较不受格式差异影响。
     normalized = (uid or "").strip().lower()
     if normalized and not normalized.startswith("@"):
         normalized = "@" + normalized
@@ -34,12 +35,14 @@ def normalize_user_id(uid: str) -> str:
 
 
 def _csv_set(value: Optional[str]) -> Set[str]:
+    # 逻辑说明：把逗号分隔环境文本拆成去空白集合；未配置时返回空集合。
     if not value:
         return set()
     return {part.strip() for part in value.split(",") if part.strip()}
 
 
 def _policy_mode(value: Optional[str], default: str = "allowlist") -> str:
+    # 逻辑说明：只接受 open/allowlist/disabled，拼写错误安全回落默认值。
     mode = (value or default).strip().lower()
     if mode in {"open", "allowlist", "disabled"}:
         return mode
@@ -51,6 +54,7 @@ def extract_mentions_from_text(
     self_user_id: str | None = None,
 ) -> List[str]:
     """Return ordered, de-duplicated MXIDs discovered in ``text``."""
+    # 逻辑说明：按出现顺序提取合法 mxid、排除自己并去重，供结构化 mention 使用。
     if not text:
         return []
 
@@ -72,6 +76,7 @@ def _merge_mentions_block(
     message: MutableMapping[str, Any],
     new_user_ids: List[str],
 ) -> None:
+    # 逻辑说明：保留已有 m.mentions 其他字段，将新 ID 与旧列表按顺序合并去重。
     current = message.get("m.mentions")
     merged: Dict[str, Any] = dict(current) if isinstance(current, Mapping) else {}
     existing_user_ids = merged.get("user_ids")
@@ -106,6 +111,7 @@ def apply_outbound_mentions(
     signal.  We enrich outgoing events from visible MXIDs in ``body`` and, for
     edits, also look at ``m.new_content.body``.
     """
+    # 逻辑说明：从正文和编辑后的正文提取提及并写入相应消息块，不改变用户可见文字。
     mentioned = extract_mentions_from_text(
         content.get("body", "") if isinstance(content.get("body"), str) else "",
         self_user_id=self_user_id,
@@ -141,6 +147,7 @@ class DualAllowList:
 
     @classmethod
     def from_env(cls) -> "DualAllowList":
+        # 逻辑说明：解析 DM/群聊策略与允许集合，构造一次不可变访问控制快照。
         return cls(
             dm_policy=_policy_mode(os.getenv("MATRIX_DM_POLICY"), "allowlist"),
             group_policy=_policy_mode(
@@ -162,6 +169,7 @@ class DualAllowList:
         return self.dm_allow | self.group_allow
 
     def permits(self, sender: str, is_dm: bool) -> bool:
+        # 逻辑说明：按房间选择策略；disabled 拒绝、open 放行、allowlist 检查发送者。
         normalized = normalize_user_id(sender)
         if not normalized:
             return False
@@ -198,6 +206,7 @@ class HistoryBuffer:
 
     @classmethod
     def from_env(cls) -> "HistoryBuffer":
+        # 逻辑说明：解析历史条数并限制为非负；无效数字回落默认值。
         raw = os.getenv("MATRIX_HISTORY_LIMIT", "")
         try:
             limit = int(raw) if raw else DEFAULT_HISTORY_LIMIT
@@ -206,6 +215,7 @@ class HistoryBuffer:
         return cls(limit=max(limit, 0))
 
     def record(self, room_id: str, sender: str, body: str) -> None:
+        # 逻辑说明：将非空消息追加到房间缓冲并裁剪到 limit，关闭历史时不保存。
         if self.limit <= 0 or not room_id:
             return
         text = (body or "").strip()
@@ -217,6 +227,7 @@ class HistoryBuffer:
             bucket.pop(0)
 
     def drain(self, room_id: str) -> str:
+        # 逻辑说明：一次性取出并删除房间历史，渲染成上下文块；无记录返回空值。
         entries = self._entries.pop(room_id, None)
         if not entries:
             return ""

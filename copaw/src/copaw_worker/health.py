@@ -151,6 +151,8 @@ class HealthState:
     """
 
     def __init__(self, state_path: Path) -> None:
+        # 逻辑说明：`__init__` 接收 state_path，初始化完整组件健康表，返回 None；
+        # 会更新对象内存状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
         self.state_path = state_path
         now = _now()
         self._components: dict[HealthComponent, ComponentHealth] = {
@@ -170,6 +172,8 @@ class HealthState:
         message: str = "",
         details: dict[str, Any] | None = None,
     ) -> HealthSnapshot:
+        # 逻辑说明：`update` 接收 component、healthiness、message、details，校验组件与健康值，更新单个组件后持久化完整快照，返回 HealthSnapshot；
+        # 会更新对象内存状态。失败策略：非法输入或状态会立即抛错，其他底层异常继续上抛；本函数不额外重试，避免掩盖持续故障。
         if component not in COMPONENTS:
             raise ValueError(f"unknown health component: {component}")
         if healthiness not in ("healthy", "unhealthy"):
@@ -185,6 +189,7 @@ class HealthState:
         return snapshot
 
     def snapshot(self) -> HealthSnapshot:
+        # 逻辑说明：读取 `_components` 最近一次探测结果，以首个 unhealthy 组件形成整体失败原因；若都健康则返回 ready 快照，并复制组件映射避免调用方改写内部状态。
         unhealthy = [
             (component, state)
             for component, state in self._components.items()
@@ -208,6 +213,8 @@ class HealthState:
         )
 
     def persist(self, snapshot: HealthSnapshot | None = None) -> HealthSnapshot:
+        # 逻辑说明：`persist` 接收 snapshot，把完整健康快照写入 JSON 文件并返回该快照，返回 HealthSnapshot；
+        # 会读写本地文件、会更新对象内存状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
         snapshot = snapshot or self.snapshot()
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
         self.state_path.write_text(
@@ -217,10 +224,13 @@ class HealthState:
         return snapshot
 
     def to_dict(self) -> dict[str, Any]:
+        # 逻辑说明：按当前组件探测结果生成 HealthSnapshot，再递归转换成健康 API 可 JSON 序列化的字典；不更新组件状态或重新执行探针。
         return _snapshot_to_dict(self.snapshot())
 
 
 def _snapshot_to_dict(snapshot: HealthSnapshot) -> dict[str, Any]:
+    # 逻辑说明：`_snapshot_to_dict` 接收 snapshot，执行 Worker 组件健康状态 中的“snapshot to dict”步骤，返回 dict[str, Any]；
+    # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     data = asdict(snapshot)
     return data
 
@@ -230,6 +240,10 @@ def check_model_service(
     *,
     timeout: float = 20,
 ) -> ComponentHealth:
+    # 逻辑说明：`check_model_service` 接收 openclaw_cfg、timeout，向活动模型发送最小 chat completion 请求并生成 model 健康结果，
+    # 返回 ComponentHealth；
+    #
+    # 会访问网络服务。失败策略：已知失败按现有 except 转为错误结果或日志，未覆盖异常继续上抛；本函数不额外重试，避免掩盖持续故障。
     active = _active_model_provider(openclaw_cfg)
     if active is None:
         return ComponentHealth(
@@ -319,6 +333,8 @@ def check_copaw_service(
     *,
     timeout: float = 5,
 ) -> ComponentHealth:
+    # 逻辑说明：`check_copaw_service` 接收 console_port、timeout，请求本机 CoPaw /health 端点并生成 copaw 健康结果，返回 ComponentHealth；
+    # 会访问网络服务。失败策略：已知失败按现有 except 转为错误结果或日志，未覆盖异常继续上抛；本函数不额外重试，避免掩盖持续故障。
     endpoint = f"http://127.0.0.1:{console_port}/health"
     details = {
         "operation": "copaw_health_probe",
@@ -362,6 +378,8 @@ def check_matrix_service(
     *,
     timeout: float = 5,
 ) -> ComponentHealth:
+    # 逻辑说明：`check_matrix_service` 接收 homeserver、timeout，请求 Matrix versions 端点并生成 matrix 健康结果，返回 ComponentHealth；
+    # 会访问网络服务。失败策略：已知失败按现有 except 转为错误结果或日志，未覆盖异常继续上抛；本函数不额外重试，避免掩盖持续故障。
     base_url = str(homeserver or "").rstrip("/")
     details = {"operation": "matrix_endpoint_probe"}
     if not base_url:
@@ -413,6 +431,10 @@ def check_matrix_service(
 def _active_model_provider(
     openclaw_cfg: dict[str, Any],
 ) -> tuple[str, str, dict[str, Any]] | None:
+    # 逻辑说明：`_active_model_provider` 接收 openclaw_cfg，按 primary 优先、Provider 列表兜底解析活动模型与 Provider，
+    # 返回 tuple[str, str, dict[str, Any]] | None；
+    #
+    # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     providers = openclaw_cfg.get("models", {}).get("providers", {})
     if not isinstance(providers, dict) or not providers:
         return None
@@ -443,15 +465,21 @@ _ENABLE_THINKING_MODELS = {"qwen", "qwq", "deepseek"}
 
 
 def _supports_enable_thinking(model_id: str) -> bool:
+    # 逻辑说明：`_supports_enable_thinking` 接收 model_id，按模型 ID 前缀判断是否支持 enable_thinking，返回 bool；
+    # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     lower = model_id.lower()
     return any(lower.startswith(prefix) for prefix in _ENABLE_THINKING_MODELS)
 
 
 def _max_tokens_param(model_id: str) -> str:
+    # 逻辑说明：`_max_tokens_param` 接收 model_id，根据模型系列选择正确的 token 上限参数名，返回 str；不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；
+    # 本函数不额外重试，避免掩盖持续故障。
     if model_id.startswith("gpt-5"):
         return "max_completion_tokens"
     return "max_tokens"
 
 
 def _now() -> str:
+    # 逻辑说明：为健康探针各检查项生成带 `+00:00` 时区的 ISO 8601 UTC 更新时间，保留微秒以区分短间隔内的连续探测结果。
+    # 只读取系统时钟并返回字符串，不修改探针缓存或其他 Worker 状态。
     return datetime.now(timezone.utc).isoformat()

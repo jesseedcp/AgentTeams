@@ -27,6 +27,7 @@ type mcpServerSpec struct {
 }
 
 func updateCmd() *cobra.Command {
+	// 逻辑说明：创建 update 命令组并注册 Worker、Team、Human、Manager 的部分更新入口。
 	cmd := &cobra.Command{
 		Use:   "update",
 		Short: "Update a resource",
@@ -43,6 +44,7 @@ func updateCmd() *cobra.Command {
 // ---------------------------------------------------------------------------
 
 func updateWorkerCmd() *cobra.Command {
+	// 逻辑说明：只把 Cobra 标记为 Changed 的字段写入 PATCH 语义 body，处理清空/console/MCP 整体替换并拒绝空更新。
 	var (
 		name        string
 		model       string
@@ -189,6 +191,7 @@ func updateWorkerCmd() *cobra.Command {
 // ---------------------------------------------------------------------------
 
 func updateHumanCmd() *cobra.Command {
+	// 逻辑说明：按 Changed 区分未提供与显式清空，校验权限级别后只提交实际修改的 Human 字段。
 	var (
 		name              string
 		displayName       string
@@ -256,6 +259,7 @@ func updateHumanCmd() *cobra.Command {
 // ---------------------------------------------------------------------------
 
 func updateTeamCmd() *cobra.Command {
+	// 逻辑说明：更新普通字段或整体重建带唯一 Leader 的成员列表；成员变更缺 Leader 和空更新都会拒绝。
 	var (
 		name                 string
 		teamName             string
@@ -330,6 +334,7 @@ Create or update each Worker separately to configure its runtime fields.`,
 // ---------------------------------------------------------------------------
 
 func updateManagerCmd() *cobra.Command {
+	// 逻辑说明：收集非空运行字段和可选 MCP 全量文档，拒绝无字段请求后更新指定 AgentScope Manager。
 	var (
 		name     string
 		model    string
@@ -406,6 +411,7 @@ func readMCPServers(
 	cmd *cobra.Command,
 	path string,
 ) ([]mcpServerSpec, error) {
+	// 逻辑说明：从文件或 stdin 有界读取 1 MiB，严格解码单个 JSON 数组，再校验名称唯一、transport 和无凭据 HTTP(S) URL。
 	var (
 		reader io.Reader
 		file   *os.File

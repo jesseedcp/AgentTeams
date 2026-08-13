@@ -45,6 +45,7 @@ class SnapshotMetadata(BaseModel):
 
 
 def event_key(prefix: str, event: JournalEvent) -> str:
+    # 逻辑说明：把操作 ID 与全局递增 sequence 编进不可变对象键；固定宽度数字保证对象存储的字典序就是重放顺序。
     return _prefixed(
         prefix,
         (
@@ -58,6 +59,7 @@ class S3Journal:
     """Journal logic independent of the concrete aioboto3 adapter."""
 
     def __init__(self, store: JournalObjectStore, *, prefix: str) -> None:
+        # 逻辑说明：保存对象存储适配器并规范化 key 前缀；构造阶段不访问远端，后续 journal/snapshot 操作共享同一命名空间。
         self._store = store
         self._prefix = prefix.strip("/")
 
@@ -71,6 +73,7 @@ class S3Journal:
 
     async def append(self, event: JournalEvent) -> str:
         """Write one event exactly once."""
+        # 逻辑说明：序列化一个已脱敏事件并用条件写入保存；相同 key 已存在时由对象存储报冲突，调用方可把它视为幂等重试而不会覆盖历史。
         return await self._store.put(
             event_key(self._prefix, event),
             event.model_dump_json().encode("utf-8"),
@@ -80,6 +83,7 @@ class S3Journal:
 
     async def list_after(self, sequence: int) -> tuple[JournalEvent, ...]:
         """Return globally sequenced journal events after a snapshot."""
+        # 逻辑说明：列出 journal 对象，忽略非 JSON 项并反序列化比快照 sequence 更新的事件；最后稳定排序后返回，读取或校验失败直接中止恢复。
         keys = await self._store.list(self.journal_prefix)
         events: list[JournalEvent] = []
         for key in keys:
@@ -100,6 +104,7 @@ class S3Journal:
         sequence: int,
     ) -> SnapshotMetadata:
         """Publish immutable bytes and metadata before the latest pointer."""
+        # 逻辑说明：读取 SQLite 快照、计算大小与 SHA-256，先不可变写数据库和元数据，再更新 latest 指针；这样中途失败不会让恢复端看到未完整发布的快照。
         data = path.read_bytes()
         digest = sha256(data).hexdigest()
         stem = f"{self.snapshot_prefix}/{sequence:020d}"
@@ -136,6 +141,7 @@ class S3Journal:
     async def download_latest_snapshot(
         self,
     ) -> tuple[SnapshotMetadata, bytes] | None:
+        # 逻辑说明：读取 latest 指针及其数据库对象，缺少指针表示尚无快照并返回 None；恢复前同时校验大小和摘要，不一致时拒绝返回损坏数据。
         try:
             encoded = await self._store.get(
                 f"{self.snapshot_prefix}/latest.json",
@@ -153,5 +159,6 @@ class S3Journal:
 
 
 def _prefixed(prefix: str, key: str) -> str:
+    # 逻辑说明：规范化可选部署前缀并拼出对象键，空前缀时保持原 key，避免产生前导斜杠造成两个命名空间。
     normalized = prefix.strip("/")
     return f"{normalized}/{key}" if normalized else key

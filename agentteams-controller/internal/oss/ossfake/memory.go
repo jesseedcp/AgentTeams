@@ -32,11 +32,13 @@ type Memory struct {
 
 // NewMemory constructs an empty in-memory storage client.
 func NewMemory() *Memory {
+	// 逻辑说明：为测试构造独立的空对象 map；每个实例互不共享状态，后续并发访问由 Memory 自身的读写锁保护。
 	return &Memory{objects: make(map[string][]byte)}
 }
 
 // PutObject stores data under key.
 func (m *Memory) PutObject(_ context.Context, key string, data []byte) error {
+	// 逻辑说明：写锁保护 map，并复制输入字节再保存，防止调用方随后修改原切片绕过锁改变“已写入”的对象内容。
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	buf := make([]byte, len(data))
@@ -47,6 +49,7 @@ func (m *Memory) PutObject(_ context.Context, key string, data []byte) error {
 
 // PutFile reads a local file and stores its contents under key.
 func (m *Memory) PutFile(ctx context.Context, localPath, key string) error {
+	// 逻辑说明：完整读取本地文件后复用 PutObject 的加锁与复制语义；读取失败保留路径上下文且不创建半个对象。
 	data, err := os.ReadFile(localPath)
 	if err != nil {
 		return fmt.Errorf("read %s: %w", localPath, err)
@@ -57,6 +60,7 @@ func (m *Memory) PutFile(ctx context.Context, localPath, key string) error {
 // GetObject returns the bytes stored under key. Returns os.ErrNotExist when
 // the key is missing to match the production MinIO client's behavior.
 func (m *Memory) GetObject(_ context.Context, key string) ([]byte, error) {
+	// 逻辑说明：读锁下查找对象，缺失时与生产实现一致返回 os.ErrNotExist；命中后复制字节再返回，避免外部修改内部存储。
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	data, ok := m.objects[key]
@@ -71,6 +75,7 @@ func (m *Memory) GetObject(_ context.Context, key string) ([]byte, error) {
 // Stat returns nil when key exists, os.ErrNotExist otherwise. ManagerConfigStore
 // relies on errors.Is(err, os.ErrNotExist) to detect first-time writes.
 func (m *Memory) Stat(_ context.Context, key string) error {
+	// 逻辑说明：读锁下只检查键是否存在，不复制内容；缺失统一返回 os.ErrNotExist，模拟上层首次写入判断所依赖的生产契约。
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	if _, ok := m.objects[key]; !ok {
@@ -82,6 +87,7 @@ func (m *Memory) Stat(_ context.Context, key string) error {
 // DeleteObject removes the object stored under key. Deleting a missing key
 // is a no-op.
 func (m *Memory) DeleteObject(_ context.Context, key string) error {
+	// 逻辑说明：写锁下直接删除键；Go map 对缺失键删除无副作用，因此自然保持幂等语义。
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.objects, key)
@@ -94,6 +100,7 @@ func (m *Memory) DeleteObject(_ context.Context, key string) error {
 // currently ignored; Overwrite=true is implicit (existing destination keys
 // are replaced).
 func (m *Memory) Mirror(_ context.Context, src, dst string, _ oss.MirrorOptions) error {
+	// 逻辑说明：写锁下规范源/目标前缀，扫描源树并把相对后缀映射到目标；每份内容都复制后写入，避免源目标对象共享可变字节切片。
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	src = strings.TrimSuffix(src, "/")
@@ -113,6 +120,7 @@ func (m *Memory) Mirror(_ context.Context, src, dst string, _ oss.MirrorOptions)
 
 // ListObjects returns all keys whose names start with prefix, sorted.
 func (m *Memory) ListObjects(_ context.Context, prefix string) ([]string, error) {
+	// 逻辑说明：读锁下收集所有匹配前缀的完整键，并排序后返回，使并发安全的 fake 也为测试提供确定顺序。
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	out := make([]string, 0)
@@ -127,6 +135,7 @@ func (m *Memory) ListObjects(_ context.Context, prefix string) ([]string, error)
 
 // DeletePrefix removes every object whose key starts with prefix.
 func (m *Memory) DeletePrefix(_ context.Context, prefix string) error {
+	// 逻辑说明：写锁下扫描并删除所有匹配键；没有匹配项时仍返回成功，复现生产清理可安全重试的行为。
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for key := range m.objects {

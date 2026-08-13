@@ -173,6 +173,7 @@ type WorkerConsoleSpec struct {
 // EffectivePort returns the configured console port after applying the
 // runtime-independent default.
 func (s WorkerConsoleSpec) EffectivePort() int {
+	// 逻辑说明：显式端口优先；零值回退统一默认端口，使旧 CR 无需迁移也得到确定配置。
 	if s.Port != 0 {
 		return s.Port
 	}
@@ -182,6 +183,7 @@ func (s WorkerConsoleSpec) EffectivePort() int {
 // Validate checks the console contract against an already-resolved Worker
 // runtime. Only CoPaw and QwenPaw currently expose a supported web console.
 func (s WorkerConsoleSpec) Validate(runtime string) error {
+	// 逻辑说明：先拒绝越界端口；console 未启用时允许其余默认值，启用后再校验有效端口和受支持 runtime。
 	if s.Port < 0 || s.Port > 65535 {
 		return fmt.Errorf("worker console port must be between 1 and 65535")
 	}
@@ -361,6 +363,7 @@ type NamespacedSecretRef struct {
 // GetBackendRuntime returns the explicitly set backendRuntime from spec, or empty string
 // if not set. Empty means "use cluster-level default from AGENTTEAMS_WORKER_BACKEND_RUNTIME".
 func (s WorkerSpec) GetBackendRuntime() string {
+	// 逻辑说明：仅返回 CR 显式设置的非空 backend；空字符串保留给集群级默认值解析。
 	if s.BackendRuntime != nil && *s.BackendRuntime != "" {
 		return *s.BackendRuntime
 	}
@@ -369,6 +372,7 @@ func (s WorkerSpec) GetBackendRuntime() string {
 
 // DesiredContainerMan returns the effective desired containerManaged, defaulting to true.
 func (s WorkerSpec) DesiredContainerMan() bool {
+	// 逻辑说明：指针区分“未设置”和显式 false；未设置按向后兼容规则由 Controller 管理容器。
 	if s.ContainerManaged != nil {
 		return *s.ContainerManaged
 	}
@@ -377,6 +381,7 @@ func (s WorkerSpec) DesiredContainerMan() bool {
 
 // DesiredState returns the effective desired state, defaulting to "Running".
 func (s WorkerSpec) DesiredState() string {
+	// 逻辑说明：显式非空状态优先；旧 CR 的 nil/空状态统一解释为 Running。
 	if s.State != nil && *s.State != "" {
 		return *s.State
 	}
@@ -386,6 +391,7 @@ func (s WorkerSpec) DesiredState() string {
 // EffectiveWorkerName returns the runtime identity key for a Worker.
 // Empty WorkerName falls back to metadata.name supplied by caller.
 func (s WorkerSpec) EffectiveWorkerName(metadataName string) string {
+	// 逻辑说明：业务身份显式配置时使用 WorkerName，否则回退不可缺失的 Kubernetes metadata.name。
 	if s.WorkerName != "" {
 		return s.WorkerName
 	}
@@ -522,6 +528,7 @@ type TeamWorkerRef struct {
 // EffectiveTeamName 返回对外系统使用的团队身份名。显式 TeamName
 // 为空时回退到 Kubernetes metadata.name，使老 CR 仍有稳定的身份键。
 func (s TeamSpec) EffectiveTeamName(metadataName string) string {
+	// 逻辑说明：显式团队身份优先，旧对象没有 TeamName 时回退 metadata.name 保持跨系统键稳定。
 	if s.TeamName != "" {
 		return s.TeamName
 	}
@@ -570,6 +577,7 @@ type TeamStatus struct {
 // instead — we keep creation out of the API types to avoid accidental
 // mutation from API response codepaths.
 func (s *TeamStatus) MemberByName(name string) *TeamMemberStatus {
+	// 逻辑说明：线性查找并返回切片内真实元素指针，调用方修改时作用于状态本身；未命中不隐式创建。
 	for i := range s.Members {
 		if s.Members[i].Name == name {
 			return &s.Members[i]
@@ -687,6 +695,7 @@ type HumanStatus struct {
 // EffectiveUsername returns the Matrix localpart for a Human.
 // Empty username falls back to metadata.name supplied by caller.
 func (s HumanSpec) EffectiveUsername(metadataName string) string {
+	// 逻辑说明：显式 Matrix localpart 优先；未配置时以资源名作为兼容且稳定的登录身份。
 	if s.Username != "" {
 		return s.Username
 	}
@@ -780,6 +789,7 @@ type ManagerCodingCLISpec struct {
 
 // EffectiveMountPath 返回 coding CLI 在 Manager 容器内的挂载路径。
 func (s ManagerCodingCLISpec) EffectiveMountPath() string {
+	// 逻辑说明：清理显式容器路径；空值使用只读 coding CLI 的固定默认挂载根。
 	if s.MountPath != "" {
 		return path.Clean(s.MountPath)
 	}
@@ -788,6 +798,7 @@ func (s ManagerCodingCLISpec) EffectiveMountPath() string {
 
 // EffectiveTrustedDirectory 返回允许 Manager 查找 CLI 可执行文件的受信任目录。
 func (s ManagerCodingCLISpec) EffectiveTrustedDirectory() string {
+	// 逻辑说明：显式可信目录先清理；未设置时限定为有效挂载路径下的 bin 子目录。
 	if s.TrustedDirectory != "" {
 		return path.Clean(s.TrustedDirectory)
 	}
@@ -796,6 +807,7 @@ func (s ManagerCodingCLISpec) EffectiveTrustedDirectory() string {
 
 // EffectiveTimeoutSeconds 返回单次 coding CLI 进程的超时上限。
 func (s ManagerCodingCLISpec) EffectiveTimeoutSeconds() int {
+	// 逻辑说明：非零显式上限优先，否则使用受控默认值，避免进程无限运行。
 	if s.TimeoutSeconds != 0 {
 		return s.TimeoutSeconds
 	}
@@ -804,6 +816,7 @@ func (s ManagerCodingCLISpec) EffectiveTimeoutSeconds() int {
 
 // EffectiveMaxOutputBytes 返回允许带回 Manager 上下文的最大输出字节数。
 func (s ManagerCodingCLISpec) EffectiveMaxOutputBytes() int {
+	// 逻辑说明：非零显式限制优先，否则使用默认字节上限，防止 CLI 输出挤占 Manager 上下文。
 	if s.MaxOutputBytes != 0 {
 		return s.MaxOutputBytes
 	}
@@ -813,6 +826,7 @@ func (s ManagerCodingCLISpec) EffectiveMaxOutputBytes() int {
 // Validate rejects implicit executables, unsafe paths, and unbounded process
 // settings before the reconciler creates a Manager container.
 func (s ManagerCodingCLISpec) Validate() error {
+	// 逻辑说明：联合校验 provider、路径包含关系、超时与输出上限，容器创建前拒绝隐式可执行文件和越界配置。
 	if s.Enabled && len(s.Providers) == 0 {
 		return fmt.Errorf("enabled Manager coding CLI requires at least one provider")
 	}
@@ -859,6 +873,7 @@ func (s ManagerCodingCLISpec) Validate() error {
 
 // DesiredState returns the effective desired state, defaulting to "Running".
 func (s ManagerSpec) DesiredState() string {
+	// 逻辑说明：显式非空生命周期状态优先；未设置的旧 Manager 仍默认保持 Running。
 	if s.State != nil && *s.State != "" {
 		return *s.State
 	}

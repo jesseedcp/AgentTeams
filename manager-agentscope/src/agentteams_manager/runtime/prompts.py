@@ -27,6 +27,7 @@ class PromptBuilder:
         *,
         expected_sha256: Mapping[str, str] | None = None,
     ) -> None:
+        # 逻辑说明：解析并保存受信任 prompt 根目录，同时复制各 section 的可选 SHA-256 期望值，避免调用方后续修改映射影响校验；构造阶段不读取任何 prompt 文件。
         self._root = root.resolve()
         self._expected_sha256 = dict(expected_sha256 or {})
 
@@ -37,6 +38,7 @@ class PromptBuilder:
         *,
         registered_tools: tuple[str, ...] | None = None,
     ) -> str:
+        # 逻辑说明：按 soul、agents、tools、heartbeat 固定顺序读取 runtime 指定源文件，再把当前房间 kind/revision、实际注册工具、允许/确认工具和 skills 追加为运行段；任一源校验失败则不返回部分 prompt。
         sources = runtime.prompt_sources
         ordered = (
             ("soul", sources.soul),
@@ -76,6 +78,7 @@ class PromptBuilder:
         return "\n\n".join(sections)
 
     def _read_source(self, label: str, source: str) -> str:
+        # 逻辑说明：把兼容性的 manager/ 前缀归一到受信任根目录，拒绝 resolve 后逃逸的路径，读取字节并按 label 校验可选 SHA-256，最后以 UTF-8 解码去除首尾空白；路径、摘要或编码错误均直接失败。
         relative = Path(source)
         if relative.parts and relative.parts[0] == "manager":
             relative = Path(*relative.parts[1:])

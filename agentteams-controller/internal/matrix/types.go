@@ -122,6 +122,7 @@ type AppServiceNamespace struct {
 // GeneratePassword produces a cryptographically secure random password
 // of the given byte length, hex-encoded (output length = 2*n).
 func GeneratePassword(n int) (string, error) {
+	// 逻辑说明：从 crypto/rand 读取 n 个字节并逐半字节转成固定小写十六进制，因此输出长度为 2*n；熵源失败直接返回错误，不降级到可预测随机数。
 	b := make([]byte, n)
 	if _, err := rand.Read(b); err != nil {
 		return "", err

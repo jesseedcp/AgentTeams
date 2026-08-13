@@ -15,6 +15,7 @@ from agentteams_cli.config_store import ConfigStore
 
 
 def cmd_plugin_install(args: argparse.Namespace) -> int:
+    # 逻辑说明：`cmd_plugin_install` 把 CLI 参数规范化为 Path 后交给安装器；用退出码表达结果。
     store = ConfigStore()
     ok = plugin_manager.install(
         store,
@@ -26,6 +27,7 @@ def cmd_plugin_install(args: argparse.Namespace) -> int:
 
 
 def cmd_plugin_list(_args: argparse.Namespace) -> int:
+    # 逻辑说明：`cmd_plugin_list` 读取项目插件清单并按表格输出；空集合是正常状态，仍返回成功退出码。
     plugins = plugin_manager.list_plugins(ConfigStore())
     if not plugins:
         print("No plugins installed.")
@@ -37,6 +39,7 @@ def cmd_plugin_list(_args: argparse.Namespace) -> int:
 
 
 def cmd_plugin_update(args: argparse.Namespace) -> int:
+    # 逻辑说明：`cmd_plugin_update` 复用安装器更新路径并映射退出码；文件副作用由 plugin_manager 管理。
     store = ConfigStore()
     ok = plugin_manager.update(
         store,
@@ -48,11 +51,13 @@ def cmd_plugin_update(args: argparse.Namespace) -> int:
 
 
 def cmd_plugin_uninstall(args: argparse.Namespace) -> int:
+    # 逻辑说明：`cmd_plugin_uninstall` 把插件名交给卸载器并映射退出码；清理失败不会被报告为成功。
     ok = plugin_manager.uninstall(ConfigStore(), args.name)
     return 0 if ok else 1
 
 
 def main() -> int:
+    # 逻辑说明：`main` 构造 plugin 子命令树、解析用户输入并分派处理函数；未知组合显示帮助并失败返回。
     parser = argparse.ArgumentParser(
         prog="agentteams",
         description="AgentTeams plugin manager and TeamHarness fallback installer",

@@ -24,6 +24,9 @@ func NewWorkerEnvBuilder(defaults config.WorkerEnvDefaults) *WorkerEnvBuilder {
 // Build returns the env map for a worker container, merging per-worker
 // credentials with cluster-wide defaults.
 func (b *WorkerEnvBuilder) Build(workerName string, prov *WorkerProvisionResult) map[string]string {
+	// 逻辑说明：Build 接收 workerName(string)、prov(*WorkerProvisionResult)，依次借助 applyClusterDefaults构造运行时配置的期望结果。
+	// 返回/状态：返回 map[string]string；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	env := map[string]string{
 		"AGENTTEAMS_WORKER_NAME":         workerName,
 		"AGENTTEAMS_WORKER_GATEWAY_KEY":  prov.GatewayKey,
@@ -49,6 +52,9 @@ func ApplyWorkerConsoleEnv(
 	runtime string,
 	console *v1beta1.WorkerConsoleSpec,
 ) error {
+	// 逻辑说明：ApplyWorkerConsoleEnv 接收 env(map[string]string)、runtime(string)、console(*v1beta1.WorkerConsoleSpec)，依次借助 delete、Validate、Itoa、EffectivePort应用运行时配置的期望结果。
+	// 返回/状态：返回 error；会更新 运行时配置的内存状态，存在客户端调用时还可能同步相应外部资源。
+	// 失败/重试：输入或依赖调用失败会返回错误；是否重排由上层调谐器决定，本函数不隐藏失败。
 	delete(env, "AGENTTEAMS_CONSOLE_PORT")
 	if console == nil {
 		return nil
@@ -65,6 +71,9 @@ func ApplyWorkerConsoleEnv(
 
 // BuildManager returns the env map for a Manager container.
 func (b *WorkerEnvBuilder) BuildManager(managerName string, prov *ManagerProvisionResult, spec v1beta1.ManagerSpec) map[string]string {
+	// 逻辑说明：BuildManager 接收 managerName(string)、prov(*ManagerProvisionResult)、spec(v1beta1.ManagerSpec)，依次借助 managerDurationSeconds、int64、TrimPrefix、FormatInt构造运行时配置的期望结果。
+	// 返回/状态：返回 map[string]string；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	deploymentRuntime := b.defaults.Runtime
 	if deploymentRuntime == "" {
 		deploymentRuntime = "k8s"
@@ -153,6 +162,9 @@ func (b *WorkerEnvBuilder) BuildManager(managerName string, prov *ManagerProvisi
 }
 
 func (b *WorkerEnvBuilder) applyClusterDefaults(env map[string]string) {
+	// 逻辑说明：applyClusterDefaults 接收 env(map[string]string)，按本函数中的条件与转换步骤应用运行时配置的期望结果。
+	// 返回/状态：返回 无；会更新 运行时配置的内存状态，存在客户端调用时还可能同步相应外部资源。
+	// 失败/重试：输入或依赖调用失败会返回错误；是否重排由上层调谐器决定，本函数不隐藏失败。
 	for k, v := range map[string]string{
 		"AGENTTEAMS_MATRIX_DOMAIN":  b.defaults.MatrixDomain,
 		"AGENTTEAMS_FS_ENDPOINT":    b.defaults.FSEndpoint,

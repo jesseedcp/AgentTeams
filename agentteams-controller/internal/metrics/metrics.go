@@ -261,6 +261,7 @@ var (
 )
 
 func init() {
+	// 逻辑说明：进程加载包时一次性向 controller-runtime registry 注册全部指标，并预创建有限标签组合，让“当前为零”也能被监控系统查询到。
 	metrics.Registry.MustRegister(
 		ReconcileDuration,
 		ReconcileTotal,
@@ -277,6 +278,7 @@ func init() {
 }
 
 func initializeSeries() {
+	// 逻辑说明：遍历预定义的 kind、route、operation、结果和错误类别创建零值 series；只使用白名单组合，避免真实资源名或 URL 形成高基数标签。
 	for _, kind := range reconcileKinds {
 		ReconcileErrors.WithLabelValues(kind)
 		for _, result := range reconcileResults {
@@ -321,6 +323,7 @@ func initializeSeries() {
 // be invoked from a deferred closure so it sees the final value of the named
 // error return.
 func Observe(kind string, start time.Time, err error) {
+	// 逻辑说明：根据 reconcile 最终 error 选择 success/error 标签，同时记录耗时与调用次数；错误时额外递增按 kind 聚合的告警计数。
 	result := "success"
 	if err != nil {
 		result = "error"
@@ -333,6 +336,7 @@ func Observe(kind string, start time.Time, err error) {
 // ObserveControllerHTTP records latency and outcome for an inbound controller
 // HTTP request. The route argument must be a normalized route pattern.
 func ObserveControllerHTTP(method, route string, start time.Time, statusCode int) {
+	// 逻辑说明：为空的 method/route 提供有界兜底标签，按 HTTP 状态判定结果和状态段，再分别记录时延、总数及 4xx/5xx 错误数。
 	if method == "" {
 		method = "UNKNOWN"
 	}
@@ -353,6 +357,7 @@ func ObserveControllerHTTP(method, route string, start time.Time, statusCode int
 
 // ObserveUpstream records latency and outcome for a controller outbound call.
 func ObserveUpstream(upstream, operation string, start time.Time, statusCode int, err error) {
+	// 逻辑说明：网络/解码等 Go error 优先决定错误类别，否则用 HTTP 4xx/5xx 标为 http 错误；无响应以 none 记录状态段，最后同步更新耗时、请求和错误指标。
 	result := "success"
 	statusClass := upstreamStatusClass(statusCode)
 	errorClass := ""
@@ -371,6 +376,7 @@ func ObserveUpstream(upstream, operation string, start time.Time, statusCode int
 }
 
 func upstreamStatusClass(statusCode int) string {
+	// 逻辑说明：把任意状态码压缩到固定的 2xx/3xx/4xx/5xx 标签；零值或非法状态表示未收到上游响应，归入 none。
 	switch {
 	case statusCode >= 200 && statusCode < 300:
 		return "2xx"
@@ -386,6 +392,7 @@ func upstreamStatusClass(statusCode int) string {
 }
 
 func classifyUpstreamError(err error) string {
+	// 逻辑说明：按取消、截止时间、网络、解码、结构无效的优先级检查可包装错误；未知错误落入固定 unknown，既保留故障层级又控制指标基数。
 	if errors.Is(err, context.Canceled) {
 		return "canceled"
 	}

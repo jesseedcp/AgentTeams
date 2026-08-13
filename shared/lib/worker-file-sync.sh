@@ -4,6 +4,7 @@
 # 允许持久化的 Worker 数据，并用成功时间标记避免重复全量扫描；Controller 管理的
 # 配置、凭据、缓存和 Matrix 私有状态明确排除，否则旧 Worker 文件会覆盖新期望状态。
 
+# 逻辑说明：创建同步状态目录并以参考文件时间初始化推送水位，避免启动时把旧文件全部误判为新修改。
 worker_sync_init() {
     local state_dir="$1"
     local reference_marker="${2:-}"
@@ -16,6 +17,7 @@ worker_sync_init() {
     fi
 }
 
+# 逻辑说明：远端恢复完成后重置本地推送水位，防止刚拉下来的历史文件立即原样上传。
 worker_sync_mark_remote_pull() {
     local state_dir="$1"
 
@@ -23,6 +25,7 @@ worker_sync_mark_remote_pull() {
     touch "${state_dir}/last-successful-push"
 }
 
+# 逻辑说明：按相对路径执行上传白名单边界，排除凭据、缓存、锁和 Controller 管理配置。
 worker_sync_should_push() {
     local relative_path="$1"
 
@@ -36,6 +39,7 @@ worker_sync_should_push() {
     return 0
 }
 
+# 逻辑说明：当变化文件很多时，以 local→remote 的单向 mirror 批量上传，同时排除 Controller 管理配置和私有凭据。
 worker_sync_mirror_all() {
     # ``mc mirror`` 的方向在这里是 local -> remote；参数调换会把远端历史内容拉回并
     # 覆盖当前运行结果，因此调用者必须传入已校验的 Worker workspace/prefix。
@@ -52,6 +56,7 @@ worker_sync_mirror_all() {
         --exclude ".openclaw/matrix/**" --exclude ".openclaw/canvas/**"
 }
 
+# 逻辑说明：扫描水位之后发生变化且允许同步的文件；小批量逐个复制，大批量切换 mirror，并只在成功后推进水位。
 worker_sync_push_once() {
     local workspace="$1"
     local remote_prefix="$2"

@@ -21,6 +21,7 @@ def decide_tool_permission(
     policy: RoomPolicy,
     yolo: bool,
 ) -> PermissionDecision:
+    # 逻辑说明：先拒绝不在 policy.allowed_tools 的工具，再对 confirm_tools 中且未启用 yolo 的调用返回 ASK，其余返回 ALLOW；该纯决策函数不扩大工具集合也不执行工具副作用。
     if tool_name not in policy.allowed_tools:
         return PermissionDecision(
             behavior=PermissionBehavior.DENY,

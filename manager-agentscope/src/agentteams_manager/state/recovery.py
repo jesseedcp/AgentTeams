@@ -34,6 +34,7 @@ class RecoveryCoordinator:
         temp_directory: Path,
         prefer_local_database: bool = False,
     ) -> None:
+        # 逻辑说明：保存恢复依赖，并仅在调用方允许且本地数据库真实存在且非空时选择 PVC 作为起点；这里只判定来源，不执行 I/O 恢复。
         self._database = database
         self._journal = journal
         self._replay_event = replay_event
@@ -46,6 +47,7 @@ class RecoveryCoordinator:
 
     async def restore(self) -> RecoveryReport:
         """Keep a valid PVC database, or restore MinIO after local loss."""
+        # 逻辑说明：优先读取可信本地已应用 sequence，否则下载并替换为最新校验快照；随后严格重放更晚事件并返回数量，任一恢复失败都会阻止应用继续启动。
         snapshot_sequence = 0
         if self._preserve_local_database:
             snapshot_sequence = await self._local_applied_sequence()
@@ -71,7 +73,9 @@ class RecoveryCoordinator:
         )
 
     async def _local_applied_sequence(self) -> int:
+        # 逻辑说明：通过数据库读事务取得本地最后已应用 journal sequence；键不存在时从 0 开始，查询错误向上抛出以避免跳过事件。
         def read(connection: sqlite3.Connection) -> int:
+            # 逻辑说明：在同一 SQLite 读连接查询恢复游标并转换为整数，不修改任何持久状态。
             row = connection.execute(
                 """
                 SELECT value FROM key_values

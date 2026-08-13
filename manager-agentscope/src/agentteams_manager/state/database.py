@@ -36,9 +36,11 @@ class Database:
     """
 
     def __init__(self, path: Path) -> None:
+        # 逻辑说明：只保存 SQLite 文件路径；连接、WAL/外键设置和事务边界延迟到 initialize/read/write，便于启动前安全组装依赖。
         self.path = path
 
     def _connect(self) -> sqlite3.Connection:
+        # 逻辑说明：为当前事务创建独立连接，并统一启用行对象、外键、WAL 与忙等待；连接失败直接抛出，让调用层决定是否重试。
         connection = sqlite3.connect(self.path, timeout=5.0)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys=ON")
@@ -48,8 +50,10 @@ class Database:
 
     async def open(self) -> None:
         """Create the database and apply the initial idempotent schema."""
+        # 逻辑说明：在线程中幂等创建目录、表和缺失迁移列，拒绝比程序更新的数据库版本；成功写入 schema 版本，任一步失败都由 SQLite 回滚并向上抛出。
 
         def run() -> None:
+            # 逻辑说明：这个同步闭包独占一次 SQLite 连接完成版本检查和全部 DDL；它由 open 放入工作线程，避免阻塞异步事件循环。
             self.path.parent.mkdir(parents=True, exist_ok=True)
             with self._connect() as connection:
                 current = connection.execute(
@@ -126,8 +130,10 @@ class Database:
         callback: Callable[[sqlite3.Connection], T],
     ) -> T:
         """Run a read callback on a dedicated thread and connection."""
+        # 逻辑说明：把调用方的同步查询交给工作线程和独立连接，等待并返回 callback 的结果；查询异常原样传播，不在仓储层吞掉或重试。
 
         def run() -> T:
+            # 逻辑说明：在连接上下文中执行一次同步查询并把结果带回事件循环；上下文负责释放连接。
             with self._connect() as connection:
                 return callback(connection)
 
@@ -143,8 +149,10 @@ class Database:
         内执行网络 I/O，否则会长时间占用写锁；跨系统效果由 workflow 在事务外按
         “先记录意图、再执行效果、最后记录回执”的顺序协调。
         """
+        # 逻辑说明：把同步写 callback 放到工作线程的一次连接事务中并返回结果；正常退出提交，异常退出回滚且错误向上传播，重试由更上层按幂等规则决定。
 
         def run() -> T:
+            # 逻辑说明：连接上下文界定完整事务边界，确保 callback 中的多条 SQL 要么全部提交、要么全部撤销。
             with self._connect() as connection:
                 return callback(connection)
 
@@ -152,8 +160,10 @@ class Database:
 
     async def backup_to(self, destination: Path) -> None:
         """Create a transactionally consistent SQLite backup."""
+        # 逻辑说明：在工作线程创建目标目录，先做被动 WAL 检查点，再用 SQLite backup API 生成一致快照；I/O 或数据库错误直接返回调用方处理。
 
         def run() -> None:
+            # 逻辑说明：同步完成检查点和数据库级复制，避免直接复制带 WAL 的文件得到不一致备份。
             destination.parent.mkdir(parents=True, exist_ok=True)
             with self._connect() as source:
                 source.execute("PRAGMA wal_checkpoint(PASSIVE)")
@@ -164,8 +174,10 @@ class Database:
 
     async def replace_from(self, source: Path) -> None:
         """Replace local contents with a verified SQLite database."""
+        # 逻辑说明：在工作线程打开来源库并通过 backup API 覆盖本地数据库；复制保持 SQLite 页面一致性，失败时异常向上抛出而不会伪报恢复成功。
 
         def run() -> None:
+            # 逻辑说明：同步打开来源与目标连接并执行数据库级复制，连接上下文负责提交或在异常时回滚。
             self.path.parent.mkdir(parents=True, exist_ok=True)
             with sqlite3.connect(source) as source_connection:
                 with self._connect() as target:
@@ -175,3 +187,4 @@ class Database:
 
     async def close(self) -> None:
         """Connections are transaction-scoped, so shutdown needs no action."""
+        # 逻辑说明：连接都由每次 read/write 的上下文及时关闭，因此这里只提供统一生命周期接口，不产生额外状态或外部副作用。

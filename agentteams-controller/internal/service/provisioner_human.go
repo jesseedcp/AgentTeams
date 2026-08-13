@@ -33,6 +33,9 @@ import (
 // not assign one and callers that want password login must follow up
 // with SetUserPassword explicitly.
 func (p *Provisioner) RegisterAppServiceUser(ctx context.Context, username string) (*HumanCredentials, error) {
+	// 逻辑说明：RegisterAppServiceUser 接收 ctx(context.Context)、username(string)，依次借助 EnsureAppServiceUser注册Matrix 真人用户的期望结果。
+	// 返回/状态：返回 *HumanCredentials、error；可能查询或改变 Matrix 用户、房间、别名、成员或权限状态。
+	// 失败/重试：Matrix 请求失败会返回错误；上层下一轮先重新观测实际状态，再只补做尚未满足的步骤。
 	uc, err := p.matrix.EnsureAppServiceUser(ctx, username)
 	if err != nil {
 		return nil, fmt.Errorf("AS register human %s: %w", username, err)
@@ -51,6 +54,9 @@ func (p *Provisioner) RegisterAppServiceUser(ctx context.Context, username strin
 // HumanCredentials always carries a Password since legacy auth has no
 // AS bypass.
 func (p *Provisioner) RegisterLegacyUser(ctx context.Context, username string) (*HumanCredentials, error) {
+	// 逻辑说明：RegisterLegacyUser 接收 ctx(context.Context)、username(string)，依次借助 EnsureUser注册Matrix 真人用户的期望结果。
+	// 返回/状态：返回 *HumanCredentials、error；可能查询或改变 Matrix 用户、房间、别名、成员或权限状态。
+	// 失败/重试：Matrix 请求失败会返回错误；上层下一轮先重新观测实际状态，再只补做尚未满足的步骤。
 	uc, err := p.matrix.EnsureUser(ctx, matrix.EnsureUserRequest{Username: username})
 	if err != nil {
 		return nil, fmt.Errorf("register legacy human %s: %w", username, err)
@@ -69,6 +75,9 @@ func (p *Provisioner) RegisterLegacyUser(ctx context.Context, username string) (
 // confirm propagation are expected to test by attempting a login
 // afterwards.
 func (p *Provisioner) SetUserPassword(ctx context.Context, userID, password string) error {
+	// 逻辑说明：SetUserPassword 接收 ctx(context.Context)、userID/password(string)，依次借助 SetPasswordAsAdmin设置Matrix 真人用户的期望结果。
+	// 返回/状态：返回 error；可能查询或改变 Matrix 用户、房间、别名、成员或权限状态。
+	// 失败/重试：Matrix 请求失败会返回错误；上层下一轮先重新观测实际状态，再只补做尚未满足的步骤。
 	return p.matrix.SetPasswordAsAdmin(ctx, userID, password)
 }
 
@@ -76,6 +85,9 @@ func (p *Provisioner) SetUserPassword(ctx context.Context, userID, password stri
 // flow (no password required). Used by both legacy_password and
 // external_sso identity sources when the controller runs in AS mode.
 func (p *Provisioner) LoginAppServiceUser(ctx context.Context, username string) (string, error) {
+	// 逻辑说明：LoginAppServiceUser 接收 ctx(context.Context)、username(string)，依次借助 LoginAppServiceUser登录Matrix 真人用户的期望结果。
+	// 返回/状态：返回 string、error；可能查询或改变 Matrix 用户、房间、别名、成员或权限状态。
+	// 失败/重试：Matrix 请求失败会返回错误；上层下一轮先重新观测实际状态，再只补做尚未满足的步骤。
 	return p.matrix.LoginAppServiceUser(ctx, username)
 }
 
@@ -83,6 +95,9 @@ func (p *Provisioner) LoginAppServiceUser(ctx context.Context, username string) 
 // login flow. Used by legacy_password when AS mode is disabled and
 // the controller has the user's stored InitialPassword.
 func (p *Provisioner) LoginWithPassword(ctx context.Context, username, password string) (string, error) {
+	// 逻辑说明：LoginWithPassword 接收 ctx(context.Context)、username/password(string)，依次借助 Login登录Matrix 真人用户的期望结果。
+	// 返回/状态：返回 string、error；可能查询或改变 Matrix 用户、房间、别名、成员或权限状态。
+	// 失败/重试：Matrix 请求失败会返回错误；上层下一轮先重新观测实际状态，再只补做尚未满足的步骤。
 	return p.matrix.Login(ctx, username, password)
 }
 
@@ -111,6 +126,9 @@ func (p *Provisioner) LoginWithPassword(ctx context.Context, username, password 
 // register / set-password primitives so the "set password" side effect
 // is only triggered on first creation.
 func (p *Provisioner) EnsureHumanUser(ctx context.Context, username string) (*HumanCredentials, error) {
+	// 逻辑说明：EnsureHumanUser 接收 ctx(context.Context)、username(string)，依次借助 MatrixAppServiceEnabled、RegisterAppServiceUser、GeneratePassword、SetUserPassword确保Matrix 真人用户的期望结果。
+	// 返回/状态：返回 *HumanCredentials、error；可能查询或改变 Matrix 用户、房间、别名、成员或权限状态。
+	// 失败/重试：Matrix 请求失败会返回错误；上层下一轮先重新观测实际状态，再只补做尚未满足的步骤。
 	if p.MatrixAppServiceEnabled() {
 		creds, err := p.RegisterAppServiceUser(ctx, username)
 		if err != nil {
@@ -148,6 +166,9 @@ func (p *Provisioner) EnsureHumanUser(ctx context.Context, username string) (*Hu
 // branch issues "!admin users reset-password", which would silently
 // overwrite any password the user changed via Cinny.
 func (p *Provisioner) LoginAsHuman(ctx context.Context, username, password string) (string, error) {
+	// 逻辑说明：LoginAsHuman 接收 ctx(context.Context)、username/password(string)，依次借助 MatrixAppServiceEnabled、LoginAppServiceUser、LoginWithPassword登录Matrix 真人用户的期望结果。
+	// 返回/状态：返回 string、error；可能查询或改变 Matrix 用户、房间、别名、成员或权限状态。
+	// 失败/重试：Matrix 请求失败会返回错误；上层下一轮先重新观测实际状态，再只补做尚未满足的步骤。
 	if p.MatrixAppServiceEnabled() {
 		return p.LoginAppServiceUser(ctx, username)
 	}
@@ -160,12 +181,18 @@ func (p *Provisioner) LoginAsHuman(ctx context.Context, username, password strin
 
 // SetDisplayName updates the Matrix profile displayname for a human user.
 func (p *Provisioner) SetDisplayName(ctx context.Context, userID, accessToken, displayName string) error {
+	// 逻辑说明：SetDisplayName 接收 ctx(context.Context)、userID/accessToken/displayName(string)，依次借助 SetDisplayName设置Matrix 真人用户的期望结果。
+	// 返回/状态：返回 error；可能查询或改变 Matrix 用户、房间、别名、成员或权限状态。
+	// 失败/重试：Matrix 请求失败会返回错误；上层下一轮先重新观测实际状态，再只补做尚未满足的步骤。
 	return p.matrix.SetDisplayName(ctx, userID, accessToken, displayName)
 }
 
 // InviteToRoom invites the given Matrix user into roomID using the admin
 // access token. Idempotent; see matrix.Client.InviteToRoom.
 func (p *Provisioner) InviteToRoom(ctx context.Context, roomID, userID string) error {
+	// 逻辑说明：InviteToRoom 接收 ctx(context.Context)、roomID/userID(string)，依次借助 InviteToRoom邀请Matrix 真人用户的期望结果。
+	// 返回/状态：返回 error；可能查询或改变 Matrix 用户、房间、别名、成员或权限状态。
+	// 失败/重试：Matrix 请求失败会返回错误；上层下一轮先重新观测实际状态，再只补做尚未满足的步骤。
 	return p.matrix.InviteToRoom(ctx, roomID, userID)
 }
 
@@ -175,11 +202,17 @@ func (p *Provisioner) InviteToRoom(ctx context.Context, roomID, userID string) e
 // /joins — an admin-side invite alone is not sufficient to make the user
 // a full member.
 func (p *Provisioner) JoinRoomAs(ctx context.Context, roomID, userToken string) error {
+	// 逻辑说明：JoinRoomAs 接收 ctx(context.Context)、roomID/userToken(string)，依次借助 JoinRoom加入Matrix 真人用户的期望结果。
+	// 返回/状态：返回 error；可能查询或改变 Matrix 用户、房间、别名、成员或权限状态。
+	// 失败/重试：Matrix 请求失败会返回错误；上层下一轮先重新观测实际状态，再只补做尚未满足的步骤。
 	return p.matrix.JoinRoom(ctx, roomID, userToken)
 }
 
 // KickFromRoom removes userID from roomID using the admin token. Idempotent.
 func (p *Provisioner) KickFromRoom(ctx context.Context, roomID, userID, reason string) error {
+	// 逻辑说明：KickFromRoom 接收 ctx(context.Context)、roomID/userID/reason(string)，依次借助 KickFromRoom移出Matrix 真人用户的期望结果。
+	// 返回/状态：返回 error；可能查询或改变 Matrix 用户、房间、别名、成员或权限状态。
+	// 失败/重试：Matrix 请求失败会返回错误；上层下一轮先重新观测实际状态，再只补做尚未满足的步骤。
 	return p.matrix.KickFromRoom(ctx, roomID, userID, reason)
 }
 
@@ -188,6 +221,9 @@ func (p *Provisioner) KickFromRoom(ctx context.Context, roomID, userID, reason s
 // holds a valid user token (password may be stale) and must rely on the
 // admin bot instead of /leave. Fire-and-forget at the bot layer.
 func (p *Provisioner) ForceLeaveRoom(ctx context.Context, userID, roomID string) error {
+	// 逻辑说明：ForceLeaveRoom 接收 ctx(context.Context)、userID/roomID(string)，依次借助 AdminCommand强制执行Matrix 真人用户的期望结果。
+	// 返回/状态：返回 error；可能查询或改变 Matrix 用户、房间、别名、成员或权限状态。
+	// 失败/重试：Matrix 请求失败会返回错误；上层下一轮先重新观测实际状态，再只补做尚未满足的步骤。
 	cmd := fmt.Sprintf("!admin users force-leave-room %s %s", userID, roomID)
 	log.FromContext(ctx).Info("sending tuwunel force-leave-room admin command", "room", roomID, "user", userID, "command", cmd)
 	return p.matrix.AdminCommand(ctx, cmd)
@@ -197,6 +233,9 @@ func (p *Provisioner) ForceLeaveRoom(ctx context.Context, userID, roomID string)
 // Tuwunel owns the exact deactivate/revoke semantics; the controller treats a
 // successful command delivery as the offboard handoff point.
 func (p *Provisioner) DeactivateHumanUser(ctx context.Context, userID string) error {
+	// 逻辑说明：DeactivateHumanUser 接收 ctx(context.Context)、userID(string)，依次借助 AdminCommand处理Matrix 真人用户的期望结果。
+	// 返回/状态：返回 error；可能查询或改变 Matrix 用户、房间、别名、成员或权限状态。
+	// 失败/重试：Matrix 请求失败会返回错误；上层下一轮先重新观测实际状态，再只补做尚未满足的步骤。
 	cmd := fmt.Sprintf("!admin users deactivate %s", userID)
 	log.FromContext(ctx).Info("sending tuwunel human deactivate admin command", "user", userID, "command", cmd)
 	return p.matrix.AdminCommand(ctx, cmd)

@@ -55,6 +55,7 @@ class Actor:
 
 
 def _binding_from_row(row: sqlite3.Row) -> TopologyBinding:
+    # 逻辑说明：解析 room kind、payload JSON 和刷新时间，将物化表行恢复为授权查询绑定；损坏缓存显式失败以触发重新同步。
     return TopologyBinding(
         resource_type=row["resource_type"],
         resource_name=row["resource_name"],
@@ -73,10 +74,12 @@ class TopologyRepository:
         *,
         admin_user_id: str | None = None,
     ) -> None:
+        # 逻辑说明：绑定拓扑数据库和可选管理员身份；实际房间、成员与 actor 状态只在后续事务中写入。
         self._database = database
         self._admin_user_id = admin_user_id
 
     async def replace_snapshot(self, snapshot: TopologySnapshot) -> None:
+        # 逻辑说明：先在事务外把 Controller snapshot 规范成 room、human、actor 三组行并检查一房多 kind 冲突，再在单事务整体替换并推进 revision。
         rows: list[tuple[str, str, str, str, str | None, str, str]] = []
         human_rows: list[tuple[str, str, int, str, str, str]] = []
         actor_rows: list[
@@ -99,6 +102,7 @@ class TopologyRepository:
             matrix_user_id: str | None,
             payload: str,
         ) -> None:
+            # 逻辑说明：忽略无 room 资源，拒绝同一 room 映射不同 RoomKind，并把规范行加入待写列表；此阶段不修改数据库。
             if not room_id:
                 return
             previous = kinds_by_room.get(room_id)
@@ -195,6 +199,7 @@ class TopologyRepository:
             )
 
         def write(connection: sqlite3.Connection) -> None:
+            # 逻辑说明：删除旧 Controller 派生绑定后批量插入新 topology/human/actor，并在同一事务更新 revision；任一步失败保留完整旧快照。
             connection.execute(
                 "DELETE FROM topology "
                 "WHERE resource_type IN ('worker', 'team')",
@@ -258,6 +263,7 @@ class TopologyRepository:
         self,
         matrix_user_id: str,
     ) -> Actor | None:
+        # 逻辑说明：先用配置的管理员 ID 快速判定 Admin，否则在单一读快照依次解析 Worker/Team actor、Human 和 trusted contact；都未命中返回 None。
         if self._admin_user_id and matrix_user_id == self._admin_user_id:
             return Actor(
                 matrix_user_id=matrix_user_id,
@@ -265,6 +271,7 @@ class TopologyRepository:
             )
 
         def read(connection: sqlite3.Connection) -> Actor | None:
+            # 逻辑说明：按信任优先级查询物化身份并解析 payload；只依据权威同步表，不从聊天内容推断角色。
             row = connection.execute(
                 """
                 SELECT actor_kind, resource_name, team_name, payload_json
@@ -316,7 +323,9 @@ class TopologyRepository:
         return await self._database.read(read)
 
     async def revision(self) -> int:
+        # 逻辑说明：读取最后成功替换的 topology revision，未同步时返回 0；不修改快照。
         def read(connection: sqlite3.Connection) -> int:
+            # 逻辑说明：查询通用 key/value 游标并转换整数。
             row = connection.execute(
                 "SELECT value FROM key_values WHERE key='topology_revision'",
             ).fetchone()
@@ -325,7 +334,9 @@ class TopologyRepository:
         return await self._database.read(read)
 
     async def room_binding(self, room_id: str) -> TopologyBinding | None:
+        # 逻辑说明：按 Matrix room ID 返回物化资源绑定，不存在返回 None，供 policy resolver 选择最小权限。
         def read(connection: sqlite3.Connection) -> TopologyBinding | None:
+            # 逻辑说明：单行查询并统一转换 payload 和枚举。
             row = connection.execute(
                 "SELECT * FROM topology WHERE room_id=?",
                 (room_id,),
@@ -339,7 +350,9 @@ class TopologyRepository:
         matrix_user_id: str,
     ) -> HumanResource | None:
         """Resolve Controller-declared Human access by Matrix identity."""
+        # 逻辑说明：按 Matrix sender 查 Controller 声明的 Human payload，未命中返回 None；不根据房间成员关系自动授予身份。
         def read(connection: sqlite3.Connection) -> HumanResource | None:
+            # 逻辑说明：读取 JSON payload 并用领域模型完整校验权限字段。
             row = connection.execute(
                 """
                 SELECT payload_json FROM human_access
@@ -354,9 +367,11 @@ class TopologyRepository:
         return await self._database.read(read)
 
     async def all_bindings(self) -> tuple[TopologyBinding, ...]:
+        # 逻辑说明：读取全部物化绑定并按资源种类/名称稳定返回，用于管理诊断和策略缓存刷新。
         def read(
             connection: sqlite3.Connection,
         ) -> tuple[TopologyBinding, ...]:
+            # 逻辑说明：在同一读快照批量转换所有 binding。
             rows = connection.execute(
                 """
                 SELECT * FROM topology
@@ -375,10 +390,12 @@ class TopologyRepository:
         payload: dict[str, object],
         refreshed_at: datetime,
     ) -> None:
+        # 逻辑说明：验证 project 与 room 键，在事务中按 project identity upsert Project Room 绑定和稳定 JSON payload；不会替换 Worker/Team snapshot。
         _require_channel_key(project_id, "project_id")
         _require_channel_key(room_id, "room_id")
 
         def write(connection: sqlite3.Connection) -> None:
+            # 逻辑说明：单条 upsert 原子更新 room、payload 与刷新时间，alias 迁移时旧 room 不再被视为当前绑定。
             connection.execute(
                 """
                 INSERT INTO topology(
@@ -412,10 +429,12 @@ class TopologyRepository:
         user_id: str,
         room_id: str,
     ) -> None:
+        # 逻辑说明：验证 user/room 后按用户 upsert 唯一 primary channel；重复设置更新房间与时间，不增加多条主通道。
         _require_channel_key(user_id, "user_id")
         _require_channel_key(room_id, "room_id")
 
         def write(connection: sqlite3.Connection) -> None:
+            # 逻辑说明：用 relationship 唯一键原子创建或替换 primary 关系。
             connection.execute(
                 """
                 INSERT INTO channel_relationships(
@@ -434,9 +453,11 @@ class TopologyRepository:
         await self._database.write(write)
 
     async def clear_primary_channel(self, user_id: str) -> None:
+        # 逻辑说明：验证用户 ID 后删除其 primary 关系；不存在时幂等成功，不影响 trusted 关系。
         _require_channel_key(user_id, "user_id")
 
         def write(connection: sqlite3.Connection) -> None:
+            # 逻辑说明：条件删除指定用户的 primary 行，事务失败则保留旧路由。
             connection.execute(
                 """
                 DELETE FROM channel_relationships
@@ -449,9 +470,11 @@ class TopologyRepository:
         await self._database.write(write)
 
     async def primary_channel(self, user_id: str) -> str | None:
+        # 逻辑说明：验证用户 ID 并读取唯一 primary room；未配置返回 None，不回退到任意加入房间。
         _require_channel_key(user_id, "user_id")
 
         def read(connection: sqlite3.Connection) -> str | None:
+            # 逻辑说明：执行单行关系查询并规范返回字符串。
             row = connection.execute(
                 """
                 SELECT room_id FROM channel_relationships
@@ -470,10 +493,12 @@ class TopologyRepository:
         second_user_id: str,
         room_id: str,
     ) -> None:
+        # 逻辑说明：先把两个不同用户规范为无方向有序对并验证 room，再 upsert trusted 关系；反向重复调用命中同一记录。
         first, second = _trusted_pair(first_user_id, second_user_id)
         _require_channel_key(room_id, "room_id")
 
         def write(connection: sqlite3.Connection) -> None:
+            # 逻辑说明：按 relationship kind 与有序用户对原子创建或更新可信 room。
             connection.execute(
                 """
                 INSERT INTO channel_relationships(
@@ -500,9 +525,11 @@ class TopologyRepository:
         self,
         user_id: str,
     ) -> tuple[str, ...]:
+        # 逻辑说明：验证用户并查询其作为任一端点的全部 trusted rooms，排序后返回不可变元组。
         _require_channel_key(user_id, "user_id")
 
         def read(connection: sqlite3.Connection) -> tuple[str, ...]:
+            # 逻辑说明：在一致快照读取关联 room，不改变信任关系。
             rows = connection.execute(
                 """
                 SELECT room_id FROM channel_relationships
@@ -521,9 +548,11 @@ class TopologyRepository:
         first_user_id: str,
         second_user_id: str,
     ) -> None:
+        # 逻辑说明：规范两个用户为同一有序身份后删除对应 trusted 关系；重复删除幂等且不影响 primary channel。
         first, second = _trusted_pair(first_user_id, second_user_id)
 
         def write(connection: sqlite3.Connection) -> None:
+            # 逻辑说明：按完整复合键条件删除，避免移除该用户与其他联系人的信任。
             connection.execute(
                 """
                 DELETE FROM channel_relationships
@@ -538,11 +567,13 @@ class TopologyRepository:
 
 
 def _require_channel_key(value: str, label: str) -> None:
+    # 逻辑说明：拒绝空的房间/用户关系键并在错误中指出字段名，防止不同缺失关系坍缩为同一数据库主键。
     if not value:
         raise ValueError(f"{label} cannot be empty")
 
 
 def _trusted_pair(first: str, second: str) -> tuple[str, str]:
+    # 逻辑说明：校验两个非空且不同的用户 ID，并稳定排序为无方向关系键，使 A-B 与 B-A 共享同一数据库记录。
     _require_channel_key(first, "first_user_id")
     _require_channel_key(second, "second_user_id")
     if first == second:

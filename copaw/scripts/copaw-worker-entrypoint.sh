@@ -30,6 +30,7 @@ WORKER_NAME="${AGENTTEAMS_WORKER_NAME:-}"
 INSTALL_DIR="/root/.copaw-worker"
 CONSOLE_PORT="${AGENTTEAMS_CONSOLE_PORT:-}"
 
+# 逻辑说明：为 CoPaw 启动阶段的诊断信息统一添加 Worker 标识与时间戳，不输出凭据。
 log() {
     echo "[agentteams-copaw-worker $(date '+%Y-%m-%d %H:%M:%S')] $1"
 }

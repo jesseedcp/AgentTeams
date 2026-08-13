@@ -115,23 +115,27 @@ Write-Host ""
 # Utility Functions
 # ============================================================
 
+# 逻辑说明：接收普通安装消息，添加统一的 `[AgentTeams]` 彩色前缀后写到终端；它不返回数据，调用方不得把 API Key、密码等秘密传进来。
 function Write-Log {
     param([string]$Message)
     Write-Host "$($script:ESC)[36m[AgentTeams]$($script:ESC)[0m $Message"
 }
 
+# 逻辑说明：接收不可恢复的错误文本，先用红色前缀显示，再抛出异常让当前安装路径停止；因此调用者不能把它当作普通日志后继续执行。
 function Write-Error {
     param([string]$Message)
     Write-Host "$($script:ESC)[31m[AgentTeams ERROR]$($script:ESC)[0m $Message" -ForegroundColor Red
     throw $Message
 }
 
+# 逻辑说明：接收仍可恢复的风险提示并用黄色前缀显示；只产生终端输出，不抛异常，是否继续由调用它的向导步骤决定。
 function Write-Warning {
     param([string]$Message)
     Write-Host "$($script:ESC)[33m[AgentTeams WARNING]$($script:ESC)[0m $Message"
 }
 
 # Pause before exit on error so user can read the message when running via double-click
+# 逻辑说明：用指定退出码结束整个安装器；交互模式发生失败时先等待用户按回车看清错误，自动化模式则立即返回退出码，避免 CI 被输入提示卡住。
 function Exit-Script {
     param([int]$ExitCode = 0)
     if ($ExitCode -ne 0 -and -not $script:AGENTTEAMS_NON_INTERACTIVE) {
@@ -142,6 +146,7 @@ function Exit-Script {
     exit $ExitCode
 }
 
+# 逻辑说明：执行只读的 `docker info` 探测 daemon 是否可连接，并以布尔值返回；命令不存在、daemon 未启动或调用异常都归为 `false`，不会创建容器。
 function Test-DockerRunning {
     try {
         $null = docker info 2>&1
@@ -155,6 +160,7 @@ function Test-DockerRunning {
     }
 }
 
+# 逻辑说明：优先返回显式 `AGENTTEAMS_TIMEZONE`，否则把 Windows 时区名转换成容器可识别的 IANA 名称；系统探测异常时回退 `Asia/Shanghai`，只读主机状态。
 function Get-AgentTeamsTimeZone {
     try {
         if ($env:AGENTTEAMS_TIMEZONE) {
@@ -187,6 +193,7 @@ function Get-AgentTeamsTimeZone {
     }
 }
 
+# 逻辑说明：返回 AgentTeams 镜像仓库主机；显式环境变量优先，否则固定使用 `ghcr.io`，这里只做地址选择，不联网拉取镜像。
 function Get-Registry {
     if ($env:AGENTTEAMS_REGISTRY) {
         return $env:AGENTTEAMS_REGISTRY
@@ -195,6 +202,7 @@ function Get-Registry {
     return "ghcr.io"
 }
 
+# 逻辑说明：根据显式覆盖或传入时区选择离用户较近的 Higress 镜像仓库并返回域名；未匹配地区回退杭州仓库，实际拉取留给安装阶段。
 function Get-HigressRegistry {
     param([string]$Timezone)
 
@@ -216,6 +224,7 @@ function Get-HigressRegistry {
     return "higress-registry.cn-hangzhou.cr.aliyuncs.com"
 }
 
+# 逻辑说明：把用户、Release API 或旧配置中的版本写法规范成 `v主.次.补丁`，同时保留预发布后缀；`latest` 和无法识别的文本原样返回，供后续逻辑保守处理。
 function ConvertTo-NormalizedVersion {
     param([string]$Version)
 
@@ -236,6 +245,7 @@ function ConvertTo-NormalizedVersion {
     return "v$major.$minor.$patch$suffix"
 }
 
+# 逻辑说明：规范化左右两个版本并逐段比较主、次、补丁号，返回左侧是否更旧；无法解析时返回 `false`，避免在不确定时误套旧版兼容配置。
 function Test-VersionLessThan {
     param(
         [string]$Left,
@@ -269,6 +279,7 @@ function Test-VersionLessThan {
     return $false
 }
 
+# 逻辑说明：判断目标镜像是否早于 v1.2，从而决定是否使用旧环境变量契约；`latest` 会换成当前已知稳定版本再比较，结果仅为布尔值。
 function Test-UseLegacyImageEnv {
     param([string]$Version)
 
@@ -279,6 +290,7 @@ function Test-UseLegacyImageEnv {
     return Test-VersionLessThan $selected "v1.2.0"
 }
 
+# 逻辑说明：根据目标镜像版本返回 Controller 接受的环境变量前缀；旧版使用历史前缀，新版使用 `AGENTTEAMS_`，避免升级时字段全部失效。
 function Get-ControllerEnvPrefix {
     param([string]$Version)
 
@@ -288,6 +300,7 @@ function Get-ControllerEnvPrefix {
     return "AGENTTEAMS_"
 }
 
+# 逻辑说明：根据目标镜像版本返回持久化对象的存储前缀；旧版和新版路径不同，选错会让 Controller 看不到原有数据，但本函数本身不读写存储。
 function Get-ControllerStoragePrefix {
     param([string]$Version)
 
@@ -297,6 +310,7 @@ function Get-ControllerStoragePrefix {
     return "agentteams/agentteams-storage"
 }
 
+# 逻辑说明：在尚未指定版本时向配置的 GitHub 仓库查询最新 Release，并写入本轮脚本版本状态；仓库名非法立即抛错，网络或无 Release 时明确回退 `latest`。
 function Resolve-AgentTeamsVersion {
     if ($script:AGENTTEAMS_VERSION) {
         return
@@ -323,6 +337,7 @@ function Resolve-AgentTeamsVersion {
     $script:AGENTTEAMS_VERSION = "latest"
 }
 
+# 逻辑说明：根据传入时区判断安装器默认使用中文还是英文并返回语言代码；中国大陆及港澳台时区返回 `zh`，其他地区返回 `en`。
 function Get-AgentTeamsLanguage {
     param([string]$Timezone)
     $chineseZones = @(
@@ -723,6 +738,7 @@ $script:Messages = @{
 
 # Get-Msg: look up message by key, with -f style argument substitution.
 # Falls back to English if the current language translation is missing.
+# 逻辑说明：用消息键从中英文词典取出当前语言文本并应用可选格式参数；键或翻译缺失时逐级回退英文和键名，保证提示不会变成空字符串。
 function Get-Msg {
     param(
         [Parameter(Mandatory)][string]$Key,
@@ -739,6 +755,7 @@ function Get-Msg {
     return $text
 }
 
+# 逻辑说明：从活动 IPv4 网卡中优先选择 Wi-Fi/Ethernet 地址，必要时再解析 `ipconfig`；探测失败返回空字符串，只用于生成访问提示而不修改网络。
 function Get-LanIP {
     # Detect local LAN IP address on Windows
     try {
@@ -781,11 +798,13 @@ $script:KnownModels = @(
     "kimi-k2.5", "glm-5", "MiniMax-M2.7", "MiniMax-M2.7-highspeed", "MiniMax-M2.5"
 )
 
+# 逻辑说明：检查传入模型名是否在安装器内置能力表中并返回布尔值；未知模型不是错误，而是触发下一步人工补充上下文和能力参数。
 function Test-KnownModel {
     param([string]$Model)
     return $script:KnownModels -contains $Model
 }
 
+# 逻辑说明：未知模型时逐项询问上下文窗口、最大输出、推理和视觉能力并写入本轮配置；用户输入 `b` 会设置回退状态，已知模型则清空这些覆盖值。
 function Request-CustomModelParams {
     param([string]$Model)
     if (Test-KnownModel $Model) {
@@ -813,6 +832,7 @@ function Request-CustomModelParams {
     Write-Log (Get-Msg "llm.custom_model.summary" -f $script:config.MODEL_CONTEXT_WINDOW, $script:config.MODEL_MAX_TOKENS, $script:config.MODEL_REASONING, $script:config.MODEL_VISION)
 }
 
+# 逻辑说明：调用系统密码学随机源生成 32 字节并返回 64 位十六进制秘密；结果只交给配置写入路径，随机源异常会向上传播而不是降级为弱随机数。
 function New-RandomKey {
     # Generate 64 character hex string (32 bytes)
     $bytes = New-Object byte[] 32
@@ -821,6 +841,7 @@ function New-RandomKey {
     return [BitConverter]::ToString($bytes).Replace("-", "").ToLower()
 }
 
+# 逻辑说明：把 Windows 宿主路径转换成 Docker 挂载可接受的 `/盘符/路径` 形式并返回；路径存在时先解析绝对路径，不存在时保留调用方输入供后续命令报出真实错误。
 function ConvertTo-DockerPath {
     param([string]$Path)
 
@@ -841,6 +862,7 @@ function ConvertTo-DockerPath {
 
 # Resolve the infrastructure Controller image. The Manager is always a separate
 # AgentScope process and installation fails if the image is unavailable.
+# 逻辑说明：确定内嵌 Controller 镜像并写入脚本状态；显式本地覆盖优先，否则尝试版本标签、再回退 `latest`，两者都不可拉取时抛错阻止半安装。
 function Resolve-EmbeddedImage {
     # Explicit override always wins (used by `make install-embedded` for local builds).
     if ($env:AGENTTEAMS_INSTALL_EMBEDDED_IMAGE) {
@@ -884,6 +906,7 @@ function Resolve-EmbeddedImage {
     Exit-Script 1
 }
 
+# 逻辑说明：在给定超时内每两秒从目标容器请求 AgentScope Manager `/readyz`，就绪返回 `true`；容器命令暂时失败会继续重试，超时返回 `false` 并输出排障提示。
 function Wait-ManagerReady {
     param(
         [string]$Container = "agentteams-manager",
@@ -916,6 +939,7 @@ function Wait-ManagerReady {
     Exit-Script 1
 }
 
+# 逻辑说明：在给定超时内轮询容器内 Tuwunel 的版本接口，确认 Matrix 真能响应后返回 `true`；启动期异常被视为可重试，超时则返回 `false`。
 function Wait-MatrixReady {
     param(
         [string]$Container = "agentteams-manager",
@@ -946,6 +970,7 @@ function Wait-MatrixReady {
     Exit-Script 1
 }
 
+# 逻辑说明：把已经校验的配置表序列化成安装 env 文件并写到指定路径，包含模型、身份、端口和随机凭据；写入失败会抛错，调用方不得在此前启动新容器。
 function New-EnvFile {
     param([hashtable]$Config, [string]$Path)
 
@@ -1060,6 +1085,7 @@ AGENTTEAMS_HOST_SHARE_DIR=$($Config.HOST_SHARE_DIR)
 # Prompt Functions
 # ============================================================
 
+# 逻辑说明：统一读取一个向导字段，按环境变量、升级现值、默认值和人工输入的优先级返回结果；秘密输入会遮罩，`b` 设置回退状态，必填项为空时继续询问。
 function Read-Prompt {
     param(
         [string]$VarName,
@@ -1162,6 +1188,7 @@ function Read-Prompt {
 }
 
 # Load current parameter values from env file for upgrade mode display
+# 逻辑说明：逐行读取现有 env 文件，把白名单字段恢复到本轮内存配置和进程环境中供升级复用；文件不存在时不做事，也不会把文件内容当 PowerShell 执行。
 function Load-CurrentParamsFromEnv {
     $envFile = $script:AGENTTEAMS_ENV_FILE
     if (Test-Path $envFile) {
@@ -1220,6 +1247,7 @@ function Load-CurrentParamsFromEnv {
 # OpenAI-Compatible Provider
 # ============================================================
 
+# 逻辑说明：向兼容 OpenAI 的聊天接口发送最小 `hi` 请求，验证 Base URL、API Key 与模型组合并返回布尔值；失败只显示脱敏错误和可选提示，不打印密钥。
 function Test-LlmConnectivity {
     param(
         [string]$BaseUrl,
@@ -1267,6 +1295,7 @@ function Test-LlmConnectivity {
     }
 }
 
+# 逻辑说明：向 embeddings 接口发送最小测试文本，验证嵌入模型配置并返回布尔值；网络/API 错误转换成可读提示，Authorization 密钥不进入日志。
 function Test-EmbeddingConnectivity {
     param(
         [string]$BaseUrl,
@@ -1301,6 +1330,7 @@ function Test-EmbeddingConnectivity {
     }
 }
 
+# 逻辑说明：把 OpenAI-compatible 上游拆成协议、主机、端口和路径，通过本地 Higress Console API 创建 Provider；参数缺失或 HTTP 配置失败返回 `false`，成功返回 `true`。
 function New-OpenAICompatProvider {
     param(
         [string]$BaseUrl,
@@ -1388,6 +1418,7 @@ function New-OpenAICompatProvider {
 # State Machine Helpers
 # ============================================================
 
+# 逻辑说明：依据非交互、Quick Start 和“保留全部配置”升级模式判断指定向导步骤是否可跳过并返回布尔值；它只读当前安装状态，不清空字段。
 function Test-ShouldSkipStep {
     param([string]$StepFn)
     switch ($StepFn) {
@@ -1425,6 +1456,7 @@ function Test-ShouldSkipStep {
     }
 }
 
+# 逻辑说明：用户返回某个向导步骤时，仅清除该步骤负责的进程环境变量和派生状态；更早已确认的配置继续保留，防止回退导致整套输入丢失。
 function Clear-StepVars {
     param([string]$StepFn)
     switch ($StepFn) {
@@ -1488,6 +1520,7 @@ function Clear-StepVars {
 # Individual step functions
 # ============================================================
 
+# 逻辑说明：展示自动检测的语言并让用户在中英文间选择，随后同步脚本变量和进程环境；输入 `b` 返回上一步，不会启动或修改容器。
 function Step-Lang {
     $langDefaultChoice = if ($script:AGENTTEAMS_LANGUAGE -eq "zh") { "1" } else { "2" }
     $langDetectedKey = "lang.detected.$($script:AGENTTEAMS_LANGUAGE)"
@@ -1507,6 +1540,7 @@ function Step-Lang {
     Write-Log ""
 }
 
+# 逻辑说明：让用户选择 Quick Start 或逐项配置，并把选择写入本轮向导状态；未知输入保持在本步骤处理，`b` 交回上层步骤调度器。
 function Step-Mode {
     Write-Log (Get-Msg "install.mode.title")
     Write-Host ""
@@ -1534,6 +1568,7 @@ function Step-Mode {
     Write-Log ""
 }
 
+# 逻辑说明：检测已有 env、Manager 和 Worker，询问升级、重装或取消，并加载可保留配置/记录待重建 Worker；此步只收集决定，删除旧容器被延迟到镜像准备成功后。
 function Step-Existing {
     # This step is skipped when env file doesn't exist
     Write-Log (Get-Msg "install.existing.detected" -f $script:AGENTTEAMS_ENV_FILE)
@@ -1692,6 +1727,7 @@ function Step-Existing {
     }
 }
 
+# 逻辑说明：收集 Provider、模型、Base URL、API Key、Embedding 与自定义模型能力，并执行最小连通性验证；验证不过会让用户重试或回退，秘密只保存在内存配置。
 function Step-Llm {
     Write-Log (Get-Msg "llm.title")
 
@@ -2016,6 +2052,7 @@ function Step-Llm {
     Write-Log ""
 }
 
+# 逻辑说明：收集管理员用户名和密码，用户名统一转小写、密码至少八位；预置密码不合格时自动化安装立即失败，交互模式回到安全输入循环。
 function Step-Admin {
     Write-Log (Get-Msg "admin.title")
     $script:config.ADMIN_USER = Read-Prompt -VarName "AGENTTEAMS_ADMIN_USER" -PromptText (Get-Msg "admin.username_prompt") -Default "admin"
@@ -2057,6 +2094,7 @@ function Step-Admin {
     Write-Log ""
 }
 
+# 逻辑说明：选择服务仅绑定本机还是允许局域网访问，并写入 `LOCAL_ONLY`；它只决定稍后的端口绑定前缀，不会自行修改 Windows 防火墙。
 function Step-Network {
     Write-Log (Get-Msg "port.local_only.title")
     Write-Host ""
@@ -2086,6 +2124,7 @@ function Step-Network {
     Write-Log ""
 }
 
+# 逻辑说明：收集 Gateway、Higress Console 和 Cinny 的宿主端口，兼容旧 Element 端口变量并写入配置；用户回退时立即停止本步骤。
 function Step-Ports {
     Write-Log (Get-Msg "port.title")
     if (-not $env:AGENTTEAMS_PORT_CINNY -and $env:AGENTTEAMS_PORT_ELEMENT_WEB) {
@@ -2100,6 +2139,7 @@ function Step-Ports {
     Write-Log ""
 }
 
+# 逻辑说明：收集 Matrix、Cinny 客户端、AI Gateway 和文件服务域名，默认值会结合已选网关端口；这里只生成后续配置，不做 DNS 或证书变更。
 function Step-Domains {
     Write-Log (Get-Msg "domain.title")
     Write-Log (Get-Msg "domain.hint")
@@ -2114,11 +2154,13 @@ function Step-Domains {
     Write-Log ""
 }
 
+# 逻辑说明：可选读取供 Worker 协作使用的 GitHub Token，并以秘密输入方式保存到本轮配置；留空代表不启用，明文不会回显。
 function Step-Github {
     Write-Log (Get-Msg "github.title")
     $script:config.GITHUB_TOKEN = Read-Prompt -VarName "AGENTTEAMS_GITHUB_TOKEN" -PromptText (Get-Msg "github.token_prompt") -Secret -Optional
 }
 
+# 逻辑说明：可选收集 Skill Registry/API 地址并写入本轮配置；空值表示不连接外部技能源，用户 `b` 时回退且不产生网络请求。
 function Step-Skills {
     Write-Log ""
     Write-Log (Get-Msg "skills.title")
@@ -2127,6 +2169,7 @@ function Step-Skills {
     Write-Log ""
 }
 
+# 逻辑说明：确定持久数据卷或目录名；自动化模式采用环境值或 `agentteams-data` 默认值，交互模式允许回退，本步骤不创建或删除实际卷。
 function Step-Volume {
     Write-Log (Get-Msg "data.title")
     # ── Non-interactive guard (deep defense) ──────────────────────────
@@ -2142,6 +2185,7 @@ function Step-Volume {
     Write-Log (Get-Msg "data.volume_using" -f $script:config.DATA_DIR)
 }
 
+# 逻辑说明：确定 AgentScope Manager 的宿主工作目录并确保目录存在；自动化/升级模式保留已知路径，创建副作用仅限这一精确目录，输入 `b` 时不继续。
 function Step-Workspace {
     Write-Log (Get-Msg "workspace.title")
     # ── Non-interactive guard (deep defense) ──────────────────────────
@@ -2171,6 +2215,7 @@ function Step-Workspace {
     Write-Log (Get-Msg "workspace.dir_label" -f $script:config.WORKSPACE_DIR)
 }
 
+# 逻辑说明：让用户选择以后新建 Worker 的默认 runtime，并把选项映射为 `copaw/openclaw/hermes/qwenpaw`；它不改变唯一 Manager 仍使用 AgentScope 的约束。
 function Step-Runtime {
     Write-Log (Get-Msg "worker_runtime.title")
     Write-Host ""
@@ -2212,6 +2257,7 @@ function Step-Runtime {
     Write-Log (Get-Msg "worker_runtime.selected" -f $script:config.DEFAULT_WORKER_RUNTIME)
 }
 
+# 逻辑说明：选择 Matrix 房间是否启用端到端加密并写成显式开关；自动化模式默认关闭，升级可保留旧值，本步骤不生成或上传加密密钥。
 function Step-E2ee {
     Write-Host ""
     Write-Log (Get-Msg "matrix_e2ee.title")
@@ -2255,6 +2301,7 @@ function Step-E2ee {
     }
 }
 
+# 逻辑说明：收集 Worker 空闲多久后休眠的分钟数，自动化模式默认 720；升级保留旧值或接受新输入，实际休眠行为由运行时执行。
 function Step-Idle {
     # ── Non-interactive guard (deep defense) ──────────────────────────
     if ($script:AGENTTEAMS_NON_INTERACTIVE) {
@@ -2279,6 +2326,7 @@ function Step-Idle {
     Write-Log ""
 }
 
+# 逻辑说明：确定允许共享给 Worker 的宿主目录并保存精确路径；默认仅为当前用户目录，真正挂载在安装阶段执行，回退不会扩大共享范围。
 function Step-Hostshare {
     # ── Non-interactive guard (deep defense) ──────────────────────────
     if ($script:AGENTTEAMS_NON_INTERACTIVE) {
@@ -2301,6 +2349,7 @@ function Step-Hostshare {
 # Manager Installation
 # ============================================================
 
+# 逻辑说明：消费全部已确认配置，写 env、准备网络/目录、拉取或复用镜像并启动 Controller 与唯一 AgentScope Manager；每个就绪检查失败都会终止，避免报告一个不可用安装。
 function Install-Manager {
     Write-Log (Get-Msg "install.title")
 
@@ -2585,6 +2634,7 @@ function Install-Manager {
 
     # Pull images (skip if already exists locally for local build tags).
     $LocalImagePattern = "^agentteams/"
+    # 逻辑说明：查询 Docker 本地镜像表并返回指定引用是否存在；只读运行时元数据，供开发镜像决定“复用还是拉取”。
     function Test-LocalImage {
         param([string]$Image)
         $imgExists = docker image inspect $Image 2>$null
@@ -2810,6 +2860,7 @@ function Install-Manager {
         Write-Log "Embedded controller started: agentteams-controller"
 
         # Wait for infra inside the controller container.
+        # 逻辑说明：在限定秒数内通过 `docker exec curl` 轮询 Controller 内指定 URL；成功返回 `true`，超时输出服务名称并返回 `false`，不会无限等待。
         function Wait-EmbeddedUrl {
             param([string]$Url, [string]$Container, [int]$MaxWait, [string]$Description)
             $elapsed = 0
@@ -2999,6 +3050,7 @@ function Install-Manager {
 # Worker Installation
 # ============================================================
 
+# 逻辑说明：校验 Worker 名称和文件服务凭据，按需重置同名容器后组装精确 Docker 参数并启动一个传统 Worker；缺少必填项或容器重名会抛错停止。
 function Install-Worker {
     param(
         [string]$Name,
@@ -3099,6 +3151,7 @@ function Install-Worker {
 # Uninstall
 # ============================================================
 
+# 逻辑说明：按精确名称停止并移除本项目 Manager、Worker、Controller、网络和用户选择的数据/工作目录；是否删除持久数据会再次确认，避免模糊匹配误删其他 Docker 资源。
 function Uninstall-AgentTeams {
     Write-Log (Get-Msg "uninstall.title")
 

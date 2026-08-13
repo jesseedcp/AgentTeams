@@ -102,6 +102,7 @@ class TaskRecovery:
         files: OperationResumer | None = None,
         coding: OperationResumer | None = None,
     ) -> None:
+        # 逻辑说明：`__init__` 接收 `operations`、`tasks`、`projects`、`git`、`files`、`coding`，初始化依赖 `待恢复 operation、定时任务和语义监督巡检`，返回 `None`。 它只计算、校验或读取数据，不直接产生外部副作用；下游失败沿用现有错误语义，不会伪造成功回执。
         self._operations = operations
         self._tasks = tasks
         self._projects = projects
@@ -110,6 +111,7 @@ class TaskRecovery:
         self._coding = coding
 
     async def reconcile_pending_tasks(self) -> TaskRecoveryReport:
+        # 逻辑说明：`reconcile_pending_tasks` 接收 当前服务依赖，核对并恢复 `pending tasks`，依次复用 `list_recoverable`、`append`、`resume_operation`，返回 `TaskRecoveryReport`。 它会推进 待恢复 operation、定时任务和语义监督巡检 的外部或持久状态；下游失败沿用现有错误语义，不会伪造成功回执。
         owned = (
             self._TASK_KINDS
             | self._PROJECT_KINDS
@@ -209,6 +211,7 @@ class IntegrationRecovery:
         integrations: IntegrationOperationResumer,
         gateways: IntegrationOperationResumer | None = None,
     ) -> None:
+        # 逻辑说明：`__init__` 接收 `operations`、`integrations`、`gateways`，初始化依赖 `待恢复 operation、定时任务和语义监督巡检`，返回 `None`。 它只计算、校验或读取数据，不直接产生外部副作用；下游失败沿用现有错误语义，不会伪造成功回执。
         self._operations = operations
         self._integrations = integrations
         self._gateways = gateways
@@ -216,6 +219,7 @@ class IntegrationRecovery:
     async def reconcile_pending_integrations(
         self,
     ) -> IntegrationRecoveryReport:
+        # 逻辑说明：`reconcile_pending_integrations` 接收 当前服务依赖，核对并恢复 `pending integrations`，依次复用 `list_recoverable`、`RecoveryError`、`resume_operation`，返回 `IntegrationRecoveryReport`。 它会推进 待恢复 operation、定时任务和语义监督巡检 的外部或持久状态；校验、并发或恢复证据不足时保留现有异常，防止把歧义状态当作成功。
         operations = tuple(
             operation
             for operation in await self._operations.list_recoverable()
@@ -279,12 +283,14 @@ class NotificationRecovery:
         operations: TaskOperationReader,
         notifications: OperationResumer,
     ) -> None:
+        # 逻辑说明：`__init__` 接收 `operations`、`notifications`，初始化依赖 `待恢复 operation、定时任务和语义监督巡检`，返回 `None`。 它只计算、校验或读取数据，不直接产生外部副作用；下游失败沿用现有错误语义，不会伪造成功回执。
         self._operations = operations
         self._notifications = notifications
 
     async def reconcile_pending_notifications(
         self,
     ) -> NotificationRecoveryReport:
+        # 逻辑说明：`reconcile_pending_notifications` 接收 当前服务依赖，核对并恢复 `pending notifications`，依次复用 `list_recoverable`、`resume_operation`、`append`，返回 `NotificationRecoveryReport`。 它会推进 待恢复 operation、定时任务和语义监督巡检 的外部或持久状态；下游失败沿用现有错误语义，不会伪造成功回执。
         operations = tuple(
             operation
             for operation in await self._operations.list_recoverable()
@@ -353,12 +359,14 @@ class TaskCompletionRecovery:
         operations: TaskOperationReader,
         tasks: OperationResumer,
     ) -> None:
+        # 逻辑说明：`__init__` 接收 `operations`、`tasks`，初始化依赖 `待恢复 operation、定时任务和语义监督巡检`，返回 `None`。 它只计算、校验或读取数据，不直接产生外部副作用；下游失败沿用现有错误语义，不会伪造成功回执。
         self._operations = operations
         self._tasks = tasks
 
     async def reconcile_pending_completions(
         self,
     ) -> CompletionRecoveryReport:
+        # 逻辑说明：`reconcile_pending_completions` 接收 当前服务依赖，核对并恢复 `pending completions`，依次复用 `list_recoverable`、`resume_operation`、`append`，返回 `CompletionRecoveryReport`。 它会推进 待恢复 operation、定时任务和语义监督巡检 的外部或持久状态；下游失败沿用现有错误语义，不会伪造成功回执。
         operations = tuple(
             operation
             for operation in await self._operations.list_recoverable()
@@ -480,6 +488,7 @@ class SemanticSupervisor:
         blocked_after: timedelta = timedelta(minutes=30),
         worker_silence_after: timedelta = timedelta(minutes=45),
     ) -> None:
+        # 逻辑说明：`__init__` 接收 `tasks`、`workers`、`notifications`、`state`、`lifecycle`、`matrix`、`overdue_after`、`blocked_after`、`worker_silence_after`，初始化依赖 `待恢复 operation、定时任务和语义监督巡检`，依次复用 `timedelta`、`ValueError`，返回 `None`。 它只计算、校验或读取数据，不直接产生外部副作用；校验、并发或恢复证据不足时保留现有异常，防止把歧义状态当作成功。
         for label, threshold in (
             ("overdue", overdue_after),
             ("blocked", blocked_after),
@@ -498,6 +507,7 @@ class SemanticSupervisor:
         self._worker_silence_after = worker_silence_after
 
     async def inspect(self, now: datetime) -> SupervisionReport:
+        # 逻辑说明：`inspect` 接收 `now`，检查 `待恢复 operation、定时任务和语义监督巡检`，依次复用 `utcoffset`、`ValueError`、`astimezone`，返回 `SupervisionReport`。 它会推进 待恢复 operation、定时任务和语义监督巡检 的外部或持久状态；校验、并发或恢复证据不足时保留现有异常，防止把歧义状态当作成功。
         if now.tzinfo is None or now.utcoffset() is None:
             raise ValueError("supervision time must be timezone-aware")
         utc_now = now.astimezone(UTC)
@@ -623,6 +633,7 @@ class SemanticSupervisor:
         worker: WorkerResource | None,
         now: datetime,
     ) -> tuple[int, int, SupervisionAlert | None]:
+        # 逻辑说明：`_supervise_overdue_task` 接收 `task`、`worker`、`now`，监督 `overdue task`，依次复用 `_supervision_alert`、`isoformat`、`_worker_heartbeat`，返回 `tuple[int, int, SupervisionAlert | None]`。 它会推进 待恢复 operation、定时任务和语义监督巡检 的外部或持久状态；下游失败沿用现有错误语义，不会伪造成功回执。
         assert self._state is not None
         assert self._lifecycle is not None
         assert self._matrix is not None
@@ -826,6 +837,7 @@ class Heartbeat:
         notification_recovery: NotificationRecoveryRunner | None = None,
         semantic_supervision: SemanticSupervisionRunner | None = None,
     ) -> None:
+        # 逻辑说明：`__init__` 接收 `recovery`、`topology`、`notifications`、`task_recovery`、`leases`、`task_scheduler`、`completions`、`snapshotter`、`runtime_watcher`、`integration_recovery`、`notification_recovery`、`semantic_supervision`，初始化依赖 `待恢复 operation、定时任务和语义监督巡检`，返回 `None`。 它只计算、校验或读取数据，不直接产生外部副作用；下游失败沿用现有错误语义，不会伪造成功回执。
         self._recovery = recovery
         self._topology = topology
         self._notifications = notifications
@@ -840,6 +852,7 @@ class Heartbeat:
         self._semantic_supervision = semantic_supervision
 
     async def run_once(self) -> HeartbeatReport:
+        # 逻辑说明：`run_once` 按固定次序轮询 runtime、恢复资源/Task/集成/通知、刷新拓扑、回收 lease、派发到期任务并执行语义监督，最后把各阶段结果汇总为 HeartbeatReport；单项失败按既有隔离策略记录。
         runtime_change = (
             await self._runtime_watcher.poll_once()
             if self._runtime_watcher is not None
@@ -988,6 +1001,7 @@ class TaskHeartbeat:
         service: TaskService,
         late_grace: timedelta = timedelta(minutes=30),
     ) -> None:
+        # 逻辑说明：`__init__` 接收 `tasks`、`service`、`late_grace`，初始化依赖 `待恢复 operation、定时任务和语义监督巡检`，依次复用 `timedelta`、`ValueError`，返回 `None`。 它只计算、校验或读取数据，不直接产生外部副作用；校验、并发或恢复证据不足时保留现有异常，防止把歧义状态当作成功。
         if late_grace < timedelta(0):
             raise ValueError("late grace must not be negative")
         self._tasks = tasks
@@ -995,6 +1009,7 @@ class TaskHeartbeat:
         self._late_grace = late_grace
 
     async def dispatch_due(self, now: datetime) -> DispatchReport:
+        # 逻辑说明：`dispatch_due` 接收 `now`，分派 `due`，依次复用 `utcoffset`、`ValueError`、`astimezone`，返回 `DispatchReport`。 它会推进 待恢复 operation、定时任务和语义监督巡检 的外部或持久状态；校验、并发或恢复证据不足时保留现有异常，防止把歧义状态当作成功。
         if now.tzinfo is None or now.utcoffset() is None:
             raise ValueError("heartbeat time must be timezone-aware")
         utc_now = now.astimezone(UTC)
@@ -1031,12 +1046,14 @@ def _task_deadline(
     task: TaskRecord,
     default_after: timedelta,
 ) -> datetime:
+    # 逻辑说明：`_task_deadline` 优先解析 Task metadata 中的 deadline，否则以创建时间加 default_after 计算监督截止点；只返回 UTC 时间，不修改 Task。
     raw = task.metadata.get("deadline") or task.metadata.get("due_at")
     parsed = _parse_timestamp(raw)
     return parsed or task.updated_at + default_after
 
 
 def _worker_heartbeat(worker: WorkerResource) -> datetime | None:
+    # 逻辑说明：`_worker_heartbeat` 从 Worker status/metadata 中按既定字段优先级解析最后心跳时间，找不到合法时间则返回 None；用于判断失联而不更新 Worker。
     for key in (
         "lastHeartbeatAt",
         "lastActiveAt",
@@ -1049,6 +1066,7 @@ def _worker_heartbeat(worker: WorkerResource) -> datetime | None:
 
 
 def _worker_is_running(worker: WorkerResource) -> bool:
+    # 逻辑说明：`_worker_is_running` 将 Worker phase/status 统一为小写后判断是否属于运行态集合，返回监督用布尔值；它只读取资源快照。
     return (
         (worker.phase or "").casefold() in {"ready", "running"}
         and str(
@@ -1059,6 +1077,7 @@ def _worker_is_running(worker: WorkerResource) -> bool:
 
 
 def _parse_timestamp(value: object) -> datetime | None:
+    # 逻辑说明：`_parse_timestamp` 接收 `value`，解析 `timestamp`，依次复用 `fromisoformat`、`replace`、`utcoffset`，返回 `datetime | None`。 它只计算、校验或读取数据，不直接产生外部副作用；下游失败沿用现有错误语义，不会伪造成功回执。
     if not isinstance(value, str) or not value:
         return None
     try:
@@ -1076,6 +1095,7 @@ def _supervision_alert(
     version: str,
     message: str,
 ) -> SupervisionAlert:
+    # 逻辑说明：`_supervision_alert` 接收 `kind`、`subject`、`version`、`message`，处理 `alert`，依次复用 `hexdigest`、`sha256`、`encode`，返回 `SupervisionAlert`。 它只计算、校验或读取数据，不直接产生外部副作用；下游失败沿用现有错误语义，不会伪造成功回执。
     import hashlib
 
     fingerprint = hashlib.sha256(

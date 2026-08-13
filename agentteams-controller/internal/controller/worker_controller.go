@@ -96,6 +96,9 @@ type WorkerReconciler struct {
 // 从 CR 和外部系统重新获取现状。ctx 在该轮 reconcile 被取消或超时时
 // 传递给下游，防止旧轮次在新轮次开始后继续修改外部状态。
 func (r *WorkerReconciler) Reconcile(ctx context.Context, req reconcile.Request) (retres reconcile.Result, reterr error) {
+	// 逻辑说明：Reconcile 接收 ctx(context.Context)、req(reconcile.Request)，依次借助 Now、Observe、Get、IgnoreNotFound调谐Worker 成员的期望结果。
+	// 返回/状态：返回 retres、reterr；会调用下层服务修改外部资源，并把阶段、条件与已应用版本写回 CR status。
+	// 失败/重试：error 或 RequeueAfter 交给 controller-runtime；重复执行必须把同一 spec 收敛到同一状态。
 	start := time.Now()
 	defer func() { metrics.Observe("worker", start, reterr) }()
 
@@ -169,6 +172,9 @@ func isEdgeWorker(w *v1beta1.Worker) bool {
 }
 
 func edgeHeartbeatStale(lastHeartbeat string, timeout time.Duration) bool {
+	// 逻辑说明：edgeHeartbeatStale 接收 lastHeartbeat(string)、timeout(time.Duration)，依次借助 Parse、Since处理Worker 成员的期望结果。
+	// 返回/状态：返回 bool；会更新 Worker 成员的内存状态，存在客户端调用时还可能同步相应外部资源。
+	// 失败/重试：输入或依赖调用失败会返回错误；是否重排由上层调谐器决定，本函数不隐藏失败。
 	if lastHeartbeat == "" {
 		return true
 	}
@@ -182,6 +188,9 @@ func edgeHeartbeatStale(lastHeartbeat string, timeout time.Duration) bool {
 // reconcileNormal builds a MemberContext from the Worker CR, runs the shared
 // member reconcile phases, and writes runtime state back to Worker.Status.
 func (r *WorkerReconciler) reconcileNormal(ctx context.Context, w *v1beta1.Worker, state *MemberState) (reconcile.Result, error) {
+	// 逻辑说明：reconcileNormal 接收 ctx(context.Context)、w(*v1beta1.Worker)、state(*MemberState)，依次借助 effectiveWorkerSpec、validateWorkerDeploymentTargetImmutable、workerMemberContextWithSpec、workerTeamName调谐Worker 成员的期望结果。
+	// 返回/状态：返回 reconcile.Result、error；会调用下层服务修改外部资源，并把阶段、条件与已应用版本写回 CR status。
+	// 失败/重试：error 或 RequeueAfter 交给 controller-runtime；重复执行必须把同一 spec 收敛到同一状态。
 	logger := log.FromContext(ctx)
 
 	deps := MemberDeps{
@@ -344,6 +353,9 @@ func (r *WorkerReconciler) reconcileNormal(ctx context.Context, w *v1beta1.Worke
 }
 
 func (r *WorkerReconciler) workerTeamName(ctx context.Context, w *v1beta1.Worker) (string, error) {
+	// 逻辑说明：workerTeamName 接收 ctx(context.Context)、w(*v1beta1.Worker)，依次借助 List、InNamespace、Slice、EffectiveTeamName处理Team的期望结果。
+	// 返回/状态：返回 Worker 当前所属的唯一 Team 名称；只读取 Team 列表，发现重复归属时返回错误且不改状态。
+	// 失败/重试：输入或依赖调用失败会返回错误；是否重排由上层调谐器决定，本函数不隐藏失败。
 	if teamName := w.Annotations[v1beta1.AnnotationWorkerTeamName]; teamName != "" {
 		return teamName, nil
 	}
@@ -367,6 +379,9 @@ func (r *WorkerReconciler) workerTeamName(ctx context.Context, w *v1beta1.Worker
 // reconcileDelete cleans up all infrastructure for the Worker and then removes
 // the finalizer.
 func (r *WorkerReconciler) reconcileDelete(ctx context.Context, w *v1beta1.Worker) (reconcile.Result, error) {
+	// 逻辑说明：reconcileDelete 接收 ctx(context.Context)、w(*v1beta1.Worker)，依次借助 teamRoleForWorker、effectiveWorkerSpec、workerSpecWithAppliedDeploymentTarget、workerMemberContextWithSpec调谐Worker 成员的期望结果。
+	// 返回/状态：返回 reconcile.Result、error；会调用下层服务修改外部资源，并把阶段、条件与已应用版本写回 CR status。
+	// 失败/重试：error 或 RequeueAfter 交给 controller-runtime；重复执行必须把同一 spec 收敛到同一状态。
 	logger := log.FromContext(ctx)
 	logger.Info("deleting worker", "name", w.Name)
 
@@ -423,6 +438,9 @@ func (r *WorkerReconciler) reconcileDelete(ctx context.Context, w *v1beta1.Worke
 // reconcileManagerAccess grants standalone Workers publish rights into the
 // Manager's group DM room and removes that right for non-leader Team members.
 func (r *WorkerReconciler) reconcileManagerAccess(ctx context.Context, w *v1beta1.Worker, mctx MemberContext, state *MemberState) {
+	// 逻辑说明：reconcileManagerAccess 接收 ctx(context.Context)、w(*v1beta1.Worker)、mctx(MemberContext)、state(*MemberState)，依次借助 Enabled、teamRoleForWorker、ForceLeaveRoom、MatrixUserID调谐Manager的期望结果。
+	// 返回/状态：返回 无；会调用下层服务修改外部资源，并把阶段、条件与已应用版本写回 CR status。
+	// 失败/重试：error 或 RequeueAfter 交给 controller-runtime；重复执行必须把同一 spec 收敛到同一状态。
 	if r.ManagerConfig == nil || !r.ManagerConfig.Enabled() {
 		return
 	}
@@ -463,6 +481,9 @@ func (r *WorkerReconciler) reconcileManagerAccess(ctx context.Context, w *v1beta
 }
 
 func (r *WorkerReconciler) teamRoleForWorker(ctx context.Context, namespace, workerName string) (MemberRole, bool, error) {
+	// 逻辑说明：teamRoleForWorker 接收 ctx(context.Context)、namespace/workerName(string)，依次借助 teamMembershipForWorker处理Team的期望结果。
+	// 返回/状态：返回 Worker 在 Team 中的角色、是否属于团队及查询错误；这里只读取关系，不修改 Worker 或 Team。
+	// 失败/重试：输入或依赖调用失败会返回错误；是否重排由上层调谐器决定，本函数不隐藏失败。
 	role, _, inTeam, err := r.teamMembershipForWorker(ctx, namespace, workerName)
 	return role, inTeam, err
 }
@@ -472,6 +493,9 @@ func (r *WorkerReconciler) teamMembershipForWorker(
 	namespace string,
 	workerName string,
 ) (MemberRole, string, bool, error) {
+	// 逻辑说明：teamMembershipForWorker 接收 ctx(context.Context)、namespace(string)、workerName(string)，依次借助 List、InNamespace、EffectiveTeamName处理Team的期望结果。
+	// 返回/状态：返回 MemberRole、string、bool、error；可能查询或改变 Matrix 用户、房间、别名、成员或权限状态。
+	// 失败/重试：Matrix 请求失败会返回错误；上层下一轮先重新观测实际状态，再只补做尚未满足的步骤。
 	if r.Client == nil || workerName == "" {
 		return "", "", false, nil
 	}
@@ -497,11 +521,17 @@ func (r *WorkerReconciler) teamMembershipForWorker(
 }
 
 func (r *WorkerReconciler) effectiveWorkerSpec(_ context.Context, w *v1beta1.Worker, _ bool) (v1beta1.WorkerSpec, *v1beta1.AgentResourceRequirements, string, error) {
+	// 逻辑说明：effectiveWorkerSpec 接收 _(context.Context)、w(*v1beta1.Worker)、_(bool)，依次借助 DeepCopy处理Worker 成员的期望结果。
+	// 返回/状态：返回 v1beta1.WorkerSpec、*v1beta1.AgentResourceRequirements、string、error；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	spec := *w.Spec.DeepCopy()
 	return spec, spec.Resources, "", nil
 }
 
 func validateWorkerDeploymentTargetImmutable(w *v1beta1.Worker, desired v1beta1.WorkerSpec) error {
+	// 逻辑说明：validateWorkerDeploymentTargetImmutable 接收 w(*v1beta1.Worker)、desired(v1beta1.WorkerSpec)，依次借助 workerSpecDeploymentMode校验Worker 成员的期望结果。
+	// 返回/状态：返回 error；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	if w.Status.DeployMode == "" {
 		return nil
 	}
@@ -519,6 +549,9 @@ func validateWorkerDeploymentTargetImmutable(w *v1beta1.Worker, desired v1beta1.
 }
 
 func workerSpecWithAppliedDeploymentTarget(spec v1beta1.WorkerSpec, status v1beta1.WorkerStatus) v1beta1.WorkerSpec {
+	// 逻辑说明：workerSpecWithAppliedDeploymentTarget 接收 spec(v1beta1.WorkerSpec)、status(v1beta1.WorkerStatus)，按本函数中的条件与转换步骤处理Worker 成员的期望结果。
+	// 返回/状态：返回 v1beta1.WorkerSpec；可能把配置、技能或运行文档写入本地目录或 MinIO/S3 的稳定对象键。
+	// 失败/重试：校验、序列化或 I/O 失败会返回错误；旧配置保持可用，上层可用相同对象键覆盖重试。
 	if status.DeployMode == "" {
 		return spec
 	}
@@ -531,10 +564,16 @@ func workerSpecWithAppliedDeploymentTarget(spec v1beta1.WorkerSpec, status v1bet
 }
 
 func applyDeploymentTargetStatus(w *v1beta1.Worker, m MemberContext) {
+	// 逻辑说明：applyDeploymentTargetStatus 接收 w(*v1beta1.Worker)、m(MemberContext)，按本函数中的条件与转换步骤应用Worker 成员的期望结果。
+	// 返回/状态：返回 无；可能把配置、技能或运行文档写入本地目录或 MinIO/S3 的稳定对象键。
+	// 失败/重试：校验、序列化或 I/O 失败会返回错误；旧配置保持可用，上层可用相同对象键覆盖重试。
 	w.Status.DeployMode = m.DeployMode
 }
 
 func workerSpecDeploymentMode(spec v1beta1.WorkerSpec) string {
+	// 逻辑说明：workerSpecDeploymentMode 接收 spec(v1beta1.WorkerSpec)，按本函数中的条件与转换步骤处理Worker 成员的期望结果。
+	// 返回/状态：返回 string；可能把配置、技能或运行文档写入本地目录或 MinIO/S3 的稳定对象键。
+	// 失败/重试：校验、序列化或 I/O 失败会返回错误；旧配置保持可用，上层可用相同对象键覆盖重试。
 	mode := v1beta1.DeployModeLocal
 	if spec.DeployMode != nil && *spec.DeployMode != "" {
 		mode = *spec.DeployMode
@@ -543,6 +582,9 @@ func workerSpecDeploymentMode(spec v1beta1.WorkerSpec) string {
 }
 
 func agentResourcesToBackend(resources *v1beta1.AgentResourceRequirements) *backend.ResourceRequirements {
+	// 逻辑说明：agentResourcesToBackend 接收 resources(*v1beta1.AgentResourceRequirements)，按本函数中的条件与转换步骤处理Worker 成员的期望结果。
+	// 返回/状态：返回 *backend.ResourceRequirements；可能查询、创建、停止、更新或删除 Pod/沙箱实例，并同步内存中的观测状态。
+	// 失败/重试：后端失败会返回错误或重排时间；下一轮先重新读取实例，避免重复创建或删除。
 	if resources == nil ||
 		(resources.Requests.CPU == "" &&
 			resources.Requests.Memory == "" &&
@@ -559,6 +601,9 @@ func agentResourcesToBackend(resources *v1beta1.AgentResourceRequirements) *back
 }
 
 func mergeBackendResourceRequirements(defaults, override *backend.ResourceRequirements) *backend.ResourceRequirements {
+	// 逻辑说明：mergeBackendResourceRequirements 接收 defaults/override(*backend.ResourceRequirements)，按本函数中的条件与转换步骤合并Worker 成员的期望结果。
+	// 返回/状态：返回 *backend.ResourceRequirements；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	if override == nil {
 		return defaults
 	}
@@ -598,6 +643,9 @@ func (r *WorkerReconciler) workerMemberContext(w *v1beta1.Worker) MemberContext 
 }
 
 func (r *WorkerReconciler) workerMemberContextWithSpec(w *v1beta1.Worker, spec v1beta1.WorkerSpec, resourceSpec *v1beta1.AgentResourceRequirements, updateStrategy string) MemberContext {
+	// 逻辑说明：workerMemberContextWithSpec 接收 w(*v1beta1.Worker)、spec(v1beta1.WorkerSpec)、resourceSpec(*v1beta1.AgentResourceRequirements)、updateStrategy(string)，依次借助 EffectiveWorkerName、ResolveRuntime、GetBackendRuntime、workerSpecWithEffectiveBackendRuntimeForHash处理Worker 成员的期望结果。
+	// 返回/状态：返回 MemberContext；会更新 Worker 成员的内存状态，存在客户端调用时还可能同步相应外部资源。
+	// 失败/重试：输入或依赖调用失败会返回错误；是否重排由上层调谐器决定，本函数不隐藏失败。
 	runtimeName := spec.EffectiveWorkerName(w.Name)
 	effectiveRuntime := backend.ResolveRuntime(spec.Runtime, r.DefaultRuntime)
 	backendRuntime := spec.GetBackendRuntime()
@@ -661,6 +709,9 @@ func (r *WorkerReconciler) workerMemberContextWithSpec(w *v1beta1.Worker, spec v
 // Phase, ObservedGeneration, Message are owned by the deferred patch in
 // Reconcile; this helper only touches infra/runtime fields.
 func applyMemberStateToWorker(w *v1beta1.Worker, state *MemberState) {
+	// 逻辑说明：applyMemberStateToWorker 接收 w(*v1beta1.Worker)、state(*MemberState)，按本函数中的条件与转换步骤应用Worker 成员的期望结果。
+	// 返回/状态：返回 无；会更新 Worker 成员的内存状态，存在客户端调用时还可能同步相应外部资源。
+	// 失败/重试：输入或依赖调用失败会返回错误；是否重排由上层调谐器决定，本函数不隐藏失败。
 	if state == nil {
 		return
 	}
@@ -684,6 +735,9 @@ func applyMemberStateToWorker(w *v1beta1.Worker, state *MemberState) {
 // reconcileWorkerSvcLabel adds or removes the worker Service name
 // label on the Worker CR. Returns true if the label set was modified.
 func reconcileWorkerSvcLabel(w *v1beta1.Worker, svcName string) bool {
+	// 逻辑说明：reconcileWorkerSvcLabel 接收 w(*v1beta1.Worker)、svcName(string)，依次借助 delete调谐Worker 成员的期望结果。
+	// 返回/状态：返回 bool；会调用下层服务修改外部资源，并把阶段、条件与已应用版本写回 CR status。
+	// 失败/重试：error 或 RequeueAfter 交给 controller-runtime；重复执行必须把同一 spec 收敛到同一状态。
 	if svcName != "" {
 		if w.Labels == nil {
 			w.Labels = make(map[string]string)
@@ -705,6 +759,9 @@ func reconcileWorkerSvcLabel(w *v1beta1.Worker, svcName string) bool {
 // computeWorkerPhase determines the Worker status phase from the reconcile
 // outcome. Delegates to the shared computeMemberPhase function.
 func computeWorkerPhase(w *v1beta1.Worker, containerState string, reconcileErr error) string {
+	// 逻辑说明：computeWorkerPhase 接收 w(*v1beta1.Worker)、containerState(string)、reconcileErr(error)，依次借助 computeMemberPhase、DesiredState计算Worker 成员的期望结果。
+	// 返回/状态：返回 string；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	return computeMemberPhase(w.Status.Phase, w.Status.MatrixUserID, w.Spec.DesiredState(), containerState, reconcileErr)
 }
 
@@ -712,6 +769,9 @@ func computeWorkerPhase(w *v1beta1.Worker, containerState string, reconcileErr e
 // 观察关系。子资源变化也要触发 Worker reconcile，因为 Pod 的实际
 // 状态不会自动写回 Worker.Status。
 func (r *WorkerReconciler) SetupWithManager(mgr ctrl.Manager) (controller.Controller, error) {
+	// 逻辑说明：SetupWithManager 接收 mgr(ctrl.Manager)，依次借助 For、NewControllerManagedBy、Background、GetBackendForType设置Manager的期望结果。
+	// 返回/状态：返回 controller.Controller、error；会注册 watch、事件过滤器或对象到调谐请求的映射，不直接创建业务资源。
+	// 失败/重试：注册失败会阻止 Controller 正常启动；事件处理本身由 controller-runtime 持续驱动。
 	bldr := ctrl.NewControllerManagedBy(mgr).
 		For(&v1beta1.Worker{})
 
@@ -752,6 +812,9 @@ func (r *WorkerReconciler) SetupWithManager(mgr ctrl.Manager) (controller.Contro
 // requests. If namespace is non-empty, it overrides obj.GetNamespace() — used
 // for remote clusters where Pod namespace != CR namespace.
 func WorkerPodMapFunc(namespace string) handler.MapFunc {
+	// 逻辑说明：WorkerPodMapFunc 接收 namespace(string)，依次借助 GetLabels、GetNamespace处理Worker 成员的期望结果。
+	// 返回/状态：返回 handler.MapFunc；可能查询、创建、停止、更新或删除 Pod/沙箱实例，并同步内存中的观测状态。
+	// 失败/重试：后端失败会返回错误或重排时间；下一轮先重新读取实例，避免重复创建或删除。
 	return func(_ context.Context, obj client.Object) []reconcile.Request {
 		workerName := obj.GetLabels()[v1beta1.LabelWorker]
 		if workerName == "" {
@@ -794,6 +857,9 @@ func WorkerPodMapFunc(namespace string) handler.MapFunc {
 // which owning reconcilers write to status.specHash after a successful
 // reconcile. Sandbox resources no longer store this hash.
 func hashAppliedWorkerSpec(spec v1beta1.WorkerSpec) string {
+	// 逻辑说明：hashAppliedWorkerSpec 接收 spec(v1beta1.WorkerSpec)，依次借助 workerDepsLayoutHashVersion、Marshal、New64a、Write计算哈希Worker 成员的期望结果。
+	// 返回/状态：返回 string；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	spec.Model = ""          // config-only: written to openclaw.json/runtime.yaml
 	spec.McpServers = nil    // config-only: written to mcporter/runtime config
 	spec.AccessEntries = nil // permission-only: resolved when credentials are issued
@@ -830,6 +896,9 @@ func hashAppliedWorkerSpec(spec v1beta1.WorkerSpec) string {
 }
 
 func hashAppliedWorkerSpecForRuntime(spec v1beta1.WorkerSpec, runtime string) string {
+	// 逻辑说明：hashAppliedWorkerSpecForRuntime 接收 spec(v1beta1.WorkerSpec)、runtime(string)，依次借助 hashQwenPawPodSpec、hashAppliedWorkerSpec计算哈希Worker 成员的期望结果。
+	// 返回/状态：返回 string；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	if runtime == backend.RuntimeQwenPaw {
 		if spec.Runtime == "" {
 			spec.Runtime = runtime
@@ -840,6 +909,9 @@ func hashAppliedWorkerSpecForRuntime(spec v1beta1.WorkerSpec, runtime string) st
 }
 
 func hashAppliedWorkerSpecForRuntimeAndResources(spec v1beta1.WorkerSpec, runtime string, resources *v1beta1.AgentResourceRequirements) string {
+	// 逻辑说明：hashAppliedWorkerSpecForRuntimeAndResources 接收 spec(v1beta1.WorkerSpec)、runtime(string)、resources(*v1beta1.AgentResourceRequirements)，依次借助 hashQwenPawPodSpecWithResources、hashAppliedWorkerSpec、workerDepsLayoutHashVersion、Marshal计算哈希Worker 成员的期望结果。
+	// 返回/状态：返回 string；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	if runtime == backend.RuntimeQwenPaw {
 		if spec.Runtime == "" {
 			spec.Runtime = runtime
@@ -876,6 +948,9 @@ func hashAppliedWorkerSpecForRuntimeAndResources(spec v1beta1.WorkerSpec, runtim
 }
 
 func workerSpecWithEffectiveBackendRuntimeForHash(spec v1beta1.WorkerSpec, backendRuntime string) v1beta1.WorkerSpec {
+	// 逻辑说明：workerSpecWithEffectiveBackendRuntimeForHash 接收 spec(v1beta1.WorkerSpec)、backendRuntime(string)，按本函数中的条件与转换步骤处理Worker 成员的期望结果。
+	// 返回/状态：返回 v1beta1.WorkerSpec；可能查询、创建、停止、更新或删除 Pod/沙箱实例，并同步内存中的观测状态。
+	// 失败/重试：后端失败会返回错误或重排时间；下一轮先重新读取实例，避免重复创建或删除。
 	if spec.BackendRuntime == nil && backendRuntime != "" {
 		spec.BackendRuntime = &backendRuntime
 	}
@@ -887,6 +962,9 @@ func hashQwenPawPodSpec(spec v1beta1.WorkerSpec) string {
 }
 
 func hashQwenPawPodSpecWithResources(spec v1beta1.WorkerSpec, resources *v1beta1.AgentResourceRequirements) string {
+	// 逻辑说明：hashQwenPawPodSpecWithResources 接收 spec(v1beta1.WorkerSpec)、resources(*v1beta1.AgentResourceRequirements)，依次借助 workerDepsLayoutHashVersion、Marshal、New64a、Write计算哈希Worker 成员的期望结果。
+	// 返回/状态：返回 string；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	type qwenPawPodSpec struct {
 		Runtime          string                             `json:"runtime,omitempty"`
 		Image            string                             `json:"image,omitempty"`
@@ -927,6 +1005,9 @@ func hashQwenPawPodSpecWithResources(spec v1beta1.WorkerSpec, resources *v1beta1
 }
 
 func workerDepsLayoutHashVersion(spec v1beta1.WorkerSpec) string {
+	// 逻辑说明：workerDepsLayoutHashVersion 接收 spec(v1beta1.WorkerSpec)，依次借助 workerDepsLayoutVersionForBackendRuntime、GetBackendRuntime处理Worker 成员的期望结果。
+	// 返回/状态：返回 string；会更新 Worker 成员的内存状态，存在客户端调用时还可能同步相应外部资源。
+	// 失败/重试：输入或依赖调用失败会返回错误；是否重排由上层调谐器决定，本函数不隐藏失败。
 	if len(spec.Volumes) > 0 || len(spec.Mounts) > 0 {
 		return workerDepsLayoutVersion
 	}
@@ -934,6 +1015,9 @@ func workerDepsLayoutHashVersion(spec v1beta1.WorkerSpec) string {
 }
 
 func workerDepsLayoutVersionForBackendRuntime(backendRuntime string) string {
+	// 逻辑说明：workerDepsLayoutVersionForBackendRuntime 接收 backendRuntime(string)，按本函数中的条件与转换步骤处理Worker 成员的期望结果。
+	// 返回/状态：返回 string；可能查询、创建、停止、更新或删除 Pod/沙箱实例，并同步内存中的观测状态。
+	// 失败/重试：后端失败会返回错误或重排时间；下一轮先重新读取实例，避免重复创建或删除。
 	switch backendRuntime {
 	case v1beta1.BackendRuntimeSandbox:
 		return workerDepsLayoutVersion
@@ -958,6 +1042,9 @@ func workerDepsLayoutVersionForBackendRuntime(backendRuntime string) string {
 // still prevents cross-instance reconcile when two agentteams-controller
 // releases share a namespace.
 func PodLifecyclePredicates(labelKey, controllerName string) predicate.Predicate {
+	// 逻辑说明：PodLifecyclePredicates 接收 labelKey/controllerName(string)，依次借助 GetLabels、matches、podLifecycleSignal处理Worker 成员的期望结果。
+	// 返回/状态：返回 predicate.Predicate；可能查询、创建、停止、更新或删除 Pod/沙箱实例，并同步内存中的观测状态。
+	// 失败/重试：后端失败会返回错误或重排时间；下一轮先重新读取实例，避免重复创建或删除。
 	matches := func(obj client.Object) bool {
 		l := obj.GetLabels()
 		return l[labelKey] != "" && l[v1beta1.LabelController] == controllerName
@@ -987,6 +1074,9 @@ func PodLifecyclePredicates(labelKey, controllerName string) predicate.Predicate
 }
 
 func podLifecycleSignal(pod *corev1.Pod) string {
+	// 逻辑说明：podLifecycleSignal 接收 pod(*corev1.Pod)，依次借助 Join、podReadyConditionSignal、podContainerStatusesSignal处理Worker 成员的期望结果。
+	// 返回/状态：返回 string；可能查询、创建、停止、更新或删除 Pod/沙箱实例，并同步内存中的观测状态。
+	// 失败/重试：后端失败会返回错误或重排时间；下一轮先重新读取实例，避免重复创建或删除。
 	if pod == nil {
 		return ""
 	}
@@ -999,6 +1089,9 @@ func podLifecycleSignal(pod *corev1.Pod) string {
 }
 
 func podReadyConditionSignal(conditions []corev1.PodCondition) string {
+	// 逻辑说明：podReadyConditionSignal 接收 conditions([]corev1.PodCondition)，按本函数中的条件与转换步骤处理Worker 成员的期望结果。
+	// 返回/状态：返回 string；可能查询、创建、停止、更新或删除 Pod/沙箱实例，并同步内存中的观测状态。
+	// 失败/重试：后端失败会返回错误或重排时间；下一轮先重新读取实例，避免重复创建或删除。
 	for i := range conditions {
 		cond := conditions[i]
 		if cond.Type == corev1.PodReady {
@@ -1009,6 +1102,9 @@ func podReadyConditionSignal(conditions []corev1.PodCondition) string {
 }
 
 func podContainerStatusesSignal(statuses []corev1.ContainerStatus) string {
+	// 逻辑说明：podContainerStatusesSignal 接收 statuses([]corev1.ContainerStatus)，依次借助 Strings、Join处理Worker 成员的期望结果。
+	// 返回/状态：返回 string；可能查询、创建、停止、更新或删除 Pod/沙箱实例，并同步内存中的观测状态。
+	// 失败/重试：后端失败会返回错误或重排时间；下一轮先重新读取实例，避免重复创建或删除。
 	if len(statuses) == 0 {
 		return ""
 	}
@@ -1039,6 +1135,9 @@ func podContainerStatusesSignal(statuses []corev1.ContainerStatus) string {
 // A sandbox is considered "ours" only when it carries both the given labelKey
 // with a non-empty value and agentteams.io/controller == controllerName.
 func SandboxLifecyclePredicates(labelKey, controllerName string) predicate.Predicate {
+	// 逻辑说明：SandboxLifecyclePredicates 接收 labelKey/controllerName(string)，依次借助 GetLabels、matches、extractUnstructuredPhase、extractUnstructuredReadyCondition处理Worker 成员的期望结果。
+	// 返回/状态：返回 predicate.Predicate；可能查询、创建、停止、更新或删除 Pod/沙箱实例，并同步内存中的观测状态。
+	// 失败/重试：后端失败会返回错误或重排时间；下一轮先重新读取实例，避免重复创建或删除。
 	matches := func(obj client.Object) bool {
 		l := obj.GetLabels()
 		return l[labelKey] != "" && l[v1beta1.LabelController] == controllerName
@@ -1075,6 +1174,9 @@ func SandboxLifecyclePredicates(labelKey, controllerName string) predicate.Predi
 
 // extractUnstructuredPhase reads .status.phase from an unstructured object.
 func extractUnstructuredPhase(obj client.Object) string {
+	// 逻辑说明：extractUnstructuredPhase 接收 obj(client.Object)，依次借助 UnstructuredContent提取Worker 成员的期望结果。
+	// 返回/状态：返回 string；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	u, ok := obj.(interface {
 		UnstructuredContent() map[string]interface{}
 	})
@@ -1096,6 +1198,9 @@ func extractUnstructuredPhase(obj client.Object) string {
 // conditions, or has no Ready condition. This keeps old/new comparisons
 // stable so missing conditions do not falsely trigger reconciliation.
 func extractUnstructuredReadyCondition(obj client.Object) string {
+	// 逻辑说明：extractUnstructuredReadyCondition 接收 obj(client.Object)，依次借助 UnstructuredContent提取Worker 成员的期望结果。
+	// 返回/状态：返回 string；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	u, ok := obj.(interface {
 		UnstructuredContent() map[string]interface{}
 	})
@@ -1129,6 +1234,9 @@ func extractUnstructuredReadyCondition(obj client.Object) string {
 // --- Package-level helpers ---
 
 func nilIfEmpty(s string) *string {
+	// 逻辑说明：nilIfEmpty 接收 s(string)，按本函数中的条件与转换步骤处理Worker 成员的期望结果。
+	// 返回/状态：返回 *string；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	if s == "" {
 		return nil
 	}

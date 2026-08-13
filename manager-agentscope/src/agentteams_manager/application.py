@@ -41,6 +41,7 @@ class ManagerApplication:
         startup_hooks: tuple[Any, ...] = (),
         closeables: tuple[Any, ...] = (),
     ) -> None:
+        # 逻辑说明：保存各生命周期组件和就绪状态依赖；构造阶段不启动网络服务或后台任务。
         self._database = database
         self._recovery = recovery
         self._config_watcher = config_watcher
@@ -63,6 +64,7 @@ class ManagerApplication:
 
     async def start(self) -> None:
         """按依赖顺序启动组件，并只在安全服务时标记 ready。"""
+        # 逻辑说明：按依赖顺序启动组件，全部通过就绪检查后开放流量；失败按反序回滚。
         if self._started:
             return
         try:
@@ -117,15 +119,18 @@ class ManagerApplication:
             raise
 
     async def run(self) -> None:
+        # 逻辑说明：先启动应用再等待停止事件，无论正常取消或异常都进入 stop 统一清理。
         await self.start()
         await self._stop_event.wait()
         await self.stop()
 
     def request_stop(self) -> None:
+        # 逻辑说明：同步设置共享停止事件以唤醒 run_forever；Event.set 可重复调用，因此操作系统信号与管理路径同时请求停机也不会重复执行清理。
         self._stop_event.set()
 
     async def stop(self) -> None:
         """先拒绝新流量，再尽力保存会话并逆序关闭组件。"""
+        # 逻辑说明：先清除 ready、保存会话，再逆序停止组件；重复调用不会重复清理。
         if self._stopped:
             return
         self._stopped = True
@@ -133,6 +138,7 @@ class ManagerApplication:
         await self._stop_components()
 
     def _clear_readiness(self) -> None:
+        # 逻辑说明：将健康状态恢复到未就绪，避免关闭期间负载均衡继续发送请求。
         self.readiness.bind_matrix_probe(None)
         self.readiness.database_ready = False
         self.readiness.recovery_ready = False
@@ -141,6 +147,7 @@ class ManagerApplication:
         self.readiness.heartbeat_ready = False
 
     async def _stop_components(self) -> None:
+        # 逻辑说明：按启动相反顺序停止组件；单个失败仍继续清理其余组件并记录异常。
         if self._components_stopped:
             return
         self._components_stopped = True
@@ -194,6 +201,7 @@ class ManagerApplication:
 
 
 def _service_ready(service: Any) -> bool:
+    # 逻辑说明：调用可选 ready 方法并规范为 bool；无该接口的已启动组件视为可用。
     value = getattr(service, "ready", True)
     is_set = getattr(value, "is_set", None)
     return bool(is_set()) if is_set is not None else bool(value)

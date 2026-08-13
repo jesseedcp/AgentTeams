@@ -25,6 +25,7 @@ name = manifest.fetch("metadata").fetch("name")
 version = manifest.fetch("metadata").fetch("version")
 package_name = "#{name}-qwenpaw-#{version}"
 
+# 逻辑说明：按 WorkerFlow manifest/adapter 的相对条目从源根复制到临时 QwenPaw 包；源缺失立即终止，所有写入都限制在 staging 根目录下。
 def copy_entry(source_root, target_root, entry)
   src = source_root / entry
   abort("missing qwenpaw package source: #{src}") unless src.exist?
@@ -42,6 +43,7 @@ def copy_entry(source_root, target_root, entry)
   end
 end
 
+# 逻辑说明：遍历临时 WorkerFlow 打包树并删除 Python 缓存与 macOS 元数据；只清理生成目录，不修改第一方源码。
 def prune_generated(path)
   Dir.glob((path / "**/*").to_s, File::FNM_DOTMATCH).each do |item|
     base = File.basename(item)
@@ -49,6 +51,7 @@ def prune_generated(path)
   end
 end
 
+# 逻辑说明：覆盖同名旧 zip 后压缩本次 staging；优先使用系统 `zip`，不可用则回退 Python `zipfile`，任一路径失败都会中止打包并向 CI 返回非零状态。
 def zip_dir(root, package_name, out_path)
   FileUtils.rm_f(out_path)
   if system("zip", "-v", out: File::NULL, err: File::NULL)

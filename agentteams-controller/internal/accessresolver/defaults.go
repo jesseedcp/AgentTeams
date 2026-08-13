@@ -38,6 +38,7 @@ import (
 // are resolved by Resolver.ResolveForCaller before leaving the
 // controller.
 func DefaultEntriesForWorker() []v1beta1.AccessEntry {
+	// 逻辑说明：生成独立 Worker 的工作区、共享区和中央包读取模板；变量暂不展开，留给调用者身份解析阶段。
 	return []v1beta1.AccessEntry{
 		{
 			Service:     credprovider.ServiceObjectStorage,
@@ -82,6 +83,7 @@ func DefaultEntriesForWorker() []v1beta1.AccessEntry {
 // which are resolved by Resolver.resolveTeamMember before leaving the
 // controller.
 func DefaultEntriesForTeamMember() []v1beta1.AccessEntry {
+	// 逻辑说明：在独立 Worker 默认范围上加入 teams/${self.team} 协作前缀，Leader 不获得跨成员额外权限。
 	return []v1beta1.AccessEntry{
 		{
 			Service:     credprovider.ServiceObjectStorage,
@@ -117,6 +119,7 @@ func DefaultEntriesForTeamMember() []v1beta1.AccessEntry {
 // legacy hard-coded manager role: broad read/write on its own agent
 // workspace, the shared prefix, and the manager prefix.
 func DefaultEntriesForManager() []v1beta1.AccessEntry {
+	// 逻辑说明：为 Manager 构造自身、shared 与 manager 前缀的读写模板，仍不包含真实 bucket 名。
 	return []v1beta1.AccessEntry{
 		{
 			Service:     credprovider.ServiceObjectStorage,
@@ -147,6 +150,7 @@ func DefaultEntriesForManager() []v1beta1.AccessEntry {
 // configured APIG gateway id; pass "" when UsesAIGateway() is false
 // and the ai-gateway entry will be omitted.
 func ControllerDefaults(bucket, gatewayID string) []credprovider.AccessEntry {
+	// 逻辑说明：直接生成 Controller 自用的已解析 OSS 权限；仅配置 gatewayID 时追加 AI Gateway 管理权限。
 	entries := []credprovider.AccessEntry{
 		{
 			Service:     credprovider.ServiceObjectStorage,
@@ -173,6 +177,7 @@ func ControllerDefaults(bucket, gatewayID string) []credprovider.AccessEntry {
 // jsonObj is a small helper to build *apiextensionsv1.JSON values in
 // Go literals without going through k8s.io/apimachinery Unstructured.
 func jsonObj(m map[string]any) *apiextensionsv1.JSON {
+	// 逻辑说明：将代码内固定 scope 稳定序列化为 CRD JSON；这些常量形状若失败属于编程错误，因此 panic。
 	raw, err := marshalJSONDeterministic(m)
 	if err != nil {
 		// impossible for the inputs we construct above

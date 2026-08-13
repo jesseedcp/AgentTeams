@@ -19,6 +19,9 @@ import (
 // lifecycle state (Running/Sleeping/Stopped). Idempotent: checks actual backend
 // state before acting.
 func (r *ManagerReconciler) reconcileManagerContainer(ctx context.Context, s *managerScope) (reconcile.Result, error) {
+	// 逻辑说明：reconcileManagerContainer 接收 ctx(context.Context)、s(*managerScope)，依次借助 DesiredState、ensureManagerContainerAbsent、ensureManagerContainerPresent调谐Manager的期望结果。
+	// 返回/状态：返回 reconcile.Result、error；可能查询、创建、停止、更新或删除 Pod/沙箱实例，并同步内存中的观测状态。
+	// 失败/重试：后端失败会返回错误或重排时间；下一轮先重新读取实例，避免重复创建或删除。
 	if s.provResult == nil {
 		return reconcile.Result{}, nil
 	}
@@ -41,6 +44,9 @@ func (r *ManagerReconciler) reconcileManagerContainer(ctx context.Context, s *ma
 // drift is detected from Manager.status.specHash; sandbox annotations are only
 // consulted as a migration fallback when status.specHash is empty.
 func (r *ManagerReconciler) ensureManagerContainerPresent(ctx context.Context, s *managerScope) (reconcile.Result, error) {
+	// 逻辑说明：ensureManagerContainerPresent 接收 ctx(context.Context)、s(*managerScope)，依次借助 managerBackend、managerContainerName、Status、hashAppliedManagerSpec确保Manager的期望结果。
+	// 返回/状态：返回 reconcile.Result、error；可能查询、创建、停止、更新或删除 Pod/沙箱实例，并同步内存中的观测状态。
+	// 失败/重试：后端失败会返回错误或重排时间；下一轮先重新读取实例，避免重复创建或删除。
 	m := s.manager
 	wb := r.managerBackend(ctx)
 	if wb == nil {
@@ -119,6 +125,9 @@ func (r *ManagerReconciler) ensureManagerContainerPresent(ctx context.Context, s
 // If remove is false (Sleeping), the container is stopped but kept (Docker)
 // or deleted (K8s, which has no stop-without-delete).
 func (r *ManagerReconciler) ensureManagerContainerAbsent(ctx context.Context, s *managerScope, remove bool) (reconcile.Result, error) {
+	// 逻辑说明：ensureManagerContainerAbsent 接收 ctx(context.Context)、s(*managerScope)、remove(bool)，依次借助 managerBackend、managerContainerName、Stop、Delete确保Manager的期望结果。
+	// 返回/状态：返回 reconcile.Result、error；可能查询、创建、停止、更新或删除 Pod/沙箱实例，并同步内存中的观测状态。
+	// 失败/重试：后端失败会返回错误或重排时间；下一轮先重新读取实例，避免重复创建或删除。
 	wb := r.managerBackend(ctx)
 	if wb == nil {
 		return reconcile.Result{}, nil
@@ -142,6 +151,9 @@ func (r *ManagerReconciler) ensureManagerContainerAbsent(ctx context.Context, s 
 // createManagerContainer builds and issues a backend Create request for the manager.
 // ErrConflict (container already exists) is treated as success for idempotency.
 func (r *ManagerReconciler) createManagerContainer(ctx context.Context, s *managerScope, wb backend.WorkerBackend) (reconcile.Result, error) {
+	// 逻辑说明：createManagerContainer 接收 ctx(context.Context)、s(*managerScope)、wb(backend.WorkerBackend)，依次借助 Validate、ValidManagerRuntime、ResolveManagerRuntime、RefreshManagerCredentials创建Manager的期望结果。
+	// 返回/状态：返回 reconcile.Result、error；可能查询、创建、停止、更新或删除 Pod/沙箱实例，并同步内存中的观测状态。
+	// 失败/重试：后端失败会返回错误或重排时间；下一轮先重新读取实例，避免重复创建或删除。
 	m := s.manager
 	logger := log.FromContext(ctx)
 	if m.Spec.CodingCLI != nil {
@@ -247,6 +259,9 @@ func (r *ManagerReconciler) createManagerContainer(ctx context.Context, s *manag
 // applyEmbeddedConfig injects Docker-mode host volume mounts, port mapping,
 // restart policy, and extra env into the CreateRequest when running in embedded mode.
 func (r *ManagerReconciler) applyEmbeddedConfig(req *backend.CreateRequest, wb backend.WorkerBackend) {
+	// 逻辑说明：applyEmbeddedConfig 接收 req(*backend.CreateRequest)、wb(backend.WorkerBackend)，依次借助 Name应用Manager的期望结果。
+	// 返回/状态：返回 无；可能把配置、技能或运行文档写入本地目录或 MinIO/S3 的稳定对象键。
+	// 失败/重试：校验、序列化或 I/O 失败会返回错误；旧配置保持可用，上层可用相同对象键覆盖重试。
 	if wb.Name() != "docker" || r.EmbeddedConfig == nil {
 		return
 	}
@@ -284,6 +299,9 @@ func (r *ManagerReconciler) applyEmbeddedConfig(req *backend.CreateRequest, wb b
 }
 
 func managerSpecChanged(m *v1beta1.Manager, desiredHash string) bool {
+	// 逻辑说明：managerSpecChanged 接收 m(*v1beta1.Manager)、desiredHash(string)，按本函数中的条件与转换步骤处理Manager的期望结果。
+	// 返回/状态：返回 bool；会更新 Manager的内存状态，存在客户端调用时还可能同步相应外部资源。
+	// 失败/重试：输入或依赖调用失败会返回错误；是否重排由上层调谐器决定，本函数不隐藏失败。
 	if m.Status.SpecHash != "" {
 		return m.Status.SpecHash != desiredHash
 	}
@@ -291,6 +309,9 @@ func managerSpecChanged(m *v1beta1.Manager, desiredHash string) bool {
 }
 
 func managerRuntimeStale(result *backend.WorkerResult, desiredHash, currentHash string, specChanged bool, missingHashMeansStale bool) bool {
+	// 逻辑说明：managerRuntimeStale 接收 result(*backend.WorkerResult)、desiredHash/currentHash(string)、specChanged(bool)、missingHashMeansStale(bool)，按本函数中的条件与转换步骤处理Manager的期望结果。
+	// 返回/状态：返回 bool；会更新 Manager的内存状态，存在客户端调用时还可能同步相应外部资源。
+	// 失败/重试：输入或依赖调用失败会返回错误；是否重排由上层调谐器决定，本函数不隐藏失败。
 	if currentHash != "" {
 		return specChanged
 	}
@@ -320,6 +341,9 @@ type managerPodSpec struct {
 // old annotation values are only read as a migration fallback while
 // status.specHash is empty.
 func hashAppliedManagerSpec(spec v1beta1.ManagerSpec) string {
+	// 逻辑说明：hashAppliedManagerSpec 接收 spec(v1beta1.ManagerSpec)，依次借助 Marshal、New64a、Write、Sum64计算哈希Manager的期望结果。
+	// 返回/状态：返回 string；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	podSpec := managerPodSpec{
 		Runtime:       spec.Runtime,
 		Image:         spec.Image,
@@ -343,6 +367,9 @@ func hashAppliedManagerSpec(spec v1beta1.ManagerSpec) string {
 // the default worker prefix ("agentteams-worker-"), so we need WithPrefix("") to
 // ensure Status/Stop/Delete/Start operate on the correct container/pod name.
 func (r *ManagerReconciler) managerBackend(ctx context.Context) backend.WorkerBackend {
+	// 逻辑说明：managerBackend 接收 ctx(context.Context)，依次借助 DetectWorkerBackend、WithPrefix处理Manager的期望结果。
+	// 返回/状态：返回 backend.WorkerBackend；可能查询、创建、停止、更新或删除 Pod/沙箱实例，并同步内存中的观测状态。
+	// 失败/重试：后端失败会返回错误或重排时间；下一轮先重新读取实例，避免重复创建或删除。
 	if r.Backend == nil {
 		return nil
 	}

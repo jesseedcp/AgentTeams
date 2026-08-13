@@ -97,6 +97,7 @@ class ProcessingMarker(BaseModel):
 
     @model_validator(mode="after")
     def validate_times(self) -> Self:
+        # 逻辑说明：`validate_times` 接收 当前服务依赖，校验 `times`，依次复用 `utcoffset`、`ValueError`、`model_validator`，返回 `Self`。 它只计算、校验或读取数据，不直接产生外部副作用；校验、并发或恢复证据不足时保留现有异常，防止把歧义状态当作成功。
         if (
             self.started_at.tzinfo is None
             or self.started_at.utcoffset() is None
@@ -156,6 +157,7 @@ class ProcessingLeaseService:
         clock: Clock,
         duration: timedelta = timedelta(minutes=15),
     ) -> None:
+        # 逻辑说明：`__init__` 接收 `leases`、`storage`、`clock`、`duration`，初始化 `Git Task 委托、processing lease 与 workspace 镜像`，依次复用 `timedelta`、`ValueError`，返回 `None`。 它只计算、校验或读取数据，不直接产生外部副作用；校验、并发或恢复证据不足时保留现有异常，防止把歧义状态当作成功。
         if duration <= timedelta(0):
             raise ValueError("lease duration must be positive")
         self._leases = leases
@@ -170,6 +172,7 @@ class ProcessingLeaseService:
         processor: str,
         operation: str,
     ) -> ProcessingLease:
+        # 逻辑说明：`acquire` 接收 `task_id`、`processor`、`operation`，处理 `Git Task 委托、processing lease 与 workspace 镜像`，依次复用 `_validate_task_id`、`ValueError`、`astimezone`，返回 `ProcessingLease`。 它会推进 Git Task 委托、processing lease 与 workspace 镜像 的外部或持久状态；校验、并发或恢复证据不足时保留现有异常，防止把歧义状态当作成功。
         _validate_task_id(task_id)
         if not processor or not operation:
             raise ValueError("lease processor and operation are required")
@@ -222,6 +225,7 @@ class ProcessingLeaseService:
         raise LeaseConflict(f"task {task_id} lease could not be acquired")
 
     async def renew(self, lease: ProcessingLease) -> ProcessingLease:
+        # 逻辑说明：`renew` 接收 `lease`，续期 `Git Task 委托、processing lease 与 workspace 镜像`，依次复用 `get`、`LeaseConflict`、`_lease_key`，返回 `ProcessingLease`。 它会推进 Git Task 委托、processing lease 与 workspace 镜像 的外部或持久状态；校验、并发或恢复证据不足时保留现有异常，防止把歧义状态当作成功。
         local = await self._leases.get(lease.task_id)
         if local is None or local.lease_id != lease.lease_id:
             raise LeaseConflict("local lease identity does not match")
@@ -255,6 +259,7 @@ class ProcessingLeaseService:
         return await self._materialize(renewed, receipt.etag)
 
     async def release(self, lease: ProcessingLease) -> None:
+        # 逻辑说明：`release` 接收 `lease`，释放 `Git Task 委托、processing lease 与 workspace 镜像`，依次复用 `get`、`LeaseConflict`、`_lease_key`，返回 `None`。 它会推进 Git Task 委托、processing lease 与 workspace 镜像 的外部或持久状态；校验、并发或恢复证据不足时保留现有异常，防止把歧义状态当作成功。
         local = await self._leases.get(lease.task_id)
         if local is not None and local.lease_id != lease.lease_id:
             raise LeaseConflict("local lease identity does not match")
@@ -286,6 +291,7 @@ class ProcessingLeaseService:
         now: datetime | None = None,
     ) -> LeaseReclaimReport:
         """Delete only an expired remote marker matching local identity."""
+        # 逻辑说明：`reclaim_expired` 接收 `now`，回收 `expired`，依次复用 `astimezone`、`now`、`expired`，返回 `LeaseReclaimReport`。 它会推进 Git Task 委托、processing lease 与 workspace 镜像 的外部或持久状态；下游失败沿用现有错误语义，不会伪造成功回执。
         instant = (now or self._clock.now()).astimezone(UTC)
         expired = await self._leases.expired(instant)
         reclaimed: list[str] = []
@@ -342,6 +348,7 @@ class ProcessingLeaseService:
         key: str,
         lease_id: str,
     ) -> tuple[ProcessingMarker, str] | None:
+        # 逻辑说明：`_prove_marker` 接收 `key`、`lease_id`，验证 `marker`，依次复用 `head`、`model_validate`、`get_json`，返回 `tuple[ProcessingMarker, str] | None`。 它会推进 Git Task 委托、processing lease 与 workspace 镜像 的外部或持久状态；下游失败沿用现有错误语义，不会伪造成功回执。
         receipt = await self._storage.head(key)
         if receipt is None:
             return None
@@ -357,6 +364,7 @@ class ProcessingLeaseService:
         marker: ProcessingMarker,
         etag: str,
     ) -> ProcessingLease:
+        # 逻辑说明：`_materialize` 接收 `marker`、`etag`，落地 `Git Task 委托、processing lease 与 workspace 镜像`，依次复用 `astimezone`、`now`、`upsert`，返回 `ProcessingLease`。 它会推进 Git Task 委托、processing lease 与 workspace 镜像 的外部或持久状态；下游失败沿用现有错误语义，不会伪造成功回执。
         now = self._clock.now().astimezone(UTC)
         await self._leases.upsert(
             ProcessingLeaseRecord(
@@ -397,6 +405,7 @@ class GitDelegationService:
         renewal_interval: float = 300,
         events: OperationEventReader | None = None,
     ) -> None:
+        # 逻辑说明：`__init__` 接收 `storage`、`leases`、`git`、`tasks`、`matrix`、`supervisor`、`cache_root`、`renewal_interval`、`events`，初始化 `Git Task 委托、processing lease 与 workspace 镜像`，依次复用 `ValueError`、`resolve`，返回 `None`。 它只计算、校验或读取数据，不直接产生外部副作用；校验、并发或恢复证据不足时保留现有异常，防止把歧义状态当作成功。
         if renewal_interval <= 0:
             raise ValueError("lease renewal interval must be positive")
         self._storage = storage
@@ -416,6 +425,7 @@ class GitDelegationService:
         context: MutationContext,
         confirmed: bool = False,
     ) -> GitDelegationReceipt:
+        # 逻辑说明：`execute` 接收 `request`、`context`、`confirmed`，处理 `Git Task 委托、processing lease 与 workspace 镜像`，依次复用 `ConfirmationRequired`、`get`、`NotFoundError`，返回 `GitDelegationReceipt`。 它会推进 Git Task 委托、pro…60256 tokens truncated…peration.request
         if request.requires_confirmation and not confirmed:
             raise ConfirmationRequired(
                 "high-risk Git operations require confirmation",
@@ -454,6 +464,7 @@ class GitDelegationService:
         operation: OperationRecord,
         task: TaskRecord,
     ) -> GitDelegationReceipt:
+        # 逻辑说明：`_execute_operation` 接收 `request`、`operation`、`task`，处理 `operation`，依次复用 `model_validate`、`ConflictError`、`validate_workspace`，返回 `GitDelegationReceipt`。 它会推进 Git Task 委托、processing lease 与 workspace 镜像 的外部或持久状态；校验、并发或恢复证据不足时保留现有异常，防止把歧义状态当作成功。
         if operation.status is OperationStatus.SUCCEEDED:
             return GitDelegationReceipt.model_validate(operation.result)
         if operation.status is OperationStatus.FAILED:
@@ -640,6 +651,7 @@ class GitDelegationService:
         operation: OperationRecord,
     ) -> GitDelegationReceipt:
         """Resume only while evidence proves no Git process could have run."""
+        # 逻辑说明：`resume_operation` 接收 `operation`，根据 journal 恢复 `operation`，依次复用 `ValueError`、`model_validate`、`RecoveryError`，返回 `GitDelegationReceipt`。 它会推进 Git Task 委托、processing lease 与 workspace 镜像 的外部或持久状态；校验、并发或恢复证据不足时保留现有异常，防止把歧义状态当作成功。
         if operation.kind is not OperationKind.GIT_DELEGATION:
             raise ValueError("operation is not Git delegation")
         if operation.status is OperationStatus.SUCCEEDED:
@@ -698,6 +710,7 @@ class GitDelegationService:
         stop: asyncio.Event,
         failures: list[Exception],
     ) -> None:
+        # 逻辑说明：`_renew_lease_until_stopped` 接收 `lease`、`stop`、`failures`，续期 `lease until stopped`，依次复用 `wait_for`、`wait`、`renew`，返回 `None`。 它会推进 Git Task 委托、processing lease 与 workspace 镜像 的外部或持久状态；下游失败沿用现有错误语义，不会伪造成功回执。
         while True:
             try:
                 await asyncio.wait_for(
@@ -714,10 +727,12 @@ class GitDelegationService:
 
 
 def _lease_key(task_id: str) -> str:
+    # 逻辑说明：`_lease_key` 接收 `task_id`，生成 lease 键 `key`，返回 `str`。 它只计算、校验或读取数据，不直接产生外部副作用；下游失败沿用现有错误语义，不会伪造成功回执。
     return f"shared/tasks/{task_id}/.processing"
 
 
 def _validate_task_id(task_id: str) -> None:
+    # 逻辑说明：`_validate_task_id` 接收 `task_id`，校验 `task id`，依次复用 `fullmatch`、`ValueError`，返回 `None`。 它只计算、校验或读取数据，不直接产生外部副作用；校验、并发或恢复证据不足时保留现有异常，防止把歧义状态当作成功。
     if re.fullmatch(r"task-[A-Za-z0-9-]+", task_id) is None:
         raise ValueError(f"invalid task ID: {task_id!r}")
 
@@ -726,6 +741,7 @@ def _git_summary(
     receipt: GitReceipt | None,
     failure: Exception | None,
 ) -> str:
+    # 逻辑说明：`_git_summary` 接收 `receipt`、`failure`，生成 Git 摘要 `summary`，依次复用 `strip`，返回 `str`。 它只计算、校验或读取数据，不直接产生外部副作用；下游失败沿用现有错误语义，不会伪造成功回执。
     if failure is not None:
         return (
             f"Git operation failed: {type(failure).__name__}: {failure}"

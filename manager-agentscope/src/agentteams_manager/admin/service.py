@@ -30,6 +30,7 @@ class AdminSnapshotService:
         runtime_registry: Any,
         coding_cli: Any | None = None,
     ) -> None:
+        # 逻辑说明：集中注入本地数据库、就绪状态和只读外部客户端，快照服务本身不成为新的事实来源。
         self._database = database
         self._readiness = readiness
         self._controller = controller
@@ -37,6 +38,7 @@ class AdminSnapshotService:
         self._coding_cli = coding_cli
 
     async def snapshot(self, section: str) -> dict[str, object]:
+        # 逻辑说明：按页面 section 查询外部权威资源或本地状态，并只返回允许展示的字段。
         if section == "overview":
             return {
                 "items": [
@@ -99,7 +101,9 @@ class AdminSnapshotService:
         raise KeyError(section)
 
     async def _rows(self, section: str) -> list[dict[str, object]]:
+        # 逻辑说明：把受支持 section 映射为固定 SQL，未知 section 不允许拼入查询。
         def read(connection: sqlite3.Connection) -> list[dict[str, object]]:
+            # 逻辑说明：在同一只读事务内查询并投影 Row，避免把连接对象带出工作线程。
             if section == "sessions":
                 rows = connection.execute(
                     """

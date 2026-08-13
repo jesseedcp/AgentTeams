@@ -48,6 +48,7 @@ _IMAGE_FILENAME_EXTENSIONS = frozenset({
 
 
 def _truthy_env(name: str, default: bool = False) -> bool:
+    # 逻辑说明：读取常见真值文本；环境变量缺失时采用调用方默认值。
     raw = os.getenv(name)
     if raw is None:
         return default
@@ -67,6 +68,7 @@ def _normalize_image_body(body: str) -> str:
     file lookup (for example ``search_files("foo.png")``) instead of relying
     on the already-cached image plus automatic vision enrichment.
     """
+    # 逻辑说明：识别 Matrix 自动生成的图片文件名并去掉它，仅保留用户真正填写的说明文字。
     stripped = (body or "").strip()
     if not stripped:
         return ""
@@ -82,6 +84,7 @@ def _normalize_image_body(body: str) -> str:
 
 def _describe_dropped_media(source_content: dict, fallback_body: str) -> str:
     """Return a copaw-style textual summary for a media event."""
+    # 逻辑说明：按媒体 msgtype 生成不含二进制的稳定文字占位，供不支持媒体的模型理解。
     body = (fallback_body or "").strip()
     msgtype = source_content.get("msgtype", "")
     if msgtype == "m.image":
@@ -102,12 +105,14 @@ class MatrixAdapter(_NativeMatrixAdapter):
     """
 
     def __init__(self, config: PlatformConfig):
+        # 逻辑说明：初始化原生适配器，并从环境构造 allowlist、历史缓冲和视觉开关。
         super().__init__(config)
         self._dual_allow = DualAllowList.from_env()
         self._history = HistoryBuffer.from_env()
         self._vision_enabled = _truthy_env("MATRIX_VISION_ENABLED", default=False)
 
     async def connect(self) -> bool:
+        # 逻辑说明：先建立原生 Matrix 连接，成功后再包装发送函数以注入结构化 mentions。
         ok = await super().connect()
         if ok and self._client is not None:
             self._wrap_send_message_event()
@@ -115,6 +120,7 @@ class MatrixAdapter(_NativeMatrixAdapter):
 
     def _wrap_send_message_event(self) -> None:
         """Inject MSC3952 ``m.mentions`` into every outgoing Matrix event."""
+        # 逻辑说明：幂等替换客户端发送方法；无客户端或已包装时跳过，避免多次嵌套。
         if self._client is None:
             return
         if getattr(self._client, "_agentteams_mentions_wrapped", False):
@@ -130,6 +136,7 @@ class MatrixAdapter(_NativeMatrixAdapter):
             *args: Any,
             **kwargs: Any,
         ) -> Any:
+            # 逻辑说明：复制字典 content、补齐 m.mentions 后调用原方法；非字典内容原样转发。
             if isinstance(content, dict):
                 apply_outbound_mentions(content, self_user_id=self._user_id)
             return await original(room_id, event_type, content, *args, **kwargs)
@@ -148,6 +155,7 @@ class MatrixAdapter(_NativeMatrixAdapter):
         relates_to: dict,
     ) -> Optional[tuple]:
         """Apply AgentTeams allow/history policy around native mention gating."""
+        # 逻辑说明：判断 DM/群聊、检查发送者和 mention；被拒消息进入历史缓冲并返回 None。
         is_dm = await self._is_dm_room(room_id)
         if not self._dual_allow.permits(sender, is_dm=is_dm):
             return None
@@ -194,6 +202,7 @@ class MatrixAdapter(_NativeMatrixAdapter):
         msgtype: str,
     ) -> None:
         """Downgrade images to text when the active model lacks vision."""
+        # 逻辑说明：按视觉开关下载支持图片或生成媒体占位，再交给统一处理；失败返回未处理。
         if msgtype == "m.image" and not self._vision_enabled:
             body = source_content.get("body", "") or ""
             display_body = body or "image"

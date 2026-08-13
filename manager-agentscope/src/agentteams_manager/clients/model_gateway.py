@@ -52,6 +52,7 @@ class ModelGatewayClient:
         timeout: float = 15,
         known_models: Mapping[str, ModelCapabilities] | None = None,
     ) -> None:
+        # 逻辑说明：校验探测超时并保存网关凭据；记录 client 所有权，关闭时不误释放调用方注入资源。
         if timeout <= 0:
             raise ValueError("model preflight timeout must be positive")
         self._base_url = base_url.rstrip("/")
@@ -62,6 +63,7 @@ class ModelGatewayClient:
         self._known_models = dict(known_models or {})
 
     async def preflight(self, spec: ModelSpec) -> ModelCapabilities:
+        # 逻辑说明：用最小 completion 验证路由/认证，再合并显式与已知能力；不返回响应正文。
         routed_model = spec.model.removeprefix("agentteams-gateway/")
         if not routed_model:
             raise ValueError("model route must not be empty")
@@ -143,5 +145,6 @@ class ModelGatewayClient:
         )
 
     async def close(self) -> None:
+        # 逻辑说明：只关闭本实例创建的连接池，调用方注入 client 的生命周期仍归调用方。
         if self._owns_client:
             await self._client.aclose()

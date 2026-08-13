@@ -55,6 +55,7 @@ type llmPreflightStatusError struct {
 }
 
 func (e *llmPreflightStatusError) Error() string {
+	// 逻辑说明：先遮蔽 API key 并截断供应商响应，再组合状态码提示；空 body 时不制造无意义诊断。
 	body := sanitizePreflightBody(e.Body, e.APIKey)
 	if body == "" {
 		return fmt.Sprintf("LLM preflight failed with HTTP %d: %s", e.StatusCode, preflightStatusHint(e.StatusCode))
@@ -69,14 +70,17 @@ type llmPreflightTransportError struct {
 }
 
 func (e *llmPreflightTransportError) Error() string {
+	// 逻辑说明：保留无凭据 endpoint 和底层网络错误，便于判断 DNS/TLS/超时问题。
 	return fmt.Sprintf("LLM preflight request to %s failed: %v", e.URL, e.Err)
 }
 
 func (e *llmPreflightTransportError) Unwrap() error {
+	// 逻辑说明：暴露底层错误给 errors.Is/As，重试判断可识别 context 取消和 deadline。
 	return e.Err
 }
 
 func llmPreflightCmd() *cobra.Command {
+	// 逻辑说明：以环境配置为 flag 默认值，执行最小模型请求；非 strict 模式只告警，strict 模式返回非零错误。
 	opts := llmPreflightOptionsFromEnv()
 	timeoutSeconds := int(opts.Timeout.Seconds())
 
@@ -108,6 +112,7 @@ func llmPreflightCmd() *cobra.Command {
 }
 
 func llmPreflightOptionsFromEnv() llmPreflightOptions {
+	// 逻辑说明：集中读取 provider/key/URL/model 与重试参数，缺失值留给后续解析器统一补默认或报错。
 	return llmPreflightOptions{
 		Provider: envOrDefaultLocal("AGENTTEAMS_LLM_PROVIDER", "openai-compat"),
 		APIKey:   os.Getenv("AGENTTEAMS_LLM_API_KEY"),
@@ -123,6 +128,7 @@ func llmPreflightOptionsFromEnv() llmPreflightOptions {
 }
 
 func resolveLLMPreflightConfig(opts llmPreflightOptions) (llmPreflightConfig, error) {
+	// 逻辑说明：清理字符串、要求 key/model、规范化超时/重试/退避，再解析 provider 对应的安全 base URL。
 	cfg := llmPreflightConfig{
 		Provider: strings.TrimSpace(opts.Provider),
 		APIKey:   strings.TrimSpace(opts.APIKey),
@@ -163,6 +169,7 @@ func resolveLLMPreflightConfig(opts llmPreflightOptions) (llmPreflightConfig, er
 }
 
 func resolveLLMPreflightBaseURL(provider, baseURL string) (string, error) {
+	// 逻辑说明：已知 provider 可补官方兼容地址，自定义 provider 必须显式 URL；最终只接受带 host 的 HTTP(S)。
 	provider = strings.TrimSpace(provider)
 	baseURL = strings.TrimSpace(baseURL)
 	if baseURL == "" {
@@ -194,6 +201,7 @@ func resolveLLMPreflightBaseURL(provider, baseURL string) (string, error) {
 // 401/403 等配置错误继续重试只会浪费时间并可能触发供应商限制。
 // 返回错误前会对 response body 脱敏，避免供应商在错误中回显的 key 进入日志。
 func runLLMPreflight(ctx context.Context, opts llmPreflightOptions) error {
+	// 逻辑说明：解析配置并选择有界 client，最多执行 retries+1 次；仅瞬时错误指数退避，取消或配置错误立即返回。
 	cfg, err := resolveLLMPreflightConfig(opts)
 	if err != nil {
 		return err
@@ -221,6 +229,7 @@ func runLLMPreflight(ctx context.Context, opts llmPreflightOptions) error {
 }
 
 func runLLMPreflightAttempt(ctx context.Context, client *http.Client, cfg llmPreflightConfig) error {
+	// 逻辑说明：向 chat/completions 发送一个 max_tokens=1 的最小请求；2xx 即通过，错误 body 最多读取 4 KiB。
 	endpoint := strings.TrimRight(cfg.BaseURL, "/") + "/chat/completions"
 	payload := map[string]interface{}{
 		"model":      cfg.Model,
@@ -260,6 +269,7 @@ func runLLMPreflightAttempt(ctx context.Context, client *http.Client, cfg llmPre
 }
 
 func isRetryableLLMPreflightError(err error) bool {
+	// 逻辑说明：context 终止不重试；网络错误、429 和 5xx 可重试，其他状态通常是确定配置错误。
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return false
 	}
@@ -275,6 +285,7 @@ func isRetryableLLMPreflightError(err error) bool {
 }
 
 func waitLLMPreflightRetryBackoff(ctx context.Context, baseDelay time.Duration, attempt int) error {
+	// 逻辑说明：按尝试次数指数放大退避，并用可取消 timer 等待；零退避直接继续。
 	if baseDelay <= 0 {
 		return nil
 	}
@@ -293,6 +304,7 @@ func waitLLMPreflightRetryBackoff(ctx context.Context, baseDelay time.Duration, 
 }
 
 func preflightStatusHint(status int) string {
+	// 逻辑说明：把常见 HTTP 状态翻译成不含响应正文的操作提示，未知状态使用保守通用描述。
 	switch status {
 	case http.StatusBadRequest:
 		return "model name or request format was rejected"
@@ -311,6 +323,7 @@ func preflightStatusHint(status int) string {
 }
 
 func sanitizePreflightBody(body, apiKey string) string {
+	// 逻辑说明：去两端空白、替换所有 key 回显并限制 1000 字节，供应商错误不会把凭据或超长文本写入日志。
 	body = strings.TrimSpace(body)
 	if apiKey != "" {
 		body = strings.ReplaceAll(body, apiKey, "[REDACTED]")
@@ -322,6 +335,7 @@ func sanitizePreflightBody(body, apiKey string) string {
 }
 
 func envOrDefaultLocal(key, defaultVal string) string {
+	// 逻辑说明：环境变量非空时优先，否则返回调用点给出的明确默认值。
 	if v := os.Getenv(key); v != "" {
 		return v
 	}
@@ -329,6 +343,7 @@ func envOrDefaultLocal(key, defaultVal string) string {
 }
 
 func envIntDefaultLocal(key string, defaultVal int) int {
+	// 逻辑说明：环境值仅在可解析为整数时生效，缺失或格式错误回退默认，后续领域校验再处理范围。
 	if v := os.Getenv(key); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			return n
@@ -338,6 +353,7 @@ func envIntDefaultLocal(key string, defaultVal int) int {
 }
 
 func envBoolDefaultLocal(key string, defaultVal bool) bool {
+	// 逻辑说明：接受常见真假拼写并忽略大小写/空白；未知文本保留默认值，避免误开启 strict 行为。
 	if v := os.Getenv(key); v != "" {
 		switch strings.ToLower(strings.TrimSpace(v)) {
 		case "1", "true", "yes", "y", "on":

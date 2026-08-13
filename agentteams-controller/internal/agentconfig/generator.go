@@ -13,6 +13,7 @@ type Generator struct {
 
 // NewGenerator creates an agent config generator.
 func NewGenerator(cfg Config) *Generator {
+	// 逻辑说明：在构造时补齐管理员与模型默认值，后续每份配置都从同一不可变基线生成。
 	if cfg.AdminUser == "" {
 		cfg.AdminUser = "admin"
 	}
@@ -35,6 +36,7 @@ func NewGenerator(cfg Config) *Generator {
 func (g *Generator) GenerateManagerRuntimeDocument(
 	req ManagerRuntimeRequest,
 ) ([]byte, error) {
+	// 逻辑说明：校验激活边界字段、解析模型能力与 MCP 描述符，复制切片后生成无密文且版本稳定的 runtime document。
 	managerName := strings.TrimSpace(req.ManagerName)
 	if managerName == "" {
 		return nil, fmt.Errorf("manager name is required")
@@ -136,6 +138,7 @@ func (g *Generator) GenerateManagerRuntimeDocument(
 // 重启 Worker，如果在这里加入当前时间或随机值，每次 reconcile 都会被
 // 误判为新版本，打断正在进行的 Agent 任务。
 func (g *Generator) GenerateOpenClawConfig(req WorkerConfigRequest) ([]byte, error) {
+	// 逻辑说明：解析模型/Matrix/网关默认值，构造字节稳定的完整配置，再按需合并 heartbeat、记忆和渠道策略。
 	modelName := req.ModelName
 	if modelName == "" {
 		modelName = g.config.DefaultModel
@@ -274,6 +277,7 @@ func (g *Generator) GenerateOpenClawConfig(req WorkerConfigRequest) ([]byte, err
 }
 
 func (g *Generator) buildMatrixChannelConfig(req WorkerConfigRequest, serverURL, domain, adminMatrixID string) map[string]interface{} {
+	// 逻辑说明：按独立 Worker 或团队成员选择最小允许联系人，并生成自动入群、私网 homeserver 和流式回复配置。
 	workerMatrixID := fmt.Sprintf("@%s:%s", req.WorkerName, domain)
 
 	// Default allow list: Manager + Admin
@@ -336,6 +340,7 @@ func (g *Generator) buildMatrixChannelConfig(req WorkerConfigRequest, serverURL,
 }
 
 func (g *Generator) applyChannelPolicy(config map[string]interface{}, policy *ChannelPolicy, domain string) {
+	// 逻辑说明：定位 Matrix 配置，先规范化短用户名，再分别做 allow 增量去重与 deny 删除；缺失结构时安全返回。
 	channels, _ := config["channels"].(map[string]interface{})
 	if channels == nil {
 		return
@@ -422,6 +427,7 @@ func (g *Generator) applyChannelPolicy(config map[string]interface{}, policy *Ch
 // 输入模态。未识别的模型使用保守默认值，这能保持安全可用，但可能
 // 没有暴露供应商宣称的全部上下文容量。
 func (g *Generator) ResolveModelSpec(modelName string) ModelSpec {
+	// 逻辑说明：先取内置保守能力，再逐项应用显式 Controller 覆盖，Worker 与 Manager 因而共享同一模型上限。
 	spec := defaultModelSpec(modelName)
 
 	// Apply user overrides
@@ -447,6 +453,7 @@ func (g *Generator) ResolveModelSpec(modelName string) ModelSpec {
 
 // defaultModelSpec returns built-in parameters for known models.
 func defaultModelSpec(modelName string) ModelSpec {
+	// 逻辑说明：查询已知模型 preset；未知模型使用保守文本默认值，再按 vision 标志构造输入模态。
 	type preset struct {
 		ctx, max int
 		vision   bool
@@ -496,6 +503,7 @@ func defaultModelSpec(modelName string) ModelSpec {
 // helpers (duplicated from gateway to avoid cross-package dependency)
 
 func toStringSlice(v interface{}) []string {
+	// 逻辑说明：兼容 JSON 解码产生的 []interface{} 与原生 []string，只保留确实为字符串的元素。
 	if v == nil {
 		return nil
 	}
@@ -515,6 +523,7 @@ func toStringSlice(v interface{}) []string {
 }
 
 func containsString(slice []string, s string) bool {
+	// 逻辑说明：线性查重用于短 allowlist，保持首现顺序而不引入 map 排序变化。
 	for _, item := range slice {
 		if item == s {
 			return true
@@ -525,6 +534,7 @@ func containsString(slice []string, s string) bool {
 
 // allModelSpecs returns all known model specs for the openclaw.json models list.
 func (g *Generator) allModelSpecs(selectedModel string) []ModelSpec {
+	// 逻辑说明：为所有内置模型生成能力对象，并在选择自定义模型时追加一次，确保 primary 总能在列表中找到。
 	allModels := []string{
 		"gpt-5.4", "gpt-5.3-codex", "gpt-5-mini", "gpt-5-nano",
 		"claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5",
@@ -550,6 +560,7 @@ func (g *Generator) allModelSpecs(selectedModel string) []ModelSpec {
 
 // allModelAliases returns the agents.defaults.models alias map.
 func (g *Generator) allModelAliases(selectedModel string) map[string]interface{} {
+	// 逻辑说明：为内置模型建立 gateway 全名到短 alias 的映射，并补齐不在内置表中的当前模型。
 	allModels := []string{
 		"gpt-5.4", "gpt-5.3-codex", "gpt-5-mini", "gpt-5-nano",
 		"claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5",
@@ -576,6 +587,7 @@ func (g *Generator) allModelAliases(selectedModel string) map[string]interface{}
 // updated JSON bytes. If enabled is false or every is empty, the heartbeat
 // key is removed.
 func InjectHeartbeat(existing []byte, enabled bool, every string) []byte {
+	// 逻辑说明：容错读取旧 JSON 并补齐 agents.defaults；启用时整体设置 heartbeat，否则删除键，再稳定输出。
 	var config map[string]interface{}
 	if len(existing) > 0 {
 		_ = json.Unmarshal(existing, &config)
@@ -609,6 +621,7 @@ func InjectHeartbeat(existing []byte, enabled bool, every string) []byte {
 // caller-computed final allow-lists. Empty inputs are treated as no-op to
 // avoid wiping a valid policy on partial information.
 func InjectChannelPolicy(existing []byte, groupAllowFrom, dmAllowFrom []string) []byte {
+	// 逻辑说明：先稳定去重两个最终 allowlist；任一为空视为信息不完整不覆盖，完整时补齐嵌套结构并整体写入。
 	groupAllowFrom = uniqueNonEmptyStrings(groupAllowFrom)
 	dmAllowFrom = uniqueNonEmptyStrings(dmAllowFrom)
 	if len(groupAllowFrom) == 0 || len(dmAllowFrom) == 0 {
@@ -646,6 +659,7 @@ func InjectChannelPolicy(existing []byte, groupAllowFrom, dmAllowFrom []string) 
 }
 
 func stringSliceToInterfaces(values []string) []interface{} {
+	// 逻辑说明：逐项复制到 JSON 配置通用切片，避免调用者切片与生成结构共享底层数组。
 	out := make([]interface{}, 0, len(values))
 	for _, value := range values {
 		out = append(out, value)
@@ -654,6 +668,7 @@ func stringSliceToInterfaces(values []string) []interface{} {
 }
 
 func uniqueNonEmptyStrings(values []string) []string {
+	// 逻辑说明：过滤空项并按首现顺序去重，生成稳定的 Matrix allowlist 而不改变业务优先次序。
 	seen := make(map[string]struct{}, len(values))
 	out := make([]string, 0, len(values))
 	for _, value := range values {

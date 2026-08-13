@@ -14,6 +14,7 @@ DIM='[38;5;102m'
 TEXT='[38;5;145m'
 
 get_script_path() {
+    # 逻辑说明：把 `$0` 解析为尽可能稳定的绝对脚本路径，供 usage 输出可复制命令；只读取 PATH 和目录，不修改文件。
     raw_path="${0:-agentteams-find-skill.sh}"
 
     case "${raw_path}" in
@@ -46,6 +47,7 @@ get_script_path() {
 SCRIPT_PATH="$(get_script_path)"
 
 usage() {
+    # 逻辑说明：把 find/install 用法和后端环境变量写到标准输出；这里只展示帮助，不探测注册中心或执行安装。
     cat <<EOF
 Usage:
   ${SCRIPT_PATH} find <query>
@@ -58,6 +60,7 @@ EOF
 }
 
 get_skills_api_url() {
+    # 逻辑说明：按 `SKILLS_API_URL`、`AGENTTEAMS_SKILLS_API_URL`、skills.sh 默认值的优先级返回注册中心地址，不改变环境变量。
     if [ -n "${SKILLS_API_URL:-}" ]; then
         printf '%s\n' "${SKILLS_API_URL}"
         return
@@ -70,6 +73,7 @@ get_skills_api_url() {
 }
 
 resolve_controller_bearer() {
+    # 逻辑说明：按直接 token、token 文件、Worker API key 的优先级输出 Controller bearer；文件不存在时不伪造凭据，且不会把 token 写入日志。
     if [ -n "${AGENTTEAMS_AUTH_TOKEN:-}" ]; then
         printf '%s' "${AGENTTEAMS_AUTH_TOKEN}"
         return
@@ -84,6 +88,7 @@ resolve_controller_bearer() {
 }
 
 ensure_nacos_sts_credentials() {
+    # 逻辑说明：已有 STS access key 时直接复用，否则带 bearer 调 Controller 换取临时 Nacos 凭据并导出到当前进程；HTTP/JSON 校验失败立即退出，避免用空凭据访问注册中心。
     [ -n "${AGENTTEAMS_NACOS_STS_ACCESS_KEY:-}" ] && return 0
 
     controller_url="${AGENTTEAMS_CONTROLLER_URL:-}"
@@ -114,6 +119,7 @@ ensure_nacos_sts_credentials() {
 }
 
 get_registry_label() {
+    # 逻辑说明：根据 backend 和实际连接参数生成人类可读的注册中心标签；Nacos 地址解析失败时退回通用标签，不发起网络请求。
     backend="$1"
     api_url="$(get_skills_api_url)"
     case "${backend}" in
@@ -139,6 +145,7 @@ get_registry_label() {
 }
 
 detect_backend() {
+    # 逻辑说明：读取最终 API URL，以 `nacos://` 选择 Nacos，以 HTTP(S) 或未知格式选择 skills.sh，并把规范化 backend 名写到标准输出。
     api_url="$(get_skills_api_url)"
     case "${api_url}" in
         nacos://*) printf '%s\n' "nacos" ;;
@@ -148,12 +155,14 @@ detect_backend() {
 }
 
 run_skills_find() {
+    # 逻辑说明：把查询参数原样交给 `skills find`，成功后在结果前补注册中心标签；子命令失败时保留其退出码和错误语义。
     output="$(skills find "$@")" || exit $?
     printf 'Registry: %s\n\n' "$(get_registry_label "skills_sh")"
     printf '%s\n' "${output}"
 }
 
 run_skills_install() {
+    # 逻辑说明：校验至少提供一个 skill 名，然后用 `exec skills add -g -y` 替换当前进程执行全局安装；缺少名称时在产生安装副作用前退出。
     if [ $# -lt 1 ]; then
         echo "error: skill name is required for install" >&2
         exit 1
@@ -162,6 +171,7 @@ run_skills_install() {
 }
 
 run_nacos_install() {
+    # 逻辑说明：校验 skill 名后调用统一 Nacos CLI 的 `skill-get` 下载/安装；连接、认证和 CLI 错误由 `run_nacos_cli` 原样传播。
     if [ $# -lt 1 ]; then
         echo "error: skill name is required for install" >&2
         exit 1
@@ -170,6 +180,7 @@ run_nacos_install() {
 }
 
 derive_nacos_connection() {
+    # 逻辑说明：合并 `nacos://` URL 与显式环境变量，解析 host、port、namespace、用户名、密码和 token，并按固定六行输出；显式环境变量优先，函数本身不连接网络。
     api_url="$(get_skills_api_url)"
     host="${AGENTTEAMS_NACOS_HOST:-}"
     port="${AGENTTEAMS_NACOS_PORT:-}"
@@ -230,6 +241,7 @@ derive_nacos_connection() {
 }
 
 run_nacos_cli() {
+    # 逻辑说明：读取六项 Nacos 连接参数，组装 `npx @nacos-group/cli` 命令；STS 模式先换取临时凭据，其他模式附加用户认证，最后执行且保留真实退出码。
     if [ $# -lt 1 ]; then
         return 0
     fi
@@ -263,6 +275,7 @@ run_nacos_cli() {
 }
 
 append_skill_lines() {
+    # 逻辑说明：从一页 Nacos CLI 文本中提取编号条目，附加 pattern/page/item 排名列后写入候选 TSV；非结果行被忽略，供后续去重评分。
     output="$1"
     pattern_rank="$2"
     page="$3"
@@ -279,6 +292,7 @@ append_skill_lines() {
 }
 
 fetch_nacos_pattern() {
+    # 逻辑说明：对单个搜索 pattern 分页调用 `skill-list`，逐页追加候选，直到空页或不足 PAGE_SIZE；任一页失败就输出错误并停止，避免用不完整结果冒充完整搜索。
     pattern="$1"
     pattern_rank="$2"
     out_file="$3"
@@ -301,6 +315,7 @@ fetch_nacos_pattern() {
 }
 
 build_nacos_patterns() {
+    # 逻辑说明：把查询统一为小写字母数字词组，同时生成完整短语和长度至少二的去重 token，写入 pattern 文件以扩大 Nacos 模糊检索召回率。
     query="$1"
     out_file="$2"
 
@@ -327,6 +342,7 @@ build_nacos_patterns() {
 }
 
 score_nacos_candidates() {
+    # 逻辑说明：解析候选 TSV，按名称/描述的精确短语、子串、token 与前缀命中计算分数，再按名称和描述去重保留最高分，输出可排序结果；不会修改注册中心数据。
     query="$1"
     candidates_file="$2"
     scored_file="$3"
@@ -453,6 +469,7 @@ score_nacos_candidates() {
 }
 
 run_nacos_find() {
+    # 逻辑说明：为一次查询创建临时目录，生成 patterns、分页收集候选、评分排序并展示前 MAX_RESULTS 条；trap 负责退出时清理临时文件，无结果时正常返回而不是安装任何内容。
     if [ $# -lt 1 ]; then
         printf '%sTip:%s search with %s%s find <query>%s\n' "${DIM}" "${RESET}" "${TEXT}" "${SCRIPT_PATH}" "${RESET}"
         exit 0

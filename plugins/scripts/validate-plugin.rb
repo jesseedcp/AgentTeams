@@ -13,19 +13,23 @@ manifest_path = Pathname.new(ARGV[0] || "plugins/teamharness/plugin.yaml").expan
 plugin_root = manifest_path.dirname
 plugins_root = plugin_root.parent
 
+# 逻辑说明：接收一条契约错误，写到 stderr 后以状态码 1 立即结束校验；统一失败出口可确保 CI 不会把残缺插件误判为成功。
 def fail!(message)
   warn "ERROR: #{message}"
   exit 1
 end
 
+# 逻辑说明：验证传入 Pathname 必须是普通文件；满足条件时静默返回，不存在或类型不符时调用统一失败出口，且不创建文件。
 def assert_file(path)
   fail!("missing file: #{path}") unless path.file?
 end
 
+# 逻辑说明：验证传入 Pathname 必须是目录；满足条件时静默返回，不存在或类型不符时终止校验，整个过程只读文件系统。
 def assert_dir(path)
   fail!("missing directory: #{path}") unless path.directory?
 end
 
+# 逻辑说明：从指定路径读取 YAML 并返回解析后的 Ruby 对象；语法错误会转成包含文件路径的统一失败信息，不运行 YAML 中的插件代码。
 def read_yaml(path)
   YAML.load_file(path)
 rescue Psych::SyntaxError => e

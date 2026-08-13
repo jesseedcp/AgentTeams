@@ -23,6 +23,7 @@ logging.basicConfig(
 
 def main() -> None:
     """Entry point registered in pyproject.toml."""
+    # 逻辑说明：声明 Typer 命令，把进程参数转换为 WorkerConfig 并进入异步生命周期。
 
     def _run(
         name: str = typer.Option(..., "--name", help="Worker name"),
@@ -40,6 +41,7 @@ def main() -> None:
         ),
     ) -> None:
         """Start the Hermes Worker and connect to Matrix via the Hermes gateway."""
+        # 逻辑说明：组装配置和 Worker，再由 asyncio.run 启动；运行失败反映为非零退出。
         config = WorkerConfig(
             worker_name=name,
             minio_endpoint=fs,
@@ -52,9 +54,11 @@ def main() -> None:
         worker = Worker(config)
 
         async def _async_run() -> None:
+            # 逻辑说明：注册优雅停止信号并等待 Worker 主循环；Windows 不支持信号 API 时继续。
             loop = asyncio.get_running_loop()
 
             def _shutdown() -> None:
+                # 逻辑说明：收到终止信号时创建异步 stop 任务，使同步与 Hermes 子进程有机会清理。
                 asyncio.create_task(worker.stop())
 
             try:

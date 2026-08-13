@@ -172,6 +172,7 @@ class BoundedProcessRunner:
         timeout: float,
         max_output_bytes: int,
     ) -> RawCodingCLIResult:
+        # 逻辑说明：创建独立进程组并并行喂入/排空有界输出；超时、取消、异常都终止整组。
         if not argv or not Path(argv[0]).is_absolute():
             raise ValueError("coding CLI executable must be an absolute path")
         if timeout <= 0:
@@ -259,6 +260,7 @@ class CodingCLIClient:
         max_output_bytes: int = 64 * 1024,
         max_prompt_bytes: int = 100_000,
     ) -> None:
+        # 逻辑说明：校验 provider 和资源上限，再固化可信目录、工作区与环境，单次委托不能扩大宿主权限。
         invalid = sorted(set(allowed_providers) - _PROVIDERS)
         if invalid:
             raise ValueError(
@@ -281,6 +283,7 @@ class CodingCLIClient:
 
     def status(self) -> dict[str, dict[str, bool]]:
         """Report desired configuration separately from mount availability."""
+        # 逻辑说明：逐个报告是否获准且可执行文件是否存在，不读取凭据，也不尝试真正启动第三方 CLI。
         return {
             provider: {
                 "configured": provider in self._allowed,
@@ -300,6 +303,7 @@ class CodingCLIClient:
         prompt: str,
         timeout_seconds: float | None = None,
     ) -> CodingCLIReceipt:
+        # 逻辑说明：验证 provider/workspace/prompt 后执行固定 argv，并在回执前脱敏环境 Secret。
         selected = self._provider(provider)
         executable = self._find_executable(selected)
         if executable is None:
@@ -347,6 +351,7 @@ class CodingCLIClient:
         )
 
     def validate_workspace(self, workspace: Path) -> Path:
+        # 逻辑说明：resolve 后必须仍在任务 cache 根内且已存在，阻止符号链接或 .. 逃逸。
         resolved = workspace.resolve()
         if (
             resolved != self._workspace_root
@@ -362,6 +367,7 @@ class CodingCLIClient:
         return resolved
 
     def _provider(self, provider: str) -> CodingCLIProvider:
+        # 逻辑说明：provider 必须同时存在于内建表和部署 allowlist，避免任意可执行名注入。
         if provider not in self._allowed or provider not in _PROVIDERS:
             raise CodingCLIProviderRejected(
                 f"coding CLI provider {provider!r} is not allowlisted",
@@ -372,6 +378,7 @@ class CodingCLIClient:
         self,
         provider: str,
     ) -> Path | None:
+        # 逻辑说明：只在 trusted directory 查找常规文件，并在 Unix 上验证执行权限。
         names = (
             (provider, f"{provider}.exe")
             if os.name == "nt"
@@ -396,6 +403,7 @@ class CodingCLIClient:
         self,
         provider: CodingCLIProvider,
     ) -> dict[str, str]:
+        # 逻辑说明：子进程只继承基础变量和该 provider 所需凭据，隔离其余 Manager Secret。
         allowed = _BASE_ENVIRONMENT | _PROVIDER_ENVIRONMENT[provider]
         return {
             name: value
@@ -408,6 +416,7 @@ async def _feed(
     writer: asyncio.StreamWriter,
     value: bytes,
 ) -> None:
+    # 逻辑说明：写完 stdin 后无论断管与否都关闭 writer，避免子进程一直等待 EOF。
     try:
         writer.write(value)
         await writer.drain()
@@ -426,6 +435,7 @@ async def _read_bounded(
     reader: asyncio.StreamReader,
     limit: int,
 ) -> tuple[bytes, bool]:
+    # 逻辑说明：持续排空 pipe 防止死锁，但内存仅保留 limit 字节并单独标记截断。
     captured = bytearray()
     observed = 0
     while True:
@@ -442,6 +452,7 @@ async def _read_bounded(
 async def _terminate_process_group(
     process: asyncio.subprocess.Process,
 ) -> None:
+    # 逻辑说明：先温和终止并短等，仍未退出再强杀整个组，避免遗留 CLI 子孙进程。
     if process.returncode is not None:
         return
     if os.name == "nt":
@@ -466,11 +477,13 @@ async def _terminate_process_group(
 
 
 def _kill_process_group(pid: int, sig: int) -> None:
+    # 逻辑说明：通过动态取得的 POSIX killpg 向整个进程组发送信号，连同 CLI 派生子进程一起终止。
     killpg = cast(Callable[[int, int], None], vars(os)["killpg"])
     killpg(pid, sig)
 
 
 async def _settle(*tasks: asyncio.Task[Any]) -> None:
+    # 逻辑说明：取消未完成的 pipe task 并吞并其收尾异常，保留最初 timeout/cancel 原因。
     for task in tasks:
         if not task.done():
             task.cancel()
@@ -478,6 +491,7 @@ async def _settle(*tasks: asyncio.Task[Any]) -> None:
 
 
 def _safe_output(value: bytes, secrets: tuple[str, ...]) -> str:
+    # 逻辑说明：容错解码、去 ANSI、替换已知 secret 和常见凭据模式后才交给 Agent。
     text = value.decode("utf-8", errors="replace")
     text = _ANSI_ESCAPE.sub("", text)
     for secret in secrets:

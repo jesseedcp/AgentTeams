@@ -189,6 +189,7 @@ type TuwunelClient struct {
 
 // NewTuwunelClient creates a Matrix client for a Tuwunel homeserver.
 func NewTuwunelClient(cfg Config, httpClient *http.Client) *TuwunelClient {
+	// 逻辑说明：缺少自定义 HTTP client 时使用标准 client，并保存配置与并发安全缓存；构造阶段不发网络请求，token/room 在首次使用时惰性获取。
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
@@ -205,6 +206,7 @@ func (c *TuwunelClient) UserID(localpart string) string {
 
 // ensureAdminToken obtains and caches an admin access token via Login.
 func (c *TuwunelClient) ensureAdminToken(ctx context.Context) (string, error) {
+	// 逻辑说明：优先复用原子缓存的管理员 token；未命中才用管理员凭据登录并缓存，登录错误原样返回，避免后续请求使用空 token。
 	if t, ok := c.adminToken.Load().(string); ok && t != "" {
 		return t, nil
 	}
@@ -217,6 +219,7 @@ func (c *TuwunelClient) ensureAdminToken(ctx context.Context) (string, error) {
 }
 
 func (c *TuwunelClient) EnsureUser(ctx context.Context, req EnsureUserRequest) (*UserCredentials, error) {
+	// 逻辑说明：补齐或生成密码，尝试登录判定用户是否存在；必要时通过管理接口创建/重置，再验证 token 与 display name，最终只在身份可用时返回凭据。
 	password := req.Password
 	if password == "" {
 		var err error
@@ -313,6 +316,7 @@ func (c *TuwunelClient) EnsureUser(ctx context.Context, req EnsureUserRequest) (
 }
 
 func (c *TuwunelClient) Login(ctx context.Context, username, password string) (string, error) {
+	// 逻辑说明：构造 Matrix password login 请求并检查 HTTP/Matrix 错误与 access_token；任一失败返回有界诊断，不缓存无效 token。
 	body := map[string]interface{}{
 		"type": "m.login.password",
 		"identifier": map[string]string{
@@ -343,6 +347,7 @@ func (c *TuwunelClient) Login(ctx context.Context, username, password string) (s
 // It uses the as_token as Bearer authentication instead of a registration token.
 // If the user already exists (M_USER_IN_USE), it falls back to LoginAppServiceUser.
 func (c *TuwunelClient) EnsureAppServiceUser(ctx context.Context, username string) (*UserCredentials, error) {
+	// 逻辑说明：用 appservice 身份先确保受管用户已注册，再执行 AS 登录并验证 whoami；只返回当前 namespace 中可成功冒充的用户凭据。
 	regBody := map[string]interface{}{
 		"type":     "m.login.application_service",
 		"username": username,
@@ -412,6 +417,7 @@ func (c *TuwunelClient) EnsureAppServiceUser(ctx context.Context, username strin
 // Service login flow. The as_token authenticates the request; no user password
 // is needed.
 func (c *TuwunelClient) LoginAppServiceUser(ctx context.Context, username string) (string, error) {
+	// 逻辑说明：使用 application_service login 和 as_token 请求指定受管用户名，校验响应状态与非空 token；失败不回退管理员 token，保持身份边界。
 	body := map[string]interface{}{
 		"type": "m.login.application_service",
 		"identifier": map[string]string{
@@ -447,6 +453,7 @@ func (c *TuwunelClient) LoginAppServiceUser(ctx context.Context, username string
 // This is used in AppService mode to set initial passwords for Human users
 // so they can still log in via Cinny with username/password.
 func (c *TuwunelClient) SetPasswordAsAdmin(ctx context.Context, userID, password string) error {
+	// 逻辑说明：把目标 Matrix user 与初始密码交给 Tuwunel 管理命令执行，复用管理员登录与房间解析；命令发送失败不会假定密码已重置。
 	cmd := fmt.Sprintf("!admin users reset-password %s %s", userID, password)
 	return c.AdminCommand(ctx, cmd)
 }
@@ -455,12 +462,14 @@ func (c *TuwunelClient) SetPasswordAsAdmin(ctx context.Context, userID, password
 // as_token instead of a user access token. Reuses the same JSON plumbing as
 // doJSON but substitutes the Bearer token.
 func (c *TuwunelClient) doJSONWithASToken(ctx context.Context, method, path string, reqBody interface{}, respOut interface{}) (int, []byte, error) {
+	// 逻辑说明：把当前 AppService as_token 绑定到统一 JSON 请求管线，使 AS 请求获得相同的 context、状态检查、解码和指标行为，而不会误用管理员用户 token。
 	return c.doJSON(ctx, method, path, c.config.AppServiceToken, reqBody, respOut)
 }
 
 // VerifyAccessToken checks whether a user access token is still valid
 // by calling GET /_matrix/client/v3/account/whoami.
 func (c *TuwunelClient) VerifyAccessToken(ctx context.Context, accessToken string) error {
+	// 逻辑说明：调用 whoami 验证 token 当前可用；网络错误或非 2xx 响应均返回错误，供创建/登录流程阻止使用失效凭据。
 	statusCode, respBody, err := c.doJSON(ctx, http.MethodGet,
 		"/_matrix/client/v3/account/whoami", accessToken, nil, nil)
 	if err != nil {
@@ -472,6 +481,7 @@ func (c *TuwunelClient) VerifyAccessToken(ctx context.Context, accessToken strin
 	return nil
 }
 func (c *TuwunelClient) SetDisplayName(ctx context.Context, userID, accessToken, displayName string) error {
+	// 逻辑说明：对 user ID 做路径转义并用该用户 token 写 profile displayname；只有 2xx 才成功，避免把 homeserver 拒绝当作已更新。
 	path := fmt.Sprintf("/_matrix/client/v3/profile/%s/displayname", url.PathEscape(userID))
 	body := map[string]string{"displayname": displayName}
 	statusCode, respBody, err := c.doJSON(ctx, http.MethodPut, path, accessToken, body, nil)
@@ -485,6 +495,7 @@ func (c *TuwunelClient) SetDisplayName(ctx context.Context, userID, accessToken,
 }
 
 func (c *TuwunelClient) CreateRoom(ctx context.Context, req CreateRoomRequest) (*RoomInfo, error) {
+	// 逻辑说明：选择显式 creator 或管理员 token，构造私有房间/alias/邀请请求并调用 createRoom；失败记录脱敏诊断，成功校验 room ID 后返回权威信息。
 	token := req.CreatorToken
 	tokenSource := "explicit"
 	if token == "" {
@@ -573,6 +584,7 @@ func (c *TuwunelClient) CreateRoom(ctx context.Context, req CreateRoomRequest) (
 }
 
 func (c *TuwunelClient) logCreateRoomFailureDiagnostics(ctx context.Context, req CreateRoomRequest, token, tokenSource string, statusCode int, errCode, errText string, respBody []byte) {
+	// 逻辑说明：在创建房间失败后尽力查询 token 对应 sender 与 power level，并记录截断后的服务端信息；诊断失败不覆盖原始错误，也不输出 token。
 	senderUserID := ""
 	senderPowerLevel := 0
 	senderPowerLevelFound := false
@@ -609,6 +621,7 @@ func (c *TuwunelClient) logCreateRoomFailureDiagnostics(ctx context.Context, req
 }
 
 func (c *TuwunelClient) accessTokenUserID(ctx context.Context, accessToken string) (string, error) {
+	// 逻辑说明：用 whoami 把 access token 解析为 Matrix user ID，检查状态和非空字段；只返回身份，不记录或泄漏 token。
 	var resp struct {
 		UserID string `json:"user_id"`
 	}
@@ -628,6 +641,7 @@ func (c *TuwunelClient) accessTokenUserID(ctx context.Context, accessToken strin
 
 // ResolveRoomAlias implements Client.ResolveRoomAlias.
 func (c *TuwunelClient) ResolveRoomAlias(ctx context.Context, alias string) (string, bool, error) {
+	// 逻辑说明：取得管理员 token 后查询编码 alias；404 明确返回 found=false，其他非 2xx 为错误，成功还要求响应包含 room ID。
 	token, err := c.ensureAdminToken(ctx)
 	if err != nil {
 		return "", false, fmt.Errorf("resolve alias %s: %w", alias, err)
@@ -660,6 +674,7 @@ func (c *TuwunelClient) ResolveRoomAlias(ctx context.Context, alias string) (str
 
 // DeleteRoomAlias implements Client.DeleteRoomAlias.
 func (c *TuwunelClient) DeleteRoomAlias(ctx context.Context, alias string) error {
+	// 逻辑说明：取得管理员 token并删除编码 alias；404 作为幂等成功处理，其他错误或非 2xx 返回给调用者对账。
 	token, err := c.ensureAdminToken(ctx)
 	if err != nil {
 		return fmt.Errorf("delete alias %s: %w", alias, err)
@@ -687,6 +702,7 @@ func (c *TuwunelClient) DeleteRoomAlias(ctx context.Context, alias string) error
 }
 
 func (c *TuwunelClient) SetRoomName(ctx context.Context, roomID, name, userToken string) error {
+	// 逻辑说明：优先使用显式用户 token，空时惰性获取管理员 token；写 m.room.name state 并只接受 2xx，保持调用身份可控。
 	token := userToken
 	if token == "" {
 		var err error
@@ -710,6 +726,7 @@ func (c *TuwunelClient) SetRoomName(ctx context.Context, roomID, name, userToken
 }
 
 func (c *TuwunelClient) SetRoomState(ctx context.Context, roomID, eventType, stateKey string, content map[string]interface{}, userToken string) error {
+	// 逻辑说明：选择用户或管理员 token，安全编码 room/event/state key 后发送状态事件；网络或非 2xx 错误带上下文返回，不吞掉 homeserver 拒绝。
 	token := userToken
 	if token == "" {
 		var err error
@@ -736,6 +753,7 @@ func (c *TuwunelClient) SetRoomState(ctx context.Context, roomID, eventType, sta
 }
 
 func (c *TuwunelClient) JoinRoom(ctx context.Context, roomID, userToken string) error {
+	// 逻辑说明：用指定用户 token 请求加入编码 room，检查网络与 HTTP 状态；失败保持原成员关系并返回有界服务端正文。
 	encodedRoom := encodeRoomID(roomID)
 	statusCode, respBody, err := c.doJSON(ctx, http.MethodPost,
 		fmt.Sprintf("/_matrix/client/v3/rooms/%s/join", encodedRoom),
@@ -750,6 +768,7 @@ func (c *TuwunelClient) JoinRoom(ctx context.Context, roomID, userToken string) 
 }
 
 func (c *TuwunelClient) LeaveRoom(ctx context.Context, roomID, userToken string) error {
+	// 逻辑说明：显式 token 为空时使用管理员身份，向 room leave 端点发送请求并验证 2xx；不会在客户端本地假设成员已移除。
 	token := userToken
 	if token == "" {
 		var err error
@@ -772,6 +791,7 @@ func (c *TuwunelClient) LeaveRoom(ctx context.Context, roomID, userToken string)
 }
 
 func (c *TuwunelClient) SendMessage(ctx context.Context, roomID, token, body string) error {
+	// 逻辑说明：为本进程生成递增 transaction ID，发送文本事件并检查响应；Matrix 可按 txn ID 去重单次重试，非 2xx 不报告成功。
 	encodedRoom := encodeRoomID(roomID)
 	txnID := fmt.Sprintf("hc-%d", txnCounter.Add(1))
 	msg := map[string]string{
@@ -795,6 +815,7 @@ func (c *TuwunelClient) SendMessage(ctx context.Context, roomID, token, body str
 // alias "#admins:<domain>" and caches the result for the lifetime of the
 // client. Controller restart re-resolves.
 func (c *TuwunelClient) ensureAdminRoomID(ctx context.Context) (string, error) {
+	// 逻辑说明：优先复用原子缓存，否则解析配置的管理员 room alias 并缓存权威 room ID；不存在或查询失败阻止管理命令发送。
 	if r, ok := c.adminRoomID.Load().(string); ok && r != "" {
 		return r, nil
 	}
@@ -823,6 +844,7 @@ func (c *TuwunelClient) ensureAdminRoomID(ctx context.Context) (string, error) {
 // the failing stage. Used by the controller for system-level prompts that
 // must originate from the admin identity (e.g. Manager onboarding welcome).
 func (c *TuwunelClient) SendMessageAsAdmin(ctx context.Context, roomID, body string) error {
+	// 逻辑说明：先取得管理员 token，再复用统一 SendMessage；登录或发送错误加操作上下文返回，不暴露凭据。
 	token, err := c.ensureAdminToken(ctx)
 	if err != nil {
 		return fmt.Errorf("send admin message: %w", err)
@@ -837,6 +859,7 @@ func (c *TuwunelClient) SendMessageAsAdmin(ctx context.Context, roomID, body str
 // the admin user. The bot parses messages starting with "!admin" in the
 // admin room. Processing is asynchronous; this call is fire-and-forget.
 func (c *TuwunelClient) AdminCommand(ctx context.Context, command string) error {
+	// 逻辑说明：取得管理员 token 与缓存/解析的 admin room ID，再把命令作为管理员消息发送；任一步失败立即返回，避免命令发往未知房间。
 	token, err := c.ensureAdminToken(ctx)
 	if err != nil {
 		return fmt.Errorf("admin command: %w", err)
@@ -852,6 +875,7 @@ func (c *TuwunelClient) AdminCommand(ctx context.Context, command string) error 
 }
 
 func (c *TuwunelClient) ListRoomMembers(ctx context.Context, roomID string) ([]RoomMember, error) {
+	// 逻辑说明：取得管理员 token 后委托带 token 的成员查询，统一管理员身份和错误上下文。
 	token, err := c.ensureAdminToken(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list members %s: %w", roomID, err)
@@ -860,6 +884,7 @@ func (c *TuwunelClient) ListRoomMembers(ctx context.Context, roomID string) ([]R
 }
 
 func (c *TuwunelClient) ListRoomMembersWithToken(ctx context.Context, roomID, userToken string) ([]RoomMember, error) {
+	// 逻辑说明：拒绝空 token，读取 room joined_members 并把 map 规范为稳定成员切片；网络、状态或 JSON 失败均不返回部分列表。
 	if userToken == "" {
 		return nil, fmt.Errorf("list members %s: empty user token", roomID)
 	}
@@ -904,6 +929,7 @@ func (c *TuwunelClient) ListRoomMembersWithToken(ctx context.Context, roomID, us
 }
 
 func (c *TuwunelClient) InviteToRoom(ctx context.Context, roomID, userID string) error {
+	// 逻辑说明：取得管理员 token 后调用统一邀请实现；管理员登录失败时不尝试修改成员关系。
 	token, err := c.ensureAdminToken(ctx)
 	if err != nil {
 		return fmt.Errorf("invite %s to %s: %w", userID, roomID, err)
@@ -912,6 +938,7 @@ func (c *TuwunelClient) InviteToRoom(ctx context.Context, roomID, userID string)
 }
 
 func (c *TuwunelClient) InviteToRoomWithToken(ctx context.Context, roomID, userID, inviterToken string) error {
+	// 逻辑说明：拒绝空 inviter token，发送 invite 并处理已加入/已邀请等幂等响应；其他非 2xx 返回错误供上层对账。
 	if inviterToken == "" {
 		return fmt.Errorf("invite %s to %s: empty inviter token", userID, roomID)
 	}
@@ -955,6 +982,7 @@ func (c *TuwunelClient) InviteToRoomWithToken(ctx context.Context, roomID, userI
 }
 
 func (c *TuwunelClient) KickFromRoom(ctx context.Context, roomID, userID, reason string) error {
+	// 逻辑说明：取得管理员 token 后调用统一 kick 实现，保留明确目标与原因的错误上下文。
 	token, err := c.ensureAdminToken(ctx)
 	if err != nil {
 		return fmt.Errorf("kick %s from %s: %w", userID, roomID, err)
@@ -963,6 +991,7 @@ func (c *TuwunelClient) KickFromRoom(ctx context.Context, roomID, userID, reason
 }
 
 func (c *TuwunelClient) KickFromRoomWithToken(ctx context.Context, roomID, userID, reason, kickerToken string) error {
+	// 逻辑说明：拒绝空 kicker token，发送 kick 请求并把目标已不在房间视为幂等结果；其他错误不伪报成员已移除。
 	if kickerToken == "" {
 		return fmt.Errorf("kick %s from %s: empty kicker token", userID, roomID)
 	}
@@ -1005,6 +1034,7 @@ func (c *TuwunelClient) KickFromRoomWithToken(ctx context.Context, roomID, userI
 // ListJoinedRooms returns the room IDs joined by the user identified by
 // the given access token.
 func (c *TuwunelClient) ListJoinedRooms(ctx context.Context, userToken string) ([]string, error) {
+	// 逻辑说明：用指定用户 token查询 joined_rooms，校验 HTTP/JSON 后返回 homeserver 权威列表；失败不使用缓存替代。
 	var resp struct {
 		JoinedRooms []string `json:"joined_rooms"`
 	}
@@ -1020,6 +1050,7 @@ func (c *TuwunelClient) ListJoinedRooms(ctx context.Context, userToken string) (
 }
 
 func (c *TuwunelClient) SyncMessages(ctx context.Context, since string, timeout time.Duration) (*SyncMessagesResult, error) {
+	// 逻辑说明：取得管理员 token，构造带 since/timeout 的长轮询 sync；解析各 joined room 的 timeline 文本事件和 next_batch，失败不推进游标。
 	token, err := c.ensureAdminToken(ctx)
 	if err != nil {
 		return nil, err
@@ -1080,6 +1111,7 @@ func (c *TuwunelClient) SyncMessages(ctx context.Context, since string, timeout 
 // The raw body is always returned (possibly nil) so callers can include it in
 // diagnostic error messages even when respOut is set.
 func (c *TuwunelClient) doJSON(ctx context.Context, method, path, token string, reqBody interface{}, respOut interface{}) (int, []byte, error) {
+	// 逻辑说明：统一序列化可选请求体、绑定 context、设置 bearer/JSON header、执行 HTTP 并读取有界响应；记录脱敏 metrics，只有成功状态才解码目标。
 	operation := matrixOperation(method, path)
 	start := time.Now()
 	statusCode := 0
@@ -1137,6 +1169,7 @@ func (c *TuwunelClient) doJSON(ctx context.Context, method, path, token string, 
 }
 
 func matrixOperation(method, path string) string {
+	// 逻辑说明：去掉 query 并按已知 Matrix endpoint 形状归一化为低基数 operation 标签；未知路径回退 method+首级段，防止 metrics 标签爆炸。
 	pathOnly := path
 	if idx := strings.IndexByte(pathOnly, '?'); idx >= 0 {
 		pathOnly = pathOnly[:idx]
@@ -1202,6 +1235,7 @@ func encodeAlias(alias string) string {
 }
 
 func truncate(b []byte, max int) string {
+	// 逻辑说明：响应体未超上限时原样转字符串，超限时只保留前 max 字节并加省略标记，限制错误日志内存和敏感信息暴露范围。
 	if len(b) <= max {
 		return string(b)
 	}

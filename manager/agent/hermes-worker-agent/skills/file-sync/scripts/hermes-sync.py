@@ -27,6 +27,7 @@ _VENV_REEXEC_MARKER = "_HERMES_SYNC_VENV_REEXEC"
 
 def _find_venv_python() -> str | None:
     """Return the first venv python that ships hermes_worker."""
+    # 逻辑说明：只检查镜像契约中的 Hermes venv，找到可执行 Python 就返回；不扫描任意宿主路径，避免重启到错误解释器。
     for venv in ("/opt/venv/hermes",):
         py = Path(venv) / "bin" / "python3"
         if py.exists():
@@ -64,6 +65,7 @@ except ImportError:
 
 
 def main() -> None:
+    # 逻辑说明：校验对象存储身份后立即拉取 Worker 文件；配置变化时重建 Hermes 桥接文件，任何同步异常都以非零状态返回给调用 Agent。
     worker_name = os.getenv("AGENTTEAMS_WORKER_NAME")
     minio_endpoint = os.getenv("AGENTTEAMS_FS_ENDPOINT")
     minio_access_key = os.getenv("AGENTTEAMS_FS_ACCESS_KEY")

@@ -27,6 +27,7 @@ _FALSE_VALUES = {"0", "false", "no", "off"}
 
 def configure_worker_logging(working_dir: Optional[Path] = None) -> Optional[Path]:
     """Configure console and rotating file logging for qwenpaw-worker."""
+    # 逻辑说明：幂等设置根日志级别和控制台 handler；若启用文件日志，再创建轮转文件并返回其路径。
 
     root = logging.getLogger()
     level = _log_level()
@@ -91,6 +92,7 @@ def configure_worker_logging(working_dir: Optional[Path] = None) -> Optional[Pat
 
 
 def _log_configured(log_file: Path, level: int, max_bytes: int, backup_count: int) -> None:
+    # 逻辑说明：以结构化字段记录最终日志路径和轮转参数，便于部署排障核对实际配置。
     logging.getLogger(__name__).info(
         "worker logging configured component=worker stage=logging event=configured file_enabled=True "
         "path=%s max_bytes=%s backup_count=%s level=%s",
@@ -102,6 +104,7 @@ def _log_configured(log_file: Path, level: int, max_bytes: int, backup_count: in
 
 
 def _ensure_console_handler(root: logging.Logger, formatter: logging.Formatter, level: int) -> None:
+    # 逻辑说明：复用带标记的控制台 handler 或只创建一个，再同步级别与格式，避免重复输出。
     handler = _find_marked_handler(root, _CONSOLE_HANDLER_MARK)
     if handler is None:
         handler = logging.StreamHandler()
@@ -112,6 +115,7 @@ def _ensure_console_handler(root: logging.Logger, formatter: logging.Formatter, 
 
 
 def _find_marked_handler(root: logging.Logger, mark: str) -> Optional[logging.Handler]:
+    # 逻辑说明：在根 logger 中按私有标记查找本模块管理的 handler，不误改宿主程序的 handler。
     for handler in root.handlers:
         if getattr(handler, mark, False):
             return handler
@@ -119,6 +123,7 @@ def _find_marked_handler(root: logging.Logger, mark: str) -> Optional[logging.Ha
 
 
 def _remove_marked_handlers(root: logging.Logger, mark: str) -> None:
+    # 逻辑说明：移除并关闭本模块创建的指定 handler，供关闭文件日志或重新配置时释放句柄。
     for handler in list(root.handlers):
         if getattr(handler, mark, False):
             root.removeHandler(handler)
@@ -126,6 +131,7 @@ def _remove_marked_handlers(root: logging.Logger, mark: str) -> None:
 
 
 def _file_logging_enabled() -> bool:
+    # 逻辑说明：解析文件日志开关；未配置默认开启，常见 false 文本会显式关闭。
     value = os.environ.get("QWENPAW_WORKER_LOG_FILE_ENABLED")
     if value is None:
         return True
@@ -133,6 +139,7 @@ def _file_logging_enabled() -> bool:
 
 
 def _log_file_path(working_dir: Optional[Path]) -> Path:
+    # 逻辑说明：依次按专用日志目录、环境工作目录、调用参数和当前目录选择日志文件位置。
     log_dir = os.environ.get("QWENPAW_WORKER_LOG_DIR")
     if log_dir:
         return Path(log_dir) / DEFAULT_LOG_FILE_NAME
@@ -148,6 +155,7 @@ def _log_file_path(working_dir: Optional[Path]) -> Path:
 
 
 def _log_level() -> int:
+    # 逻辑说明：接受数字或标准日志名称；无法识别时安全回落 INFO，避免配置拼写导致启动失败。
     value = os.environ.get("QWENPAW_LOG_LEVEL", "INFO").strip()
     if value.isdigit():
         return int(value)
@@ -159,6 +167,7 @@ def _log_level() -> int:
 
 
 def _bounded_int(value: Optional[str], default: int, *, minimum: int, maximum: int) -> int:
+    # 逻辑说明：把环境文本转成限定范围整数；格式错误或低于下限回落默认值，高于上限截断。
     try:
         parsed = int(value) if value is not None else default
     except (TypeError, ValueError):

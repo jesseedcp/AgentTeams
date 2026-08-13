@@ -22,16 +22,19 @@ class TracerHandle:
     is_noop: bool
 
     def start_as_current_span(self, name: str, **kwargs: Any):
+        # 逻辑说明：未启用 tracing 时返回同接口空上下文，业务代码无需为可选依赖增加分支。
         if self.is_noop or self.tracer is None:
             return nullcontext()
         return self.tracer.start_as_current_span(name, **kwargs)
 
     def shutdown(self) -> None:
+        # 逻辑说明：仅在真实 provider 存在时刷新并关闭 exporter，no-op 模式可安全重复调用。
         if self.provider is not None:
             self.provider.shutdown()
 
 
 def build_tracer_from_env() -> TracerHandle:
+    # 逻辑说明：先解析显式开关；启用后才延迟导入 OTel、配置可选 OTLP exporter 并注册全局 provider。
     enabled = os.environ.get(
         "AGENTTEAMS_CMS_TRACES_ENABLED",
         "",

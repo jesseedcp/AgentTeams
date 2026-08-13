@@ -76,11 +76,13 @@ class TaskArtifactSet:
         metadata: TaskMetadata,
         specification: str,
     ) -> None:
+        # 逻辑说明：绑定对象存储及任务元数据/规格读写器；实际远端读取、写入和完整性校验由后续方法按任务执行。
         self._storage = storage
         self._metadata = metadata
         self._specification = specification
 
     async def write_prepared(self) -> tuple[ObjectReceipt, ObjectReceipt]:
+        # 逻辑说明：先要求 metadata 处于 prepared 且 spec 非空，再按发布顺序条件写 meta.json 与 spec.md；对象已存在时版本冲突阻止覆盖不可变任务定义。
         if self._metadata.status != "prepared":
             raise ValueError("new task metadata must have prepared status")
         if not self._specification.strip():
@@ -188,6 +190,7 @@ class FileSyncService:
         supervisor: FileSyncSupervisor | None = None,
         matrix: MatrixPort | None = None,
     ) -> None:
+        # 逻辑说明：组合对象存储、lease、任务库、缓存根和通知依赖；仅规范化本地根路径，不在构造时同步任务文件。
         self._storage = storage
         self._leases = leases
         self._tasks = tasks
@@ -206,6 +209,7 @@ class FileSyncService:
         worker_name: str | None = None,
         task_id: str | None = None,
     ) -> Path:
+        # 逻辑说明：复用统一 root 解析器得到受限本地根路径并丢弃远端前缀；缺少对应 Worker/Task 身份时沿用校验错误，不猜测目录。
         local, _ = self._root_spec(
             root,
             worker_name=worker_name,
@@ -220,6 +224,7 @@ class FileSyncService:
         processor: str,
         worker_name: str | None = None,
     ) -> FileRootReceipt:
+        # 逻辑说明：解析允许的本地根与远端前缀，扫描并按内容差异条件上传整棵树，最后返回文件数、传输字节与稳定 manifest 摘要。
         del processor
         local, prefix = self._root_spec(
             root,
@@ -246,6 +251,7 @@ class FileSyncService:
         *,
         worker_name: str | None = None,
     ) -> Path:
+        # 逻辑说明：解析 root/target 到受控缓存目录和对象前缀，调用 storage mirror_down 完整同步后返回本地路径；失败不伪报可用缓存。
         local, prefix = self._root_spec(
             root,
             worker_name=worker_name,
@@ -262,6 +268,7 @@ class FileSyncService:
         processor: str,
         context: MutationContext,
     ) -> FileSyncReceipt | Path:
+        # 逻辑说明：pull 直接下载；push 无 supervisor 时走基础上传，有 supervisor 时创建可恢复 operation、记录 Storage 与 Matrix 效果及回执，网络异常标 ambiguous 后重抛。
         if direction == "pull":
             return await self.pull_task(task_id)
         if self._supervisor is None or self._matrix is None:
@@ -349,6 +356,7 @@ class FileSyncService:
         self,
         operation: OperationRecord,
     ) -> FileSyncReceipt | Path:
+        # 逻辑说明：验证恢复对象确为 FILE_SYNC/push_task，重建原 MutationContext 并核对 operation ID 未漂移，然后重入幂等 sync_task 对账后续效果。
         if operation.kind is not OperationKind.FILE_SYNC:
             raise RecoveryError("operation is not a file sync")
         request = operation.request
@@ -369,6 +377,7 @@ class FileSyncService:
         )
 
     async def pull_task(self, task_id: str) -> Path:
+        # 逻辑说明：确认任务存在，根据 Team 路由计算权威对象前缀，将其镜像到受控 task cache 并返回目录。
         task = await self._require_task(task_id)
         destination = self._task_root(task_id)
         await self._storage.mirror_down(
@@ -385,6 +394,7 @@ class FileSyncService:
         max_bytes: int = 256 * 1024,
     ) -> TaskFileReadReceipt:
         """Read one bounded UTF-8 file from the verified task cache."""
+        # 逻辑说明：确认任务、大小范围和相对路径，逐级拒绝 symlink/越界/非文件，双重检查字节数并解码 UTF-8，最后返回正文与 SHA-256。
 
         await self._require_task(task_id)
         if not 1 <= max_bytes <= 1024 * 1024:
@@ -437,6 +447,7 @@ class FileSyncService:
         processor: str,
         lease: ProcessingLease | None = None,
     ) -> FileSyncReceipt:
+        # 逻辑说明：验证 task cache 存在，递归枚举普通且非 Manager-owned 文件，再委托 push_files 获取 lease、做版本上传和生成 manifest。
         root = self._task_root(task_id)
         if not root.is_dir():
             raise FileNotFoundError(root)
@@ -462,6 +473,7 @@ class FileSyncService:
         processor: str,
         lease: ProcessingLease | None = None,
     ) -> FileSyncReceipt:
+        # 逻辑说明：确认任务和缓存根，获取或验证 processing lease；逐文件拒绝 symlink/越界/保护路径，按摘要+大小跳过未变对象并用 ETag 条件写，finally 释放自有 lease。
         task = await self._require_task(task_id)
         prefix = _task_remote_prefix(task)
         root = self._task_root(task_id)
@@ -549,6 +561,7 @@ class FileSyncService:
         *,
         protect_manager_files: bool,
     ) -> tuple[list[dict[str, object]], int]:
+        # 逻辑说明：安全遍历受控 root，拒绝 symlink 与 resolve 越界，可选跳过 Manager 文件；只上传内容变化对象并返回完整 manifest entries 与实际传输字节。
         if not root.is_dir():
             raise FileNotFoundError(root)
         entries: list[dict[str, object]] = []
@@ -595,12 +608,14 @@ class FileSyncService:
         return entries, transferred
 
     async def _require_task(self, task_id: str) -> TaskRecord:
+        # 逻辑说明：从任务端口读取持久记录，不存在立即抛出领域 NotFound；返回值作为后续 Team 前缀和权限判断依据。
         task = await self._tasks.get(task_id)
         if task is None:
             raise NotFoundError(f"task/{task_id} does not exist")
         return task
 
     def _task_root(self, task_id: str) -> Path:
+        # 逻辑说明：严格限制 task ID 格式并拒绝路径分隔符/点目录，再拼入固定 cache 根，防止用户 ID 逃逸文件系统边界。
         if (
             not task_id.startswith("task-")
             or "/" in task_id
@@ -617,6 +632,7 @@ class FileSyncService:
         worker_name: str | None,
         task_id: str | None,
     ) -> tuple[Path, str]:
+        # 逻辑说明：按 root 种类校验所需/禁止的 Worker 或 task 参数，并同时返回受控本地目录与规范远端前缀；未知组合立即拒绝。
         if root == "worker_workspace":
             if (
                 worker_name is None
@@ -651,6 +667,7 @@ class FileSyncService:
 
 
 def _manager_owned(relative: Path) -> bool:
+    # 逻辑说明：仅把任务目录根及 Manager 的元数据/处理目录标记为 Manager 所有；Worker 产物因此不会被 Manager 写操作误覆盖。
     if not relative.parts:
         return True
     return relative.parts[0] in {
@@ -662,6 +679,7 @@ def _manager_owned(relative: Path) -> bool:
 
 
 def _task_remote_prefix(task: TaskRecord) -> str:
+    # 逻辑说明：优先使用 delegated/storage Team 决定共享对象命名空间，无 Team 回退全局任务前缀；非法 Team 名触发恢复错误，防止写到意外 key。
     team_name = str(
         task.delegated_to_team
         or task.metadata.get("storage_team_name")
@@ -677,6 +695,7 @@ def _task_remote_prefix(task: TaskRecord) -> str:
 
 
 def _content_type(path: Path) -> str:
+    # 逻辑说明：按小写扩展名选择有限 MIME 映射，未知文件统一为二进制，避免从用户文件内容猜测类型。
     return {
         ".json": "application/json",
         ".md": "text/markdown",
@@ -687,6 +706,7 @@ def _content_type(path: Path) -> str:
 
 
 def _manifest_sha256(entries: list[dict[str, object]]) -> str:
+    # 逻辑说明：把 manifest 用稳定键序和紧凑 JSON 编码后计算 SHA-256，相同文件回执集合得到相同根摘要。
     encoded = json.dumps(
         entries,
         ensure_ascii=False,
@@ -700,6 +720,7 @@ def _manifest_sha256(entries: list[dict[str, object]]) -> str:
 def _sync_receipt_from_operation(
     operation: OperationRecord,
 ) -> FileSyncReceipt:
+    # 逻辑说明：从已成功 Operation 的持久 result 提取 sync 字典并重新验证 FileSyncReceipt；缺失或类型错误说明恢复状态不完整，拒绝伪造回执。
     raw = operation.result.get("sync")
     if not isinstance(raw, dict):
         raise RecoveryError("succeeded file sync has no durable receipt")

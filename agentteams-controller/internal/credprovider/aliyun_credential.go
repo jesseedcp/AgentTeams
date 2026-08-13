@@ -33,10 +33,12 @@ type aliyunCredential struct {
 const credentialType = "sts"
 
 func (a *aliyunCredential) token() (*IssueResponse, error) {
+	// 逻辑说明：桥接不携带 context 的阿里云 SDK 凭据接口，以后台 context 向 TokenManager 取可用 STS；缓存与刷新策略完全由 TokenManager 负责。
 	return a.tm.Token(context.Background())
 }
 
 func (a *aliyunCredential) GetAccessKeyId() (*string, error) {
+	// 逻辑说明：获取当前有效 STS 后只返回 AccessKeyID 指针；刷新失败原样返回错误，绝不返回空指针冒充成功。
 	t, err := a.token()
 	if err != nil {
 		return nil, err
@@ -45,6 +47,7 @@ func (a *aliyunCredential) GetAccessKeyId() (*string, error) {
 }
 
 func (a *aliyunCredential) GetAccessKeySecret() (*string, error) {
+	// 逻辑说明：获取当前有效 STS 后只返回 AccessKeySecret 指针供 SDK 签名；取 token 失败时不暴露旧密钥。
 	t, err := a.token()
 	if err != nil {
 		return nil, err
@@ -53,6 +56,7 @@ func (a *aliyunCredential) GetAccessKeySecret() (*string, error) {
 }
 
 func (a *aliyunCredential) GetSecurityToken() (*string, error) {
+	// 逻辑说明：获取当前有效 STS 的 SecurityToken 并转成 SDK 要求的指针；刷新错误直接上抛，避免 AK/SK 与安全令牌跨代混用。
 	t, err := a.token()
 	if err != nil {
 		return nil, err
@@ -71,6 +75,7 @@ func (a *aliyunCredential) GetType() *string {
 }
 
 func (a *aliyunCredential) GetCredential() (*credential.CredentialModel, error) {
+	// 逻辑说明：一次性取得同一批 STS 三元组并组装阿里云 SDK CredentialModel，同时标记类型与提供方；获取失败时不构造半完整模型。
 	t, err := a.token()
 	if err != nil {
 		return nil, err

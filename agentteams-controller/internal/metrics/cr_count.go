@@ -22,6 +22,7 @@ type CRCountCollector struct {
 }
 
 func (c *CRCountCollector) Start(ctx context.Context) error {
+	// 逻辑说明：先校验 Kubernetes client 并立即采集一次，随后按配置周期刷新；单次 List 失败只记日志而不终止后台任务，只有 context 取消才停止 ticker 并退出。
 	if c.Client == nil {
 		return fmt.Errorf("cr count collector requires a client")
 	}
@@ -48,6 +49,7 @@ func (c *CRCountCollector) Start(ctx context.Context) error {
 }
 
 func (c *CRCountCollector) refresh(ctx context.Context) error {
+	// 逻辑说明：为每种 CR 和允许的 phase 建立全零快照，再从 controller cache 依次列出 Worker、Team、Human 和可选 Manager；全部读取成功后才覆盖指标，避免一次半成品采集混入新旧数值。
 	counts := newCRCountSnapshot()
 	opts := c.listOptions()
 
@@ -94,6 +96,7 @@ func (c *CRCountCollector) refresh(ctx context.Context) error {
 }
 
 func (c *CRCountCollector) listOptions() []client.ListOption {
+	// 逻辑说明：未限定 namespace 时让 client 查询其可见范围；配置 namespace 时返回 InNamespace 选项，使所有 CR 计数遵守同一作用域。
 	if c.Namespace == "" {
 		return nil
 	}
@@ -101,6 +104,7 @@ func (c *CRCountCollector) listOptions() []client.ListOption {
 }
 
 func newCRCountSnapshot() map[string]map[string]float64 {
+	// 逻辑说明：按固定 kind/status 白名单预建值为零的二维表，确保本轮已经消失的状态也会被显式写回 0，而不是遗留上一轮 gauge。
 	counts := make(map[string]map[string]float64, len(crStatusesByKind))
 	for kind, statuses := range crStatusesByKind {
 		counts[kind] = make(map[string]float64, len(statuses))
@@ -112,6 +116,7 @@ func newCRCountSnapshot() map[string]map[string]float64 {
 }
 
 func boundedCRStatus(kind, status string) string {
+	// 逻辑说明：只允许预注册的低基数 phase 进入 Prometheus 标签；空值或未来未知状态统一折叠为 unknown，防止标签数量随任意状态文本增长。
 	if status == "" {
 		return "unknown"
 	}

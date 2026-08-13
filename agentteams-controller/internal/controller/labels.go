@@ -21,6 +21,9 @@ package controller
 // in the future only requires an additional mergeLabels argument at the
 // call sites.
 func mergeLabels(layers ...map[string]string) map[string]string {
+	// 逻辑说明：mergeLabels 接收 layers(...map[string]string)，按本函数中的条件与转换步骤合并Controller 状态的期望结果。
+	// 返回/状态：返回 map[string]string；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	size := 0
 	for _, l := range layers {
 		size += len(l)

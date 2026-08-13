@@ -13,6 +13,7 @@ set -euo pipefail
 CLUSTER_NAME="${AGENTTEAMS_CLUSTER_NAME:-agentteams}"
 NAMESPACE="${AGENTTEAMS_NAMESPACE:-agentteams}"
 
+# 逻辑说明：给本地集群清理步骤统一加前缀，使 Helm 卸载和 kind 删除的日志可以区分。
 log() { echo -e "\033[36m[AgentTeams K8s]\033[0m $1"; }
 
 # Uninstall Helm release (if exists)

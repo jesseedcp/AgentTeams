@@ -37,6 +37,9 @@ type ManagerConfigStoreConfig struct {
 }
 
 func NewManagerConfigStore(cfg ManagerConfigStoreConfig) *ManagerConfigStore {
+	// 逻辑说明：NewManagerConfigStore 接收 cfg(ManagerConfigStoreConfig)，按本函数中的条件与转换步骤处理运行时配置的期望结果。
+	// 返回/状态：返回 *ManagerConfigStore；可能把配置、技能或运行文档写入本地目录或 MinIO/S3 的稳定对象键。
+	// 失败/重试：校验、序列化或 I/O 失败会返回错误；旧配置保持可用，上层可用相同对象键覆盖重试。
 	managerName := cfg.ManagerName
 	if managerName == "" {
 		managerName = "manager"
@@ -66,6 +69,9 @@ func (l *ManagerConfigStore) managerAgentPrefix() string {
 // managerLocalConfigPath returns the local filesystem path for the manager's openclaw.json.
 // In embedded mode, this is a shared mount with the manager container.
 func (l *ManagerConfigStore) managerLocalConfigPath() string {
+	// 逻辑说明：managerLocalConfigPath 接收 无，按本函数中的条件与转换步骤处理运行时配置的期望结果。
+	// 返回/状态：返回 string；可能把配置、技能或运行文档写入本地目录或 MinIO/S3 的稳定对象键。
+	// 失败/重试：校验、序列化或 I/O 失败会返回错误；旧配置保持可用，上层可用相同对象键覆盖重试。
 	if l.AgentFSDir == "" {
 		return ""
 	}
@@ -75,6 +81,9 @@ func (l *ManagerConfigStore) managerLocalConfigPath() string {
 // writeManagerLocalConfig writes openclaw.json to the local filesystem (shared mount).
 // This ensures the manager container sees changes immediately without MinIO sync.
 func (l *ManagerConfigStore) writeManagerLocalConfig(data []byte) {
+	// 逻辑说明：writeManagerLocalConfig 接收 data([]byte)，依次借助 managerLocalConfigPath、WriteFile、Printf写入运行时配置的期望结果。
+	// 返回/状态：返回 无；可能把配置、技能或运行文档写入本地目录或 MinIO/S3 的稳定对象键。
+	// 失败/重试：校验、序列化或 I/O 失败会返回错误；旧配置保持可用，上层可用相同对象键覆盖重试。
 	path := l.managerLocalConfigPath()
 	if path == "" {
 		return
@@ -91,6 +100,9 @@ func (l *ManagerConfigStore) writeManagerLocalConfig(data []byte) {
 // new config with any existing groupAllowFrom entries to avoid overwriting
 // additions made by UpdateManagerGroupAllowFrom (e.g. team leader IDs).
 func (l *ManagerConfigStore) PutManagerConfig(configJSON []byte) error {
+	// 逻辑说明：PutManagerConfig 接收 configJSON([]byte)，依次借助 Enabled、Lock、Unlock、Background处理运行时配置的期望结果。
+	// 返回/状态：返回 error；可能把配置、技能或运行文档写入本地目录或 MinIO/S3 的稳定对象键。
+	// 失败/重试：校验、序列化或 I/O 失败会返回错误；旧配置保持可用，上层可用相同对象键覆盖重试。
 	if !l.Enabled() {
 		return nil
 	}
@@ -131,6 +143,9 @@ func (l *ManagerConfigStore) PutManagerConfig(configJSON []byte) error {
 // mergeGroupAllowFrom copies any extra groupAllowFrom entries from old config
 // into new config, preserving IDs added by UpdateManagerGroupAllowFrom.
 func mergeGroupAllowFrom(oldCfg, newCfg map[string]interface{}) {
+	// 逻辑说明：mergeGroupAllowFrom 接收 oldCfg/newCfg(map[string]interface{})，依次借助 extractStringSlice合并运行时配置的期望结果。
+	// 返回/状态：返回 无；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	oldChannels, _ := oldCfg["channels"].(map[string]interface{})
 	newChannels, _ := newCfg["channels"].(map[string]interface{})
 	if oldChannels == nil || newChannels == nil {
@@ -164,6 +179,9 @@ func mergeGroupAllowFrom(oldCfg, newCfg map[string]interface{}) {
 // UpdateManagerGroupAllowFrom adds or removes a worker Matrix ID from the
 // Manager's openclaw.json groupAllowFrom list via OSS.
 func (l *ManagerConfigStore) UpdateManagerGroupAllowFrom(workerMatrixID string, add bool) error {
+	// 逻辑说明：UpdateManagerGroupAllowFrom 接收 workerMatrixID(string)、add(bool)，依次借助 Enabled、Lock、Unlock、Background更新运行时配置的期望结果。
+	// 返回/状态：返回 error；会更新 运行时配置的内存状态，存在客户端调用时还可能同步相应外部资源。
+	// 失败/重试：输入或依赖调用失败会返回错误；是否重排由上层调谐器决定，本函数不隐藏失败。
 	if !l.Enabled() {
 		return nil
 	}
@@ -229,6 +247,9 @@ func (l *ManagerConfigStore) UpdateManagerGroupAllowFrom(workerMatrixID string, 
 }
 
 func extractStringSlice(v interface{}) []string {
+	// 逻辑说明：extractStringSlice 接收 v(interface{})，按本函数中的条件与转换步骤提取运行时配置的期望结果。
+	// 返回/状态：返回 []string；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	if v == nil {
 		return nil
 	}

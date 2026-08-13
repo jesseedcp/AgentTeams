@@ -25,6 +25,7 @@ type KubeconfigResponse struct {
 
 // GetKubeconfig calls the STS provider to obtain a temporary kubeconfig for the given cluster.
 func (c *HTTPClient) GetKubeconfig(ctx context.Context, clusterID string) (*KubeconfigResponse, error) {
+	// 逻辑说明：把集群 ID 编码后 POST 到凭据侧车的 kubeconfig 接口；只在 2xx、JSON 可解码且 kubeconfig 非空时返回，其他情况附带服务端正文帮助定位并确保响应体关闭。
 	if c.baseURL == "" {
 		return nil, errors.New("credprovider: base URL not configured (AGENTTEAMS_CREDENTIAL_PROVIDER_URL)")
 	}

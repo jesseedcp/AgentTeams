@@ -88,6 +88,7 @@ class RoomSessionManager:
         session_timezone: str = "UTC",
         now: Callable[[], datetime] | None = None,
     ) -> None:
+        # 逻辑说明：保存 Agent factory、会话仓库、时区和时钟，并初始化房间 session/lock cache、cache guard 与活动 turn 任务表；构造阶段不加载持久化 state 或创建 Agent。
         self._factory = factory
         self._sessions = sessions
         self._cache: dict[str, RoomSession] = {}
@@ -102,6 +103,7 @@ class RoomSessionManager:
         room_id: str,
         policy: RoomPolicy,
     ) -> RoomSession:
+        # 逻辑说明：取得 room_id 对应的唯一锁并在锁内委托 _get_or_create_locked，使同房间并发调用串行地复用或重建同一 RoomSession；创建失败原样传播且锁自动释放。
         lock = await self._lock_for(room_id)
         async with lock:
             return await self._get_or_create_locked(
@@ -116,6 +118,7 @@ class RoomSessionManager:
         policy: RoomPolicy,
         lock: asyncio.Lock,
     ) -> RoomSession:
+        # 逻辑说明：比较缓存 session 与当前 policy/runtime revision 及持久化设置；完全一致则复用，否则从缓存或仓库深拷贝 state 创建新 Agent，成功写入 cache 后才 retire 旧 Agent，创建失败保留旧缓存。
         cached = self._cache.get(room_id)
         runtime_revision = getattr(
             self._factory,
@@ -185,6 +188,7 @@ class RoomSessionManager:
         event: InboundEvent,
         policy: RoomPolicy,
     ) -> AsyncIterator[AgentEvent]:
+        # 逻辑说明：把 InboundEvent 的已验证发送者、房间、线程、mentions 与 canonical 当前正文封装成 UserMsg，再把 run_input 产生的 AgentEvent 原序转发；构造或下游异常直接传播。
         message = UserMsg(
             name=event.sender,
             content=current_message_text(event),
@@ -217,6 +221,7 @@ class RoomSessionManager:
         到 state，避免历史/记忆副本被永久重复保存。发生取消时恢复 ``state_before``，
         因而 ``/stop`` 不会留下半个 tool call 的上下文。
         """
+        # 逻辑说明：在 room lock 内取得 Agent、登记当前 task 并保存 turn 前深拷贝；冷会话可临时前置房间上下文后流式 yield reply，取消时回滚 state，非取消退出时恢复 canonical 输入、记录 event_id 并持久化，回调或流异常也按 finally 保存已形成状态。
         lock = await self._lock_for(event.room_id)
         async with lock:
             session = await self._get_or_create_locked(
@@ -286,6 +291,7 @@ class RoomSessionManager:
                     await self._save(event.room_id, session)
 
     async def _lock_for(self, room_id: str) -> asyncio.Lock:
+        # 逻辑说明：快速返回已存在的 room lock；首次访问时用全局 cache_guard 和 setdefault 原子创建唯一 asyncio.Lock，保证并发初始化同一 room_id 不会得到两把不同的串行锁。
         lock = self._room_locks.get(room_id)
         if lock is not None:
             return lock
@@ -297,6 +303,7 @@ class RoomSessionManager:
 
     async def persist(self, room_id: str) -> None:
         """Persist a cached session after out-of-stream state changes."""
+        # 逻辑说明：若 room_id 已缓存则在该 session 锁内保存当前 Agent state、policy revision 与 last_event_id；冷房间为空操作，仓库写入失败向上传播且不移除缓存。
         session = self._cache.get(room_id)
         if session is None:
             return
@@ -305,9 +312,11 @@ class RoomSessionManager:
 
     async def reset(self, room_id: str) -> None:
         """Drop one parked continuation and its persisted room state."""
+        # 逻辑说明：通过 _drop_state 删除指定房间的缓存 Agent 和持久化会话，并在存在旧 Agent 时释放其 generation；清理或仓库删除失败由调用方处理。
         await self._drop_state(room_id)
 
     async def settings(self, room_id: str) -> SessionSettings:
+        # 逻辑说明：使用注入时钟和 session_timezone 向仓库读取 room_id 的完整 SessionSettings；时间计算或仓库异常直接传播，本方法不修改 cache。
         return await self._sessions.settings(
             room_id,
             now=self._now(),
@@ -315,6 +324,7 @@ class RoomSessionManager:
         )
 
     async def queue_settings(self, room_id: str) -> tuple[str, int]:
+        # 逻辑说明：复用 settings(room_id) 读取持久化配置，并只投影 queue_mode 与 queue_limit 组成元组返回；读取失败不提供猜测默认值。
         settings = await self.settings(room_id)
         return settings.queue_mode, settings.queue_limit
 
@@ -323,6 +333,7 @@ class RoomSessionManager:
         room_id: str,
         **changes: Any,
     ) -> SessionSettings:
+        # 逻辑说明：把 room_id、当前 UTC 时刻和显式 changes 交给 SessionRepository.update，并返回仓库校验后的 SessionSettings；本方法不主动重建缓存 Agent，非法变更由仓库拒绝。
         return await self._sessions.update(
             room_id,
             now=self._now(),
@@ -336,6 +347,7 @@ class RoomSessionManager:
         model_override: str | None,
     ) -> RoomSessionStatus:
         """Change only the room model and rebuild while preserving state."""
+        # 逻辑说明：先持久化 room_id 的 model_override，再调用 get_or_create 依设置重建 Agent 且保留会话 state，最后返回最新 status；设置成功后若重建失败，持久化覆盖仍保留供下次重试。
         await self.update_settings(
             room_id,
             model_override=model_override,
@@ -345,6 +357,7 @@ class RoomSessionManager:
 
     async def cancel(self, room_id: str) -> bool:
         """Cancel the in-flight turn for a room and wait for rollback."""
+        # 逻辑说明：查找 room_id 正在执行且未结束的 asyncio task，缺失时返回 False；存在时发出 cancel，若非当前 task 则等待其 run_input 回滚完成并吞掉预期 CancelledError，最终返回 True。
         task = self._active_tasks.get(room_id)
         if task is None or task.done():
             return False
@@ -366,6 +379,7 @@ class RoomSessionManager:
         now: datetime | None = None,
     ) -> RoomSessionStatus:
         """Start a clean room session and optionally pin its model."""
+        # 逻辑说明：按给定或当前时间先删除房间旧 state/Agent，再用可选 model_override 和时区建立全新持久化设置，最后读取空会话 status；删除后配置失败不会恢复旧会话。
         timestamp = (now or self._now()).astimezone(UTC)
         await self._drop_state(room_id)
         await self._sessions.configure(
@@ -384,6 +398,7 @@ class RoomSessionManager:
         summary_limit: int = 8_000,
     ) -> RoomSessionStatus:
         """Fold older AgentScope context into a bounded durable summary."""
+        # 逻辑说明：校验保留条数与摘要上限后在 room lock 内读取缓存或持久化 state，将较老消息格式化并追加到限长 summary、仅保留尾部 context，再按来源保存；无会话或无旧消息时保持原状态并返回 status。
         if keep_messages < 0:
             raise ValueError("kept context messages cannot be negative")
         if summary_limit <= 0:
@@ -447,6 +462,7 @@ class RoomSessionManager:
         *,
         now: datetime | None = None,
     ) -> RoomSessionStatus:
+        # 逻辑说明：用指定时刻读取房间设置，并优先从 cache、否则从仓库取得 AgentState，投影 session/model/reasoning/queue、context 数量、字符串或块摘要及下次重置时间；只读过程中不创建 Agent。
         timestamp = (now or self._now()).astimezone(UTC)
         settings = await self._sessions.settings(
             room_id,
@@ -502,6 +518,7 @@ class RoomSessionManager:
         exclude_rooms: frozenset[str] = frozenset(),
     ) -> tuple[str, ...]:
         """Reset every room whose persisted local 04:00 boundary passed."""
+        # 逻辑说明：查询给定 UTC 时刻已越过本地 04:00 边界的设置，跳过 exclude_rooms，其余逐房间删除 state 并推进下一重置点；返回实际完成的 room_id，途中失败会停止且不把未完成房间列入结果。
         timestamp = (now or self._now()).astimezone(UTC)
         due = await self._sessions.due_for_reset(timestamp)
         reset_rooms: list[str] = []
@@ -517,6 +534,7 @@ class RoomSessionManager:
         return tuple(reset_rooms)
 
     async def _drop_state(self, room_id: str) -> None:
+        # 逻辑说明：取得 room lock 后从 cache 移除 session，若存在则先 retire 其 Agent generation，再删除仓库中的持久化 state；释放或删除失败直接传播，防止调用方误认为重置完整成功。
         lock = await self._lock_for(room_id)
         async with lock:
             session = self._cache.pop(room_id, None)
@@ -525,6 +543,7 @@ class RoomSessionManager:
             await self._sessions.delete(room_id)
 
     async def _save(self, room_id: str, session: RoomSession) -> None:
+        # 逻辑说明：将 RoomSession 的当前 AgentState、policy_revision 和 last_event_id 作为一组写入 SessionRepository.save；仓库失败直接传播，内存 session 不被本方法改写。
         await self._sessions.save(
             room_id=room_id,
             state=session.agent.state,
@@ -533,12 +552,14 @@ class RoomSessionManager:
         )
 
     async def save_all(self) -> None:
+        # 逻辑说明：遍历当前 cache 快照并逐个获取对应 session lock，将每个房间的 AgentState、policy revision 和 last_event_id 写入仓库；任一保存失败立即传播，已保存房间保持提交且 cache 不变。
         for room_id, session in tuple(self._cache.items()):
             async with session.lock:
                 await self._save(room_id, session)
 
     async def close_all(self) -> None:
         """Persist and retire every cached Agent generation."""
+        # 逻辑说明：遍历 cache 快照并逐房间持锁，依次保存 state 后 retire Agent，全部成功才清空 cache；任一保存或释放失败即传播并保留 cache 供后续重试。
         for room_id, session in tuple(self._cache.items()):
             async with session.lock:
                 await self._save(room_id, session)
@@ -546,6 +567,7 @@ class RoomSessionManager:
         self._cache.clear()
 
     async def _retire(self, agent: Any) -> None:
+        # 逻辑说明：动态查找 factory 的可选 retire 方法，缺失时为空操作；存在时调用并兼容同步或 awaitable 返回值，释放异常不吞掉以避免隐藏 generation 泄漏。
         retire = getattr(self._factory, "retire", None)
         if retire is None:
             return
@@ -555,6 +577,7 @@ class RoomSessionManager:
 
 
 def _context_line(message: Any) -> str:
+    # 逻辑说明：读取消息文本并格式化为 role/name: text 的单行摘要，最后硬截断至 2000 字符供 compact 持久化；空文本保留身份前缀，消息访问错误直接传播。
     text = message.get_text_content() or ""
     return f"{message.role}/{message.name}: {text}"[:2_000]
 
@@ -563,6 +586,7 @@ def _effective_policy(
     policy: RoomPolicy,
     elevated_mode: str,
 ) -> RoomPolicy:
+    # 逻辑说明：依据 elevated_mode 仅调整传入 RoomPolicy 的确认集合与 confirmation_mode：ask 要求所有已允许工具确认，full 清空确认，其他值设为 off；始终 model_copy，不扩大 allowed_tools 或修改原 policy。
     if elevated_mode == "ask":
         return policy.model_copy(
             update={

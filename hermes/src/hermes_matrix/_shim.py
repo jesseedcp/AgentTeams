@@ -24,4 +24,5 @@ def __getattr__(name: str):
 
 
 def __dir__() -> list[str]:
+    # 逻辑说明：合并 shim 与原生扩展的符号名并排序，使交互检查看到完整 API。
     return sorted(set(globals()) | set(dir(_native)))

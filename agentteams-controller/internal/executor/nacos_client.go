@@ -33,6 +33,7 @@ type nacosAIClientOptions struct {
 type NacosAIClientOption func(*nacosAIClientOptions)
 
 func WithNacosSTSResources(resources []string) NacosAIClientOption {
+	// 逻辑说明：返回一个 option 闭包，在构造时复制资源切片到私有配置；调用方后续修改原切片不会扩大或缩小 STS 权限。
 	return func(opts *nacosAIClientOptions) {
 		opts.stsResources = append([]string(nil), resources...)
 	}
@@ -52,6 +53,7 @@ func NewNacosAIClient(
 	credClient credprovider.Client,
 	options ...NacosAIClientOption,
 ) (*NacosAIClient, error) {
+	// 逻辑说明：应用选项、解析地址/凭据、补 public namespace，根据显式或自动认证类型构造 credential，再先 TCP 预检后首次刷新；配置、连通性或认证失败均不返回 client。
 	opts := nacosAIClientOptions{}
 	for _, apply := range options {
 		apply(&opts)
@@ -122,6 +124,7 @@ func NewNacosAIClient(
 }
 
 func (c *NacosAIClient) preflightConnect(ctx context.Context) error {
+	// 逻辑说明：调用方没有 deadline 时补五秒超时，然后只建立并立即关闭目标 TCP 连接；用来快速区分地址不可达，不发送 Nacos 业务或凭据。
 	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, nacosPreflightTimeout)
@@ -138,6 +141,7 @@ func (c *NacosAIClient) preflightConnect(ctx context.Context) error {
 // prepareRequest refreshes credentials if needed and applies auth headers.
 // Must be called before every outbound HTTP request.
 func (c *NacosAIClient) prepareRequest(ctx context.Context, req *http.Request) error {
+	// 逻辑说明：每次外发 HTTP 前先保证 credential 有效，再把对应 header/signature 注入请求；刷新失败时不发送未认证请求。
 	if err := c.cred.Refresh(ctx); err != nil {
 		return fmt.Errorf("credential refresh: %w", err)
 	}
@@ -148,6 +152,7 @@ func (c *NacosAIClient) prepareRequest(ctx context.Context, req *http.Request) e
 // ── parseNacosAddr ────────────────────────────────────────────────────────
 
 func parseNacosAddr(raw string) (host, port, username, password string, err error) {
+	// 逻辑说明：为无 scheme 地址补 HTTP 后解析 host/port/userinfo，端口默认 8848；URL 未带成对凭据时回退进程环境，缺 host 返回错误。
 	if !strings.Contains(raw, "://") {
 		raw = "http://" + raw
 	}

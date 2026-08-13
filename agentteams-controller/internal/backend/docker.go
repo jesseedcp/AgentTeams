@@ -37,6 +37,7 @@ type DockerBackend struct {
 
 // NewDockerBackend creates a DockerBackend that talks to the given Docker socket.
 func NewDockerBackend(config DockerConfig, containerPrefix string) *DockerBackend {
+	// 逻辑说明：为指定 Unix socket 组装专用 HTTP transport，并保存容器名前缀；这里只配置按需拨号，真正访问 Docker 的错误留到各操作方法返回。
 	transport := &http.Transport{
 		DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
 			return net.Dial("unix", config.SocketPath)
@@ -54,6 +55,7 @@ func NewDockerBackend(config DockerConfig, containerPrefix string) *DockerBacken
 // Use WithPrefix("") to disable prefix for containers that already have full names
 // (e.g. Manager containers named "agentteams-manager" rather than "agentteams-worker-X").
 func (d *DockerBackend) WithPrefix(prefix string) *DockerBackend {
+	// 逻辑说明：浅拷贝 backend 并只替换容器名前缀，复用线程安全 HTTP client；调用方可为 Manager 传空前缀而不改变原实例。
 	cp := *d
 	cp.containerPrefix = prefix
 	return &cp
@@ -64,6 +66,7 @@ func (d *DockerBackend) DeploymentMode() string         { return DeployLocal }
 func (d *DockerBackend) NeedsCredentialInjection() bool { return false }
 
 func (d *DockerBackend) Available(ctx context.Context) bool {
+	// 逻辑说明：先确认 Unix socket 存在，再用两秒子 context 请求 Docker `/_ping`；只有 HTTP 200 返回可用，路径、构造或连接错误均返回 false。
 	// Check socket file exists
 	if _, err := os.Stat(d.config.SocketPath); err != nil {
 		return false
@@ -84,6 +87,7 @@ func (d *DockerBackend) Available(ctx context.Context) bool {
 }
 
 func (d *DockerBackend) Create(ctx context.Context, req CreateRequest) (*WorkerResult, error) {
+	// 逻辑说明：解析容器名/runtime/镜像/网络与认证环境，确保镜像存在后创建并启动容器；Console 端口冲突最多换端口重试十次，每次清理失败实例，其他错误立即返回。
 	var containerName string
 	if req.ContainerName != "" {
 		containerName = req.ContainerName
@@ -214,6 +218,7 @@ func (d *DockerBackend) Create(ctx context.Context, req CreateRequest) (*WorkerR
 // doCreate sends the container create request to Docker, handling conflict by
 // deleting the existing container and retrying once.
 func (d *DockerBackend) doCreate(ctx context.Context, containerName string, body []byte) (string, error) {
+	// 逻辑说明：向 Docker create 接口提交已编码 payload；首次 409 会删除同名容器并等待后重试一次，非 201 或响应无法解码均返回错误，成功只返回容器 ID。
 	for retry := 0; retry < 2; retry++ {
 		u := fmt.Sprintf("http://localhost/containers/create?name=%s", url.QueryEscape(containerName))
 		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, u, strings.NewReader(string(body)))
@@ -259,6 +264,7 @@ func (d *DockerBackend) doCreate(ctx context.Context, containerName string, body
 }
 
 func (d *DockerBackend) Delete(ctx context.Context, name string) error {
+	// 逻辑说明：按精确前缀和名称调用 Docker force-delete；404 视为幂等成功，其他非 200/204 响应读取正文后返回，不删除任何模糊匹配容器。
 	containerName := d.containerPrefix + name
 	u := fmt.Sprintf("http://localhost/containers/%s?force=true", url.PathEscape(containerName))
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, u, nil)
@@ -282,6 +288,7 @@ func (d *DockerBackend) Delete(ctx context.Context, name string) error {
 }
 
 func (d *DockerBackend) Start(ctx context.Context, name string) error {
+	// 逻辑说明：把逻辑 Agent 名映射为容器名并调用统一启动 helper；404 转成领域 ErrNotFound，其他 Docker 错误保持原因返回。
 	containerName := d.containerPrefix + name
 	if err := d.startContainer(ctx, containerName); err != nil {
 		if strings.Contains(err.Error(), "status 404") {
@@ -293,6 +300,7 @@ func (d *DockerBackend) Start(ctx context.Context, name string) error {
 }
 
 func (d *DockerBackend) Stop(ctx context.Context, name string) error {
+	// 逻辑说明：请求 Docker 在十秒宽限期内停止精确容器；404 映射领域缺失错误、304 视为已停止成功，其他异常状态附正文返回。
 	containerName := d.containerPrefix + name
 	u := fmt.Sprintf("http://localhost/containers/%s/stop?t=10", url.PathEscape(containerName))
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, nil)
@@ -319,6 +327,7 @@ func (d *DockerBackend) Stop(ctx context.Context, name string) error {
 }
 
 func (d *DockerBackend) Status(ctx context.Context, name string) (*WorkerResult, error) {
+	// 逻辑说明：inspect 精确容器并把 Docker 原始状态映射成统一 WorkerResult；404 返回 StatusNotFound 而非错误，传输、状态码和 JSON 解码失败则阻止伪造状态。
 	containerName := d.containerPrefix + name
 	u := fmt.Sprintf("http://localhost/containers/%s/json", url.PathEscape(containerName))
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
@@ -369,6 +378,7 @@ func (d *DockerBackend) Status(ctx context.Context, name string) (*WorkerResult,
 
 // ensureImage checks if an image exists locally and pulls it if not.
 func (d *DockerBackend) ensureImage(ctx context.Context, image string) error {
+	// 逻辑说明：先 inspect 本地镜像，存在即返回；缺失时发起 pull 并完整消费进度流，随后再次 inspect 验证，任何请求或最终不可见都返回错误。
 	// Check if image exists locally
 	// Note: Docker Engine API expects unescaped image names in the path
 	// (e.g. /images/agentteams/worker-agent:latest/json), not PathEscaped.
@@ -421,6 +431,7 @@ func (d *DockerBackend) ensureImage(ctx context.Context, image string) error {
 }
 
 func (d *DockerBackend) startContainer(ctx context.Context, nameOrID string) error {
+	// 逻辑说明：按容器 ID/名称调用 start 接口；304 作为已运行幂等成功，404 给出可识别文本供上层映射，其他非成功状态读取响应正文。
 	u := fmt.Sprintf("http://localhost/containers/%s/start", url.PathEscape(nameOrID))
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, nil)
 	if err != nil {
@@ -482,6 +493,7 @@ type dockerPortBinding struct {
 }
 
 func (d *DockerBackend) buildCreatePayload(req CreateRequest, consolePort string, hostPort int) dockerCreatePayload {
+	// 逻辑说明：把 CreateRequest 纯转换为稳定 Docker API payload：环境键排序、挂载/重启/端口和网络别名按需填充；不发请求且不修改输入，空 HostConfig 不序列化。
 	// Sort env keys for deterministic output
 	keys := make([]string, 0, len(req.Env))
 	for k := range req.Env {
@@ -566,6 +578,7 @@ func (d *DockerBackend) buildCreatePayload(req CreateRequest, consolePort string
 }
 
 func normalizeDockerStatus(status string) WorkerStatus {
+	// 逻辑说明：大小写无关地把 Docker running/exited/dead/created/restarting 映射为跨后端状态；未识别字符串保守返回 Unknown。
 	switch strings.ToLower(status) {
 	case "running":
 		return StatusRunning

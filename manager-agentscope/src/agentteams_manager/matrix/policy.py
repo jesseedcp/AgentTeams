@@ -310,6 +310,7 @@ class RoomPolicyResolver:
         manager_user_id: str = "@manager:local",
         revision: int | RevisionProvider = 1,
     ) -> None:
+        # 逻辑说明：保存拓扑读取器、管理员/Manager 身份及可同步或异步提供的版本号；此时不查拓扑，权限快照只在 resolve 时生成。
         self._topology = topology
         self._admin_user_id = admin_user_id
         self._admin_room_id = admin_room_id
@@ -317,6 +318,7 @@ class RoomPolicyResolver:
         self._revision = revision
 
     async def resolve(self, event: InboundEvent) -> RoomPolicy:
+        # 逻辑说明：先过滤不可操作事件和 Manager 自发消息，再按管理员私聊、房间绑定、Human/可信联系人顺序解析最小权限；返回的 policy 还会标记本消息是否应唤醒模型。
         revision = await self._current_revision()
         if not self._is_actionable(event):
             return self._unknown(
@@ -392,6 +394,7 @@ class RoomPolicyResolver:
         human: HumanResource | None,
         revision: int,
     ) -> RoomPolicy:
+        # 逻辑说明：依据 Controller 房间绑定核验发送者与项目参与者身份，计算工具、MCP、Worker 和 Project 范围；未知参与者得到 silent 的收窄策略。
         if binding.room_kind is RoomKind.TEAM_ROOM:
             return RoomPolicy(
                 room_id=event.room_id,
@@ -470,6 +473,7 @@ class RoomPolicyResolver:
         binding: TopologyBinding | None,
         actor: Actor | None,
     ) -> bool:
+        # 逻辑说明：管理员私聊直接唤醒，Leader/Project 房间要求显式提及 Manager（任务状态协议兼容正文提及），Team 房间和 Manager 自己的消息始终不唤醒。
         del actor
         if event.sender_id == self._manager_user_id:
             return False
@@ -520,6 +524,7 @@ class RoomPolicyResolver:
         )
 
     async def _current_revision(self) -> int:
+        # 逻辑说明：统一读取固定整数或动态 revision provider，并在 provider 返回 awaitable 时等待；最终强制转成 int 供权限快照标记版本。
         if isinstance(self._revision, int):
             return self._revision
         value = self._revision()
@@ -529,6 +534,7 @@ class RoomPolicyResolver:
 
 
 def _tools_for_kind(kind: RoomKind) -> frozenset[str]:
+    # 逻辑说明：把 Worker、Leader、Project 房间类型映射到各自静态工具白名单，其他类型统一返回 UNKNOWN_TOOLS，避免未知房间继承管理能力。
     if kind is RoomKind.WORKER_ROOM:
         return WORKER_TOOLS
     if kind is RoomKind.LEADER_ROOM:
@@ -545,6 +551,7 @@ def policy_for_human(
     revision: int,
 ) -> RoomPolicy:
     """Map Controller Human tiers to tools and named resource scopes."""
+    # 逻辑说明：将 Controller Human 的三级权限转换为工具集、审批集和命名资源范围；一级可跨资源但仍排除管理员专属工具，二三级受 Team/Worker 列表限制。
     if human.permission_level == 1:
         tools = ALL_MANAGER_TOOLS - ADMIN_ONLY_TOOLS
         confirmations = CONFIRM_TOOLS
@@ -576,6 +583,7 @@ def policy_for_human(
 
 
 def _scope_names(value: object) -> frozenset[str]:
+    # 逻辑说明：只接受集合形输入并保留其中非空字符串，异常结构返回空 frozenset，使缺失权限配置默认不授权任何命名资源。
     if not isinstance(value, (list, tuple, set, frozenset)):
         return frozenset()
     return frozenset(
@@ -586,6 +594,7 @@ def _scope_names(value: object) -> frozenset[str]:
 
 
 def _mcp_names(payload: dict[str, object]) -> frozenset[str]:
+    # 逻辑说明：兼容从 payload.spec.mcpServers 或旧顶层字段读取 MCP 列表，只提取字典项中的非空 name；畸形配置安全收窄为空集合。
     spec = payload.get("spec")
     sources = (
         spec.get("mcpServers")
@@ -609,6 +618,7 @@ def team_member_names(
     payload: dict[str, object],
 ) -> frozenset[str]:
     """Return only Controller-materialized Team member names."""
+    # 逻辑说明：从 Controller 已物化的 leader 与 workers 字段汇总非空成员名并去重；不会从消息正文猜测成员，结果用于 Leader 房间资源范围。
     leader = payload.get("leader")
     workers = payload.get("workers")
     names = {

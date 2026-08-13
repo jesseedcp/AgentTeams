@@ -256,6 +256,7 @@ class TaskMessageFormatter:
         matrix_user_id: str,
         completion_user_id: str | None = None,
     ) -> str:
+        # 逻辑说明：`assignment` 接收 `task_id`、`title`、`matrix_user_id`、`completion_user_id`，生成分派消息 `有限/周期 Task 的分派、结果、取消与恢复`，返回 `str`。 它只计算、校验或读取数据，不直接产生外部副作用；下游失败沿用现有错误语义，不会伪造成功回执。
         message = (
             f"{matrix_user_id} New task [{task_id}]: {title}. "
             "Use your file-sync skill to pull the spec: "
@@ -284,6 +285,7 @@ class TaskMessageFormatter:
         assigned_to: str,
         summary: str,
     ) -> str:
+        # 逻辑说明：`completion` 接收 `task_id`、`title`、`assigned_to`、`summary`，生成完成消息 `有限/周期 Task 的分派、结果、取消与恢复`，返回 `str`。 它只计算、校验或读取数据，不直接产生外部副作用；下游失败沿用现有错误语义，不会伪造成功回执。
         return (
             f"[Task Completed] {task_id}: {title} — "
             f"assigned to {assigned_to}. {summary}"
@@ -315,6 +317,7 @@ class TaskService:
         notifications: CompletionNotificationPort | None = None,
         project_graph: ProjectGraphPort | None = None,
     ) -> None:
+        # 逻辑说明：`__init__` 接收 `tasks`、`storage`、`controller`、`matrix`、`supervisor`、`clock`、`cache_root`、`matrix_domain`、`manager_user_id`、`notifications`、`project_graph`，初始化依赖 `有限/周期 Task 的分派、结果、取消与恢复`，依次复用 `strip`、`ValueError`、`startswith`，返回 `None`。 它只计算、校验或读取数据，不直接产生外部副作用；校验、并发或恢复证据不足时保留现有异常，防止把歧义状态当作成功。
         if not matrix_domain.strip():
             raise ValueError("matrix_domain must not be empty")
         resolved_manager_user_id = (
@@ -350,6 +353,7 @@ class TaskService:
         defer_dispatch: bool = False,
         metadata: dict[str, Any] | None = None,
     ) -> TaskReceipt:
+        # 逻辑说明：`create_finite` 接收 `title`、`spec`、`assigned_to`、`context`、`delegated_to_team`、`project_id`、`project_room_id`、`defer_dispatch`、`metadata`，创建 `finite`，依次复用 `TaskCreateRequest`、`begin`、`model_dump`，返回 `TaskReceipt`。 它会推进 有限/周期 Task 的分派、结果、取消与恢复 的外部或持久状态；下游失败沿用现有错误语义，不会伪造成功回执。
         request = TaskCreateRequest(
             title=title,
             specification=spec,
@@ -382,6 +386,7 @@ class TaskService:
         project_id: str | None = None,
         project_room_id: str | None = None,
     ) -> TaskReceipt:
+        # 逻辑说明：`create_recurring` 接收 `title`、`spec`、`assigned_to`、`schedule`、`timezone`、`context`、`delegated_to_team`、`project_id`、`project_room_id`，创建 `recurring`，依次复用 `parse`、`RecurringTaskCreateRequest`、`begin`，返回 `TaskReceipt`。 它会推进 有限/周期 Task 的分派、结果、取消与恢复 的外部或持久状态；下游失败沿用现有错误语义，不会伪造成功回执。
         CronSchedule.parse(schedule)
         request = RecurringTaskCreateRequest(
             title=title,
@@ -406,6 +411,7 @@ class TaskService:
         self,
         operation: OperationRecord,
     ) -> TaskReceipt:
+        # 逻辑说明：`_resume_recurring_creation` 接收 `operation`，根据 journal 恢复 `recurring creation`，依次复用 `model_validate`、`parse`、`_task_id_for`，返回 `TaskReceipt`。 它会推进 有限/周期 Task 的分派、结果、取消与恢复 的外部或持久状态；校验、并发或恢复证据不足时保留现有异常，防止把歧义状态当作成功。
         request = RecurringTaskCreateRequest.model_validate(
             operation.request,
         )
@@ -494,6 +500,7 @@ class TaskService:
     async def dispatch(self, operation: OperationRecord) -> TaskReceipt:
         """Resume a finite dispatch from facts in SQLite, MinIO, and Matrix."""
 
+        # 逻辑说明：`dispatch` 接收 `operation`，分派 `有限/周期 Task 的分派、结果、取消与恢复`，依次复用 `ValueError`、`model_validate`、`_task_id_for`，返回 `TaskReceipt`。 它会推进 有限/周期 Task 的分派、结果、取消与恢复 的外部或持久状态；校验、并发或恢复证据不足时保留现有异常，防止把歧义状态当作成功。
         if operation.kind is not OperationKind.DELEGATE_TASK:
             raise ValueError("operation is not a task delegation")
         request = TaskCreateRequest.model_validate(operation.request)
@@ -678,6 +685,7 @@ class TaskService:
         task_id: str,
         context: MutationContext,
     ) -> TaskReceipt:
+        # 逻辑说明：`dispatch_ready` 接收 `task_id`、`context`，分派 `ready`，依次复用 `RuntimeError`、`_require_task`、`operation_id_for`，返回 `TaskReceipt`。 它会推进 有限/周期 Task 的分派、结果、取消与恢复 的外部或持久状态；校验、并发或恢复证据不足时保留现有异常，防止把歧义状态当作成功。
         if self._project_graph is None:
             raise RuntimeError("project graph is not configured")
         await self._require_task(task_id)
@@ -706,6 +714,7 @@ class TaskService:
     ) -> None:
         """Copy task artifacts before changing an assignee's storage scope."""
 
+        # 逻辑说明：`prepare_reassignment_storage` 接收 `task_id`、`storage_team_name`、`operation`，准备 `reassignment storage`，依次复用 `_require_task`、`strip`、`_task_storage_root`，返回 `None`。 它会推进 有限/周期 Task 的分派、结果、取消与恢复 的外部或持久状态；校验、并发或恢复证据不足时保留现有异常，防止把歧义状态当作成功。
         task = await self._require_task(task_id)
         target_team_name = str(storage_team_name or "").strip() or None
         old_root = _task_storage_root(task)
@@ -738,6 +747,7 @@ class TaskService:
         self,
         operation: OperationRecord,
     ) -> TaskReceipt:
+        # 逻辑说明：`_resume_ready_dispatch` 接收 `operation`，根据 journal 恢复 `ready dispatch`，依次复用 `RuntimeError`、`get`、`RecoveryError`，返回 `TaskReceipt`。 它会推进 有限/周期 Task 的分派、结果、取消与恢复 的外部或持久状态；校验、并发或恢复证据不足时保留现有异常，防止把歧义状态当作成功。
         from agentteams_manager.state.tasks import ProjectTaskState
 
         project_graph = self._project_graph
@@ -892,6 +902,7 @@ class TaskService:
     ) -> TaskResultSubmission:
         """Pull and validate a Worker result without accepting it."""
 
+        # 逻辑说明：`inspect_result` 接收 `task_id`、`structured_result`，检查 `result`，依次复用 `_require_task`、`mirror_down`、`_task_storage_root`，返回 `TaskResultSubmission`。 它会推进 有限/周期 Task 的分派、结果、取消与恢复 的外部或持久状态；下游失败沿用现有错误语义，不会伪造成功回执。
         task = await self._require_task(task_id)
         destination = self._cache_root / "shared" / "tasks" / task_id
         await self.storage.mirror_down(
@@ -916,6 +927,7 @@ class TaskService:
     ) -> TaskReceipt:
         """Process one submitted result after an explicit Manager decision."""
 
+        # 逻辑说明：`record_completion` 接收 `task_id`、`worker_event_id`、`structured_result`、`actor_id`、`accepted`、`result_digest`，记录 `completion`，依次复用 `_require_task`、`operation_id_for`、`get`，返回 `TaskReceipt`。 它会推进 有限/周期 Task 的分派、结果、取消与恢复 的外部或持久状态；校验、并发或恢复证据不足时保留现有异常，防止把歧义状态当作成功。
         task = await self._require_task(task_id)
         operation_id = operation_id_for(
             task.room_id,
@@ -1192,6 +1204,7 @@ class TaskService:
         destination: Path,
         structured_result: dict[str, Any] | None,
     ) -> TaskResultSubmission:
+        # 逻辑说明：`_result_submission` 接收 `task`、`destination`、`structured_result`，处理结果 `submission`，依次复用 `_read_task_metadata`、`is_file`、`read_text`，返回 `TaskResultSubmission`。 它会推进 有限/周期 Task 的分派、结果、取消与恢复 的外部或持久状态；下游失败沿用现有错误语义，不会伪造成功回执。
         current_remote = await self._read_task_metadata(task.task_id)
         result_file = destination / "result.md"
         result_text = (
@@ -1211,6 +1224,7 @@ class TaskService:
         self,
         task: TaskRecord,
     ) -> RecurringDispatchReceipt:
+        # 逻辑说明：`dispatch_recurring` 接收 `task`，分派 `recurring`，依次复用 `ConflictError`、`astimezone`、`operation_id_for`，返回 `RecurringDispatchReceipt`。 它会推进 有限/周期 Task 的分派、结果、取消与恢复 的外部或持久状态；校验、并发或恢复证据不足时保留现有异常，防止把歧义状态当作成功。
         if (
             task.task_type not in {"infinite", "recurring"}
             or task.status != "active"
@@ -1312,6 +1326,7 @@ class TaskService:
         task_id: str,
         worker_event_id: str,
     ) -> TaskReceipt:
+        # 逻辑说明：`record_execution` 接收 `task_id`、`worker_event_id`，记录 `execution`，依次复用 `_require_task`、`ConflictError`、`get`，返回 `TaskReceipt`。 它会推进 有限/周期 Task 的分派、结果、取消与恢复 的外部或持久状态；校验、并发或恢复证据不足时保留现有异常，防止把歧义状态当作成功。
         task = await self._require_task(task_id)
         if (
             task.task_type not in {"infinite", "recurring"}
@@ -1407,6 +1422,7 @@ class TaskService:
         task_id: str,
         context: MutationContext,
     ) -> TaskReceipt:
+        # 逻辑说明：`cancel` 接收 `task_id`、`context`，取消 `有限/周期 Task 的分派、结果、取消与恢复`，依次复用 `_require_task`、`_task_receipt`、`ConflictError`，返回 `TaskReceipt`。 它会推进 有限/周期 Task 的分派、结果、取消与恢复 的外部或持久状态；校验、并发或恢复证据不足时保留现有异常，防止把歧义状态当作成功。
         task = await self._require_task(task_id)
         if task.status == "cancelled":
             return _task_receipt(context.operation_id, task)
@@ -1426,6 +1442,7 @@ class TaskService:
         self,
         operation: OperationRecord,
     ) -> TaskReceipt:
+        # 逻辑说明：`_resume_cancel` 接收 `operation`，根据 journal 恢复 `cancel`，依次复用 `get`、`ValueError`、`_require_task`，返回 `TaskReceipt`。 它会推进 有限/周期 Task 的分派、结果、取消与恢复 的外部或持久状态；校验、并发或恢复证据不足时保留现有异常，防止把歧义状态当作成功。
         request = operation.request
         task_id = str(request.get("task_id", ""))
         if (
@@ -1480,6 +1497,7 @@ class TaskService:
         operation: OperationRecord,
     ) -> object:
         """Resume one task-owned operation from its durable request."""
+        # 逻辑说明：`resume_operation` 接收 `operation`，根据 journal 恢复 `operation`，依次复用 `get`、`_resume_ready_dispatch`、`_require_task`，返回 `object`。 它会推进 有限/周期 Task 的分派、结果、取消与恢复 的外部或持久状态；校验、并发或恢复证据不足时保留现有异常，防止把歧义状态当作成功。
         if operation.kind is OperationKind.DELEGATE_TASK:
             if operation.request.get("action") == "dispatch_project_ready":
                 return await self._resume_ready_dispatch(operation)
@@ -1525,6 +1543,7 @@ class TaskService:
         self,
         request: TaskCreateRequest,
     ) -> tuple[str, str, str | None]:
+        # 逻辑说明：`_resolve_assignment` 接收 `request`，解析 `assignment`，依次复用 `_resolve_destination`，返回 `tuple[str, str, str | None]`。 它会推进 有限/周期 Task 的分派、结果、取消与恢复 的外部或持久状态；下游失败沿用现有错误语义，不会伪造成功回执。
         return await self._resolve_destination(
             assigned_to=request.assigned_to,
             delegated_to_team=request.delegated_to_team,
@@ -1538,6 +1557,7 @@ class TaskService:
         delegated_to_team: str | None,
         project_room_id: str | None = None,
     ) -> tuple[str, str, str | None]:
+        # 逻辑说明：`_resolve_destination` 接收 `assigned_to`、`delegated_to_team`、`project_room_id`，解析 `destination`，依次复用 `get_team`、`NotFoundError`、`get_worker`，返回 `tuple[str, str, str | None]`。 它会推进 有限/周期 Task 的分派、结果、取消与恢复 的外部或持久状态；校验、并发或恢复证据不足时保留现有异常，防止把歧义状态当作成功。
         if delegated_to_team is not None:
             team = await self._controller.get_team(
                 delegated_to_team,
@@ -1588,6 +1608,7 @@ class TaskService:
         *,
         operation_name: str,
     ) -> ObjectReceipt:
+        # 逻辑说明：`_ensure_json` 接收 `operation`、`key`、`value`、`operation_name`，确保 `json`，依次复用 `head`、`get_json`、`get`，返回 `ObjectReceipt`。 它会推进 有限/周期 Task 的分派、结果、取消与恢复 的外部或持久状态；校验、并发或恢复证据不足时保留现有异常，防止把歧义状态当作成功。
         existing = await self.storage.head(key)
         if existing is not None:
             current = await self.storage.get_json(key)
@@ -1624,6 +1645,7 @@ class TaskService:
         content_type: str,
         operation_name: str,
     ) -> ObjectReceipt:
+        # 逻辑说明：`_ensure_bytes` 接收 `operation`、`key`、`value`、`content_type`、`operation_name`，确保 `bytes`，依次复用 `head`、`get_bytes`、`ConflictError`，返回 `ObjectReceipt`。 它会推进 有限/周期 Task 的分派、结果、取消与恢复 的外部或持久状态；校验、并发或恢复证据不足时保留现有异常，防止把歧义状态当作成功。
         existing = await self.storage.head(key)
         if existing is not None:
             if await self.storage.get_bytes(key) != value:
@@ -1664,6 +1686,7 @@ class TaskService:
         expected_etag: str | None,
         operation_name: str,
     ) -> ObjectReceipt:
+        # 逻辑说明：`_replace_json` 接收 `operation`、`key`、`value`、`expected_etag`、`operation_name`，替换 `json`，依次复用 `before_effect`、`put_json_if_version`、`_record_external_failure`，返回 `ObjectReceipt`。 它会推进 有限/周期 Task 的分派、结果、取消与恢复 的外部或持久状态；校验、并发或恢复证据不足时保留现有异常，防止把歧义状态当作成功。
         await self._supervisor.before_effect(
             operation.operation_id,
             ExternalEffect.STORAGE,
@@ -1690,6 +1713,7 @@ class TaskService:
         return receipt
 
     async def _read_task_metadata(self, task_id: str) -> TaskMetadata:
+        # 逻辑说明：`_read_task_metadata` 接收 `task_id`，读取 `task metadata`，依次复用 `_require_task`、`_task_storage_root`、`head`，返回 `TaskMetadata`。 它会推进 有限/周期 Task 的分派、结果、取消与恢复 的外部或持久状态；校验、并发或恢复证据不足时保留现有异常，防止把歧义状态当作成功。
         task = await self._require_task(task_id)
         key = f"{_task_storage_root(task)}/meta.json"
         if await self.storage.head(key) is None:
@@ -1703,6 +1727,7 @@ class TaskService:
         *,
         operation_name: str,
     ) -> ObjectReceipt:
+        # 逻辑说明：`_replace_task_metadata` 接收 `operation`、`metadata`、`operation_name`，替换 `task metadata`，依次复用 `_require_task`、`_task_storage_root`、`head`，返回 `ObjectReceipt`。 它会推进 有限/周期 Task 的分派、结果、取消与恢复 的外部或持久状态；校验、并发或恢复证据不足时保留现有异常，防止把歧义状态当作成功。
         task = await self._require_task(metadata.task_id)
         key = f"{_task_storage_root(task)}/meta.json"
         current_receipt = await self.storage.head(key)
@@ -1728,6 +1753,7 @@ class TaskService:
         effect: ExternalEffect,
         exc: Exception,
     ) -> None:
+        # 逻辑说明：`_record_external_failure` 接收 `operation_id`、`effect`、`exc`，记录 `external failure`，依次复用 `_ambiguous_exception`、`effect_ambiguous`、`effect_failed`，返回 `None`。 它会推进 有限/周期 Task 的分派、结果、取消与恢复 的外部或持久状态；下游失败沿用现有错误语义，不会伪造成功回执。
         if _ambiguous_exception(exc):
             await self._supervisor.effect_ambiguous(
                 operation_id,
@@ -1742,6 +1768,7 @@ class TaskService:
         )
 
     async def _require_task(self, task_id: str) -> TaskRecord:
+        # 逻辑说明：`_require_task` 接收 `task_id`，校验并取得 `task`，依次复用 `get`、`NotFoundError`，返回 `TaskRecord`。 它会推进 有限/周期 Task 的分派、结果、取消与恢复 的外部或持久状态；校验、并发或恢复证据不足时保留现有异常，防止把歧义状态当作成功。
         task = await self._tasks.get(task_id)
         if task is None:
             raise NotFoundError(f"task/{task_id} does not exist")
@@ -1753,6 +1780,7 @@ class TaskService:
         operation: OperationRecord,
         request: TaskCreateRequest,
     ) -> None:
+        # 逻辑说明：`_verify_task_request` 接收 `task`、`operation`、`request`，核对 `task request`，依次复用 `get`、`ConflictError`，返回 `None`。 它只计算、校验或读取数据，不直接产生外部副作用；校验、并发或恢复证据不足时保留现有异常，防止把歧义状态当作成功。
         expected = {
             "title": request.title,
             "assigned_to": request.assigned_to,
@@ -1787,6 +1815,7 @@ class TaskService:
         operation: OperationRecord,
         request: RecurringTaskCreateRequest,
     ) -> None:
+        # 逻辑说明：`_verify_recurring_request` 接收 `task`、`operation`、`request`，核对 `recurring request`，依次复用 `_verify_task_request`、`ConflictError`，返回 `None`。 它只计算、校验或读取数据，不直接产生外部副作用；校验、并发或恢复证据不足时保留现有异常，防止把歧义状态当作成功。
         TaskService._verify_task_request(task, operation, request)
         if (
             task.task_type not in {"infinite", "recurring"}
@@ -1800,6 +1829,7 @@ class TaskService:
 
 
 def _task_id_for(operation: OperationRecord) -> str:
+    # 逻辑说明：`_task_id_for` 用 operation 创建时间和 operation_id 前缀生成稳定 Task ID，使同一 operation 重放仍定位同一个 Task；不读写仓库。
     timestamp = operation.created_at.astimezone(UTC)
     return (
         f"task-{timestamp:%Y%m%d-%H%M%S}-"
@@ -1808,6 +1838,7 @@ def _task_id_for(operation: OperationRecord) -> str:
 
 
 def _task_storage_root(task: TaskRecord) -> str:
+    # 逻辑说明：`_task_storage_root` 接收 `task`，处理 Task `storage root`，依次复用 `strip`、`get`、`_task_storage_root_for`，返回 `str`。 它只计算、校验或读取数据，不直接产生外部副作用；下游失败沿用现有错误语义，不会伪造成功回执。
     team_name = str(
         task.delegated_to_team
         or task.metadata.get("storage_team_name")
@@ -1824,6 +1855,7 @@ def _task_storage_root_for(
     task_id: str,
     team_name: str | None,
 ) -> str:
+    # 逻辑说明：`_task_storage_root_for` 为独立 Task 返回 shared/tasks 路径，为 Team Task 返回 shared/teams/<team>/tasks 路径；拒绝点号和路径分隔符，防止 team_name 造成目录穿越。
     if not team_name:
         return f"shared/tasks/{task_id}"
     if team_name in {".", ".."} or "/" in team_name or "\\" in team_name:
@@ -1839,6 +1871,7 @@ def _task_specification(
     task_id: str,
     manager_user_id: str,
 ) -> str:
+    # 逻辑说明：`_task_specification` 接收 `request`、`task_id`、`manager_user_id`，处理 Task `specification`，依次复用 `rstrip`，返回 `str`。 它只计算、校验或读取数据，不直接产生外部副作用；下游失败沿用现有错误语义，不会伪造成功回执。
     specification = (
         f"{request.specification.rstrip()}\n\n"
         "## AgentTeams result contract (required)\n\n"
@@ -1887,6 +1920,7 @@ def _task_metadata(
     status: TaskDocumentStatus,
     manager_user_id: str,
 ) -> TaskMetadata:
+    # 逻辑说明：`_task_metadata` 接收 `task`、`status`、`manager_user_id`，处理 Task `metadata`，依次复用 `get`、`TaskMetadata`、`fromisoformat`，返回 `TaskMetadata`。 它只计算、校验或读取数据，不直接产生外部副作用；下游失败沿用现有错误语义，不会伪造成功回执。
     completed_at_raw = task.metadata.get("completed_at")
     return TaskMetadata(
         task_id=task.task_id,
@@ -1929,6 +1963,7 @@ def _task_metadata(
 
 
 def _task_document_status(status: str) -> TaskDocumentStatus:
+    # 逻辑说明：`_task_document_status` 接收 `status`，处理 Task `document status`，依次复用 `RecoveryError`，返回 `TaskDocumentStatus`。 它只计算、校验或读取数据，不直接产生外部副作用；校验、并发或恢复证据不足时保留现有异常，防止把歧义状态当作成功。
     allowed = {
         "prepared",
         "assigned",
@@ -1954,6 +1989,7 @@ def _task_receipt(
     *,
     summary: str | None = None,
 ) -> TaskReceipt:
+    # 逻辑说明：`_task_receipt` 接收 `operation_id`、`task`、`summary`，处理 Task `receipt`，依次复用 `TaskReceipt`、`get`、`_completion_summary`，返回 `TaskReceipt`。 它只计算、校验或读取数据，不直接产生外部副作用；下游失败沿用现有错误语义，不会伪造成功回执。
     return TaskReceipt(
         operation_id=operation_id,
         task_id=task.task_id,
@@ -1981,6 +2017,7 @@ def _task_receipt(
 
 
 def _task_status_rank(status: str) -> int:
+    # 逻辑说明：`_task_status_rank` 把 prepared、assigned、in_progress、completed 等文档状态映射为单调序号，供恢复逻辑判断是否已越过某阶段；未知状态返回默认低值。
     return {
         "prepared": 0,
         "assigned": 1,
@@ -1992,6 +2029,7 @@ def _task_status_rank(status: str) -> int:
 
 
 def _summarize(value: str) -> str:
+    # 逻辑说明：`_summarize` 接收 `value`，摘要 `有限/周期 Task 的分派、结果、取消与恢复`，依次复用 `join`、`split`、`TaskResultMissing`，返回 `str`。 它只计算、校验或读取数据，不直接产生外部副作用；校验、并发或恢复证据不足时保留现有异常，防止把歧义状态当作成功。
     normalized = " ".join(value.split())
     if not normalized:
         raise TaskResultMissing("task result must not be empty")
@@ -1999,6 +2037,7 @@ def _summarize(value: str) -> str:
 
 
 def _completion_summary(task: TaskRecord) -> str | None:
+    # 逻辑说明：`_completion_summary` 接收 `task`，生成完成文案 `summary`，依次复用 `get`，返回 `str | None`。 它只计算、校验或读取数据，不直接产生外部副作用；下游失败沿用现有错误语义，不会伪造成功回执。
     value = task.metadata.get("completion_summary")
     return str(value) if value is not None else None
 
@@ -2011,6 +2050,7 @@ def _parse_task_result_submission(
     structured_result: dict[str, Any] | None,
     destination: Path,
 ) -> TaskResultSubmission:
+    # 逻辑说明：`_parse_task_result_submission` 接收 `task`、`remote`、`result_text`、`structured_result`、`destination`，解析 `task result submission`，依次复用 `TaskResultMissing`、`get`、`_markdown_field`，返回 `TaskResultSubmission`。 它只计算、校验或读取数据，不直接产生外部副作用；校验、并发或恢复证据不足时保留现有异常，防止把歧义状态当作成功。
     structured = structured_result or {}
     if not result_text and not structured and remote.result_status is None:
         raise TaskResultMissing(
@@ -2170,6 +2210,7 @@ def _parse_task_result_submission(
 
 
 def _markdown_field(body: str, name: str) -> str | None:
+    # 逻辑说明：`_markdown_field` 接收 `body`、`name`，提取 Markdown `field`，依次复用 `search`、`escape`、`strip`，返回 `str | None`。 它只计算、校验或读取数据，不直接产生外部副作用；下游失败沿用现有错误语义，不会伪造成功回执。
     match = re.search(
         rf"(?im)^\s*(?:#{{1,6}}\s*)?(?:[-*]\s+)?"
         rf"(?:\*\*|__)?{re.escape(name)}(?:\*\*|__)?"
@@ -2186,6 +2227,7 @@ def _markdown_field(body: str, name: str) -> str | None:
 
 
 def _markdown_deliverables(body: str) -> tuple[str, ...]:
+    # 逻辑说明：`_markdown_deliverables` 接收 `body`，提取 Markdown `deliverables`，依次复用 `search`、`splitlines`、`group`，返回 `tuple[str, ...]`。 它只计算、校验或读取数据，不直接产生外部副作用；下游失败沿用现有错误语义，不会伪造成功回执。
     match = re.search(
         r"(?ims)^\s*(?:#{1,6}\s*)?"
         r"(?:\*\*|__)?DELIVERABLES(?:\*\*|__)?\s*:\s*$"
@@ -2204,6 +2246,7 @@ def _markdown_deliverables(body: str) -> tuple[str, ...]:
 
 
 def _normalize_result_path(task: TaskRecord, value: str) -> str:
+    # 逻辑说明：`_normalize_result_path` 接收 `task`、`value`，规范化 `result path`，依次复用 `replace`、`strip`、`removeprefix`，返回 `str`。 它只计算、校验或读取数据，不直接产生外部副作用；校验、并发或恢复证据不足时保留现有异常，防止把歧义状态当作成功。
     normalized = value.strip().strip("`").replace("\\", "/")
     normalized = normalized.removeprefix("./")
     if not normalized or normalized.startswith("/") or ":" in normalized:
@@ -2236,6 +2279,7 @@ def _local_result_artifact(
     *,
     destination: Path,
 ) -> Path:
+    # 逻辑说明：`_local_result_artifact` 接收 `task`、`value`、`destination`，定位本地 `result artifact`，依次复用 `removeprefix`、`resolve`、`relative_to`，返回 `Path`。 它只计算、校验或读取数据，不直接产生外部副作用；校验、并发或恢复证据不足时保留现有异常，防止把歧义状态当作成功。
     canonical_root = f"shared/tasks/{task.task_id}"
     relative = value.removeprefix(f"{canonical_root}/")
     candidate = (destination / relative).resolve()
@@ -2249,6 +2293,7 @@ def _local_result_artifact(
 
 
 def _ambiguous_exception(exc: Exception) -> bool:
+    # 逻辑说明：`_ambiguous_exception` 接收 `exc`，判断歧义 `exception`，返回 `bool`。 它只计算、校验或读取数据，不直接产生外部副作用；下游失败沿用现有错误语义，不会伪造成功回执。
     return isinstance(
         exc,
         (
@@ -2260,6 +2305,7 @@ def _ambiguous_exception(exc: Exception) -> bool:
 
 
 def _safe_reason(exc: Exception) -> str:
+    # 逻辑说明：`_safe_reason` 接收 `exc`，生成可持久化的安全副本 `reason`，依次复用 `strip`，返回 `str`。 它只计算、校验或读取数据，不直接产生外部副作用；下游失败沿用现有错误语义，不会伪造成功回执。
     if isinstance(exc, AmbiguousEffectError):
         return type(exc).__name__
     text = str(exc).strip()

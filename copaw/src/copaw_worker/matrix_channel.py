@@ -128,6 +128,8 @@ def _md_to_html(text: str) -> str:
 
     Falls back to simple HTML-escape + ``<br>`` if the library is missing.
     """
+    # 逻辑说明：`_md_to_html` 接收 text，执行 Matrix 房间与消息通道 中的“md to html”步骤，返回 str；
+    # 会读写本地文件。失败策略：已知失败按现有 except 转为错误结果或日志，未覆盖异常继续上抛；本函数不额外重试，避免掩盖持续故障。
     try:
         from markdown_it import MarkdownIt
 
@@ -176,6 +178,8 @@ class MatrixChannelConfig:
     """Parsed config for MatrixChannel (read from config.json channels.matrix)."""
 
     def __init__(self, raw: dict[str, Any]) -> None:
+        # 逻辑说明：`__init__` 接收 raw，初始化 Matrix channel 状态，返回 None；会更新对象内存状态。失败策略：底层异常继续上抛，由调用链统一处理；
+        # 本函数不额外重试，避免掩盖持续故障。
         self.enabled: bool = raw.get("enabled", True)
         self.homeserver: str = raw.get("homeserver", "")
         self.access_token: str = raw.get("access_token", "")
@@ -209,6 +213,7 @@ class MatrixChannelConfig:
 
 
 def _normalize_user_id(uid: str) -> str:
+    # 逻辑说明：`_normalize_user_id` 接收 uid，规范化用户 ID，返回 str；不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     uid = uid.strip().lower()
     if not uid.startswith("@"):
         uid = "@" + uid
@@ -216,6 +221,8 @@ def _normalize_user_id(uid: str) -> str:
 
 
 def _strip_yaml_string(value: str) -> str:
+    # 逻辑说明：`_strip_yaml_string` 接收 value，执行 Matrix 房间与消息通道 中的“strip yaml string”步骤，返回 str；
+    # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     text = value.strip()
     if not text or text in {"null", "~"}:
         return ""
@@ -227,6 +234,8 @@ def _strip_yaml_string(value: str) -> str:
 
 
 def _runtime_root() -> Path:
+    # 逻辑说明：`_runtime_root` 接收 当前对象/进程状态，执行 Matrix 房间与消息通道 中的“runtime root”步骤，返回 Path；
+    # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     configured = os.getenv("COPAW_WORKING_DIR")
     if configured:
         path = Path(configured).expanduser().resolve()
@@ -247,6 +256,8 @@ def _runtime_root() -> Path:
 
 
 def _runtime_config_field(section: str, key: str) -> str:
+    # 逻辑说明：`_runtime_config_field` 接收 section、key，执行 Matrix 房间与消息通道 中的“runtime 配置 字段”步骤，返回 str；
+    # 不修改外部状态。失败策略：已知失败按现有 except 转为错误结果或日志，未覆盖异常继续上抛；本函数不额外重试，避免掩盖持续故障。
     path = _runtime_root() / "runtime" / "runtime.yaml"
     if not path.exists():
         return ""
@@ -274,6 +285,8 @@ def _runtime_config_field(section: str, key: str) -> str:
 
 
 def _extract_matrix_user_ids(text: str) -> list[str]:
+    # 逻辑说明：`_extract_matrix_user_ids` 接收 text，执行 Matrix 房间与消息通道 中的“extract Matrix 用户 ids”步骤，返回 list[str]；
+    # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     seen: set[str] = set()
     result: list[str] = []
     for match in _MATRIX_USER_ID_RE.finditer(text or ""):
@@ -287,6 +300,8 @@ def _extract_matrix_user_ids(text: str) -> list[str]:
 
 
 def _matrix_localpart(user_id: str | None) -> str:
+    # 逻辑说明：`_matrix_localpart` 接收 user_id，执行 Matrix 房间与消息通道 中的“Matrix localpart”步骤，返回 str；
+    # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     text = (user_id or os.getenv("AGENTTEAMS_WORKER_NAME") or "").strip()
     if text.startswith("@"):
         return text[1:].split(":", 1)[0]
@@ -294,17 +309,23 @@ def _matrix_localpart(user_id: str | None) -> str:
 
 
 def _is_team_leader_identity(user_id: str | None) -> bool:
+    # 逻辑说明：`_is_team_leader_identity` 接收 user_id，判断团队 Leader identity，返回 bool；
+    # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     localpart = _matrix_localpart(user_id)
     return localpart.endswith("-lead") or localpart.endswith("-leader")
 
 
 def _ends_with_no_reply_control(text: str) -> bool:
     """Return true when the final non-empty output line is NO_REPLY."""
+    # 逻辑说明：`_ends_with_no_reply_control` 接收 text，执行 Matrix 房间与消息通道 中的“ends with no reply control”步骤，返回 bool；
+    # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     return bool(text) and text.rstrip().splitlines()[-1].strip() == "NO_REPLY"
 
 
 def _is_team_leader_internal_preamble_text(text: str) -> bool:
     """Return true for visible Team Leader internal planning/tool preambles."""
+    # 逻辑说明：`_is_team_leader_internal_preamble_text` 接收 text，判断团队 Leader internal preamble 文本，返回 bool；
+    # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     stripped = (text or "").strip()
     if not stripped or "?" in stripped:
         return False
@@ -322,6 +343,8 @@ def _is_team_leader_internal_preamble_text(text: str) -> bool:
 
 def _is_team_leader_dm_internal_preamble(current_room_id: str, text: str) -> bool:
     """Suppress visible Team Leader internal planning/tool preambles in Leader DM."""
+    # 逻辑说明：`_is_team_leader_dm_internal_preamble` 接收 current_room_id、text，判断团队 Leader dm internal preamble，返回 bool；
+    # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     if _runtime_config_field("member", "role") != "team_leader":
         return False
 
@@ -337,6 +360,10 @@ def _should_suppress_team_leader_internal_preamble(
     room_id: str,
     text: str,
 ) -> bool:
+    # 逻辑说明：`_should_suppress_team_leader_internal_preamble` 接收 user_id、room_id、text，
+    # 执行 Matrix 房间与消息通道 中的“should suppress 团队 Leader internal preamble”步骤，返回 bool；
+    #
+    # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     if _is_team_leader_dm_internal_preamble(room_id, text):
         return True
     if not _is_team_leader_identity(user_id):
@@ -363,6 +390,10 @@ class MatrixChannel(BaseChannel):
         filter_tool_messages: bool = False,
         filter_thinking: bool = False,
     ) -> None:
+        # 逻辑说明：`__init__` 接收 process、config、on_reply_sent、show_tool_details、filter_tool_messages、filter_thinking，
+        # 初始化 Matrix channel 状态，返回 None；
+        #
+        # 会更新对象内存状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
         super().__init__(
             process=process,
             on_reply_sent=on_reply_sent,
@@ -384,6 +415,7 @@ class MatrixChannel(BaseChannel):
     # ------------------------------------------------------------------
 
     def get_debounce_key(self, payload: Any) -> str:
+        # 逻辑说明：`get_debounce_key` 接收 payload，读取debounce key，返回 str；不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
         if isinstance(payload, dict):
             meta = payload.get("meta") or {}
             room_id = meta.get("room_id")
@@ -406,6 +438,8 @@ class MatrixChannel(BaseChannel):
         replies). Mirror the dict shape produced by
         ``_build_content_part`` / ``_apply_history_to_parts``.
         """
+        # 逻辑说明：`_content_has_text` 接收 contents，执行 Matrix 房间与消息通道 中的“内容 has 文本”步骤，返回 bool；
+        # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
         for c in contents or []:
             if isinstance(c, dict):
                 if c.get("type") == "text" and (c.get("text") or "").strip():
@@ -421,6 +455,8 @@ class MatrixChannel(BaseChannel):
         ``_content_has_text``): audio-only messages must bypass the
         no-text debounce, otherwise they are buffered forever.
         """
+        # 逻辑说明：`_content_has_audio` 接收 contents，执行 Matrix 房间与消息通道 中的“内容 has audio”步骤，返回 bool；
+        # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
         for c in contents or []:
             if isinstance(c, dict):
                 if c.get("type") == "audio":
@@ -444,6 +480,10 @@ class MatrixChannel(BaseChannel):
         filter_tool_messages: bool = False,
         filter_thinking: bool = False,
     ) -> "MatrixChannel":
+        # 逻辑说明：`from_config` 接收 process、config、on_reply_sent、show_tool_details、filter_tool_messages、filter_thinking，
+        # 执行 Matrix 房间与消息通道 中的“from 配置”步骤，返回 'MatrixChannel'；
+        #
+        # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
         if isinstance(config, dict):
             cfg = MatrixChannelConfig(config)
         elif isinstance(config, MatrixChannelConfig):
@@ -462,6 +502,8 @@ class MatrixChannel(BaseChannel):
 
     @classmethod
     def from_env(cls, process: Callable, on_reply_sent=None) -> "MatrixChannel":
+        # 逻辑说明：`from_env` 接收 process、on_reply_sent，执行 Matrix 房间与消息通道 中的“from env”步骤，返回 'MatrixChannel'；
+        # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
         import os
         cfg = MatrixChannelConfig({
             "homeserver": os.environ.get("AGENTTEAMS_MATRIX_SERVER", ""),
@@ -474,6 +516,8 @@ class MatrixChannel(BaseChannel):
     # ------------------------------------------------------------------
 
     async def start(self) -> None:
+        # 逻辑说明：依据 MatrixChannelConfig 创建 nio 客户端，用 token（失效时尝试刷新）或账号密码认证，并在启用 E2EE 时加载密钥存储、上传设备密钥。
+        # 认证成功后注册文本、媒体与加密事件回调并启动同步后台任务；缺 homeserver/凭据或认证失败会记录原因并提前返回，不启动同步循环。
         if not self._cfg.homeserver:
             logger.warning("MatrixChannel: homeserver not configured, skipping")
             return
@@ -583,6 +627,8 @@ class MatrixChannel(BaseChannel):
         logger.info("MatrixChannel: sync loop started")
 
     async def stop(self) -> None:
+        # 逻辑说明：取消并等待本 Matrix channel 的长轮询同步任务，再关闭 nio HTTP 客户端连接，确保退出时不遗留网络会话。
+        # 同步任务的 CancelledError 属于正常停机并被吞掉；客户端关闭的其他异常继续交给 Worker 停机链处理。
         if self._sync_task:
             self._sync_task.cancel()
             try:
@@ -604,6 +650,8 @@ class MatrixChannel(BaseChannel):
     @staticmethod
     def _sync_token_path() -> Optional[Path]:
         """Return the file path for persisting the Matrix sync token."""
+        # 逻辑说明：`_sync_token_path` 接收 当前对象/进程状态，执行 Matrix 房间与消息通道 中的“同步 令牌 路径”步骤，返回 Optional[Path]；
+        # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
         wd = os.environ.get("COPAW_WORKING_DIR")
         if wd:
             return Path(wd) / "matrix_sync_token"
@@ -616,6 +664,8 @@ class MatrixChannel(BaseChannel):
         startup, so it's already on disk when this runs — even on a fresh
         container after destroy/recreate.
         """
+        # 逻辑说明：`_load_sync_token` 接收 当前对象/进程状态，加载同步 令牌，返回 Optional[str]；
+        # 会更新对象内存状态。失败策略：已知失败按现有 except 转为错误结果或日志，未覆盖异常继续上抛；本函数不额外重试，避免掩盖持续故障。
         path = self._sync_token_path()
         if path and path.exists():
             try:
@@ -629,6 +679,8 @@ class MatrixChannel(BaseChannel):
 
     def _save_sync_token(self, token: str) -> None:
         """Persist next_batch token to disk (push_loop uploads it to MinIO)."""
+        # 逻辑说明：`_save_sync_token` 接收 token，执行 Matrix 房间与消息通道 中的“save 同步 令牌”步骤，返回 None；
+        # 会读写本地文件、会更新对象内存状态。失败策略：已知失败按现有 except 转为错误结果或日志，未覆盖异常继续上抛；本函数不额外重试，避免掩盖持续故障。
         path = self._sync_token_path()
         if path:
             try:
@@ -646,6 +698,8 @@ class MatrixChannel(BaseChannel):
         - Claim one-time keys to establish Olm sessions
         - Send outgoing to-device messages (key shares, key requests)
         """
+        # 逻辑说明：`_e2ee_maintenance` 接收 当前对象/进程状态，定期执行密钥上传与待处理 E2EE 维护，返回 None；
+        # 不修改外部状态。失败策略：已知失败按现有 except 转为错误结果或日志，未覆盖异常继续上抛；本函数不额外重试，避免掩盖持续故障。
         if not self._cfg.encryption or not self._client or not self._client.olm:
             return
         try:
@@ -663,6 +717,8 @@ class MatrixChannel(BaseChannel):
 
     async def _refresh_matrix_token(self) -> bool:
         """Call controller to get a fresh Matrix access token."""
+        # 逻辑说明：`_refresh_matrix_token` 接收 当前对象/进程状态，使用配置的用户名密码重新登录并替换客户端 access token，返回 bool；
+        # 会更新对象内存状态。失败策略：已知失败按现有 except 转为错误结果或日志，未覆盖异常继续上抛；本函数不额外重试，避免掩盖持续故障。
         controller_url = os.environ.get("AGENTTEAMS_CONTROLLER_URL", "")
         auth_token_file = os.environ.get("AGENTTEAMS_AUTH_TOKEN_FILE", "")
         auth_token = os.environ.get("AGENTTEAMS_AUTH_TOKEN", "")
@@ -704,6 +760,8 @@ class MatrixChannel(BaseChannel):
         return False
 
     async def _sync_loop(self) -> None:
+        # 逻辑说明：`_sync_loop` 接收 当前对象/进程状态，按 Matrix since token 持续拉取事件，分派回调并持久化下一个 token，返回 None；
+        # 会访问网络服务、会更新对象内存状态。失败策略：已知失败按现有 except 转为错误结果或日志，未覆盖异常继续上抛；循环/重试受现有次数、超时或间隔限制。
         next_batch: Optional[str] = self._load_sync_token()
 
         # When no persisted token exists (old version upgrade or first deploy),
@@ -801,6 +859,8 @@ class MatrixChannel(BaseChannel):
 
     def _check_allowed(self, sender_id: str, room_id: str, is_dm: bool) -> bool:
         """Return True if the sender is allowed to interact in this context."""
+        # 逻辑说明：`_check_allowed` 接收 sender_id、room_id、is_dm，检查allowed，返回 bool；不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；
+        # 本函数不额外重试，避免掩盖持续故障。
         normalized = _normalize_user_id(sender_id)
         if is_dm:
             if self._cfg.dm_policy == "disabled":
@@ -820,6 +880,7 @@ class MatrixChannel(BaseChannel):
 
     def _require_mention(self, room_id: str) -> bool:
         """Check per-room config, fall back to global default (require mention)."""
+        # 逻辑说明：`_require_mention` 接收 room_id，验证必需条件mention，返回 bool；会更新对象内存状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
         room_cfg = self._cfg.groups.get(room_id) or self._cfg.groups.get("*")
         if room_cfg:
             if room_cfg.get("autoReply") is True:
@@ -829,6 +890,8 @@ class MatrixChannel(BaseChannel):
         return True  # default: require mention in group rooms
 
     def _was_mentioned(self, event: Any, text: str) -> bool:
+        # 逻辑说明：`_was_mentioned` 接收 event、text，执行 Matrix 房间与消息通道 中的“was mentioned”步骤，返回 bool；
+        # 会访问网络服务、会更新对象内存状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
         if not self._user_id:
             return False
         # 1. Check m.mentions (structured mention from Matrix spec)
@@ -860,6 +923,8 @@ class MatrixChannel(BaseChannel):
         E.g. ``"@worker:hs.example /new"`` → ``"/new"``
              ``"math 💕: /clear"`` → ``"/clear"``.
         """
+        # 逻辑说明：`_strip_mention_prefix` 接收 text、room，执行 Matrix 房间与消息通道 中的“strip mention prefix”步骤，返回 str；
+        # 会更新对象内存状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
         if not self._user_id:
             return text
         # 1. Strip MXID (@user:server) at start
@@ -913,6 +978,8 @@ class MatrixChannel(BaseChannel):
         populated by full_state sync at startup).
         """
         # 1. Try the room object directly (passed by nio callback)
+        # 逻辑说明：`_get_display_name` 接收 room、user_id，读取display 名称，返回 str；
+        # 会更新对象内存状态。失败策略：已知失败按现有 except 转为错误结果或日志，未覆盖异常继续上抛；本函数不额外重试，避免掩盖持续故障。
         try:
             name = room.user_name(user_id)
             if name:
@@ -946,6 +1013,7 @@ class MatrixChannel(BaseChannel):
 
     def _record_history(self, room_id: str, entry: HistoryEntry) -> None:
         """Append *entry* to the per-room history buffer, respecting the limit."""
+        # 逻辑说明：`_record_history` 接收 room_id、entry，记录历史，返回 None；会更新对象内存状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
         limit = self._cfg.history_limit
         if limit <= 0:
             return
@@ -956,6 +1024,8 @@ class MatrixChannel(BaseChannel):
 
     def _build_history_prefix(self, room_id: str) -> str:
         """Format buffered history entries as a multi-line text block."""
+        # 逻辑说明：`_build_history_prefix` 接收 room_id，构造历史 prefix，返回 str；
+        # 会访问网络服务、会更新对象内存状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
         entries = self._room_histories.get(room_id, [])
         if not entries:
             return ""
@@ -980,6 +1050,8 @@ class MatrixChannel(BaseChannel):
 
         Returns a (possibly new) list — the original is not mutated.
         """
+        # 逻辑说明：`_apply_history_to_parts` 接收 room_id、content_parts，应用历史 to parts，返回 list[dict[str, Any]]；
+        # 会更新对象内存状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
         if self._cfg.history_limit <= 0:
             return content_parts
         history_text = self._build_history_prefix(room_id)
@@ -1023,6 +1095,8 @@ class MatrixChannel(BaseChannel):
         and, for images when vision is enabled, downloads the actual file so it
         can be included as an image content part later.
         """
+        # 逻辑说明：`_record_media_history` 接收 room、event、sender_id、room_id，记录媒体 历史，返回 None；
+        # 会更新对象内存状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
         body = event.body or ""
         media_parts: list[dict[str, Any]] = []
 
@@ -1063,6 +1137,8 @@ class MatrixChannel(BaseChannel):
 
     def _media_dir(self) -> Path:
         """Return (and create) the local media storage directory."""
+        # 逻辑说明：`_media_dir` 接收 当前对象/进程状态，执行 Matrix 房间与消息通道 中的“媒体 dir”步骤，返回 Path；
+        # 会读写本地文件。失败策略：已知失败按现有 except 转为错误结果或日志，未覆盖异常继续上抛；本函数不额外重试，避免掩盖持续故障。
         try:
             from copaw.constant import WORKING_DIR
             d = WORKING_DIR / "media"
@@ -1077,6 +1153,8 @@ class MatrixChannel(BaseChannel):
 
     async def _download_mxc(self, mxc_url: str, filename: str) -> Optional[str]:
         """Download an mxc:// URI to a local file. Returns local path or None."""
+        # 逻辑说明：`_download_mxc` 接收 mxc_url、filename，从 Matrix content repository 下载普通媒体到本地隔离目录，返回 Optional[str]；
+        # 会读写本地文件、会更新对象内存状态。失败策略：已知失败按现有 except 转为错误结果或日志，未覆盖异常继续上抛；本函数不额外重试，避免掩盖持续故障。
         if not mxc_url.startswith("mxc://"):
             return None
         try:
@@ -1107,6 +1185,8 @@ class MatrixChannel(BaseChannel):
 
     def _e2ee_store_path(self) -> Path:
         """Return the directory for persisting Olm/Megolm crypto state."""
+        # 逻辑说明：`_e2ee_store_path` 接收 当前对象/进程状态，执行 Matrix 房间与消息通道 中的“e2ee store 路径”步骤，返回 Path；
+        # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
         wd = os.environ.get("COPAW_WORKING_DIR")
         if wd:
             return Path(wd) / "matrix_crypto_store"
@@ -1116,6 +1196,10 @@ class MatrixChannel(BaseChannel):
         self, mxc_url: str, filename: str, key: dict, hashes: dict, iv: str
     ) -> Optional[str]:
         """Download an encrypted mxc:// URI, decrypt it, and save locally."""
+        # 逻辑说明：`_download_encrypted_mxc` 接收 mxc_url、filename、key、hashes、iv，下载并按事件 file 信息解密 Matrix 加密媒体，
+        # 返回 Optional[str]；
+        #
+        # 会读写本地文件、会更新对象内存状态。失败策略：已知失败按现有 except 转为错误结果或日志，未覆盖异常继续上抛；本函数不额外重试，避免掩盖持续故障。
         if not mxc_url.startswith("mxc://") or not self._client:
             return None
         try:
@@ -1148,6 +1232,8 @@ class MatrixChannel(BaseChannel):
 
     async def _on_megolm_event(self, room: MatrixRoom, event: MegolmEvent) -> None:
         """Handle undecryptable encrypted events (missing session key)."""
+        # 逻辑说明：`_on_megolm_event` 接收 room、event，执行 Matrix 房间与消息通道 中的“on megolm event”步骤，返回 None；
+        # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
         logger.warning(
             "MatrixChannel: could not decrypt event %s in %s (session_id=%s)",
             event.event_id, room.room_id, getattr(event, "session_id", "?"),
@@ -1160,6 +1246,10 @@ class MatrixChannel(BaseChannel):
         the Megolm payload. The file content itself is still encrypted with AES
         and must be downloaded + decrypted using the key/iv/hashes from the event.
         """
+        # 逻辑说明：`_on_room_encrypted_media_event` 接收 room、event，执行 Matrix 房间与消息通道 中的“on 房间 encrypted 媒体 event”步骤，
+        # 返回 None；
+        #
+        # 会更新对象内存状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
         if event.sender == self._user_id:
             return
 
@@ -1262,6 +1352,8 @@ class MatrixChannel(BaseChannel):
 
     async def _upload_file(self, file_ref: str) -> Optional[str]:
         """Upload a local file to Matrix media repo. Returns mxc:// URI or None."""
+        # 逻辑说明：`_upload_file` 接收 file_ref，读取本地文件并上传到 Matrix content repository，返回 Optional[str]；
+        # 会访问网络服务、会更新对象内存状态。失败策略：已知失败按现有 except 转为错误结果或日志，未覆盖异常继续上抛；本函数不额外重试，避免掩盖持续故障。
         if not self._client:
             return None
         try:
@@ -1299,6 +1391,8 @@ class MatrixChannel(BaseChannel):
     # ------------------------------------------------------------------
 
     async def _on_room_event(self, room: MatrixRoom, event: RoomMessageText) -> None:
+        # 逻辑说明：`_on_room_event` 接收 room、event，校验发送者、mention 与去重规则后把文本事件交给 Agent，返回 None；
+        # 会读写本地文件、会更新对象内存状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
         logger.debug(
             "_on_room_event: sender=%s body=%r room_users=%d",
             event.sender, (event.body or "")[:80], len(getattr(room, 'users', {})),
@@ -1378,6 +1472,8 @@ class MatrixChannel(BaseChannel):
 
     async def _on_room_media_event(self, room: MatrixRoom, event: Any) -> None:
         """Handle incoming media messages (image, file, audio, video)."""
+        # 逻辑说明：`_on_room_media_event` 接收 room、event，下载/解密媒体、构造 Agent 输入并记录房间历史，返回 None；
+        # 会更新对象内存状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
         if event.sender == self._user_id:
             return
 
@@ -1484,6 +1580,8 @@ class MatrixChannel(BaseChannel):
 
     async def _send_read_receipt(self, room_id: str, event_id: str) -> None:
         """Mark a message as read (sends both read receipt and read marker)."""
+        # 逻辑说明：`_send_read_receipt` 接收 room_id、event_id，发送read receipt，返回 None；
+        # 不修改外部状态。失败策略：已知失败按现有 except 转为错误结果或日志，未覆盖异常继续上抛；本函数不额外重试，避免掩盖持续故障。
         if not self._client or not event_id:
             return
         try:
@@ -1504,6 +1602,8 @@ class MatrixChannel(BaseChannel):
         typing indicator every 25s (before the 30s server timeout expires),
         up to a 2-minute hard cap. When turning off, cancels the renewal task.
         """
+        # 逻辑说明：`_send_typing` 接收 room_id、typing、timeout，向 Matrix 更新 typing 状态并维护续期任务，返回 None；
+        # 会更新对象内存状态。失败策略：已知失败按现有 except 转为错误结果或日志，未覆盖异常继续上抛；本函数不额外重试，避免掩盖持续故障。
         if not self._client:
             return
         # Cancel any existing renewal task for this room
@@ -1528,6 +1628,8 @@ class MatrixChannel(BaseChannel):
         self, room_id: str, timeout: int = 30000
     ) -> None:
         """Re-send typing=true every 25s, hard-capped at 2 minutes."""
+        # 逻辑说明：`_typing_renewal_loop` 接收 room_id、timeout，在 Agent 处理期间周期续期 Matrix typing 通知，返回 None；
+        # 不修改外部状态。失败策略：已知失败按现有 except 转为错误结果或日志，未覆盖异常继续上抛；循环/重试受现有次数、超时或间隔限制。
         max_duration = 120  # seconds
         renewal_interval = 25  # seconds (renew before 30s server timeout)
         elapsed = 0
@@ -1561,6 +1663,7 @@ class MatrixChannel(BaseChannel):
 
     def _build_content_part(self, p: dict[str, Any]) -> Any:
         """Convert a native content-part dict to a CoPaw Content object."""
+        # 逻辑说明：`_build_content_part` 接收 p，构造内容 part，返回 Any；不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
         t = p.get("type")
         if t == "text" and p.get("text"):
             return TextContent(type=ContentType.TEXT, text=p["text"])
@@ -1586,6 +1689,8 @@ class MatrixChannel(BaseChannel):
         return None
 
     def build_agent_request_from_native(self, native_payload: Any) -> Any:
+        # 逻辑说明：`build_agent_request_from_native` 接收 native_payload，构造Agent 请求 from native，返回 Any；
+        # 会更新对象内存状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
         parts = native_payload.get("content_parts", [])
         meta = native_payload.get("meta", {})
         sender_id = native_payload.get("sender_id", "")
@@ -1614,10 +1719,14 @@ class MatrixChannel(BaseChannel):
         return req
 
     def resolve_session_id(self, sender_id: str, channel_meta=None) -> str:
+        # 逻辑说明：`resolve_session_id` 接收 sender_id、channel_meta，解析session ID，返回 str；
+        # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
         room_id = (channel_meta or {}).get("room_id", sender_id)
         return f"matrix:{room_id}"
 
     def get_to_handle_from_request(self, request: Any) -> str:
+        # 逻辑说明：`get_to_handle_from_request` 接收 request，读取to handle from 请求，返回 str；
+        # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
         meta = getattr(request, "channel_meta", {}) or {}
         return meta.get("room_id", getattr(request, "user_id", ""))
 
@@ -1638,6 +1747,8 @@ class MatrixChannel(BaseChannel):
         ``formatted_body`` with an HTML pill so clients render the
         mention visually.
         """
+        # 逻辑说明：`_apply_mention` 接收 content、room_id、explicit_user_ids、fallback_user_id，应用mention，返回 None；
+        # 会读写本地文件、会访问网络服务、会更新对象内存状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
         targets = list(explicit_user_ids or _extract_matrix_user_ids(content.get("body", "")))
         if not targets and fallback_user_id:
             targets.append(fallback_user_id)
@@ -1681,6 +1792,8 @@ class MatrixChannel(BaseChannel):
 
     def _resolve_display_name(self, user_id: str, room_id: str) -> str:
         """Best-effort display name for *user_id* in *room_id*."""
+        # 逻辑说明：`_resolve_display_name` 接收 user_id、room_id，解析display 名称，返回 str；
+        # 会更新对象内存状态。失败策略：已知失败按现有 except 转为错误结果或日志，未覆盖异常继续上抛；本函数不额外重试，避免掩盖持续故障。
         if self._client:
             room = self._client.rooms.get(room_id)
             if room:
@@ -1693,6 +1806,8 @@ class MatrixChannel(BaseChannel):
         return user_id.split(":")[0].lstrip("@") or user_id
 
     def _team_assignment_room(self, current_room_id: str, text: str) -> str:
+        # 逻辑说明：`_team_assignment_room` 接收 current_room_id、text，执行 Matrix 房间与消息通道 中的“团队 派工 房间”步骤，返回 str；
+        # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
         role = _runtime_config_field("member", "role")
         if role != "team_leader":
             return current_room_id
@@ -1723,6 +1838,8 @@ class MatrixChannel(BaseChannel):
         text: str,
         meta: Optional[Dict[str, Any]] = None,
     ) -> None:
+        # 逻辑说明：`send` 接收 to_handle、text、meta，把 Agent 响应转换为 Matrix 文本事件，应用 mention/过滤后发送，返回 None；
+        # 会访问网络服务、会更新对象内存状态。失败策略：已知失败按现有 except 转为错误结果或日志，未覆盖异常继续上抛；本函数不额外重试，避免掩盖持续故障。
         if not self._client:
             logger.error("MatrixChannel: send called but client not ready")
             return
@@ -1791,6 +1908,8 @@ class MatrixChannel(BaseChannel):
         meta: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Upload a local file to Matrix and send as m.image / m.file / etc."""
+        # 逻辑说明：`send_media` 接收 to_handle、part、meta，上传本地媒体并向 Matrix 房间发送对应消息事件，返回 None；
+        # 会访问网络服务、会更新对象内存状态。失败策略：已知失败按现有 except 转为错误结果或日志，未覆盖异常继续上抛；本函数不额外重试，避免掩盖持续故障。
         if not self._client:
             return
 

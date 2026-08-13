@@ -57,6 +57,8 @@ class Worker:
     文件或使用旧 Matrix 身份的协程。
     """
     def __init__(self, config: WorkerConfig) -> None:
+        # 逻辑说明：`__init__` 接收 config，执行 CoPaw Worker 生命周期 中的“init”步骤，返回 None；
+        # 会访问网络服务、会更新对象内存状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
         self.config = config
         self.worker_name = config.worker_name
         self.sync: Optional[FileSync] = None
@@ -75,6 +77,8 @@ class Worker:
     # ------------------------------------------------------------------
 
     async def run(self) -> bool:
+        # 逻辑说明：`run` 接收 当前对象/进程状态，完成启动后托管 CoPaw，退出或取消时统一停止所有资源，返回 bool；
+        # 不修改外部状态。失败策略：已知失败按现有 except 转为错误结果或日志，未覆盖异常继续上抛；本函数不额外重试，避免掩盖持续故障。
         if not await self.start():
             return False
         try:
@@ -86,6 +90,8 @@ class Worker:
         return True
 
     async def stop(self) -> None:
+        # 逻辑说明：把 Worker 标记为停机并通知 CoPaw server 退出，随后尽力停止所有 channel 与 runner、取消并汇总后台任务，最后关闭健康 API。
+        # channel/runner 的局部异常被隔离以继续释放其余资源；后台任务异常通过 return_exceptions 收集，健康 API 无论成功与否都会在 finally 中清空引用。
         self._stopping = True
         console.print("[yellow]Stopping worker...[/yellow]")
         if self._copaw_server is not None:
@@ -119,6 +125,8 @@ class Worker:
 
     async def start(self) -> bool:
         """依次恢复远端状态并启动依赖，全部就绪后才允许 Worker 接收任务。"""
+        # 逻辑说明：`start` 接收 当前对象/进程状态，按存储恢复、配置转换、健康检查、channel 与后台任务顺序启动 Worker，返回 bool；
+        # 会读写本地文件、会访问网络服务、会更新对象内存状态、会修改进程环境。失败策略：已知失败按现有 except 转为错误结果或日志，未覆盖异常继续上抛；循环/重试受现有次数、超时或间隔限制。
         self._stopping = False
         console.print(
             Panel.fit(
@@ -311,12 +319,16 @@ class Worker:
         return True
 
     def _track_background_task(self, awaitable: Any) -> asyncio.Task[Any]:
+        # 逻辑说明：`_track_background_task` 接收 awaitable，创建后台 Task，登记到集合并在完成回调中自动移除，返回 asyncio.Task[Any]；
+        # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
         task = asyncio.create_task(awaitable)
         self._background_tasks.add(task)
         task.add_done_callback(self._background_tasks.discard)
         return task
 
     def _ensure_health(self) -> HealthState:
+        # 逻辑说明：`_ensure_health` 接收 当前对象/进程状态，返回现有 HealthState，缺失时按 runtime 路径创建并持久化初始状态，返回 HealthState；
+        # 会更新对象内存状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
         if self._health is None:
             runtime_dir = (
                 self._copaw_working_dir
@@ -340,6 +352,8 @@ class Worker:
 
     async def build_worker_readiness(self) -> dict[str, Any]:
         """Probe the live dependencies and return the complete health snapshot."""
+        # 逻辑说明：`build_worker_readiness` 接收 当前对象/进程状态，实时探测 Matrix、模型和 CoPaw，并返回完整 readiness 快照，返回 dict[str, Any]；
+        # 会更新对象内存状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
         health = self._ensure_health()
 
         matrix_cfg = (
@@ -409,6 +423,8 @@ class Worker:
         interval: float = 1,
     ) -> None:
         """Wait boundedly for CoPaw's native health endpoint."""
+        # 逻辑说明：`_mark_copaw_startup_health` 接收 timeout、interval，在限定时间内轮询 CoPaw 健康端点并更新 startup health，返回 None；
+        # 会更新对象内存状态。失败策略：底层异常继续上抛，由调用链统一处理；循环/重试受现有次数、超时或间隔限制。
         if self.config.console_port is None:
             return
         health = self._ensure_health()
@@ -445,6 +461,8 @@ class Worker:
         """Start CoPaw. If console_port is set, run the full FastAPI app via
         uvicorn (gives access to the web console). Otherwise start the runner
         and channel manager directly (lightweight, no HTTP server)."""
+        # 逻辑说明：`_run_copaw` 接收 当前对象/进程状态，安装工具 hook，并按 console 开关选择完整或 headless runtime，返回 None；
+        # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
         from copaw_worker.hooks import install_tool_hooks
 
         install_tool_hooks()
@@ -455,6 +473,8 @@ class Worker:
 
     async def _run_copaw_with_console(self, port: int) -> None:
         """Run CoPaw's full FastAPI app (runner + channels + web console)."""
+        # 逻辑说明：`_run_copaw_with_console` 接收 port，启动带 FastAPI/uvicorn Console 的 CoPaw runtime，返回 None；
+        # 会更新对象内存状态。失败策略：已知失败按现有 except 转为错误结果或日志，未覆盖异常继续上抛；本函数不额外重试，避免掩盖持续故障。
         import uvicorn
         from copaw.app.channels.registry import clear_builtin_channel_cache
 
@@ -505,6 +525,8 @@ class Worker:
 
     async def _run_copaw_headless(self) -> None:
         """Start CoPaw's AgentRunner + ChannelManager (no HTTP server)."""
+        # 逻辑说明：`_run_copaw_headless` 接收 当前对象/进程状态，直接启动 AgentRunner 与 ChannelManager，不暴露 Web Console，返回 None；
+        # 会更新对象内存状态。失败策略：已知失败按现有 except 转为错误结果或日志，未覆盖异常继续上抛；循环/重试受现有次数、超时或间隔限制。
         from copaw.app.channels.manager import ChannelManager
         from copaw.app.channels.registry import clear_builtin_channel_cache
         from copaw.app.channels.utils import make_process_from_runner
@@ -562,6 +584,8 @@ class Worker:
 
         The password is read directly from MinIO (never written to disk).
         """
+        # 逻辑说明：`_matrix_relogin` 接收 openclaw_cfg，用 Worker 密码重新登录 Matrix，并把新 token 合并回内存配置，返回 dict；
+        # 会访问网络服务、会更新对象内存状态。失败策略：已知失败按现有 except 转为错误结果或日志，未覆盖异常继续上抛；本函数不额外重试，避免掩盖持续故障。
         import json
         import urllib.request
 
@@ -666,6 +690,10 @@ class Worker:
         poll_interval: float = 1,
     ) -> list[str]:
         """Accept pending invites and wait boundedly for joined rooms."""
+        # 逻辑说明：`_wait_for_matrix_rooms` 接收 homeserver、headers、timeout、poll_interval，接受待处理邀请并在截止时间前等待房间加入完成，
+        # 返回 list[str]；
+        #
+        # 会访问网络服务。失败策略：已知失败按现有 except 转为错误结果或日志，未覆盖异常继续上抛；循环/重试受现有次数、超时或间隔限制。
         import json
         import urllib.parse
         import urllib.request
@@ -731,6 +759,8 @@ class Worker:
         openclaw_cfg: dict[str, Any],
     ) -> None:
         """Send an operational warning to every joined Worker room."""
+        # 逻辑说明：`_notify_matrix` 接收 message、openclaw_cfg，向已加入的 Worker 房间发送运维告警，返回 None；
+        # 会访问网络服务、会更新对象内存状态。失败策略：已知失败按现有 except 转为错误结果或日志，未覆盖异常继续上抛；本函数不额外重试，避免掩盖持续故障。
         import json
         import urllib.parse
         import urllib.request
@@ -779,6 +809,8 @@ class Worker:
 
     def _join_pending_matrix_invites(self, openclaw_cfg: dict) -> None:
         """Accept pending Matrix invites before CoPaw's channel loop starts."""
+        # 逻辑说明：`_join_pending_matrix_invites` 接收 openclaw_cfg，启动 channel 前登录 Matrix 并接受所有待处理邀请，返回 None；
+        # 会访问网络服务。失败策略：已知失败按现有 except 转为错误结果或日志，未覆盖异常继续上抛；本函数不额外重试，避免掩盖持续故障。
         import json
         import urllib.parse
         import urllib.request
@@ -832,6 +864,8 @@ class Worker:
         If not found, downloads the latest release from dl.min.io and installs
         it to ~/.local/bin/mc (created if needed, added to PATH for this process).
         """
+        # 逻辑说明：`_ensure_mc` 接收 当前对象/进程状态，确认 mc 可执行文件存在；缺失时按平台下载到用户目录，返回 None；
+        # 会读写本地文件、会修改进程环境。失败策略：已知失败按现有 except 转为错误结果或日志，未覆盖异常继续上抛；本函数不额外重试，避免掩盖持续故障。
         if shutil.which("mc"):
             logger.debug("mc already available")
             return
@@ -877,6 +911,8 @@ class Worker:
 
     def _sync_skills(self) -> None:
         """Project the exact Controller-owned skill set into CoPaw."""
+        # 逻辑说明：`_sync_skills` 接收 当前对象/进程状态，读取 Controller 指定 Skill 列表并刷新 CoPaw runtime，返回 None；
+        # 会访问网络服务、会更新对象内存状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
         skill_names = self.sync.list_skills()
         sync_skills_to_runtime(
             self.sync.local_dir,
@@ -896,6 +932,8 @@ class Worker:
         We set COPAW_WORKING_DIR in bridge.py before this runs, so the
         directory is already correct.
         """
+        # 逻辑说明：`_install_matrix_channel` 接收 当前对象/进程状态，把 AgentTeams Matrix channel 实现复制到 CoPaw custom_channels，返回 None；
+        # 会读写本地文件、会更新对象内存状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
         custom_channels_dir = self._copaw_working_dir / "custom_channels"
         custom_channels_dir.mkdir(parents=True, exist_ok=True)
         src = Path(__file__).parent / "matrix_channel.py"
@@ -920,6 +958,8 @@ class Worker:
 
     async def _on_files_pulled(self, pulled_files: list[str]) -> None:
         """Refresh the CoPaw runtime after Controller-owned files change."""
+        # 逻辑说明：`_on_files_pulled` 接收 pulled_files，识别本次拉取是否涉及 Controller 管理文件，并按需刷新 runtime，返回 None；
+        # 会访问网络服务、会更新对象内存状态。失败策略：已知失败按现有 except 转为错误结果或日志，未覆盖异常继续上抛；本函数不额外重试，避免掩盖持续故障。
         refresh_prefixes = (
             "openclaw.json",
             "SOUL.md",

@@ -158,6 +158,8 @@ SAFE_TEMP_AGENT_ID_RE = re.compile(r"^tmp-[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 def _require_loopback_api_base(base: str) -> None:
     """拒绝非本机 QwenPaw API，避免 MCP 参数变成服务端请求伪造入口。"""
+    # 逻辑说明：`_require_loopback_api_base` 接收 `base`，校验并规范化输入，并依次复用 `urlparse`、`ValueError`，不返回业务结果。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     parsed = urllib.parse.urlparse(base)
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
         raise ValueError("apiBaseUrl must be an http(s) loopback URL")
@@ -173,6 +175,8 @@ def _require_loopback_api_base(base: str) -> None:
 
 
 def _api_base(raw: str | None = None) -> str:
+    # 逻辑说明：`_api_base` 接收 `raw`，按既有分支组合输入并生成结果，并依次复用 `strip`、`rstrip`，返回 `str`。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
     explicit = bool((raw or "").strip())
     base = (
         (raw or "").strip()
@@ -188,6 +192,8 @@ def _api_base(raw: str | None = None) -> str:
 
 
 def _json_request(method: str, base_url: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    # 逻辑说明：`_json_request` 接收 `method`、`base_url`、`path`、`payload`，按既有分支组合输入并生成结果，并依次复用 `encode`、`dumps`，返回 `dict[str, Any]`。
+    # 执行过程中包含外部 I/O；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     url = f"{base_url}{path}"
     body = None if payload is None else json.dumps(payload).encode("utf-8")
     request = urllib.request.Request(url, data=body, method=method)
@@ -210,6 +216,8 @@ def _json_request(method: str, base_url: str, path: str, payload: dict[str, Any]
 
 
 def _qwenpaw_working_dir() -> Path:
+    # 逻辑说明：`_qwenpaw_working_dir` 不接收参数，从 QWENPAW_WORKING_DIR 选择 WorkerFlow 根目录，未配置时使用兼容的 QwenPaw 默认目录。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     raw = os.getenv("QWENPAW_WORKING_DIR", "").strip() or os.getenv("COPAW_WORKING_DIR", "").strip()
     if raw:
         return Path(raw).expanduser()
@@ -222,6 +230,8 @@ def _default_workspace(agent_id: str) -> Path:
 
 
 def _default_agent_workspace() -> Path:
+    # 逻辑说明：`_default_agent_workspace` 不接收参数，优先读取显式 Agent 工作区，否则在 QwenPaw 根目录下拼接默认 workspace。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     raw = os.getenv("QWENPAW_DEFAULT_WORKSPACE_DIR", "").strip()
     if raw:
         return Path(raw).expanduser()
@@ -237,6 +247,8 @@ def _shared_root() -> Path:
 
 
 def _resolve_run_id(raw: Any, fallback: str) -> str:
+    # 逻辑说明：`_resolve_run_id` 接收 `raw`、`fallback`，校验并规范化输入，并依次复用 `strip`、`match`，返回 `str`。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
     value = str(raw or "").strip() or fallback
     if not SAFE_RUN_ID_RE.match(value):
         raise ValueError("sharedRunId must be a safe single path component")
@@ -244,6 +256,8 @@ def _resolve_run_id(raw: Any, fallback: str) -> str:
 
 
 def _resolve_shared_dir(shared_dir: Any, shared_run_id: Any, fallback_run_id: str) -> Path:
+    # 逻辑说明：`_resolve_shared_dir` 接收 `shared_dir`、`shared_run_id`、`fallback_run_id`，校验并规范化输入，并依次复用 `strip`、`expanduser`，返回 `Path`。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
     raw = str(shared_dir or "").strip()
     if raw:
         path = Path(raw).expanduser()
@@ -254,6 +268,8 @@ def _resolve_shared_dir(shared_dir: Any, shared_run_id: Any, fallback_run_id: st
 
 
 def _shared_plan(agent_id: str, workspace_dir: Path, shared_dir: Path) -> dict[str, Any]:
+    # 逻辑说明：`_shared_plan` 接收 `agent_id`、`workspace_dir`、`shared_dir`，按既有分支组合输入并生成结果，返回 `dict[str, Any]`。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     return {
         "path": str(shared_dir),
         "inputs": str(shared_dir / "inputs"),
@@ -264,6 +280,8 @@ def _shared_plan(agent_id: str, workspace_dir: Path, shared_dir: Path) -> dict[s
 
 
 def _is_directory_link(path: Path) -> bool:
+    # 逻辑说明：`_is_directory_link` 接收 `path`，按既有分支组合输入并生成结果，并依次复用 `is_symlink`、`is_junction`，返回 `bool`。
+    # 执行过程中包含外部 I/O；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     if path.is_symlink():
         return True
     is_junction = getattr(os.path, "isjunction", None)
@@ -271,6 +289,8 @@ def _is_directory_link(path: Path) -> bool:
 
 
 def _remove_directory_link(path: Path) -> None:
+    # 逻辑说明：`_remove_directory_link` 接收 `path`，按既有顺序执行资源生命周期步骤，并依次复用 `is_symlink`、`unlink`，不返回业务结果。
+    # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     if path.is_symlink():
         path.unlink()
     else:
@@ -278,6 +298,8 @@ def _remove_directory_link(path: Path) -> None:
 
 
 def _replace_shared_link(link_path: Path, shared_dir: Path) -> dict[str, Any]:
+    # 逻辑说明：`_replace_shared_link` 接收 `link_path`、`shared_dir`，按既有分支组合输入并生成结果，并依次复用 `_is_directory_link`、`samefile`，返回 `dict[str, Any]`。
+    # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     if _is_directory_link(link_path):
         try:
             same_target = os.path.samefile(link_path, shared_dir)
@@ -310,6 +332,8 @@ def _replace_shared_link(link_path: Path, shared_dir: Path) -> dict[str, Any]:
 
 
 def _setup_shared_dir(agent_id: str, workspace_dir: Path, shared_dir: Path) -> dict[str, Any]:
+    # 逻辑说明：`_setup_shared_dir` 接收 `agent_id`、`workspace_dir`、`shared_dir`，计算目标值并更新持久或共享状态，并依次复用 `resolve`、`expanduser`，返回 `dict[str, Any]`。
+    # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
     shared_dir = shared_dir.expanduser().resolve()
     inputs_dir = shared_dir / "inputs"
     output_dir = shared_dir / "outputs" / agent_id
@@ -339,6 +363,8 @@ def _setup_shared_dir(agent_id: str, workspace_dir: Path, shared_dir: Path) -> d
 
 
 def _safe_cleanup_shared(shared_dir: Path) -> dict[str, Any]:
+    # 逻辑说明：`_safe_cleanup_shared` 接收 `shared_dir`，校验并规范化输入，并依次复用 `resolve`、`_shared_root`，返回 `dict[str, Any]`。
+    # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
     root = _shared_root().resolve()
     target = shared_dir.expanduser().resolve()
     try:
@@ -354,6 +380,8 @@ def _safe_cleanup_shared(shared_dir: Path) -> dict[str, Any]:
 
 
 def _write_json(path: Path, data: dict[str, Any]) -> None:
+    # 逻辑说明：`_write_json` 接收 `path`、`data`，计算目标值并更新持久或共享状态，并依次复用 `mkdir`、`with_name`，不返回业务结果。
+    # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f".{path.name}.tmp")
     tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -361,6 +389,8 @@ def _write_json(path: Path, data: dict[str, Any]) -> None:
 
 
 def _read_json(path: Path) -> dict[str, Any]:
+    # 逻辑说明：`_read_json` 接收 `path`，读取、筛选并规范化现有数据，并依次复用 `exists`、`loads`，返回 `dict[str, Any]`。
+    # 执行过程中包含外部 I/O；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     if not path.exists():
         return {}
     try:
@@ -371,6 +401,8 @@ def _read_json(path: Path) -> dict[str, Any]:
 
 
 def _load_runtime_config() -> dict[str, Any]:
+    # 逻辑说明：`_load_runtime_config` 不接收参数，按 TEAMHARNESS_RUNTIME_CONFIG、AGENTTEAMS_MEMBER_RUNTIME_CONFIG 的顺序定位 WorkerFlow 配置，再依次尝试 JSON、PyYAML 与最小解析器。
+    # 执行过程中包含外部 I/O；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
     runtime_config = os.getenv("TEAMHARNESS_RUNTIME_CONFIG", "").strip()
     if not runtime_config:
         runtime_config = os.getenv("AGENTTEAMS_MEMBER_RUNTIME_CONFIG", "").strip()
@@ -396,6 +428,8 @@ def _load_runtime_config() -> dict[str, Any]:
 
 
 def _simple_yaml_sections(text: str) -> dict[str, Any]:
+    # 逻辑说明：`_simple_yaml_sections` 接收 WorkerFlow 的 YAML 文本，在没有 PyYAML 时按缩进解析最多三级字典，以支持 member、team 等运行时配置节。
+    # 执行过程中包含实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     data: dict[str, Any] = {}
     section: str | None = None
     nested_section: str | None = None
@@ -433,6 +467,8 @@ def _simple_yaml_sections(text: str) -> dict[str, Any]:
 
 
 def _yaml_scalar(value: str) -> Any:
+    # 逻辑说明：`_yaml_scalar` 接收 WorkerFlow 回退解析器中的单个 YAML 标量，识别空值、布尔值与引号字符串，无法识别的值原样保留。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     if value in {"", "null", "Null", "NULL", "~"}:
         return ""
     if value in {"true", "True", "TRUE"}:
@@ -445,11 +481,15 @@ def _yaml_scalar(value: str) -> Any:
 
 
 def _section(data: dict[str, Any], name: str) -> dict[str, Any]:
+    # 逻辑说明：`_section` 接收 WorkerFlow 运行时配置和节名，返回类型安全的子字典；缺失或非字典节统一折叠为空字典。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     value = data.get(name)
     return value if isinstance(value, dict) else {}
 
 
 def _matrix_user_id() -> str:
+    # 逻辑说明：`_matrix_user_id` 不接收参数，优先采用显式 AGENTTEAMS_MATRIX_USER_ID，否则从 WorkerFlow member 配置解析 Matrix 用户 ID；本函数不发送网络请求。
+    # 执行过程中包含外部 I/O；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     explicit = os.getenv("AGENTTEAMS_MATRIX_USER_ID", "").strip()
     if explicit:
         return explicit
@@ -458,6 +498,8 @@ def _matrix_user_id() -> str:
 
 
 def _workflow_run_id(arguments: dict[str, Any], action: str) -> str:
+    # 逻辑说明：`_workflow_run_id` 接收 `arguments`、`action`，按请求类型分派并编排后续步骤，并依次复用 `get`、`_resolve_run_id`，返回 `str`。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
     raw = arguments.get("runId") or arguments.get("run_id") or arguments.get("sharedRunId")
     if raw:
         return _resolve_run_id(raw, "")
@@ -474,6 +516,8 @@ def _workflow_state_path(shared_dir: Path) -> Path:
 
 
 def _workflow_rows(value: Any) -> list[dict[str, Any]]:
+    # 逻辑说明：`_workflow_rows` 接收 `value`，按请求类型分派并编排后续步骤，并依次复用 `append`，返回 `list[dict[str, Any]]`。
+    # 执行过程中包含实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     if not isinstance(value, list):
         return []
     rows: list[dict[str, Any]] = []
@@ -486,6 +530,8 @@ def _workflow_rows(value: Any) -> list[dict[str, Any]]:
 
 
 def _workflow_row_keys(row: dict[str, Any]) -> set[str]:
+    # 逻辑说明：`_workflow_row_keys` 接收 `row`，按请求类型分派并编排后续步骤，并依次复用 `strip`、`get`，返回 `set[str]`。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     keys: set[str] = set()
     for key in ("id", "agentId", "agent_id", "name"):
         value = str(row.get(key) or "").strip()
@@ -495,6 +541,8 @@ def _workflow_row_keys(row: dict[str, Any]) -> set[str]:
 
 
 def _sync_subagent_rows(subagents: list[dict[str, Any]], steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    # 逻辑说明：`_sync_subagent_rows` 接收 `subagents`、`steps`，推进组件生命周期并同步运行状态，并依次复用 `enumerate`、`_workflow_row_keys`，返回 `list[dict[str, Any]]`。
+    # 执行过程中包含实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     if not subagents or not steps:
         return subagents
     synced = [dict(row) for row in subagents]
@@ -516,10 +564,14 @@ def _sync_subagent_rows(subagents: list[dict[str, Any]], steps: list[dict[str, A
 
 
 def _workflow_done(status: Any) -> bool:
+    # 逻辑说明：`_workflow_done` 接收 `status`，按请求类型分派并编排后续步骤，并依次复用 `lower`、`strip`，返回 `bool`。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     return str(status or "").strip().lower() in {"done", "success", "succeeded", "completed"}
 
 
 def _workflow_completed_keys(state: dict[str, Any]) -> set[str]:
+    # 逻辑说明：`_workflow_completed_keys` 接收 `state`，按请求类型分派并编排后续步骤，并依次复用 `_workflow_rows`、`get`，返回 `set[str]`。
+    # 执行过程中包含实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     completed: set[str] = set()
     for row in _workflow_rows(state.get("steps")) + _workflow_rows(state.get("subagents")) + _workflow_rows(state.get("nodes")):
         if _workflow_done(row.get("status")):
@@ -528,6 +580,8 @@ def _workflow_completed_keys(state: dict[str, Any]) -> set[str]:
 
 
 def _workflow_rows_by_key(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    # 逻辑说明：`_workflow_rows_by_key` 接收 `rows`，按请求类型分派并编排后续步骤，并依次复用 `_workflow_row_keys`、`setdefault`，返回 `dict[str, dict[str, Any]]`。
+    # 执行过程中包含实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     by_key: dict[str, dict[str, Any]] = {}
     for row in rows:
         for key in _workflow_row_keys(row):
@@ -536,6 +590,8 @@ def _workflow_rows_by_key(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any
 
 
 def _with_upstream_summaries(prompt: str, depends_on: list[str], state: dict[str, Any]) -> str:
+    # 逻辑说明：`_with_upstream_summaries` 接收 `prompt`、`depends_on`、`state`，按既有分支组合输入并生成结果，并依次复用 `_workflow_rows_by_key`、`_workflow_rows`，返回 `str`。
+    # 执行过程中包含实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     by_key = _workflow_rows_by_key(_workflow_rows(state.get("steps")) + _workflow_rows(state.get("subagents")))
     lines: list[str] = []
     for dep_id in depends_on:
@@ -552,6 +608,8 @@ def _with_upstream_summaries(prompt: str, depends_on: list[str], state: dict[str
 
 
 def _mark_workflow_rows_ready(rows: list[dict[str, Any]], ready_ids: set[str]) -> list[dict[str, Any]]:
+    # 逻辑说明：`_mark_workflow_rows_ready` 接收 `rows`、`ready_ids`，读取、筛选并规范化现有数据，并依次复用 `strip`、`get`，返回 `list[dict[str, Any]]`。
+    # 执行过程中包含实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     marked: list[dict[str, Any]] = []
     for row in rows:
         item = dict(row)
@@ -563,6 +621,8 @@ def _mark_workflow_rows_ready(rows: list[dict[str, Any]], ready_ids: set[str]) -
 
 
 def _advance_workflow_state(state: dict[str, Any]) -> list[dict[str, Any]]:
+    # 逻辑说明：`_advance_workflow_state` 接收 `state`，计算目标值并更新持久或共享状态，并依次复用 `_workflow_rows`、`get`，返回 `list[dict[str, Any]]`。
+    # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     waiting = _workflow_rows(state.get("waitingInstructions"))
     if not waiting:
         state["readyInstructions"] = []
@@ -606,6 +666,8 @@ def _advance_workflow_state(state: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _workflow_temp_agent_ids(state: dict[str, Any]) -> list[str]:
+    # 逻辑说明：`_workflow_temp_agent_ids` 接收 `state`，按请求类型分派并编排后续步骤，并依次复用 `_workflow_rows`、`get`，返回 `list[str]`。
+    # 执行过程中包含实例、文件或共享状态变更；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
     agent_ids: list[str] = []
     seen: set[str] = set()
     for row in _workflow_rows(state.get("subagents")) + _workflow_rows(state.get("nodes")):
@@ -619,6 +681,8 @@ def _workflow_temp_agent_ids(state: dict[str, Any]) -> list[str]:
 
 
 def _cleanup_workflow_temp_agents(state: dict[str, Any], arguments: dict[str, Any]) -> dict[str, Any]:
+    # 逻辑说明：`_cleanup_workflow_temp_agents` 接收 `state`、`arguments`，按请求类型分派并编排后续步骤，并依次复用 `get`、`_workflow_temp_agent_ids`，返回 `dict[str, Any]`。
+    # 执行过程中包含实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     results: list[dict[str, Any]] = []
     dry_run = bool(arguments.get("dryRun"))
     for agent_id in _workflow_temp_agent_ids(state):
@@ -659,6 +723,8 @@ def _cleanup_workflow_temp_agents(state: dict[str, Any], arguments: dict[str, An
 
 
 def _workflow_status(action: str, arguments: dict[str, Any], previous: dict[str, Any]) -> str:
+    # 逻辑说明：`_workflow_status` 接收 `action`、`arguments`、`previous`，按请求类型分派并编排后续步骤，并依次复用 `strip`、`get`，返回 `str`。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     explicit = str(arguments.get("status") or "").strip()
     if explicit:
         return explicit
@@ -672,6 +738,8 @@ def _workflow_status(action: str, arguments: dict[str, Any], previous: dict[str,
 
 
 def _merge_workflow_state(action: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    # 逻辑说明：`_merge_workflow_state` 接收 `action`、`arguments`，计算目标值并更新持久或共享状态，并依次复用 `_workflow_run_id`、`resolve`，返回 `dict[str, Any]`。
+    # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
     run_id = _workflow_run_id(arguments, action)
     shared_dir = _resolve_shared_dir(arguments.get("sharedDir"), arguments.get("sharedRunId") or run_id, run_id).expanduser().resolve()
     previous = _read_json(_workflow_state_path(shared_dir))
@@ -709,10 +777,14 @@ def _merge_workflow_state(action: str, arguments: dict[str, Any]) -> dict[str, A
 
 
 def _html_cell(value: Any) -> str:
+    # 逻辑说明：`_html_cell` 接收 `value`，把输入转换为调用方需要的结构，并依次复用 `escape`，返回 `str`。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     return html.escape(str(value or ""))
 
 
 def _workflow_cell_value(row: dict[str, Any], key: str) -> Any:
+    # 逻辑说明：`_workflow_cell_value` 接收 `row`、`key`，按请求类型分派并编排后续步骤，并依次复用 `get`，返回 `Any`。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     if key == "name":
         return row.get("name") or row.get("id") or row.get("agentId") or row.get("agent_id")
     if key == "agentId":
@@ -721,6 +793,8 @@ def _workflow_cell_value(row: dict[str, Any], key: str) -> Any:
 
 
 def _workflow_table(rows: list[dict[str, Any]], columns: list[tuple[str, str]]) -> str:
+    # 逻辑说明：`_workflow_table` 接收 `rows`、`columns`，按请求类型分派并编排后续步骤，并依次复用 `join`、`escape`，返回 `str`。
+    # 执行过程中包含实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     if not rows:
         return ""
     header = "".join(f"<th>{html.escape(label)}</th>" for _, label in columns)
@@ -732,6 +806,8 @@ def _workflow_table(rows: list[dict[str, Any]], columns: list[tuple[str, str]]) 
 
 
 def _workflow_content(state: dict[str, Any]) -> dict[str, Any]:
+    # 逻辑说明：`_workflow_content` 接收 `state`，把输入转换为调用方需要的结构，并依次复用 `get`、`_workflow_rows`，返回 `dict[str, Any]`。
+    # 执行过程中包含实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     title = str(state.get("title") or "WorkerFlow")
     run_id = str(state.get("runId") or "")
     status = str(state.get("status") or "")
@@ -809,6 +885,8 @@ def _workflow_content(state: dict[str, Any]) -> dict[str, Any]:
 
 
 def _workflow_matrix_content(state: dict[str, Any], event_id: str = "") -> dict[str, Any]:
+    # 逻辑说明：`_workflow_matrix_content` 接收 `state`、`event_id`，构造协议数据并完成外部传输，并依次复用 `_workflow_content`，返回 `dict[str, Any]`。
+    # 执行过程中包含实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     content = _workflow_content(state)
     if not event_id:
         return content
@@ -823,6 +901,8 @@ def _workflow_matrix_content(state: dict[str, Any], event_id: str = "") -> dict[
 
 
 def _matrix_homeserver() -> str:
+    # 逻辑说明：`_matrix_homeserver` 不接收参数，解析并去除 homeserver 末尾斜杠，为后续 WorkerFlow Matrix API 请求提供稳定基址；本函数不发请求。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     return str(
         os.getenv("AGENTTEAMS_MATRIX_URL")
         or os.getenv("AGENTTEAMS_MATRIX_SERVER")
@@ -832,6 +912,8 @@ def _matrix_homeserver() -> str:
 
 
 def _matrix_token() -> str:
+    # 逻辑说明：`_matrix_token` 不接收参数，优先读取显式访问令牌，缺失时从 member 运行时配置取 token；这里只返回凭据，不记录或传输它。
+    # 执行过程中包含外部 I/O；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     credentials = _section(_load_runtime_config(), "credentials")
     token_env = str(credentials.get("matrixTokenEnv") or "AGENTTEAMS_WORKER_MATRIX_TOKEN").strip()
     for name in (token_env, "AGENTTEAMS_WORKER_MATRIX_TOKEN", "AGENTTEAMS_MATRIX_TOKEN"):
@@ -844,6 +926,8 @@ def _matrix_token() -> str:
 
 
 def _matrix_send_content(room_id: str, content: dict[str, Any]) -> str:
+    # 逻辑说明：`_matrix_send_content` 接收 `room_id`、`content`，构造协议数据并完成外部传输，并依次复用 `_matrix_homeserver`、`_matrix_token`，返回 `str`。
+    # 执行过程中包含外部 I/O；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
     homeserver = _matrix_homeserver()
     token = _matrix_token()
     if not homeserver or not token:
@@ -878,6 +962,8 @@ def _matrix_send_content(room_id: str, content: dict[str, Any]) -> str:
 
 
 def _workflow(arguments: dict[str, Any], action: str) -> dict[str, Any]:
+    # 逻辑说明：`_workflow` 接收 `arguments`、`action`，按请求类型分派并编排后续步骤，并依次复用 `get`、`_merge_workflow_state`，返回 `dict[str, Any]`。
+    # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     dry_run = bool(arguments.get("dryRun"))
     state = _merge_workflow_state(action, arguments)
     ready_instructions = _advance_workflow_state(state) if action == "workflow_update" else []
@@ -924,6 +1010,8 @@ def _workflow(arguments: dict[str, Any], action: str) -> dict[str, Any]:
 
 
 def _workflow_plan_subagents(value: Any) -> list[dict[str, Any]]:
+    # 逻辑说明：`_workflow_plan_subagents` 接收 `value`，按请求类型分派并编排后续步骤，并依次复用 `ValueError`、`enumerate`，返回 `list[dict[str, Any]]`。
+    # 执行过程中包含实例、文件或共享状态变更；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
     if not isinstance(value, list) or not value:
         raise ValueError("workflow_run requires at least one subagent")
     subagents: list[dict[str, Any]] = []
@@ -948,6 +1036,8 @@ def _workflow_plan_subagents(value: Any) -> list[dict[str, Any]]:
 
 
 def _workflow_plan_nodes(arguments: dict[str, Any]) -> tuple[list[dict[str, Any]], bool]:
+    # 逻辑说明：`_workflow_plan_nodes` 接收 `arguments`，按请求类型分派并编排后续步骤，并依次复用 `get`、`_workflow_plan_subagents`，返回 `tuple[list[dict[str, Any]], bool]`。
+    # 执行过程中包含实例、文件或共享状态变更；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
     raw_nodes = arguments.get("nodes")
     is_dag = isinstance(raw_nodes, list) and bool(raw_nodes)
     nodes = _workflow_plan_subagents(raw_nodes if is_dag else arguments.get("subagents"))
@@ -977,11 +1067,15 @@ def _workflow_plan_nodes(arguments: dict[str, Any]) -> tuple[list[dict[str, Any]
 
 def _validate_workflow_dag(nodes: list[dict[str, Any]]) -> None:
     """确认依赖节点存在且没有环；有环的 DAG 永远不会出现可运行节点。"""
+    # 逻辑说明：`_validate_workflow_dag` 接收 `nodes`，校验并规范化输入，并依次复用 `visit`，不返回业务结果。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     by_id = {node["id"]: node for node in nodes}
     visiting: set[str] = set()
     visited: set[str] = set()
 
     def visit(node_id: str) -> None:
+        # 逻辑说明：`visit` 接收 `node_id`，按既有分支组合输入并生成结果，并依次复用 `ValueError`、`add`，不返回业务结果。
+        # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
         if node_id in visited:
             return
         if node_id in visiting:
@@ -997,6 +1091,8 @@ def _validate_workflow_dag(nodes: list[dict[str, Any]]) -> None:
 
 
 def _workflow_subagent_agent_id(run_id: str, subagent: dict[str, Any]) -> str:
+    # 逻辑说明：`_workflow_subagent_agent_id` 接收 `run_id`、`subagent`，按请求类型分派并编排后续步骤，并依次复用 `strip`、`get`，返回 `str`。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
     explicit = str(subagent.get("agentId") or subagent.get("agent_id") or "").strip()
     agent_id = explicit or f"tmp-workerflow-{run_id}-{subagent['id']}"
     if not SAFE_TEMP_AGENT_ID_RE.match(agent_id):
@@ -1012,6 +1108,8 @@ def _workflow_submit_prompt(
     merge: dict[str, Any],
     dependency_outputs: list[dict[str, str]] | None = None,
 ) -> str:
+    # 逻辑说明：`_workflow_submit_prompt` 接收 `title`、`input_text`、`subagent`、`shared`，按请求类型分派并编排后续步骤，并依次复用 `get`、`extend`，返回 `str`。
+    # 执行过程中包含实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     lines = [
         "WorkerFlow subagent task.",
         "",
@@ -1040,6 +1138,7 @@ def _workflow_submit_prompt(
 
 
 def _workflow_dependency_outputs(node: dict[str, Any], output_paths: dict[str, str]) -> list[dict[str, str]]:
+    # 逻辑说明：`_workflow_dependency_outputs` 按节点声明的依赖 ID 查找上游输出路径，返回可写入提示词的 ID/输出映射；缺失键沿用现有异常以暴露不完整工作流。
     return [{"id": dep_id, "output": output_paths[dep_id]} for dep_id in node.get("dependsOn") or []]
 
 
@@ -1050,6 +1149,8 @@ def _fail_workflow_run_spawn(
     node_rows: list[dict[str, Any]],
     exc: Exception,
 ) -> None:
+    # 逻辑说明：`_fail_workflow_run_spawn` 接收 `arguments`、`run_id`、`start`、`node_rows`，按请求类型分派并编排后续步骤，并依次复用 `get`、`_workflow`，不返回业务结果。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     if bool(arguments.get("dryRun")):
         return
     try:
@@ -1076,6 +1177,8 @@ def _fail_workflow_run_spawn(
 
 
 def _workflow_run(arguments: dict[str, Any]) -> dict[str, Any]:
+    # 逻辑说明：`_workflow_run` 接收 `arguments`，按请求类型分派并编排后续步骤，并依次复用 `_workflow_run_id`、`strip`，返回 `dict[str, Any]`。
+    # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
     run_id = _workflow_run_id(arguments, "workflow_run")
     title = str(arguments.get("title") or "WorkerFlow").strip()
     input_text = str(arguments.get("input") or "").strip()
@@ -1117,6 +1220,8 @@ def _workflow_run(arguments: dict[str, Any]) -> dict[str, Any]:
             display_role = str(node.get("role") or node.get("title") or node["subagent"])
 
             def record_created_temp_agent(_agent_id: str, _created: dict[str, Any]) -> None:
+                # 逻辑说明：`record_created_temp_agent` 接收 `_agent_id`、`_created`，计算目标值并更新持久或共享状态，并依次复用 `append`，不返回业务结果。
+                # 执行过程中包含实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
                 cleanup_rows.append(
                     {
                         "id": node["id"],
@@ -1260,6 +1365,8 @@ def _workflow_run(arguments: dict[str, Any]) -> dict[str, Any]:
 
 
 def _list_subagents() -> list[dict[str, Any]]:
+    # 逻辑说明：`_list_subagents` 不接收参数，扫描 WorkerFlow subagents 目录，读取每个子 Agent 的状态文件并返回可序列化的摘要列表。
+    # 执行过程中包含实例、文件或共享状态变更；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
     root = _subagents_dir()
     if not root.is_dir():
         return []
@@ -1285,6 +1392,8 @@ def _list_subagents() -> list[dict[str, Any]]:
 
 
 def _resolve_subagent_template(name: str) -> Path:
+    # 逻辑说明：`_resolve_subagent_template` 接收 `name`，校验并规范化输入，并依次复用 `strip`、`match`，返回 `Path`。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
     value = name.strip()
     if not SAFE_SUBAGENT_NAME_RE.match(value):
         raise ValueError("subagent must be a safe single path component")
@@ -1300,12 +1409,16 @@ def _resolve_subagent_template(name: str) -> Path:
 
 
 def _copy_replace(source: Path, target: Path) -> None:
+    # 逻辑说明：`_copy_replace` 接收 `source`、`target`，按既有顺序执行资源生命周期步骤，并依次复用 `exists`、`rmtree`，不返回业务结果。
+    # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     if target.exists():
         shutil.rmtree(target)
     shutil.copytree(source, target, ignore=shutil.ignore_patterns("__pycache__", ".DS_Store", "*.pyc"))
 
 
 def _copy_template(template_path: str, workspace_dir: Path) -> dict[str, Any]:
+    # 逻辑说明：`_copy_template` 接收 `template_path`、`workspace_dir`，按既有顺序执行资源生命周期步骤，并依次复用 `resolve`、`expanduser`，返回 `dict[str, Any]`。
+    # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
     if not template_path:
         return {"copied": [], "skills": [], "enabled": []}
     template = Path(template_path).expanduser().resolve()
@@ -1335,6 +1448,8 @@ def _copy_template(template_path: str, workspace_dir: Path) -> dict[str, Any]:
 
 
 def _reconcile_and_enable_skills(workspace_dir: Path, skill_names: list[str]) -> list[str]:
+    # 逻辑说明：`_reconcile_and_enable_skills` 接收 `workspace_dir`、`skill_names`，按既有分支组合输入并生成结果，并依次复用 `reconcile_workspace_manifest`、`SkillService`，返回 `list[str]`。
+    # 执行过程中包含实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     if not skill_names:
         return []
     try:
@@ -1354,6 +1469,8 @@ def _reconcile_and_enable_skills(workspace_dir: Path, skill_names: list[str]) ->
 
 
 def _safe_cleanup_workspace(agent_id: str, workspace_dir: str) -> dict[str, Any]:
+    # 逻辑说明：`_safe_cleanup_workspace` 接收 `agent_id`、`workspace_dir`，校验并规范化输入，并依次复用 `startswith`、`resolve`，返回 `dict[str, Any]`。
+    # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
     if not workspace_dir:
         return {"removed": False, "reason": "missing_workspace"}
     if not agent_id.startswith("tmp-"):
@@ -1373,6 +1490,8 @@ def _safe_cleanup_workspace(agent_id: str, workspace_dir: str) -> dict[str, Any]
 
 
 def _agentflow(arguments: dict[str, Any]) -> dict[str, Any]:
+    # 逻辑说明：`_agentflow` 接收 `arguments`，按既有分支组合输入并生成结果，并依次复用 `strip`、`get`，返回 `dict[str, Any]`。
+    # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有输入校验、范围限制与异常传播，避免失败或部分成功被误报为完整成功。
     action = str(arguments.get("action") or "").strip()
     base_url = _api_base(arguments.get("apiBaseUrl"))
     dry_run = bool(arguments.get("dryRun"))
@@ -1496,11 +1615,14 @@ def _agentflow(arguments: dict[str, Any]) -> dict[str, Any]:
 
 
 def _tool_schema(name: str) -> dict[str, Any]:
+    # 逻辑说明：从 WorkerFlow 的固定工具表投影 MCP 可见 schema；注册表缺项直接失败，避免向宿主宣告不完整工具。
     schema = TOOL_SCHEMAS[name]
     return {"name": name, "description": schema["description"], "inputSchema": schema["inputSchema"]}
 
 
 def _call_tool(name: str, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
+    # 逻辑说明：`_call_tool` 接收 `name`、`arguments`，按请求类型分派并编排后续步骤，并依次复用 `ValueError`、`_agentflow`，返回 `dict[str, Any]`。
+    # 外部或状态副作用仅来自上述既有 helper 调用；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     if name not in TOOL_NAMES:
         raise ValueError(f"unknown tool: {name}")
     args = arguments or {}
@@ -1512,6 +1634,8 @@ def _call_tool(name: str, arguments: dict[str, Any] | None = None) -> dict[str, 
 
 
 def _handle(request: dict[str, Any]) -> dict[str, Any] | None:
+    # 逻辑说明：`_handle` 接收 `request`，按请求类型分派并编排后续步骤，并依次复用 `get`、`_tool_schema`，返回 `dict[str, Any] | None`。
+    # 执行过程中包含外部 I/O；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     method = request.get("method")
     request_id = request.get("id")
     if request_id is None:
@@ -1536,6 +1660,8 @@ def _handle(request: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def main() -> None:
+    # 逻辑说明：`main` 不接收业务参数，启动 WorkerFlow 的 stdin/stdout JSON-RPC 循环，把每行 MCP 请求交给 `_handle` 并输出对应响应。
+    # 执行过程中包含外部 I/O、实例、文件或共享状态变更；保留现有异常和错误返回语义，避免失败或部分成功被误报为完整成功。
     for line in sys.stdin:
         if not line.strip():
             continue

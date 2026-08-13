@@ -22,6 +22,8 @@ class FilesyncToolError(ValueError):
 
 
 def _response(payload: dict[str, Any]) -> ToolResponse:
+    # 逻辑说明：`_response` 接收 payload，执行 filesync 工具 中的“响应”步骤，返回 ToolResponse；不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；
+    # 本函数不额外重试，避免掩盖持续故障。
     return ToolResponse(
         content=[
             TextBlock(
@@ -41,6 +43,8 @@ def _error(message: str, **payload: Any) -> ToolResponse:
 
 
 def _copaw_working_dir() -> Path:
+    # 逻辑说明：`_copaw_working_dir` 接收 当前对象/进程状态，执行 filesync 工具 中的“copaw working dir”步骤，返回 Path；
+    # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     configured = os.getenv("COPAW_WORKING_DIR")
     if configured:
         return Path(configured)
@@ -54,6 +58,7 @@ def _copaw_working_dir() -> Path:
 
 
 def create_sync() -> FileSync:
+    # 逻辑说明：`create_sync` 接收 当前对象/进程状态，创建同步，返回 FileSync；会访问网络服务。失败策略：非法输入或状态会立即抛错，其他底层异常继续上抛；本函数不额外重试，避免掩盖持续故障。
     worker_name = (
         os.getenv("AGENTTEAMS_WORKER_NAME")
         or os.getenv("COPAW_WORKER_NAME")
@@ -110,6 +115,8 @@ def create_sync() -> FileSync:
 
 
 def _coerce_payload(payload: dict[str, Any] | str | None) -> dict[str, Any]:
+    # 逻辑说明：把文件同步工具收到的字典、JSON 字符串或空值统一成对象字典；空值表示无参数，非法 JSON 与非对象载荷分别转换成 FilesyncToolError。
+    # 本函数只校验和转换内存数据，不读取工作区或调用 MinIO，因而失败后无需在这里重试。
     if payload is None:
         return {}
     if isinstance(payload, str):
@@ -123,6 +130,8 @@ def _coerce_payload(payload: dict[str, Any] | str | None) -> dict[str, Any]:
 
 
 def _normalize_exclude(exclude: list[str] | str | None) -> list[str]:
+    # 逻辑说明：`_normalize_exclude` 接收 exclude，规范化exclude，返回 list[str]；
+    # 不修改外部状态。失败策略：已知失败按现有 except 转为错误结果或日志，未覆盖异常继续上抛；本函数不额外重试，避免掩盖持续故障。
     if not exclude:
         return []
     if isinstance(exclude, str):
@@ -142,6 +151,7 @@ def _normalize_exclude(exclude: list[str] | str | None) -> list[str]:
 
 def _normalize_directory_path(path: str) -> str:
     """Normalize common shared directory paths agents often omit '/' for."""
+    # 逻辑说明：`_normalize_directory_path` 接收 path，规范化目录 路径，返回 str；不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     stripped = path.strip()
     if stripped.endswith("/"):
         return stripped
@@ -167,6 +177,10 @@ async def filesync(
     dryRun: bool = False,
 ) -> ToolResponse:
     """Pull, push, stat, or list AgentTeams shared files."""
+    # 逻辑说明：`filesync` 接收 action、payload、path、exclude、dryRun，解析 action 和路径，
+    # 在安全 shared 边界内执行 pull、push、stat 或 list，返回 ToolResponse；
+    #
+    # 不修改外部状态。失败策略：已知失败按现有 except 转为错误结果或日志，未覆盖异常继续上抛；本函数不额外重试，避免掩盖持续故障。
     if isinstance(payload, str) and path is None and payload.strip().startswith(
         ("shared/", "global-shared/"),
     ):

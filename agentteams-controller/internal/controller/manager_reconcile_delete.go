@@ -11,6 +11,9 @@ import (
 )
 
 func (r *ManagerReconciler) reconcileManagerDelete(ctx context.Context, s *managerScope) (reconcile.Result, error) {
+	// 逻辑说明：reconcileManagerDelete 接收 ctx(context.Context)、s(*managerScope)，依次借助 LeaveAllManagerRooms、DeleteManagerRoom、DeprovisionManager、managerBackend调谐Manager的期望结果。
+	// 返回/状态：返回 reconcile.Result、error；会更新 Manager的内存状态，存在客户端调用时还可能同步相应外部资源。
+	// 失败/重试：输入或依赖调用失败会返回错误；是否重排由上层调谐器决定，本函数不隐藏失败。
 	logger := log.FromContext(ctx)
 	m := s.manager
 	logger.Info("deleting manager", "name", m.Name)

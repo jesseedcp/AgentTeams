@@ -186,6 +186,7 @@ class OperationRecord(StrictModel):
         target_key: str,
         request: dict[str, Any],
     ) -> Self:
+        # 逻辑说明：新操作统一从 PLANNED 开始并写入同一 UTC 时间，workflow 再按状态机推进。
         now = datetime.now(UTC)
         return cls(
             operation_id=operation_id,
@@ -356,6 +357,7 @@ class TaskMetadata(FrozenStrictModel):
 
     @model_validator(mode="after")
     def validate_schedule(self) -> Self:
+        # 逻辑说明：交叉校验任务类型、cron 时区与完成时间，避免单字段合法但整体不可调度的记录落库。
         if self.task_type == "infinite" and (
             not self.schedule or not self.timezone
         ):
@@ -434,6 +436,7 @@ class ProjectMetadata(FrozenStrictModel):
 
     @model_validator(mode="after")
     def validate_project_state(self) -> Self:
+        # 逻辑说明：把房间、计划确认和完成时间绑定到项目状态，阻止持久化无法恢复的半激活项目。
         if self.status in {"active", "completed"} and not self.room_id:
             raise ValueError(f"{self.status} project requires a room")
         if self.status in {"active", "completed"} and (
@@ -467,6 +470,7 @@ class ProjectPlan(FrozenStrictModel):
     updated_at: datetime
 
     def render(self) -> str:
+        # 逻辑说明：依据任务状态生成勾选标记，并把结构化计划稳定渲染为供人和 Agent 阅读的 Markdown。
         markers = {
             "completed": "x",
             "assigned": "~",
@@ -504,6 +508,7 @@ class JournalEvent(FrozenStrictModel):
         sequence: int,
         event_type: str,
     ) -> Self:
+        # 逻辑说明：生成测试/示例事件时补齐当前 UTC 时间，其余字段仍走正式模型校验。
         return cls(
             operation_id=operation_id,
             sequence=sequence,

@@ -24,22 +24,26 @@ COMPARE_CONTENT_MAX_BYTES = 20 * 1024 * 1024
 
 
 def _to_text(value: object) -> str:
+    # 逻辑说明：把 mc 的 bytes/空值统一为可记录文本；坏字节用替换字符保留诊断信息。
     if isinstance(value, bytes):
         return value.decode("utf-8", errors="replace")
     return str(value or "")
 
 
 def _looks_like_missing_object_error(stderr: Optional[str] | bytes) -> bool:
+    # 逻辑说明：识别不同对象存储返回的“对象不存在”文案，使缺失文件可按正常初始状态处理。
     text = _to_text(stderr)
     return "Object does not exist" in text or "The specified key does not exist" in text
 
 
 def _mc_error_message(exc: subprocess.CalledProcessError) -> str:
+    # 逻辑说明：优先抽取 mc 标准错误/输出；若均为空则生成包含退出码的稳定错误消息。
     text = _to_text(exc.stderr or exc.stdout).strip()
     return text or f"mc exited with status {exc.returncode}"
 
 
 def _redact_url_userinfo(value: str) -> str:
+    # 逻辑说明：日志输出前遮蔽 URL 中的 userinfo；普通 URL 原样返回，不改变实际连接地址。
     if "://" not in value or "@" not in value:
         return value
     scheme, rest = value.split("://", 1)
@@ -47,12 +51,14 @@ def _redact_url_userinfo(value: str) -> str:
 
 
 def _preview_list(values: List[str], limit: int = 20) -> List[str]:
+    # 逻辑说明：限制日志列表长度并标出省略数量，避免一次同步产生过大的日志记录。
     if len(values) <= limit:
         return values
     return [*values[:limit], f"...({len(values) - limit} more)"]
 
 
 def _storage_alias() -> str:
+    # 逻辑说明：优先采用显式 mc alias，否则从完整存储前缀推断，最后使用兼容默认名。
     value = os.getenv("AGENTTEAMS_STORAGE_ALIAS", "").strip().strip("/")
     if value:
         return value
@@ -83,6 +89,7 @@ class FileSync:
         remote_prefix: Optional[str] = None,
         shared_prefix: Optional[str] = None,
     ) -> None:
+        # 逻辑说明：保存连接参数并计算 Worker/共享远端前缀；连接和目录写入延迟到实际同步时发生。
         self.endpoint = endpoint
         self.access_key = access_key
         self.secret_key = secret_key
@@ -96,6 +103,7 @@ class FileSync:
         self._alias_set = False
 
     def _mc(self, *args: str, check: bool = True, text: bool = True) -> subprocess.CompletedProcess:
+        # 逻辑说明：定位 mc 二进制并以捕获输出方式执行；缺失程序或按 check 判定失败时向上抛错。
         mc_bin = shutil.which("mc")
         if not mc_bin:
             raise RuntimeError("mc binary not found")
@@ -107,6 +115,7 @@ class FileSync:
         )
 
     def ensure_alias(self) -> None:
+        # 逻辑说明：幂等建立 mc alias；优先复用环境注入凭据，K8s 缺少凭据时拒绝隐式明文配置。
         if self._alias_set:
             return
         if os.getenv(f"MC_HOST_{self.mc_alias}"):
@@ -149,6 +158,7 @@ class FileSync:
         return f"{self.mc_alias}/{self.bucket}/{key.strip('/')}"
 
     def _cat(self, key: str) -> Optional[str]:
+        # 逻辑说明：从对象存储读取文本；对象缺失返回 None，其他错误记录后同样交由调用方决定是否重试。
         self.ensure_alias()
         result = self._mc("cat", self._object_path(key), check=False)
         if result.returncode == 0:
@@ -159,6 +169,7 @@ class FileSync:
         return None
 
     def _cat_bytes(self, key: str) -> Optional[bytes]:
+        # 逻辑说明：以二进制模式读取对象，供不能 UTF-8 解码的文件恢复；失败或缺失返回 None。
         self.ensure_alias()
         try:
             result = self._mc("cat", self._object_path(key), check=False, text=False)
@@ -176,6 +187,7 @@ class FileSync:
         return None
 
     def _mirror_prefix(self, remote_prefix: str, local_dir: Path) -> None:
+        # 逻辑说明：确保本地目录存在并用 mc mirror 拉取一个远端前缀；凭据和远端错误会向上报告。
         local_dir.mkdir(parents=True, exist_ok=True)
         remote = f"{self.mc_alias}/{self.bucket}/{remote_prefix.strip('/')}/"
         logger.info(
@@ -206,15 +218,18 @@ class FileSync:
         )
 
     def mirror_all(self) -> None:
+        # 逻辑说明：先保证 alias，然后依次恢复 Worker 私有目录和团队共享目录，供重启后继续工作。
         self.ensure_alias()
         self._mirror_prefix(self.remote_prefix, self.local_dir)
         self._mirror_prefix(self.shared_prefix, self.shared_dir)
 
     def mirror_prefix(self, remote_prefix: str, local_dir: Path) -> None:
+        # 逻辑说明：公开单前缀恢复入口，复用相同 alias 初始化与镜像错误语义。
         self.ensure_alias()
         self._mirror_prefix(remote_prefix, local_dir)
 
     def pull_runtime_config(self, local_path: Path, remote_key: Optional[str] = None) -> bool:
+        # 逻辑说明：将权威 runtime.yaml 下载到指定路径；对象尚未发布返回 False，其他错误抛出。
         self.ensure_alias()
         key = remote_key or f"{self.remote_prefix}/runtime/runtime.yaml"
         local_path.parent.mkdir(parents=True, exist_ok=True)
@@ -228,6 +243,7 @@ class FileSync:
 
 
 def _skip_background_push(rel: Path) -> bool:
+    # 逻辑说明：按保守规则排除凭据、运行时权威状态、缓存和临时文件，防止本地噪声覆盖远端。
     # 背景推送是自动发生的，因此必须采用保守边界。这里排除的文件即使对调试
     # 有用，也不应成为跨 Pod 的持久状态；否则重启会恢复陈旧锁、令牌或缓存。
     rel_path = rel.as_posix()
@@ -260,6 +276,7 @@ def push_local(sync: FileSync, since: float = 0) -> List[str]:
     返回相对路径列表供日志和测试核对。函数按内容与修改时间筛选，而不是把整个
     目录无条件镜像到远端，因而不会删除 Controller 刚发布但本地尚未看到的文件。
     """
+    # 逻辑说明：扫描 since 后变化且允许持久化的文件逐个上传；汇总成功键，任何失败最终统一抛出。
     pushed = []
     failures: List[tuple[str, Exception]] = []
     local_dir = sync.local_dir
@@ -303,6 +320,7 @@ def push_local(sync: FileSync, since: float = 0) -> List[str]:
 
 
 async def push_loop(sync: FileSync, check_interval: float = 5) -> None:
+    # 逻辑说明：以循环启动时刻为基线周期推送新变化；同步异常只记录，取消信号则正常退出。
     # Startup state has just been mirrored from object storage. Only watch
     # changes made after the loop starts; a since=0 scan can spend minutes
     # comparing a QwenPaw 2 workdir and starve newly-created files.

@@ -137,6 +137,7 @@ class GitRequestParser:
 
     @classmethod
     def parse(cls, message: str) -> GitRequest:
+        # 逻辑说明：按固定区段解析 task/workspace/operations/context，拒绝乱序或额外字段。
         lines = message.splitlines()
         if not lines:
             raise InvalidGitRequest("git-request block is empty")
@@ -218,6 +219,7 @@ class GitRequestParser:
 
     @classmethod
     def parse_operation(cls, command: str) -> GitOperation:
+        # 逻辑说明：shlex 只负责 token 化而不执行；随后拒绝 shell operator、response file 和逃逸 flag。
         if not command.strip() or "\n" in command or "\r" in command:
             raise InvalidGitRequest("Git operation must be one line")
         if "`" in command or "$(" in command:
@@ -261,6 +263,7 @@ class GitRequestParser:
 
     @staticmethod
     def _reject_global_escape_flags(argv: tuple[str, ...]) -> None:
+        # 逻辑说明：扫描全局参数并拒绝可改目录、配置或仓库边界的 escape hatch，防止离开受控 workspace。
         denied_exact = {
             "-C",
             "--git-dir",
@@ -291,6 +294,7 @@ class GitRequestParser:
 
     @staticmethod
     def _reject_execution_options(argv: tuple[str, ...]) -> None:
+        # 逻辑说明：拒绝会启动外部程序、指定 helper 或注入命令的 Git 选项，封住隐式代码执行面。
         denied_exact = {
             "--exec",
             "--upload-pack",
@@ -322,6 +326,7 @@ class GitRequestParser:
 
     @staticmethod
     def _validate_config(argv: tuple[str, ...]) -> None:
+        # 逻辑说明：config 仅允许本地作用域与安全键，禁止 system/global 以及可承载外部命令的配置。
         if argv[1] != "config":
             return
         if "--global" in argv or "--system" in argv:
@@ -353,6 +358,7 @@ class GitRequestParser:
 
     @staticmethod
     def _risk(argv: tuple[str, ...]) -> Literal["low", "medium", "high"]:
+        # 逻辑说明：结合子命令和危险参数计算风险级别，供调用侧选择是否要求管理员确认。
         command = argv[1]
         args = argv[2:]
         lowered = {argument.casefold() for argument in args}
@@ -435,6 +441,7 @@ class GitClient:
     """Execute validated operations through an allowlisted process runner."""
 
     def __init__(self, process: GitProcessPort) -> None:
+        # 逻辑说明：注入唯一受限进程边界，所有已解析 Git 操作最终都通过它执行而不经过 shell。
         self._process = process
 
     @staticmethod
@@ -442,6 +449,7 @@ class GitClient:
         task_workspace_root: Path,
         requested: Path,
     ) -> Path:
+        # 逻辑说明：resolve 后必须位于该 Task workspace 根内，阻止 .. 或符号链接逃逸。
         root = task_workspace_root.resolve()
         candidate = requested.resolve()
         if not candidate.is_relative_to(root):
@@ -455,6 +463,7 @@ class GitClient:
         workspace: Path,
         operations: tuple[GitOperation, ...],
     ) -> GitReceipt:
+        # 逻辑说明：逐项验证并以禁用 hooks/ext protocol 的固定 argv 执行，首个失败即返回累计回执。
         workspace = workspace.resolve(strict=True)
         if not workspace.is_dir():
             raise InvalidGitRequest("Git workspace must be a directory")
@@ -504,6 +513,7 @@ class GitClient:
         workspace: Path,
         operation: GitOperation,
     ) -> None:
+        # 逻辑说明：收集所有可能表示本地路径的 option/参数，resolve 后拒绝越出 workspace。
         path_options = {
             "--directory",
             "--exclude-from",
@@ -558,6 +568,7 @@ class GitClient:
         workspace: Path,
         operation: GitOperation,
     ) -> None:
+        # 逻辑说明：拒绝在已存在目标上初始化 bare 仓库，避免重定义受控 workspace 边界。
         if operation.argv[1] != "init" or "--bare" not in operation.argv:
             return
         positional = [
@@ -577,6 +588,7 @@ class GitClient:
 
     @staticmethod
     def _inspect_repository_config(workspace: Path) -> None:
+        # 逻辑说明：解析仓库 config 并拒绝 alias/hooks/filter/credential 等可执行或敏感设置。
         candidates = [workspace / ".git" / "config", workspace / "config"]
         config_path = next(
             (path for path in candidates if path.is_file()),
@@ -626,5 +638,6 @@ class GitClient:
 
 
 def _decode_output(value: bytes) -> str:
+    # 逻辑说明：以替换非法字节的方式解码 Git 子进程输出，并只保留末尾 8 KiB，避免错误日志无限占用 Manager 上下文。
     decoded = value.decode("utf-8", errors="replace")
     return decoded[-8192:]

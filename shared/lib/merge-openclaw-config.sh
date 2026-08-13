@@ -25,6 +25,7 @@
 #
 # If output_path is omitted, writes merged result to local_path.
 
+# 逻辑说明：把远端 Controller 管理字段合入本地配置，同时保留 Worker 本地拥有的字段；输出采用临时文件替换，避免写出半份 JSON。
 merge_openclaw_config() {
     local remote_path="$1"
     local local_path="$2"

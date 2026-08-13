@@ -16,6 +16,9 @@ import (
 // when userEnv is non-empty; callers always pass the builder's output,
 // which is guaranteed non-nil.
 func mergeUserEnv(sysEnv, userEnv map[string]string, logger logr.Logger, subject string) {
+	// 逻辑说明：mergeUserEnv接收 sysEnv/userEnv(map[string]string)、logger(logr.Logger)、subject(string)，按稳定顺序合并输入集合并处理重复项或覆盖优先级，保留仍由用户拥有的字段。
+	// 返回/状态：无；只修改传入的内存对象或返回新集合，不直接访问外部服务。
+	// 失败/重试：该步骤本身无需重试；调用者随后将合并结果持久化，持久化失败由上层处理。
 	if len(userEnv) == 0 {
 		return
 	}

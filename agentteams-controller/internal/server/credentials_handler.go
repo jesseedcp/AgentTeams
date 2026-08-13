@@ -17,11 +17,13 @@ type CredentialsHandler struct {
 }
 
 func NewCredentialsHandler(stsService *credentials.STSService, provisioner *service.Provisioner) *CredentialsHandler {
+	// 逻辑说明：注入可选云 STS 与 Matrix provisioner；handler 会在每条路由分别检查 nil，使 embedded/降级部署能明确返回服务不可用。
 	return &CredentialsHandler{stsService: stsService, provisioner: provisioner}
 }
 
 // RefreshSTS handles POST /api/v1/credentials/sts
 func (h *CredentialsHandler) RefreshSTS(w http.ResponseWriter, r *http.Request) {
+	// 逻辑说明：拒绝未启用云 STS 或认证中间件未注入身份的请求，随后仅以 context 中 caller 的角色/用户名签发自作用域 token；签发失败不返回任何部分凭据。
 	log.Printf("[INFO] STS credential request received from %s", r.RemoteAddr)
 	if h.stsService == nil {
 		httputil.WriteError(w, http.StatusServiceUnavailable, "STS service not available (not in cloud mode)")
@@ -50,6 +52,7 @@ func (h *CredentialsHandler) RefreshSTS(w http.ResponseWriter, r *http.Request) 
 // Called by Workers/Managers when they receive a 401 from the homeserver.
 // Issues a fresh access token and persists it to the credential store.
 func (h *CredentialsHandler) RefreshMatrixToken(w http.ResponseWriter, r *http.Request) {
+	// 逻辑说明：从认证 context 取得调用者并确认 provisioner 可用，再按 caller.Username 强制登录/持久化新的 Matrix token；成功响应只暴露该调用者的新 access token。
 	caller := auth.CallerFromContext(r.Context())
 	if caller == nil || caller.Username == "" {
 		httputil.WriteError(w, http.StatusBadRequest, "caller identity not found")

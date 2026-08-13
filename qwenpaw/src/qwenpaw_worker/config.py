@@ -14,10 +14,12 @@ from typing import Optional
 
 
 def _clean_prefix(value: str) -> str:
+    # 逻辑说明：去掉对象存储前缀两侧空白和斜杠，供后续路径组合使用。
     return value.strip().strip("/")
 
 
 def _relative_storage_prefix(value: str, bucket: str) -> str:
+    # 逻辑说明：把可能带 alias/bucket 的完整前缀还原为桶内相对路径；空值保持为空。
     prefix = _clean_prefix(value)
     if not prefix:
         return ""
@@ -30,6 +32,7 @@ def _relative_storage_prefix(value: str, bucket: str) -> str:
 
 
 def _join_prefix(root: str, suffix: str) -> str:
+    # 逻辑说明：清理根前缀和后缀后用单个斜杠连接，根为空时只返回后缀。
     root = _clean_prefix(root)
     suffix = _clean_prefix(suffix)
     return f"{root}/{suffix}" if root else suffix
@@ -60,6 +63,7 @@ class WorkerConfig:
         runtime_config_path: Optional[Path] = None,
         runtime_config_poll_interval: float = 5,
     ) -> None:
+        # 逻辑说明：保存并规范化启动参数、计算存储前缀；这里只建配置对象，不创建目录或连接远端。
         self.worker_name = worker_name
         self.worker_cr_name = worker_cr_name or worker_name
         self.agent_role = os.environ.get("AGENTTEAMS_WORKER_ROLE") or os.environ.get("AGENTTEAMS_AGENT_ROLE") or "worker"
@@ -108,12 +112,14 @@ class WorkerConfig:
 
     @property
     def shared_dir(self) -> Path:
+        # 逻辑说明：优先使用显式共享目录，否则回落到所有 Worker 共同的安装根旁目录。
         if self.shared_dir_override is not None:
             return self.shared_dir_override
         return self.install_dir.parent / "shared"
 
     @property
     def runtime_config_path(self) -> Path:
+        # 逻辑说明：按“构造参数、环境变量、Worker 默认目录”的优先级解析 runtime.yaml 路径。
         if self.runtime_config_path_override is not None:
             return self.runtime_config_path_override
         configured = os.environ.get("AGENTTEAMS_MEMBER_RUNTIME_CONFIG", "").strip()

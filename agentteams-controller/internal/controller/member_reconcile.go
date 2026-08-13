@@ -219,6 +219,9 @@ type MemberState struct {
 // working. Explicit sandbox requests must resolve to a registered sandbox
 // backend and never silently fall back to pods.
 func resolveBackendForMember(registry *backend.Registry, backendRuntime string, m MemberContext) (backend.WorkerBackend, error) {
+	// 逻辑说明：resolveBackendForMember 接收 registry(*backend.Registry)、backendRuntime(string)、m(MemberContext)，依次借助 GetBackendForType、Background、DetectWorkerBackend解析Worker 成员的期望结果。
+	// 返回/状态：返回 backend.WorkerBackend、error；可能查询、创建、停止、更新或删除 Pod/沙箱实例，并同步内存中的观测状态。
+	// 失败/重试：后端失败会返回错误或重排时间；下一轮先重新读取实例，避免重复创建或删除。
 	if registry == nil {
 		return nil, fmt.Errorf("no backend registry configured for member %s", m.Name)
 	}
@@ -293,6 +296,9 @@ type MemberDeps struct {
 // reconciliation. Open-source managed workers are local-cluster pods only;
 // Edge workers are handled by the dedicated Edge flow before this validation.
 func ValidateMemberDeployment(m MemberContext) error {
+	// 逻辑说明：ValidateMemberDeployment 接收 m(MemberContext)，按本函数中的条件与转换步骤校验Worker 成员的期望结果。
+	// 返回/状态：返回 error；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	switch m.DeployMode {
 	case "", v1beta1.DeployModeLocal:
 		return nil
@@ -316,6 +322,9 @@ func ValidateMemberDeployment(m MemberContext) error {
 // 刷新短期凭据，不重新注册账号。这一分支使重复 reconcile 不会创建
 // 多份身份。但这些 token 只活在本轮内存 state，不得写入 CR status。
 func ReconcileMemberInfra(ctx context.Context, d MemberDeps, m MemberContext, state *MemberState) (reconcile.Result, error) {
+	// 逻辑说明：ReconcileMemberInfra 接收 ctx(context.Context)、d(MemberDeps)、m(MemberContext)、state(*MemberState)，依次借助 RefreshWorkerCredentials、ProvisionWorker、Is调谐Worker 成员的期望结果。
+	// 返回/状态：返回 reconcile.Result、error；会更新 Worker 成员的内存状态，存在客户端调用时还可能同步相应外部资源。
+	// 失败/重试：输入或依赖调用失败会返回错误；是否重排由上层调谐器决定，本函数不隐藏失败。
 	if m.ExistingMatrixUserID != "" {
 		refreshResult, err := d.Provisioner.RefreshWorkerCredentials(ctx, m.Name, m.RuntimeName, m.TeamName)
 		if err != nil {
@@ -362,6 +371,9 @@ func ReconcileMemberInfra(ctx context.Context, d MemberDeps, m MemberContext, st
 // EnsureModelProviderAuth authorizes the member's gateway consumer on the
 // model provider's HttpApi. No-op when modelProvider is not set.
 func EnsureModelProviderAuth(ctx context.Context, d MemberDeps, m MemberContext, state *MemberState) error {
+	// 逻辑说明：EnsureModelProviderAuth 接收 ctx(context.Context)、d(MemberDeps)、m(MemberContext)、state(*MemberState)，依次借助 AuthorizeAIRoutes确保Worker 成员的期望结果。
+	// 返回/状态：返回 error；会更新 Worker 成员的内存状态，存在客户端调用时还可能同步相应外部资源。
+	// 失败/重试：输入或依赖调用失败会返回错误；是否重排由上层调谐器决定，本函数不隐藏失败。
 	if m.ModelProviderInfo == nil || d.GatewayClient == nil {
 		return nil
 	}
@@ -379,6 +391,9 @@ func EnsureModelProviderAuth(ctx context.Context, d MemberDeps, m MemberContext,
 // member pod exists. Separated from Infra because SA creation can race with
 // the K8s API after namespace setup and benefits from independent retry.
 func EnsureMemberServiceAccount(ctx context.Context, d MemberDeps, m MemberContext) error {
+	// 逻辑说明：EnsureMemberServiceAccount 接收 ctx(context.Context)、d(MemberDeps)、m(MemberContext)，依次借助 EnsureServiceAccount确保Worker 成员的期望结果。
+	// 返回/状态：返回 error；可能读取或修改 Kubernetes API 中的账户、令牌、服务或存储对象。
+	// 失败/重试：API 冲突或暂时不可用会返回错误；上层重新读取 resourceVersion 与实际对象后幂等重试。
 	if err := d.Provisioner.EnsureServiceAccount(ctx, m.Name); err != nil {
 		return fmt.Errorf("ServiceAccount: %w", err)
 	}
@@ -392,6 +407,9 @@ func EnsureMemberServiceAccount(ctx context.Context, d MemberDeps, m MemberConte
 // 的 Matrix user/room 与 gateway 身份。它在 Container 之前执行，因为新 Pod
 // 启动后应立即看到完整版本，不能读到一半新、一半旧的配置。
 func ReconcileMemberConfig(ctx context.Context, d MemberDeps, m MemberContext, state *MemberState) error {
+	// 逻辑说明：ReconcileMemberConfig 接收 ctx(context.Context)、d(MemberDeps)、m(MemberContext)、state(*MemberState)，依次借助 ResolveRuntime、runtimeSkillRegistryConfig、DeployMemberRuntimeConfig、pushMemberSkills调谐Worker 成员的期望结果。
+	// 返回/状态：返回 error；可能把配置、技能或运行文档写入本地目录或 MinIO/S3 的稳定对象键。
+	// 失败/重试：校验、序列化或 I/O 失败会返回错误；旧配置保持可用，上层可用相同对象键覆盖重试。
 	if state.ProvResult == nil {
 		return nil
 	}
@@ -488,6 +506,9 @@ func pushMemberSkills(
 	deployer service.WorkerDeployer,
 	member MemberContext,
 ) error {
+	// 逻辑说明：pushMemberSkills 接收 ctx(context.Context)、deployer(service.WorkerDeployer)、member(MemberContext)，依次借助 PushOnDemandSkills上传Worker 成员的期望结果。
+	// 返回/状态：返回 error；可能把配置、技能或运行文档写入本地目录或 MinIO/S3 的稳定对象键。
+	// 失败/重试：校验、序列化或 I/O 失败会返回错误；旧配置保持可用，上层可用相同对象键覆盖重试。
 	if err := deployer.PushOnDemandSkills(
 		ctx,
 		member.RuntimeName,
@@ -500,6 +521,9 @@ func pushMemberSkills(
 }
 
 func runtimeSkillRegistryConfig(d MemberDeps, m MemberContext, state *MemberState) (string, string) {
+	// 逻辑说明：runtimeSkillRegistryConfig 接收 d(MemberDeps)、m(MemberContext)、state(*MemberState)，依次借助 Build处理Worker 成员的期望结果。
+	// 返回/状态：返回 string、string；可能把配置、技能或运行文档写入本地目录或 MinIO/S3 的稳定对象键。
+	// 失败/重试：校验、序列化或 I/O 失败会返回错误；旧配置保持可用，上层可用相同对象键覆盖重试。
 	if d.EnvBuilder == nil || state == nil || state.ProvResult == nil {
 		return "", ""
 	}
@@ -515,6 +539,9 @@ func runtimeSkillRegistryConfig(d MemberDeps, m MemberContext, state *MemberStat
 // 因 hash 变化重建整个容器。ctx 超时时后端操作结果可能不确定，
 // 下一轮必须先查询实际状态，不能把超时等同于“没创建”。
 func ReconcileMemberContainer(ctx context.Context, d MemberDeps, m MemberContext, state *MemberState) (reconcile.Result, error) {
+	// 逻辑说明：ReconcileMemberContainer 接收 ctx(context.Context)、d(MemberDeps)、m(MemberContext)、state(*MemberState)，依次借助 DesiredContainerMan、DesiredState、ensureMemberContainerAbsent、ensureMemberContainerPresent调谐Worker 成员的期望结果。
+	// 返回/状态：返回 reconcile.Result、error；可能查询、创建、停止、更新或删除 Pod/沙箱实例，并同步内存中的观测状态。
+	// 失败/重试：后端失败会返回错误或重排时间；下一轮先重新读取实例，避免重复创建或删除。
 	if state.ProvResult == nil {
 		return reconcile.Result{}, nil
 	}
@@ -540,6 +567,9 @@ func ReconcileMemberContainer(ctx context.Context, d MemberDeps, m MemberContext
 }
 
 func ensureMemberContainerPresent(ctx context.Context, d MemberDeps, m MemberContext, state *MemberState) (reconcile.Result, error) {
+	// 逻辑说明：ensureMemberContainerPresent 接收 ctx(context.Context)、d(MemberDeps)、m(MemberContext)、state(*MemberState)，依次借助 resolveBackendForMember、Delete、Is、Status确保Worker 成员的期望结果。
+	// 返回/状态：返回 reconcile.Result、error；可能查询、创建、停止、更新或删除 Pod/沙箱实例，并同步内存中的观测状态。
+	// 失败/重试：后端失败会返回错误或重排时间；下一轮先重新读取实例，避免重复创建或删除。
 	if d.Backend == nil {
 		return reconcile.Result{}, nil
 	}
@@ -712,6 +742,9 @@ func ensureMemberContainerPresent(ctx context.Context, d MemberDeps, m MemberCon
 }
 
 func ensureMemberContainerAbsent(ctx context.Context, d MemberDeps, m MemberContext, remove bool, state *MemberState) (reconcile.Result, error) {
+	// 逻辑说明：ensureMemberContainerAbsent 接收 ctx(context.Context)、d(MemberDeps)、m(MemberContext)、remove(bool)、state(*MemberState)，依次借助 resolveBackendForMember、Status、Delete、Is确保Worker 成员的期望结果。
+	// 返回/状态：返回 reconcile.Result、error；可能查询、创建、停止、更新或删除 Pod/沙箱实例，并同步内存中的观测状态。
+	// 失败/重试：后端失败会返回错误或重排时间；下一轮先重新读取实例，避免重复创建或删除。
 	if d.Backend == nil {
 		return reconcile.Result{}, nil
 	}
@@ -763,6 +796,9 @@ func ensureMemberContainerAbsent(ctx context.Context, d MemberDeps, m MemberCont
 }
 
 func memberRuntimeStale(result *backend.WorkerResult, m MemberContext, missingHashMeansStale bool) bool {
+	// 逻辑说明：memberRuntimeStale 接收 result(*backend.WorkerResult)、m(MemberContext)、missingHashMeansStale(bool)，按本函数中的条件与转换步骤处理Worker 成员的期望结果。
+	// 返回/状态：返回 bool；会更新 Worker 成员的内存状态，存在客户端调用时还可能同步相应外部资源。
+	// 失败/重试：输入或依赖调用失败会返回错误；是否重排由上层调谐器决定，本函数不隐藏失败。
 	if m.CurrentSpecHash != "" {
 		return m.SpecChanged
 	}
@@ -773,6 +809,9 @@ func memberRuntimeStale(result *backend.WorkerResult, m MemberContext, missingHa
 }
 
 func createMemberContainer(ctx context.Context, d MemberDeps, m MemberContext, state *MemberState, wb backend.WorkerBackend) (reconcile.Result, error) {
+	// 逻辑说明：createMemberContainer 接收 ctx(context.Context)、d(MemberDeps)、m(MemberContext)、state(*MemberState)、wb(backend.WorkerBackend)，依次借助 RefreshWorkerCredentials、buildMemberWorkerEnv、prepareMemberWorkerDeps、minPositiveDuration创建Worker 成员的期望结果。
+	// 返回/状态：返回 reconcile.Result、error；可能查询、创建、停止、更新或删除 Pod/沙箱实例，并同步内存中的观测状态。
+	// 失败/重试：后端失败会返回错误或重排时间；下一轮先重新读取实例，避免重复创建或删除。
 	logger := log.FromContext(ctx)
 
 	prov := state.ProvResult
@@ -864,6 +903,9 @@ func createMemberContainer(ctx context.Context, d MemberDeps, m MemberContext, s
 }
 
 func waitForScopedWorkerConfig(ctx context.Context, workerName, key string, workerEnv map[string]string) error {
+	// 逻辑说明：waitForScopedWorkerConfig 接收 ctx(context.Context)、workerName/key(string)、workerEnv(map[string]string)，依次借助 Getenv、NewMinIOClient、Add、Now处理Worker 成员的期望结果。
+	// 返回/状态：返回 error；可能把配置、技能或运行文档写入本地目录或 MinIO/S3 的稳定对象键。
+	// 失败/重试：校验、序列化或 I/O 失败会返回错误；旧配置保持可用，上层可用相同对象键覆盖重试。
 	accessKey := strings.TrimSpace(workerEnv["AGENTTEAMS_FS_ACCESS_KEY"])
 	secretKey := strings.TrimSpace(workerEnv["AGENTTEAMS_FS_SECRET_KEY"])
 	if accessKey == "" || secretKey == "" {
@@ -912,6 +954,9 @@ func waitForScopedWorkerConfig(ctx context.Context, workerName, key string, work
 }
 
 func refreshSandboxSetWorkerDeps(ctx context.Context, d MemberDeps, m MemberContext, prov *service.WorkerProvisionResult) (time.Duration, string, error) {
+	// 逻辑说明：refreshSandboxSetWorkerDeps 接收 ctx(context.Context)、d(MemberDeps)、m(MemberContext)、prov(*service.WorkerProvisionResult)，依次借助 buildMemberWorkerEnv、prepareMemberWorkerDeps刷新Worker 成员的期望结果。
+	// 返回/状态：返回 time.Duration、string、error；可能查询、创建、停止、更新或删除 Pod/沙箱实例，并同步内存中的观测状态。
+	// 失败/重试：后端失败会返回错误或重排时间；下一轮先重新读取实例，避免重复创建或删除。
 	workerEnv, err := buildMemberWorkerEnv(ctx, d, m, prov)
 	if err != nil {
 		return 0, "", err
@@ -921,6 +966,9 @@ func refreshSandboxSetWorkerDeps(ctx context.Context, d MemberDeps, m MemberCont
 }
 
 func buildMemberWorkerEnv(ctx context.Context, d MemberDeps, m MemberContext, prov *service.WorkerProvisionResult) (map[string]string, error) {
+	// 逻辑说明：buildMemberWorkerEnv 接收 ctx(context.Context)、d(MemberDeps)、m(MemberContext)、prov(*service.WorkerProvisionResult)，依次借助 Build、ResolveRuntime、ApplyWorkerConsoleEnv、mergeUserEnv构造Worker 成员的期望结果。
+	// 返回/状态：返回 map[string]string、error；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	if d.EnvBuilder == nil {
 		return nil, fmt.Errorf("worker env builder is not configured")
 	}
@@ -951,6 +999,9 @@ func memberUsesSandboxClaim(m MemberContext) bool {
 }
 
 func prepareMemberWorkerDeps(ctx context.Context, d MemberDeps, m MemberContext, workerEnv map[string]string, forceTokenProjection bool) (*backend.WorkerDepsSpec, time.Duration, string, error) {
+	// 逻辑说明：prepareMemberWorkerDeps 接收 ctx(context.Context)、d(MemberDeps)、m(MemberContext)、workerEnv(map[string]string)、forceTokenProjection(bool)，依次借助 memberUsesSandboxClaim、resolveSandboxWorkerDeps、projectSandboxSetWorkerToken、TrimRight准备Worker 成员的期望结果。
+	// 返回/状态：返回 *backend.WorkerDepsSpec、time.Duration、string、error；会更新 Worker 成员的内存状态，存在客户端调用时还可能同步相应外部资源。
+	// 失败/重试：输入或依赖调用失败会返回错误；是否重排由上层调谐器决定，本函数不隐藏失败。
 	usesSandboxClaim := memberUsesSandboxClaim(m)
 	if !usesSandboxClaim {
 		if len(m.Spec.Volumes) > 0 || len(m.Spec.Mounts) > 0 {
@@ -1037,6 +1088,9 @@ type sandboxWorkerDeps struct {
 }
 
 func (d sandboxWorkerDeps) UniqueCustomVolumes() []v1beta1.WorkerVolumeSpec {
+	// 逻辑说明：UniqueCustomVolumes 接收 无，按本函数中的条件与转换步骤处理Worker 成员的期望结果。
+	// 返回/状态：返回 []v1beta1.WorkerVolumeSpec；会更新 Worker 成员的内存状态，存在客户端调用时还可能同步相应外部资源。
+	// 失败/重试：输入或依赖调用失败会返回错误；是否重排由上层调谐器决定，本函数不隐藏失败。
 	seen := map[string]struct{}{}
 	out := make([]v1beta1.WorkerVolumeSpec, 0, len(d.Volumes))
 	for _, mount := range d.CustomMounts {
@@ -1050,6 +1104,9 @@ func (d sandboxWorkerDeps) UniqueCustomVolumes() []v1beta1.WorkerVolumeSpec {
 }
 
 func resolveSandboxWorkerDeps(deps MemberDeps, m MemberContext) (sandboxWorkerDeps, error) {
+	// 逻辑说明：resolveSandboxWorkerDeps 接收 deps(MemberDeps)、m(MemberContext)，依次借助 builtinWorkerDepsAuth、defaultWorkerDepsMounts、validateWorkerDepsVolume、isWorkerDepsReservedMount解析Worker 成员的期望结果。
+	// 返回/状态：返回 sandboxWorkerDeps、error；可能查询、创建、停止、更新或删除 Pod/沙箱实例，并同步内存中的观测状态。
+	// 失败/重试：后端失败会返回错误或重排时间；下一轮先重新读取实例，避免重复创建或删除。
 	instanceName := backend.BuiltinSandboxInstanceName
 	builtinAuth, err := builtinWorkerDepsAuth(deps, instanceName)
 	if err != nil {
@@ -1104,6 +1161,9 @@ func resolveSandboxWorkerDeps(deps MemberDeps, m MemberContext) (sandboxWorkerDe
 }
 
 func builtinWorkerDepsAuth(deps MemberDeps, instanceName string) (v1beta1.WorkerOSSAuthSpec, error) {
+	// 逻辑说明：builtinWorkerDepsAuth 接收 deps(MemberDeps)、instanceName(string)，依次借助 normalizeWorkerDepsMountAuthType处理Worker 成员的期望结果。
+	// 返回/状态：返回 v1beta1.WorkerOSSAuthSpec、error；会更新 Worker 成员的内存状态，存在客户端调用时还可能同步相应外部资源。
+	// 失败/重试：输入或依赖调用失败会返回错误；是否重排由上层调谐器决定，本函数不隐藏失败。
 	authType, err := normalizeWorkerDepsMountAuthType(deps.MountAuthType)
 	if err != nil {
 		return v1beta1.WorkerOSSAuthSpec{}, err
@@ -1131,6 +1191,9 @@ func builtinWorkerDepsAuth(deps MemberDeps, instanceName string) (v1beta1.Worker
 }
 
 func workerDepsDynamicMountAttributes(volume v1beta1.WorkerVolumeSpec, mountName string) map[string]string {
+	// 逻辑说明：workerDepsDynamicMountAttributes 接收 volume(v1beta1.WorkerVolumeSpec)、mountName(string)，依次借助 workerDepsCredentialProviderName处理Worker 成员的期望结果。
+	// 返回/状态：返回 map[string]string；会更新 Worker 成员的内存状态，存在客户端调用时还可能同步相应外部资源。
+	// 失败/重试：输入或依赖调用失败会返回错误；是否重排由上层调谐器决定，本函数不隐藏失败。
 	if volume.OSS == nil || volume.OSS.Auth.Type != workerDepsAuthTypeRRSA {
 		return nil
 	}
@@ -1138,6 +1201,9 @@ func workerDepsDynamicMountAttributes(volume v1beta1.WorkerVolumeSpec, mountName
 }
 
 func normalizeWorkerDepsMountAuthType(authType string) (string, error) {
+	// 逻辑说明：normalizeWorkerDepsMountAuthType 接收 authType(string)，依次借助 ToLower处理Worker 成员的期望结果。
+	// 返回/状态：返回 string、error；会更新 Worker 成员的内存状态，存在客户端调用时还可能同步相应外部资源。
+	// 失败/重试：输入或依赖调用失败会返回错误；是否重排由上层调谐器决定，本函数不隐藏失败。
 	switch strings.ToLower(strings.TrimSpace(authType)) {
 	case "", "rrsa":
 		return workerDepsAuthTypeRRSA, nil
@@ -1149,6 +1215,9 @@ func normalizeWorkerDepsMountAuthType(authType string) (string, error) {
 }
 
 func defaultWorkerDepsMounts(instanceName, workerName string) map[string]v1beta1.WorkerMountSpec {
+	// 逻辑说明：defaultWorkerDepsMounts 接收 instanceName/workerName(string)，依次借助 workerDepsSubPath处理Worker 成员的期望结果。
+	// 返回/状态：返回 map[string]v1beta1.WorkerMountSpec；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	return map[string]v1beta1.WorkerMountSpec{
 		workerDepsMountToken: {
 			Name:      workerDepsMountToken,
@@ -1175,10 +1244,16 @@ func defaultWorkerDepsMounts(instanceName, workerName string) map[string]v1beta1
 }
 
 func workerDepsSubPath(workerName, name string) string {
+	// 逻辑说明：workerDepsSubPath 接收 workerName/name(string)，依次借助 Join处理Worker 成员的期望结果。
+	// 返回/状态：返回 string；会更新 Worker 成员的内存状态，存在客户端调用时还可能同步相应外部资源。
+	// 失败/重试：输入或依赖调用失败会返回错误；是否重排由上层调谐器决定，本函数不隐藏失败。
 	return path.Join("workers-deps", workerName, name)
 }
 
 func validateSandboxWorkerDepsStoragePrefix(storagePrefix, bucket string) error {
+	// 逻辑说明：validateSandboxWorkerDepsStoragePrefix 接收 storagePrefix/bucket(string)，依次借助 Trim、Split校验Worker 成员的期望结果。
+	// 返回/状态：返回 error；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	storagePrefix = strings.Trim(storagePrefix, "/")
 	bucket = strings.TrimSpace(bucket)
 	if storagePrefix == "" || bucket == "" {
@@ -1192,11 +1267,17 @@ func validateSandboxWorkerDepsStoragePrefix(storagePrefix, bucket string) error 
 }
 
 func isWorkerDepsReservedMount(name string) bool {
+	// 逻辑说明：isWorkerDepsReservedMount 接收 name(string)，按本函数中的条件与转换步骤判断Worker 成员的期望结果。
+	// 返回/状态：返回 bool；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	_, ok := workerDepsMountReadOnly[name]
 	return ok
 }
 
 func validateWorkerDepsVolume(i int, volume v1beta1.WorkerVolumeSpec) error {
+	// 逻辑说明：validateWorkerDepsVolume 接收 i(int)、volume(v1beta1.WorkerVolumeSpec)，按本函数中的条件与转换步骤校验Worker 成员的期望结果。
+	// 返回/状态：返回 error；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	prefix := "built-in worker-deps volume"
 	if i >= 0 {
 		prefix = fmt.Sprintf("spec.volumes[%d]", i)
@@ -1234,6 +1315,9 @@ func validateWorkerDepsVolume(i int, volume v1beta1.WorkerVolumeSpec) error {
 }
 
 func validateCustomWorkerMount(i int, mount v1beta1.WorkerMountSpec, volumes map[string]v1beta1.WorkerVolumeSpec) error {
+	// 逻辑说明：validateCustomWorkerMount 接收 i(int)、mount(v1beta1.WorkerMountSpec)、volumes(map[string]v1beta1.WorkerVolumeSpec)，依次借助 isBuiltinWorkerDepsMountPath校验Worker 成员的期望结果。
+	// 返回/状态：返回 error；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	if mount.Name == "" {
 		return fmt.Errorf("spec.mounts[%d].name is required", i)
 	}
@@ -1256,6 +1340,9 @@ func validateCustomWorkerMount(i int, mount v1beta1.WorkerMountSpec, volumes map
 }
 
 func isBuiltinWorkerDepsMountPath(mountPath string) bool {
+	// 逻辑说明：isBuiltinWorkerDepsMountPath 接收 mountPath(string)，依次借助 Clean、HasPrefix判断Worker 成员的期望结果。
+	// 返回/状态：返回 bool；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	clean := path.Clean(mountPath)
 	for _, builtin := range []string{"/var/run/secrets/agentteams", "/mnt/agentteams/env", "/mnt/agentteams/data"} {
 		if clean == builtin || strings.HasPrefix(builtin, clean+"/") || strings.HasPrefix(clean, builtin+"/") {
@@ -1266,6 +1353,9 @@ func isBuiltinWorkerDepsMountPath(mountPath string) bool {
 }
 
 func prepareWorkerDepsObjects(ctx context.Context, d MemberDeps, m MemberContext, deps sandboxWorkerDeps, workerEnv map[string]string, token string, writeToken bool) error {
+	// 逻辑说明：prepareWorkerDepsObjects 接收 ctx(context.Context)、d(MemberDeps)、m(MemberContext)、deps(sandboxWorkerDeps)、workerEnv(map[string]string)、token(string)、writeToken(bool)，依次借助 PrepareWorkerDeps准备Worker 成员的期望结果。
+	// 返回/状态：返回 error；会更新 Worker 成员的内存状态，存在客户端调用时还可能同步相应外部资源。
+	// 失败/重试：输入或依赖调用失败会返回错误；是否重排由上层调谐器决定，本函数不隐藏失败。
 	req := service.WorkerDepsPrepareRequest{
 		WorkerName:  m.RuntimeName,
 		DataSubPath: deps.Mounts[workerDepsMountData].SubPath,
@@ -1289,6 +1379,9 @@ type sandboxSetTokenProjection struct {
 }
 
 func projectSandboxSetWorkerToken(ctx context.Context, d MemberDeps, m MemberContext, force bool) (sandboxSetTokenProjection, error) {
+	// 逻辑说明：projectSandboxSetWorkerToken 接收 ctx(context.Context)、d(MemberDeps)、m(MemberContext)、force(bool)，依次借助 sandboxSetTokenProjectionKey、Now、Load、IsZero处理Worker 成员的期望结果。
+	// 返回/状态：返回 sandboxSetTokenProjection、error；可能查询、创建、停止、更新或删除 Pod/沙箱实例，并同步内存中的观测状态。
+	// 失败/重试：后端失败会返回错误或重排时间；下一轮先重新读取实例，避免重复创建或删除。
 	if d.Provisioner == nil {
 		return sandboxSetTokenProjection{}, fmt.Errorf("sandbox claim token projector requires worker provisioner")
 	}
@@ -1347,6 +1440,9 @@ func sandboxSetTokenProjectionKey(m MemberContext) string {
 }
 
 func sandboxSetTokenNextRefresh(m MemberContext, issuedAt, expiresAt time.Time) time.Time {
+	// 逻辑说明：sandboxSetTokenNextRefresh 接收 m(MemberContext)、issuedAt/expiresAt(time.Time)，依次借助 Sub、Add、Now、Before处理Worker 成员的期望结果。
+	// 返回/状态：返回 time.Time；可能查询、创建、停止、更新或删除 Pod/沙箱实例，并同步内存中的观测状态。
+	// 失败/重试：后端失败会返回错误或重排时间；下一轮先重新读取实例，避免重复创建或删除。
 	ttl := expiresAt.Sub(issuedAt)
 	if ttl <= 0 {
 		return time.Now().Add(sandboxSetTokenRetryAfter)
@@ -1370,12 +1466,18 @@ func sandboxSetTokenNextRefresh(m MemberContext, issuedAt, expiresAt time.Time) 
 }
 
 func tokenRefreshJitter(key string) time.Duration {
+	// 逻辑说明：tokenRefreshJitter 接收 key(string)，依次借助 New32a、Write、Duration、Sum32处理Worker 成员的期望结果。
+	// 返回/状态：返回 time.Duration；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	h := fnv.New32a()
 	_, _ = h.Write([]byte(key))
 	return time.Duration(h.Sum32()%uint32(sandboxSetTokenRefreshJitterMax/time.Second)) * time.Second
 }
 
 func ensureWorkerDepsMountResources(ctx context.Context, d MemberDeps, m MemberContext, volume v1beta1.WorkerVolumeSpec, builtIn bool) error {
+	// 逻辑说明：ensureWorkerDepsMountResources 接收 ctx(context.Context)、d(MemberDeps)、m(MemberContext)、volume(v1beta1.WorkerVolumeSpec)、builtIn(bool)，依次借助 resolveMemberDynamicClient、workerDepsMountResourceObjects、createWorkerDepsObjectIfMissing确保Worker 成员的期望结果。
+	// 返回/状态：返回 error；会更新 Worker 成员的内存状态，存在客户端调用时还可能同步相应外部资源。
+	// 失败/重试：输入或依赖调用失败会返回错误；是否重排由上层调谐器决定，本函数不隐藏失败。
 	dynClient, namespace, err := resolveMemberDynamicClient(ctx, d, m)
 	if err != nil {
 		return err
@@ -1393,6 +1495,9 @@ func ensureWorkerDepsMountResources(ctx context.Context, d MemberDeps, m MemberC
 }
 
 func workerDepsMountResourceObjects(volume v1beta1.WorkerVolumeSpec, namespace string, builtIn bool) []*unstructured.Unstructured {
+	// 逻辑说明：workerDepsMountResourceObjects 接收 volume(v1beta1.WorkerVolumeSpec)、namespace(string)、builtIn(bool)，依次借助 buildAccessKeyWorkerDepsPersistentVolume、buildRRSAWorkerDepsPersistentVolume、buildWorkerDepsCredentialProvider、buildWorkerDepsAgentIdentity处理Worker 成员的期望结果。
+	// 返回/状态：返回 []*unstructured.Unstructured；会更新 Worker 成员的内存状态，存在客户端调用时还可能同步相应外部资源。
+	// 失败/重试：输入或依赖调用失败会返回错误；是否重排由上层调谐器决定，本函数不隐藏失败。
 	if volume.OSS != nil && volume.OSS.Auth.Type == workerDepsAuthTypeAccessKey {
 		return []*unstructured.Unstructured{buildAccessKeyWorkerDepsPersistentVolume(volume, namespace)}
 	}
@@ -1415,11 +1520,17 @@ func workerDepsMountResourceObjects(volume v1beta1.WorkerVolumeSpec, namespace s
 }
 
 func resolveMemberDynamicClient(ctx context.Context, d MemberDeps, m MemberContext) (dynamic.Interface, string, error) {
+	// 逻辑说明：resolveMemberDynamicClient 接收 ctx(context.Context)、d(MemberDeps)、m(MemberContext)，按本函数中的条件与转换步骤解析Worker 成员的期望结果。
+	// 返回/状态：返回 dynamic.Interface、string、error；会更新 Worker 成员的内存状态，存在客户端调用时还可能同步相应外部资源。
+	// 失败/重试：输入或依赖调用失败会返回错误；是否重排由上层调谐器决定，本函数不隐藏失败。
 	namespace := m.Namespace
 	return d.DynamicClient, namespace, nil
 }
 
 func createWorkerDepsObjectIfMissing(ctx context.Context, dynClient dynamic.Interface, obj *unstructured.Unstructured) error {
+	// 逻辑说明：createWorkerDepsObjectIfMissing 接收 ctx(context.Context)、dynClient(dynamic.Interface)、obj(*unstructured.Unstructured)，依次借助 workerDepsObjectGVR、GetName、GetNamespace、Namespace创建Worker 成员的期望结果。
+	// 返回/状态：返回 error；会更新 Worker 成员的内存状态，存在客户端调用时还可能同步相应外部资源。
+	// 失败/重试：输入或依赖调用失败会返回错误；是否重排由上层调谐器决定，本函数不隐藏失败。
 	gvr := workerDepsObjectGVR(obj)
 	name := obj.GetName()
 	ns := obj.GetNamespace()
@@ -1452,6 +1563,9 @@ func createWorkerDepsObjectIfMissing(ctx context.Context, dynClient dynamic.Inte
 }
 
 func updateWorkerDepsObjectIfNeeded(ctx context.Context, res dynamic.ResourceInterface, existing, desired *unstructured.Unstructured) error {
+	// 逻辑说明：updateWorkerDepsObjectIfNeeded 接收 ctx(context.Context)、res(dynamic.ResourceInterface)、existing/desired(*unstructured.Unstructured)，依次借助 GetKind、GetLabels、NestedMap、DeepEqual更新Worker 成员的期望结果。
+	// 返回/状态：返回 error；会更新 Worker 成员的内存状态，存在客户端调用时还可能同步相应外部资源。
+	// 失败/重试：输入或依赖调用失败会返回错误；是否重排由上层调谐器决定，本函数不隐藏失败。
 	switch desired.GetKind() {
 	case "CredentialProvider", "AgentIdentity", "AgentRole", "AgentRoleBinding":
 	default:
@@ -1490,6 +1604,9 @@ func updateWorkerDepsObjectIfNeeded(ctx context.Context, res dynamic.ResourceInt
 }
 
 func workerDepsObjectGVR(obj *unstructured.Unstructured) schema.GroupVersionResource {
+	// 逻辑说明：workerDepsObjectGVR 接收 obj(*unstructured.Unstructured)，依次借助 GetKind处理Worker 成员的期望结果。
+	// 返回/状态：返回 schema.GroupVersionResource；会更新 Worker 成员的内存状态，存在客户端调用时还可能同步相应外部资源。
+	// 失败/重试：输入或依赖调用失败会返回错误；是否重排由上层调谐器决定，本函数不隐藏失败。
 	switch obj.GetKind() {
 	case "StorageClass":
 		return workerDepsStorageClassGVR
@@ -1509,6 +1626,9 @@ func workerDepsObjectGVR(obj *unstructured.Unstructured) schema.GroupVersionReso
 }
 
 func buildWorkerDepsStorageClass(volume v1beta1.WorkerVolumeSpec, namespace string) *unstructured.Unstructured {
+	// 逻辑说明：buildWorkerDepsStorageClass 接收 volume(v1beta1.WorkerVolumeSpec)、namespace(string)，依次借助 defaultSecretNamespace、workerDepsObjectLabels构造Worker 成员的期望结果。
+	// 返回/状态：返回 *unstructured.Unstructured；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	provisioner := ackOSSCSIProvisioner
 	parameters := map[string]interface{}{}
 	if volume.OSS != nil {
@@ -1545,6 +1665,9 @@ func buildWorkerDepsStorageClass(volume v1beta1.WorkerVolumeSpec, namespace stri
 }
 
 func buildWorkerDepsPersistentVolume(volume v1beta1.WorkerVolumeSpec, namespace string) *unstructured.Unstructured {
+	// 逻辑说明：buildWorkerDepsPersistentVolume 接收 volume(v1beta1.WorkerVolumeSpec)、namespace(string)，依次借助 defaultSecretNamespace、workerDepsObjectLabels构造Worker 成员的期望结果。
+	// 返回/状态：返回 *unstructured.Unstructured；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	driver := ackOSSCSIProvisioner
 	attrs := map[string]interface{}{}
 	var secretRef map[string]interface{}
@@ -1596,6 +1719,9 @@ func buildWorkerDepsPersistentVolume(volume v1beta1.WorkerVolumeSpec, namespace 
 }
 
 func buildAccessKeyWorkerDepsPersistentVolume(volume v1beta1.WorkerVolumeSpec, namespace string) *unstructured.Unstructured {
+	// 逻辑说明：buildAccessKeyWorkerDepsPersistentVolume 接收 volume(v1beta1.WorkerVolumeSpec)、namespace(string)，依次借助 workerDepsObjectLabels构造Worker 成员的期望结果。
+	// 返回/状态：返回 *unstructured.Unstructured；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	attrs := map[string]interface{}{}
 	secretRef := map[string]interface{}{}
 	if volume.OSS != nil {
@@ -1637,6 +1763,9 @@ func buildAccessKeyWorkerDepsPersistentVolume(volume v1beta1.WorkerVolumeSpec, n
 }
 
 func buildRRSAWorkerDepsPersistentVolume(volume v1beta1.WorkerVolumeSpec) *unstructured.Unstructured {
+	// 逻辑说明：buildRRSAWorkerDepsPersistentVolume 接收 volume(v1beta1.WorkerVolumeSpec)，依次借助 workerDepsObjectLabels构造Worker 成员的期望结果。
+	// 返回/状态：返回 *unstructured.Unstructured；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	attrs := map[string]interface{}{}
 	if volume.OSS != nil {
 		attrs["authType"] = "agent-identity"
@@ -1675,6 +1804,9 @@ func workerDepsCredentialProviderName(mountName string) string {
 }
 
 func buildWorkerDepsCredentialProvider(volume v1beta1.WorkerVolumeSpec, namespace, mountName string) *unstructured.Unstructured {
+	// 逻辑说明：buildWorkerDepsCredentialProvider 接收 volume(v1beta1.WorkerVolumeSpec)、namespace/mountName(string)，依次借助 workerDepsObjectLabels、workerDepsCredentialProviderName、workerDepsCredentialProviderPolicy构造Worker 成员的期望结果。
+	// 返回/状态：返回 *unstructured.Unstructured；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	roleName := ""
 	if volume.OSS != nil && volume.OSS.Auth.RRSA != nil {
 		roleName = volume.OSS.Auth.RRSA.RoleName
@@ -1720,6 +1852,9 @@ func buildWorkerDepsAgentIdentity(namespace string) *unstructured.Unstructured {
 }
 
 func buildWorkerDepsAgentRole(namespace string) *unstructured.Unstructured {
+	// 逻辑说明：buildWorkerDepsAgentRole 接收 namespace(string)，依次借助 workerDepsFixedObjectLabels、workerDepsAgentRoleRule、workerDepsCredentialProviderName构造Worker 成员的期望结果。
+	// 返回/状态：返回 *unstructured.Unstructured；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	return &unstructured.Unstructured{Object: map[string]interface{}{
 		"apiVersion": "agentidentity.alibabacloud.com/v1alpha1",
 		"kind":       "AgentRole",
@@ -1774,6 +1909,9 @@ func buildWorkerDepsAgentRoleBinding(namespace string) *unstructured.Unstructure
 }
 
 func workerDepsCredentialProviderPolicy() string {
+	// 逻辑说明：workerDepsCredentialProviderPolicy 接收 无，依次借助 MarshalIndent处理Worker 成员的期望结果。
+	// 返回/状态：返回 string；可能读写凭据文件或 Kubernetes Secret，敏感内容只经返回值传递，禁止写日志。
+	// 失败/重试：随机源、文件系统或 Secret API 失败会返回错误；调用方重新读取现状后可安全重试。
 	policy := map[string]interface{}{
 		"Version": "1",
 		"Statement": []map[string]interface{}{
@@ -1817,6 +1955,9 @@ func workerDepsCredentialProviderPolicy() string {
 }
 
 func defaultSecretNamespace(secretNamespace, fallback string) string {
+	// 逻辑说明：defaultSecretNamespace 接收 secretNamespace/fallback(string)，按本函数中的条件与转换步骤处理Worker 成员的期望结果。
+	// 返回/状态：返回 string；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	if secretNamespace != "" {
 		return secretNamespace
 	}
@@ -1846,6 +1987,9 @@ func buildWorkerDepsPersistentVolumeClaim(volume v1beta1.WorkerVolumeSpec, names
 }
 
 func workerDepsObjectLabels(volume v1beta1.WorkerVolumeSpec) map[string]interface{} {
+	// 逻辑说明：workerDepsObjectLabels 接收 volume(v1beta1.WorkerVolumeSpec)，依次借助 workerDepsFixedObjectLabels、ToLower处理Worker 成员的期望结果。
+	// 返回/状态：返回 map[string]interface{}；会更新 Worker 成员的内存状态，存在客户端调用时还可能同步相应外部资源。
+	// 失败/重试：输入或依赖调用失败会返回错误；是否重排由上层调谐器决定，本函数不隐藏失败。
 	labels := workerDepsFixedObjectLabels()
 	labels["agentteams.io/mount-provider"] = strings.ToLower(volume.Type)
 	return labels
@@ -1859,6 +2003,9 @@ func workerDepsFixedObjectLabels() map[string]interface{} {
 }
 
 func minPositiveDuration(a, b time.Duration) time.Duration {
+	// 逻辑说明：minPositiveDuration 接收 a/b(time.Duration)，按本函数中的条件与转换步骤处理Worker 成员的期望结果。
+	// 返回/状态：返回 time.Duration；会更新 Worker 成员的内存状态，存在客户端调用时还可能同步相应外部资源。
+	// 失败/重试：输入或依赖调用失败会返回错误；是否重排由上层调谐器决定，本函数不隐藏失败。
 	if a <= 0 {
 		return b
 	}
@@ -1872,6 +2019,9 @@ func minPositiveDuration(a, b time.Duration) time.Duration {
 // observed container status, and reconcile outcome. Single source of truth
 // for both Worker and Team member paths.
 func computeMemberPhase(currentPhase, matrixUserID, desiredState, containerState string, reconcileErr error) string {
+	// 逻辑说明：computeMemberPhase 接收 currentPhase/matrixUserID/desiredState/containerState(string)、reconcileErr(error)，按本函数中的条件与转换步骤计算Worker 成员的期望结果。
+	// 返回/状态：返回 string；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	if reconcileErr != nil {
 		if matrixUserID == "" {
 			return "Failed"
@@ -1907,6 +2057,9 @@ func computeMemberPhase(currentPhase, matrixUserID, desiredState, containerState
 }
 
 func extraHostsForBackend(wb backend.WorkerBackend) []string {
+	// 逻辑说明：extraHostsForBackend 接收 wb(backend.WorkerBackend)，依次借助 Name处理Worker 成员的期望结果。
+	// 返回/状态：返回 []string；可能查询、创建、停止、更新或删除 Pod/沙箱实例，并同步内存中的观测状态。
+	// 失败/重试：后端失败会返回错误或重排时间；下一轮先重新读取实例，避免重复创建或删除。
 	if wb != nil && wb.Name() == "docker" {
 		return []string{dockerHostInternalExtraHost}
 	}
@@ -1920,6 +2073,9 @@ func extraHostsForBackend(wb backend.WorkerBackend) []string {
 // 并把已验证的域名写入 state。Higress 是路由的权威来源，Status
 // 只是上次观察缓存；两者冲突时必须以网关实际状态为准。
 func ReconcileMemberExpose(ctx context.Context, d MemberDeps, m MemberContext, state *MemberState) error {
+	// 逻辑说明：ReconcileMemberExpose 接收 ctx(context.Context)、d(MemberDeps)、m(MemberContext)、state(*MemberState)，依次借助 ReconcileExpose、Is、V调谐Worker 成员的期望结果。
+	// 返回/状态：返回 error；会更新 Worker 成员的内存状态，存在客户端调用时还可能同步相应外部资源。
+	// 失败/重试：输入或依赖调用失败会返回错误；是否重排由上层调谐器决定，本函数不隐藏失败。
 	if len(m.Spec.Expose) == 0 && len(m.CurrentExposedPorts) == 0 {
 		state.ExposedPorts = nil
 		return nil
@@ -1947,6 +2103,9 @@ func ReconcileMemberExpose(ctx context.Context, d MemberDeps, m MemberContext, s
 // finalizer 调用。清理步骤要允许重复执行：进程可能在删掉 Matrix
 // 别名后、移除 finalizer 前重启，下一轮会再次进入这个函数。
 func ReconcileMemberDelete(ctx context.Context, d MemberDeps, m MemberContext) error {
+	// 逻辑说明：ReconcileMemberDelete 接收 ctx(context.Context)、d(MemberDeps)、m(MemberContext)，依次借助 Delete、sandboxSetTokenProjectionKey、LeaveAllWorkerRooms、DeleteWorkerRoom调谐Worker 成员的期望结果。
+	// 返回/状态：返回 error；会更新 Worker 成员的内存状态，存在客户端调用时还可能同步相应外部资源。
+	// 失败/重试：输入或依赖调用失败会返回错误；是否重排由上层调谐器决定，本函数不隐藏失败。
 	logger := log.FromContext(ctx)
 	logger.Info("deleting member", "name", m.Name, "role", m.Role)
 	sandboxSetTokenProjections.Delete(sandboxSetTokenProjectionKey(m))

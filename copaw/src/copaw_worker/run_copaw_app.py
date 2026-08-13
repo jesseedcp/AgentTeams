@@ -12,6 +12,7 @@ from copaw_worker.hooks import install_tool_hooks
 
 
 def main() -> None:
+    # 逻辑说明：在以 `python -m copaw` 启动 Web 应用前安装 AgentTeams 工具、脱敏与凭据保护 hooks，再用 `__main__` 语义转交上游 CoPaw 入口；任一步失败直接抛出。
     install_tool_hooks()
     runpy.run_module("copaw", run_name="__main__", alter_sys=True)
 

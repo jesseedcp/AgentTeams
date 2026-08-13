@@ -51,6 +51,7 @@ const (
 // 与最小寿命。过短的 token 可能在 Worker 还未启动时就过期，导致表面上
 // 是模型或 Matrix 错误，实际却是身份过期。
 func NormalizeAuthTokenExpirationSeconds(seconds int64) int64 {
+	// 逻辑说明：未配置或非正数时返回一小时默认值，低于 Kubernetes 可接受下限时提升到十分钟，其余原样保留，避免投影 token 在 Agent 启动前过期。
 	if seconds <= 0 {
 		return DefaultAuthTokenExpirationSeconds
 	}
@@ -74,6 +75,7 @@ func ValidManagerRuntime(r string) bool {
 
 // ResolveManagerRuntime applies the only supported Manager default.
 func ResolveManagerRuntime(runtime string) string {
+	// 逻辑说明：Manager 未显式指定 runtime 时唯一回退 AgentScope；非空值原样返回，合法性由上层校验负责。
 	if runtime == "" {
 		return RuntimeAgentScope
 	}
@@ -97,6 +99,7 @@ func ResolveManagerRuntime(runtime string) string {
 // no-op for any CR created with `spec.runtime` unset (the API server would
 // silently fill it before the controller ever observes the empty value).
 func ResolveRuntime(reqRuntime, fallback string) string {
+	// 逻辑说明：按请求显式值、调用方环境回退、历史 OpenClaw 默认的顺序选出 Worker 有效 runtime，保证后续镜像和工作目录逻辑拿到非空值。
 	if reqRuntime != "" {
 		return reqRuntime
 	}

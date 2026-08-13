@@ -30,6 +30,7 @@ class HostFileAccess:
         write_allowlist: tuple[str, ...],
         max_bytes: int = 2 * 1024 * 1024,
     ) -> None:
+        # 逻辑说明：把可选共享根解析为绝对真实路径，并冻结读写 allowlist 与字节上限；后续每次访问仍会重新检查目标是否留在该根内。
         self._root = root.resolve() if root is not None else None
         self._read = tuple(read_allowlist)
         self._write = tuple(write_allowlist)
@@ -40,6 +41,7 @@ class HostFileAccess:
         return self._root is not None
 
     def read_text(self, path: str) -> dict[str, object]:
+        # 逻辑说明：先按只读 allowlist 解析并约束目标，再读取字节、检查大小并以 UTF-8 返回；权限、I/O 或解码失败均直接拒绝，不返回截断内容。
         target = self._resolve(path, self._read)
         data = target.read_bytes()
         if len(data) > self._max_bytes:
@@ -51,6 +53,7 @@ class HostFileAccess:
         }
 
     def write_text(self, path: str, content: str) -> dict[str, object]:
+        # 逻辑说明：校验写 allowlist 与字节上限后，在同目录写临时文件、flush/fsync 再原子 replace；finally 清理残留临时文件，失败不会暴露半写目标。
         target = self._resolve(path, self._write)
         data = content.encode("utf-8")
         if len(data) > self._max_bytes:
@@ -71,6 +74,7 @@ class HostFileAccess:
         return {"path": path, "bytes": len(data)}
 
     def _resolve(self, path: str, allowlist: tuple[str, ...]) -> Path:
+        # 逻辑说明：把用户路径规范为相对 POSIX 形式，依次拒绝禁用状态、绝对路径、..、未匹配 allowlist 和 resolve 后越界；只返回仍位于共享根内的真实路径。
         if self._root is None:
             raise PermissionError("host file access is disabled")
         relative = PurePosixPath(path.replace("\\", "/"))
@@ -101,6 +105,7 @@ class _Write(_Read):
 
 class HostFileToolkitFactory:
     def __init__(self, *, access: HostFileAccess, yolo: bool) -> None:
+        # 逻辑说明：绑定已经限定根目录的宿主文件访问器及确认策略；路径解析和实际读写留到每次工具调用执行。
         self._access = access
         self._yolo = yolo
 
@@ -108,6 +113,7 @@ class HostFileToolkitFactory:
         self,
         policy: RoomPolicy,
     ) -> tuple[ManagerTool, ...]:
+        # 逻辑说明：仅在管理员私聊且主机共享已启用时注册读写工具；写工具始终携带高风险确认提示，其他房间返回空能力集。
         if policy.kind is not RoomKind.ADMIN_DM or not self._access.enabled:
             return ()
         return (

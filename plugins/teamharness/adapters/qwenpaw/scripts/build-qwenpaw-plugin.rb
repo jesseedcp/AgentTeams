@@ -26,6 +26,7 @@ name = manifest.fetch("metadata").fetch("name")
 version = manifest.fetch("metadata").fetch("version")
 package_name = "#{name}-qwenpaw-#{version}"
 
+# 逻辑说明：按 manifest/adapter 给出的相对条目，从源根复制到临时 QwenPaw 包；源缺失立即终止，目录递归复制、文件保留相对路径，避免发布包悄悄漏项。
 def copy_entry(source_root, target_root, entry)
   src = source_root / entry
   abort("missing qwenpaw package source: #{src}") unless src.exist?
@@ -43,6 +44,7 @@ def copy_entry(source_root, target_root, entry)
   end
 end
 
+# 逻辑说明：仅在传入的临时打包树内删除 Python 缓存和 macOS 元数据；它会修改 staging，但不触碰插件源码或最终包之外的目录。
 def prune_generated(path)
   Dir.glob((path / "**/*").to_s, File::FNM_DOTMATCH).each do |item|
     base = File.basename(item)
@@ -50,6 +52,7 @@ def prune_generated(path)
   end
 end
 
+# 逻辑说明：先删除同名旧产物，再把临时包目录压缩到目标 zip；优先调用系统 `zip`，不可用时回退 Python `zipfile`，两条路径失败都会终止而不保留伪成功结果。
 def zip_dir(root, package_name, out_path)
   FileUtils.rm_f(out_path)
   if system("zip", "-v", out: File::NULL, err: File::NULL)

@@ -15,6 +15,7 @@ import (
 )
 
 func applyCmd() *cobra.Command {
+	// 逻辑说明：收集一个或多个 -f 输入并复用同一 stdin，或分派到 Worker 参数/ZIP apply 子命令。
 	var files []string
 
 	cmd := &cobra.Command{
@@ -55,10 +56,12 @@ type yamlMetadata struct {
 }
 
 func applyFromFiles(files []string) error {
+	// 逻辑说明：生产入口把进程 stdin 注入可测试实现，文件和 “-” 的解析规则保持一致。
 	return applyFromFilesWithInput(files, os.Stdin)
 }
 
 func applyFromFilesWithInput(files []string, stdin io.Reader) error {
+	// 逻辑说明：每个文件读取并拆分多文档 YAML；stdin 最多读取一次，跳过空/无身份文档后逐项声明式 upsert。
 	client := NewAPIClient()
 	var stdinData []byte
 	stdinRead := false
@@ -110,6 +113,7 @@ func applyFromFilesWithInput(files []string, stdin io.Reader) error {
 // 这里只应用 spec，不将 YAML 中的 status 或 Kubernetes 服务端 metadata 送回，
 // 否则 CLI 可能覆盖 Controller 正在维护的观察状态和并发控制字段。
 func applyOneResource(client *APIClient, res yamlResource) error {
+	// 逻辑说明：按 kind/name 探测存在性，存在 PUT spec、不存在 POST name+spec，绝不回写 status 或服务端 metadata。
 	kind := strings.ToLower(res.Kind)
 	name := res.Metadata.Name
 
@@ -141,6 +145,7 @@ func applyOneResource(client *APIClient, res yamlResource) error {
 }
 
 func buildApplyBody(res yamlResource, includeName bool) map[string]interface{} {
+	// 逻辑说明：复制 YAML spec 到新 map，并只在创建请求中加入 metadata.name，避免修改解析后的原对象。
 	body := make(map[string]interface{})
 	if includeName {
 		body["name"] = res.Metadata.Name
@@ -152,6 +157,7 @@ func buildApplyBody(res yamlResource, includeName bool) map[string]interface{} {
 }
 
 func splitYAMLDocs(content string) []string {
+	// 逻辑说明：仅把独占行 “---” 当文档边界，保留每段正文顺序并丢弃纯空白文档。
 	var docs []string
 	current := ""
 	for _, line := range strings.Split(content, "\n") {
@@ -175,6 +181,7 @@ func splitYAMLDocs(content string) []string {
 // ---------------------------------------------------------------------------
 
 func applyWorkerSubCmd() *cobra.Command {
+	// 逻辑说明：校验 Worker 名后在 ZIP 上传路径与显式参数 upsert 路径二选一，并注册所有输入 flag。
 	var (
 		name       string
 		model      string
@@ -238,6 +245,7 @@ func applyWorkerSubCmd() *cobra.Command {
 // the controller's defaultRuntime() (which silently falls back to openclaw and
 // hides cross-runtime test coverage gaps — see fix in this commit).
 func applyWorkerZip(name, zipPath, runtimeOverride string) error {
+	// 逻辑说明：读取 ZIP、提取模型/runtime、先上传取得 package URI，再探测 Worker 存在性选择创建或更新。
 	zipData, err := os.ReadFile(zipPath)
 	if err != nil {
 		return fmt.Errorf("read ZIP %s: %w", zipPath, err)
@@ -299,6 +307,7 @@ func applyWorkerZip(name, zipPath, runtimeOverride string) error {
 // applyWorkerParams creates or updates a Worker from CLI flags (upsert semantics).
 func applyWorkerParams(name, model, runtime, image, identity, soul, soulFile,
 	skills, packageURI, expose, team, role string) error {
+	// 逻辑说明：解析文件/URI/列表/端口为类型化请求 map，探测目标后执行 upsert；只发送用户明确提供的可选字段。
 
 	if model == "" {
 		model = defaultWorkerModel()
@@ -377,6 +386,7 @@ func applyWorkerParams(name, model, runtime, image, identity, soul, soulFile,
 // their own defaults (model → defaultWorkerModel(), which prefers
 // $AGENTTEAMS_DEFAULT_MODEL; runtime → server-side default).
 func extractWorkerFieldsFromZip(zipData []byte) (model, runtime string) {
+	// 逻辑说明：只读取根 manifest.json，兼容顶层与 worker 子对象且后者优先；任何 ZIP/JSON 错误安全返回空值供调用方默认。
 	r, err := zip.NewReader(bytes.NewReader(zipData), int64(len(zipData)))
 	if err != nil {
 		return "", ""

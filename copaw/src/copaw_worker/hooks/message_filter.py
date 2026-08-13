@@ -78,11 +78,15 @@ class MessageFilterResult:
 
 def extract_matrix_mentions(text: str) -> list[str]:
     """Extract visible Matrix user IDs from message text."""
+    # 逻辑说明：`extract_matrix_mentions` 接收 text，执行 Matrix 消息过滤 中的“extract Matrix mentions”步骤，返回 list[str]；
+    # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     return list(dict.fromkeys(_MATRIX_USER_ID_RE.findall(text or "")))
 
 
 def canonicalize_team_worker_mentions(text: str) -> str:
     """Expand unambiguous Team Worker aliases to their full Matrix IDs."""
+    # 逻辑说明：`canonicalize_team_worker_mentions` 接收 text，执行 Matrix 消息过滤 中的“canonicalize 团队 Worker mentions”步骤，返回 str；
+    # 不修改外部状态。失败策略：已知失败按现有 except 转为错误结果或日志，未覆盖异常继续上抛；本函数不额外重试，避免掩盖持续故障。
     if _runtime_config_field("member", "role") != "team_leader":
         return text
     team_name = _runtime_config_field("team", "name")
@@ -116,6 +120,8 @@ def canonicalize_team_worker_mentions(text: str) -> str:
             aliases[localpart[len(prefix) :]] = matrix_id
 
     def replace(match: re.Match[str]) -> str:
+        # 逻辑说明：`replace` 接收 match，执行 Matrix 消息过滤 中的“replace”步骤，返回 str；不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；
+        # 本函数不额外重试，避免掩盖持续故障。
         matrix_id = match.group(0)
         localpart = matrix_id.split(":", 1)[0].removeprefix("@")
         return aliases.get(localpart, matrix_id)
@@ -123,6 +129,7 @@ def canonicalize_team_worker_mentions(text: str) -> str:
     canonical = _MATRIX_USER_ID_RE.sub(replace, text or "")
 
     def replace_local(match: re.Match[str]) -> str:
+        # 逻辑说明：`replace_local` 接收 match，替换本地，返回 str；不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
         localpart = match.group(1)
         return aliases.get(localpart, match.group(0))
 
@@ -131,6 +138,8 @@ def canonicalize_team_worker_mentions(text: str) -> str:
 
 def resolve_team_leader_assignment_room(text: str, room_id: str) -> str:
     """Route Team Leader worker assignments from Leader DM to Team Room."""
+    # 逻辑说明：`resolve_team_leader_assignment_room` 接收 text、room_id，解析团队 Leader 派工 房间，返回 str；
+    # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     if _runtime_config_field("member", "role") != "team_leader":
         return room_id
 
@@ -152,6 +161,8 @@ def resolve_team_leader_assignment_room(text: str, room_id: str) -> str:
 
 def _low_information_key(text: str) -> str:
     """Normalize short ACK text by dropping punctuation, emoji, and spacing."""
+    # 逻辑说明：`_low_information_key` 接收 text，执行 Matrix 消息过滤 中的“low information key”步骤，返回 str；
+    # 会访问网络服务。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     return "".join(
         re.findall(r"[0-9A-Za-z\u4e00-\u9fff]+", text or ""),
     ).lower()
@@ -159,6 +170,8 @@ def _low_information_key(text: str) -> str:
 
 def strip_no_reply_contamination(text: str) -> str:
     """Remove leaked NO_REPLY protocol tokens from otherwise substantive text."""
+    # 逻辑说明：`strip_no_reply_contamination` 接收 text，执行 Matrix 消息过滤 中的“strip no reply contamination”步骤，返回 str；
+    # 会读写本地文件。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     if not text or NO_REPLY_TOKEN not in text:
         return text or ""
 
@@ -176,6 +189,8 @@ def strip_no_reply_contamination(text: str) -> str:
 
 
 def _strip_yaml_string(value: str) -> str:
+    # 逻辑说明：`_strip_yaml_string` 接收 value，执行 Matrix 消息过滤 中的“strip yaml string”步骤，返回 str；
+    # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     text = value.strip()
     if not text or text in {"null", "~"}:
         return ""
@@ -187,6 +202,8 @@ def _strip_yaml_string(value: str) -> str:
 
 
 def _runtime_root() -> Path:
+    # 逻辑说明：从 `COPAW_WORKING_DIR` 反推 Worker runtime 根目录，识别 `.copaw/workspaces/default` 与 `.copaw` 两种布局；未配置时退回当前目录。
+    # 路径会展开用户目录并规范化，但不会创建或校验目标目录内容。
     configured = os.environ.get("COPAW_WORKING_DIR")
     if configured:
         path = Path(configured).expanduser().resolve()
@@ -207,6 +224,8 @@ def _runtime_root() -> Path:
 
 
 def _runtime_config_field(section: str, key: str) -> str:
+    # 逻辑说明：`_runtime_config_field` 接收 section、key，执行 Matrix 消息过滤 中的“runtime 配置 字段”步骤，返回 str；
+    # 不修改外部状态。失败策略：已知失败按现有 except 转为错误结果或日志，未覆盖异常继续上抛；本函数不额外重试，避免掩盖持续故障。
     path = _runtime_root() / "runtime" / "runtime.yaml"
     if not path.exists():
         return ""
@@ -239,6 +258,10 @@ def get_team_leader_dm_internal_preamble_reason(
     room_id: str | None = None,
 ) -> str | None:
     """Return a suppress reason for visible Team Leader internal DM preambles."""
+    # 逻辑说明：`get_team_leader_dm_internal_preamble_reason` 接收 text、room_id，
+    # 读取团队 Leader dm internal preamble reason，返回 str | None；
+    #
+    # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     if not room_id:
         return None
     if _runtime_config_field("member", "role") != "team_leader":
@@ -272,6 +295,8 @@ def get_pingpong_block_reason(
     fallback_user_id: str | None = None,
 ) -> str | None:
     """Return a block reason when a reply would only wake another agent."""
+    # 逻辑说明：`get_pingpong_block_reason` 接收 text、mentions、fallback_user_id，读取pingpong block reason，返回 str | None；
+    # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     visible_mentions = mentions
     if visible_mentions is None:
         visible_mentions = extract_matrix_mentions(text)
@@ -310,6 +335,10 @@ def filter_outgoing_matrix_message(
     room_id: str | None = None,
 ) -> MessageFilterResult:
     """Apply all outgoing Matrix message filters in a stable order."""
+    # 逻辑说明：`filter_outgoing_matrix_message` 接收 text、mentions、fallback_user_id、room_id，
+    # 依次执行控制标记、内部前导语和 ping-pong 过滤并返回决策，返回 MessageFilterResult；
+    #
+    # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     raw_text = text or ""
     stripped = raw_text.strip()
 

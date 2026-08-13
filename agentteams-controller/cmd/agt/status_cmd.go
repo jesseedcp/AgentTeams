@@ -7,6 +7,7 @@ import (
 )
 
 func statusCmd() *cobra.Command {
+	// 逻辑说明：查询集群汇总状态，并按 -o json 或人类可读详情二选一输出。
 	var output string
 
 	cmd := &cobra.Command{
@@ -37,6 +38,7 @@ func statusCmd() *cobra.Command {
 }
 
 func versionCmd() *cobra.Command {
+	// 逻辑说明：读取 Controller 版本/模式并复用统一 JSON 或详情输出路径。
 	var output string
 
 	cmd := &cobra.Command{

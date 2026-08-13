@@ -216,6 +216,9 @@ type Deployer struct {
 }
 
 func NewDeployer(cfg DeployerConfig) *Deployer {
+	// 逻辑说明：NewDeployer 接收 cfg(DeployerConfig)，依次借助 Dir处理运行时配置的期望结果。
+	// 返回/状态：返回 *Deployer；可能把配置、技能或运行文档写入本地目录或 MinIO/S3 的稳定对象键。
+	// 失败/重试：校验、序列化或 I/O 失败会返回错误；旧配置保持可用，上层可用相同对象键覆盖重试。
 	managerAgentDir := cfg.ManagerAgentDir
 	if managerAgentDir == "" && cfg.WorkerAgentDir != "" {
 		managerAgentDir = filepath.Dir(cfg.WorkerAgentDir)
@@ -237,6 +240,9 @@ func NewDeployer(cfg DeployerConfig) *Deployer {
 // DeployPackage resolves, downloads, extracts, and deploys a package to OSS.
 // No-op if uri is empty.
 func (d *Deployer) DeployPackage(ctx context.Context, name, uri string, isUpdate bool) error {
+	// 逻辑说明：DeployPackage 接收 ctx(context.Context)、name/uri(string)、isUpdate(bool)，依次借助 redactPackageURI、ResolveAndExtract、DeployToMinIO部署运行时配置的期望结果。
+	// 返回/状态：返回 error；可能把配置、技能或运行文档写入本地目录或 MinIO/S3 的稳定对象键。
+	// 失败/重试：校验、序列化或 I/O 失败会返回错误；旧配置保持可用，上层可用相同对象键覆盖重试。
 	if uri == "" {
 		return nil
 	}
@@ -269,6 +275,9 @@ func (d *Deployer) DeployPackage(ctx context.Context, name, uri string, isUpdate
 // WriteInlineConfigs writes inline identity/soul/agents content to the local agent directory.
 // No-op if all inline fields are empty.
 func (d *Deployer) WriteInlineConfigs(name string, spec v1beta1.WorkerSpec) error {
+	// 逻辑说明：WriteInlineConfigs 接收 name(string)、spec(v1beta1.WorkerSpec)，依次借助 WriteInlineConfigs写入运行时配置的期望结果。
+	// 返回/状态：返回 error；可能把配置、技能或运行文档写入本地目录或 MinIO/S3 的稳定对象键。
+	// 失败/重试：校验、序列化或 I/O 失败会返回错误；旧配置保持可用，上层可用相同对象键覆盖重试。
 	if spec.Identity == "" && spec.Soul == "" && spec.Agents == "" {
 		return nil
 	}
@@ -284,6 +293,9 @@ func (d *Deployer) WriteInlineConfigs(name string, spec v1beta1.WorkerSpec) erro
 // openclaw.json, SOUL.md, mcporter config, Matrix password, agent file sync,
 // AGENTS.md merge with builtin section + coordination context, builtin skills.
 func (d *Deployer) DeployWorkerConfig(ctx context.Context, req WorkerDeployRequest) error {
+	// 逻辑说明：DeployWorkerConfig 接收 ctx(context.Context)、req(WorkerDeployRequest)，依次借助 ensureDirectoryObject、MkdirAll、seedLocalAgentFiles、GenerateOpenClawConfig部署运行时配置的期望结果。
+	// 返回/状态：返回 error；可能把配置、技能或运行文档写入本地目录或 MinIO/S3 的稳定对象键。
+	// 失败/重试：校验、序列化或 I/O 失败会返回错误；旧配置保持可用，上层可用相同对象键覆盖重试。
 	logger := log.FromContext(ctx)
 	agentPrefix := fmt.Sprintf("agents/%s", req.Name)
 	localAgentDir := fmt.Sprintf("%s/%s", d.agentFSDir, req.Name)
@@ -471,6 +483,9 @@ func (d *Deployer) DeployWorkerConfig(ctx context.Context, req WorkerDeployReque
 }
 
 func heartbeatEvery(cfg *agentconfig.HeartbeatConfig) string {
+	// 逻辑说明：heartbeatEvery 接收 cfg(*agentconfig.HeartbeatConfig)，按本函数中的条件与转换步骤处理运行时配置的期望结果。
+	// 返回/状态：返回 string；可能把配置、技能或运行文档写入本地目录或 MinIO/S3 的稳定对象键。
+	// 失败/重试：校验、序列化或 I/O 失败会返回错误；旧配置保持可用，上层可用相同对象键覆盖重试。
 	if cfg == nil || !cfg.Enabled {
 		return ""
 	}
@@ -478,6 +493,9 @@ func heartbeatEvery(cfg *agentconfig.HeartbeatConfig) string {
 }
 
 func (d *Deployer) deployWorkerMcporterConfig(ctx context.Context, agentPrefix, gatewayKey string, mcpServers []v1beta1.MCPServer) {
+	// 逻辑说明：deployWorkerMcporterConfig 接收 ctx(context.Context)、agentPrefix/gatewayKey(string)、mcpServers([]v1beta1.MCPServer)，依次借助 GenerateMcporterConfig、mergeExistingWorkerMcporterConfig、PutObject部署运行时配置的期望结果。
+	// 返回/状态：返回 无；可能把配置、技能或运行文档写入本地目录或 MinIO/S3 的稳定对象键。
+	// 失败/重试：校验、序列化或 I/O 失败会返回错误；旧配置保持可用，上层可用相同对象键覆盖重试。
 	logger := log.FromContext(ctx)
 	mcporterJSON, err := d.agentConfig.GenerateMcporterConfig(gatewayKey, mcpServers)
 	if err != nil {
@@ -501,6 +519,9 @@ func (d *Deployer) deployWorkerMcporterConfig(ctx context.Context, agentPrefix, 
 }
 
 func (d *Deployer) mergeExistingWorkerMcporterConfig(ctx context.Context, agentPrefix string, desiredJSON []byte) ([]byte, error) {
+	// 逻辑说明：mergeExistingWorkerMcporterConfig 接收 ctx(context.Context)、agentPrefix(string)、desiredJSON([]byte)，依次借助 readExistingWorkerMcporterConfig、mergeMcporterConfigPreservingExternal合并运行时配置的期望结果。
+	// 返回/状态：返回 []byte、error；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	existingJSON, ok := d.readExistingWorkerMcporterConfig(ctx, agentPrefix)
 	if !ok {
 		return desiredJSON, nil
@@ -509,6 +530,9 @@ func (d *Deployer) mergeExistingWorkerMcporterConfig(ctx context.Context, agentP
 }
 
 func (d *Deployer) readExistingWorkerMcporterConfig(ctx context.Context, agentPrefix string) ([]byte, bool) {
+	// 逻辑说明：readExistingWorkerMcporterConfig 接收 ctx(context.Context)、agentPrefix(string)，依次借助 GetObject读取运行时配置的期望结果。
+	// 返回/状态：返回 []byte、bool；可能把配置、技能或运行文档写入本地目录或 MinIO/S3 的稳定对象键。
+	// 失败/重试：校验、序列化或 I/O 失败会返回错误；旧配置保持可用，上层可用相同对象键覆盖重试。
 	data, err := d.oss.GetObject(ctx, agentPrefix+"/config/mcporter.json")
 	if err == nil && len(data) > 0 {
 		return data, true
@@ -525,6 +549,9 @@ type rawMcporterServer struct {
 }
 
 func mergeMcporterConfigPreservingExternal(existingJSON, desiredJSON []byte) ([]byte, error) {
+	// 逻辑说明：mergeMcporterConfigPreservingExternal 接收 existingJSON/desiredJSON([]byte)，依次借助 Unmarshal、mcporterGatewayOrigins、mcporterServerBelongsToGateway、MarshalIndent合并运行时配置的期望结果。
+	// 返回/状态：返回 []byte、error；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	var existing rawMcporterConfig
 	if err := json.Unmarshal(existingJSON, &existing); err != nil {
 		return nil, err
@@ -555,6 +582,9 @@ func mergeMcporterConfigPreservingExternal(existingJSON, desiredJSON []byte) ([]
 }
 
 func mcporterGatewayOrigins(servers map[string]json.RawMessage) map[string]struct{} {
+	// 逻辑说明：mcporterGatewayOrigins 接收 servers(map[string]json.RawMessage)，依次借助 parseMcporterServerURL、Contains、mcporterURLOrigin处理运行时配置的期望结果。
+	// 返回/状态：返回 map[string]struct{}；可能把配置、技能或运行文档写入本地目录或 MinIO/S3 的稳定对象键。
+	// 失败/重试：校验、序列化或 I/O 失败会返回错误；旧配置保持可用，上层可用相同对象键覆盖重试。
 	origins := map[string]struct{}{}
 	for _, server := range servers {
 		parsed := parseMcporterServerURL(server)
@@ -567,6 +597,9 @@ func mcporterGatewayOrigins(servers map[string]json.RawMessage) map[string]struc
 }
 
 func mcporterServerBelongsToGateway(server json.RawMessage, gatewayOrigins map[string]struct{}) bool {
+	// 逻辑说明：mcporterServerBelongsToGateway 接收 server(json.RawMessage)、gatewayOrigins(map[string]struct{})，依次借助 parseMcporterServerURL、Contains、mcporterURLOrigin处理运行时配置的期望结果。
+	// 返回/状态：返回 bool；可能把配置、技能或运行文档写入本地目录或 MinIO/S3 的稳定对象键。
+	// 失败/重试：校验、序列化或 I/O 失败会返回错误；旧配置保持可用，上层可用相同对象键覆盖重试。
 	if len(gatewayOrigins) == 0 {
 		return false
 	}
@@ -579,6 +612,9 @@ func mcporterServerBelongsToGateway(server json.RawMessage, gatewayOrigins map[s
 }
 
 func parseMcporterServerURL(server json.RawMessage) *url.URL {
+	// 逻辑说明：parseMcporterServerURL 接收 server(json.RawMessage)，依次借助 Unmarshal、Parse解析运行时配置的期望结果。
+	// 返回/状态：返回 *url.URL；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	var decoded rawMcporterServer
 	if err := json.Unmarshal(server, &decoded); err != nil {
 		return nil
@@ -595,11 +631,17 @@ func parseMcporterServerURL(server json.RawMessage) *url.URL {
 }
 
 func mcporterURLOrigin(u *url.URL) string {
+	// 逻辑说明：mcporterURLOrigin 接收 u(*url.URL)，依次借助 ToLower处理运行时配置的期望结果。
+	// 返回/状态：返回 string；可能把配置、技能或运行文档写入本地目录或 MinIO/S3 的稳定对象键。
+	// 失败/重试：校验、序列化或 I/O 失败会返回错误；旧配置保持可用，上层可用相同对象键覆盖重试。
 	return strings.ToLower(u.Scheme) + "://" + strings.ToLower(u.Host)
 }
 
 // InjectCoordinationContext writes team coordination context into the leader's AGENTS.md.
 func (d *Deployer) InjectCoordinationContext(ctx context.Context, req CoordinationDeployRequest) error {
+	// 逻辑说明：InjectCoordinationContext 接收 ctx(context.Context)、req(CoordinationDeployRequest)，依次借助 GetObject、InjectCoordinationContext、PutObject、renderAndPushSoulTemplate处理运行时配置的期望结果。
+	// 返回/状态：返回 error；可能把配置、技能或运行文档写入本地目录或 MinIO/S3 的稳定对象键。
+	// 失败/重试：校验、序列化或 I/O 失败会返回错误；旧配置保持可用，上层可用相同对象键覆盖重试。
 	leaderAgentPrefix := fmt.Sprintf("agents/%s", req.LeaderName)
 
 	teamWorkers := make([]agentconfig.TeamWorkerInfo, 0, len(req.TeamWorkers))
@@ -639,6 +681,9 @@ func (d *Deployer) InjectCoordinationContext(ctx context.Context, req Coordinati
 // The rendered template is wrapped in markers; existing content (from package or
 // prior runs) is preserved outside the markers. Priority: CR spec.leader.soul > template.
 func (d *Deployer) renderAndPushSoulTemplate(ctx context.Context, agentPrefix string, req CoordinationDeployRequest) error {
+	// 逻辑说明：renderAndPushSoulTemplate 接收 ctx(context.Context)、agentPrefix(string)、req(CoordinationDeployRequest)，依次借助 PutObject、Join、builtinAgentDir、ReadFile渲染运行时配置的期望结果。
+	// 返回/状态：返回 error；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	soulKey := agentPrefix + "/SOUL.md"
 
 	if req.LeaderSoul != "" {
@@ -677,6 +722,9 @@ func (d *Deployer) renderAndPushSoulTemplate(ctx context.Context, agentPrefix st
 // worker's AGENTS.md. This is the worker-side counterpart to
 // InjectCoordinationContext, which targets the leader.
 func (d *Deployer) InjectWorkerCoordination(ctx context.Context, req WorkerCoordinationRequest) error {
+	// 逻辑说明：InjectWorkerCoordination 接收 ctx(context.Context)、req(WorkerCoordinationRequest)，依次借助 GetObject、InjectCoordinationContext、PutObject处理运行时配置的期望结果。
+	// 返回/状态：返回 error；可能把配置、技能或运行文档写入本地目录或 MinIO/S3 的稳定对象键。
+	// 失败/重试：校验、序列化或 I/O 失败会返回错误；旧配置保持可用，上层可用相同对象键覆盖重试。
 	agentPrefix := fmt.Sprintf("agents/%s", req.WorkerName)
 	existing, _ := d.oss.GetObject(ctx, agentPrefix+"/AGENTS.md")
 	coordCtx := agentconfig.CoordinationContext{
@@ -695,6 +743,9 @@ func (d *Deployer) InjectWorkerCoordination(ctx context.Context, req WorkerCoord
 // InjectHeartbeatConfig reads the leader's existing openclaw.json from OSS,
 // injects or updates the heartbeat configuration, and writes it back.
 func (d *Deployer) InjectHeartbeatConfig(ctx context.Context, req InjectHeartbeatRequest) error {
+	// 逻辑说明：InjectHeartbeatConfig 接收 ctx(context.Context)、req(InjectHeartbeatRequest)，依次借助 GetObject、InjectHeartbeat、PutObject处理运行时配置的期望结果。
+	// 返回/状态：返回 error；可能把配置、技能或运行文档写入本地目录或 MinIO/S3 的稳定对象键。
+	// 失败/重试：校验、序列化或 I/O 失败会返回错误；旧配置保持可用，上层可用相同对象键覆盖重试。
 	agentPrefix := fmt.Sprintf("agents/%s", req.WorkerName)
 	existing, _ := d.oss.GetObject(ctx, agentPrefix+"/openclaw.json")
 	updated := agentconfig.InjectHeartbeat(existing, req.Enabled, req.Every)
@@ -709,6 +760,9 @@ func (d *Deployer) InjectHeartbeatConfig(ctx context.Context, req InjectHeartbea
 // apply the role-aware Team policy. On Team deletion, the caller resets the
 // lists to standalone manager/admin semantics.
 func (d *Deployer) InjectChannelPolicy(ctx context.Context, req InjectChannelPolicyRequest) error {
+	// 逻辑说明：InjectChannelPolicy 接收 ctx(context.Context)、req(InjectChannelPolicyRequest)，依次借助 GetObject、InjectChannelPolicy、PutObject处理运行时配置的期望结果。
+	// 返回/状态：返回 error；可能把配置、技能或运行文档写入本地目录或 MinIO/S3 的稳定对象键。
+	// 失败/重试：校验、序列化或 I/O 失败会返回错误；旧配置保持可用，上层可用相同对象键覆盖重试。
 	if req.WorkerName == "" || len(req.GroupAllowFrom) == 0 || len(req.DMAllowFrom) == 0 {
 		return nil
 	}
@@ -723,6 +777,9 @@ func (d *Deployer) InjectChannelPolicy(ctx context.Context, req InjectChannelPol
 // Worker. It intentionally does not rewrite openclaw.json or credentials:
 // decoupled Teams do not own Worker lifecycle/config wholesale.
 func (d *Deployer) SyncTeamLeaderAssets(ctx context.Context, req SyncTeamLeaderAssetsRequest) error {
+	// 逻辑说明：SyncTeamLeaderAssets 接收 ctx(context.Context)、req(SyncTeamLeaderAssetsRequest)，依次借助 prepareAndPushAgentsMD、pushBuiltinSkills、pushBuiltinTopLevelFiles同步运行时配置的期望结果。
+	// 返回/状态：返回 error；可能把配置、技能或运行文档写入本地目录或 MinIO/S3 的稳定对象键。
+	// 失败/重试：校验、序列化或 I/O 失败会返回错误；旧配置保持可用，上层可用相同对象键覆盖重试。
 	if req.WorkerName == "" {
 		return nil
 	}
@@ -745,6 +802,9 @@ func (d *Deployer) SyncTeamLeaderAssets(ctx context.Context, req SyncTeamLeaderA
 // Controller desired state is authoritative; the AgentScope Manager never
 // mutates a JSON registry or invokes a legacy distribution script.
 func (d *Deployer) PushOnDemandSkills(ctx context.Context, workerName string, skills []string, remoteSkills []v1beta1.RemoteSkillSource) error {
+	// 逻辑说明：PushOnDemandSkills 接收 ctx(context.Context)、workerName(string)、skills([]string)、remoteSkills([]v1beta1.RemoteSkillSource)，依次借助 validateManagedSkills、loadManagedSkills、DeletePrefix、pushRemoteSkills上传运行时配置的期望结果。
+	// 返回/状态：返回 error；可能把配置、技能或运行文档写入本地目录或 MinIO/S3 的稳定对象键。
+	// 失败/重试：校验、序列化或 I/O 失败会返回错误；旧配置保持可用，上层可用相同对象键覆盖重试。
 	if d.oss == nil {
 		return fmt.Errorf("push Worker skills: object storage is unavailable")
 	}
@@ -800,6 +860,9 @@ func (d *Deployer) validateManagedSkills(
 	skills []string,
 	remoteSkills []v1beta1.RemoteSkillSource,
 ) ([]string, map[string]struct{}, error) {
+	// 逻辑说明：validateManagedSkills 接收 skills([]string)、remoteSkills([]v1beta1.RemoteSkillSource)，依次借助 onDemandSkillSource、parseNacosRemoteSource、mapRemoteSkillAuthType、validOnDemandSkillName校验运行时配置的期望结果。
+	// 返回/状态：返回 []string、map[string]struct{}、error；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	builtin := make(map[string]struct{}, len(skills))
 	desired := make(map[string]struct{}, len(skills))
 	for _, skillName := range skills {
@@ -875,6 +938,9 @@ func (d *Deployer) loadManagedSkills(
 	ctx context.Context,
 	workerName string,
 ) ([]string, bool, error) {
+	// 逻辑说明：loadManagedSkills 接收 ctx(context.Context)、workerName(string)，依次借助 managedSkillsStateKey、GetObject、IsNotExist、Unmarshal读取运行时配置的期望结果。
+	// 返回/状态：返回 []string、bool、error；可能把配置、技能或运行文档写入本地目录或 MinIO/S3 的稳定对象键。
+	// 失败/重试：校验、序列化或 I/O 失败会返回错误；旧配置保持可用，上层可用相同对象键覆盖重试。
 	key := managedSkillsStateKey(workerName)
 	data, err := d.oss.GetObject(ctx, key)
 	if err != nil {
@@ -916,6 +982,9 @@ func (d *Deployer) storeManagedSkills(
 	workerName string,
 	desired map[string]struct{},
 ) error {
+	// 逻辑说明：storeManagedSkills 接收 ctx(context.Context)、workerName(string)、desired(map[string]struct{})，依次借助 managedSkillsStateKey、DeleteObject、Strings、MarshalIndent处理运行时配置的期望结果。
+	// 返回/状态：返回 error；可能把配置、技能或运行文档写入本地目录或 MinIO/S3 的稳定对象键。
+	// 失败/重试：校验、序列化或 I/O 失败会返回错误；旧配置保持可用，上层可用相同对象键覆盖重试。
 	key := managedSkillsStateKey(workerName)
 	if len(desired) == 0 {
 		if err := d.oss.DeleteObject(ctx, key); err != nil {
@@ -955,6 +1024,9 @@ func (d *Deployer) pushOnDemandSkill(
 	agentPrefix string,
 	skillName string,
 ) error {
+	// 逻辑说明：pushOnDemandSkill 接收 ctx(context.Context)、agentPrefix(string)、skillName(string)，依次借助 onDemandSkillSource、DeletePrefix、WalkDir、IsDir上传运行时配置的期望结果。
+	// 返回/状态：返回 error；可能把配置、技能或运行文档写入本地目录或 MinIO/S3 的稳定对象键。
+	// 失败/重试：校验、序列化或 I/O 失败会返回错误；旧配置保持可用，上层可用相同对象键覆盖重试。
 	source, err := d.onDemandSkillSource(skillName)
 	if err != nil {
 		return err
@@ -1013,6 +1085,9 @@ func (d *Deployer) pushOnDemandSkill(
 }
 
 func (d *Deployer) onDemandSkillSource(skillName string) (string, error) {
+	// 逻辑说明：onDemandSkillSource 接收 skillName(string)，依次借助 validOnDemandSkillName、Join、Stat、IsNotExist处理运行时配置的期望结果。
+	// 返回/状态：返回 string、error；可能把配置、技能或运行文档写入本地目录或 MinIO/S3 的稳定对象键。
+	// 失败/重试：校验、序列化或 I/O 失败会返回错误；旧配置保持可用，上层可用相同对象键覆盖重试。
 	if !validOnDemandSkillName(skillName) {
 		return "", fmt.Errorf("invalid built-in skill name")
 	}
@@ -1042,6 +1117,9 @@ func (d *Deployer) onDemandSkillSource(skillName string) (string, error) {
 }
 
 func validOnDemandSkillName(name string) bool {
+	// 逻辑说明：validOnDemandSkillName 接收 name(string)，按本函数中的条件与转换步骤处理运行时配置的期望结果。
+	// 返回/状态：返回 bool；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	if len(name) == 0 || len(name) > 128 {
 		return false
 	}
@@ -1060,6 +1138,9 @@ func validOnDemandSkillName(name string) bool {
 }
 
 func (d *Deployer) PrepareWorkerDeps(ctx context.Context, req WorkerDepsPrepareRequest) error {
+	// 逻辑说明：PrepareWorkerDeps 接收 ctx(context.Context)、req(WorkerDepsPrepareRequest)，依次借助 workerDepsObjectKey、workerDepsEnvFile、Strings、PutObject准备运行时配置的期望结果。
+	// 返回/状态：返回 error；可能把配置、技能或运行文档写入本地目录或 MinIO/S3 的稳定对象键。
+	// 失败/重试：校验、序列化或 I/O 失败会返回错误；旧配置保持可用，上层可用相同对象键覆盖重试。
 	if req.WorkerName == "" {
 		return fmt.Errorf("worker deps: workerName is required")
 	}
@@ -1115,6 +1196,9 @@ func workerDepsObjectKey(subPath, fileName string) string {
 }
 
 func workerDepsEnvFile(env map[string]string) string {
+	// 逻辑说明：workerDepsEnvFile 接收 env(map[string]string)，依次借助 validEnvKey、Strings、WriteString、shellSingleQuote处理运行时配置的期望结果。
+	// 返回/状态：返回 string；可能把配置、技能或运行文档写入本地目录或 MinIO/S3 的稳定对象键。
+	// 失败/重试：校验、序列化或 I/O 失败会返回错误；旧配置保持可用，上层可用相同对象键覆盖重试。
 	keys := make([]string, 0, len(env))
 	for key := range env {
 		if validEnvKey(key) {
@@ -1134,6 +1218,9 @@ func workerDepsEnvFile(env map[string]string) string {
 }
 
 func validEnvKey(key string) bool {
+	// 逻辑说明：validEnvKey 接收 key(string)，按本函数中的条件与转换步骤处理运行时配置的期望结果。
+	// 返回/状态：返回 bool；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	if key == "" {
 		return false
 	}
@@ -1156,6 +1243,9 @@ func shellSingleQuote(value string) string {
 }
 
 func (d *Deployer) seedLocalAgentFiles(ctx context.Context, localAgentDir, agentPrefix string, excludedTopLevel map[string]struct{}) error {
+	// 逻辑说明：seedLocalAgentFiles 接收 ctx(context.Context)、localAgentDir/agentPrefix(string)、excludedTopLevel(map[string]struct{})，依次借助 Stat、IsNotExist、IsDir、WalkDir处理运行时配置的期望结果。
+	// 返回/状态：返回 error；可能把配置、技能或运行文档写入本地目录或 MinIO/S3 的稳定对象键。
+	// 失败/重试：校验、序列化或 I/O 失败会返回错误；旧配置保持可用，上层可用相同对象键覆盖重试。
 	info, err := os.Stat(localAgentDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -1218,6 +1308,9 @@ type nacosClientKey struct {
 }
 
 func (d *Deployer) pushRemoteSkills(ctx context.Context, workerName, agentPrefix string, remoteSkills []v1beta1.RemoteSkillSource) error {
+	// 逻辑说明：pushRemoteSkills 接收 ctx(context.Context)、workerName/agentPrefix(string)、remoteSkills([]v1beta1.RemoteSkillSource)，依次借助 parseNacosRemoteSource、mapRemoteSkillAuthType、remoteSkillSTSResources、Join上传运行时配置的期望结果。
+	// 返回/状态：返回 error；可能把配置、技能或运行文档写入本地目录或 MinIO/S3 的稳定对象键。
+	// 失败/重试：校验、序列化或 I/O 失败会返回错误；旧配置保持可用，上层可用相同对象键覆盖重试。
 	if len(remoteSkills) == 0 {
 		return nil
 	}
@@ -1308,6 +1401,9 @@ func (d *Deployer) pushRemoteSkills(ctx context.Context, workerName, agentPrefix
 }
 
 func mapRemoteSkillAuthType(raw string) (string, error) {
+	// 逻辑说明：mapRemoteSkillAuthType 接收 raw(string)，按本函数中的条件与转换步骤处理运行时配置的期望结果。
+	// 返回/状态：返回 string、error；可能把配置、技能或运行文档写入本地目录或 MinIO/S3 的稳定对象键。
+	// 失败/重试：校验、序列化或 I/O 失败会返回错误；旧配置保持可用，上层可用相同对象键覆盖重试。
 	authType := strings.TrimSpace(raw)
 	switch authType {
 	case "", "sts-agentteams", "nacos", "none":
@@ -1318,6 +1414,9 @@ func mapRemoteSkillAuthType(raw string) (string, error) {
 }
 
 func remoteSkillSTSResources(skills []v1beta1.RemoteSkill) []string {
+	// 逻辑说明：remoteSkillSTSResources 接收 skills([]v1beta1.RemoteSkill)，依次借助 Strings处理运行时配置的期望结果。
+	// 返回/状态：返回 []string；可能把配置、技能或运行文档写入本地目录或 MinIO/S3 的稳定对象键。
+	// 失败/重试：校验、序列化或 I/O 失败会返回错误；旧配置保持可用，上层可用相同对象键覆盖重试。
 	seen := make(map[string]struct{}, len(skills))
 	for _, skill := range skills {
 		name := strings.TrimSpace(skill.Name)
@@ -1335,6 +1434,9 @@ func remoteSkillSTSResources(skills []v1beta1.RemoteSkill) []string {
 }
 
 func parseNacosRemoteSource(raw string) (nacosAddr, namespace string, err error) {
+	// 逻辑说明：parseNacosRemoteSource 接收 raw(string)，依次借助 HasPrefix、Parse、TrimPrefix、Split解析运行时配置的期望结果。
+	// 返回/状态：返回 nacosAddr/namespace、err；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	if !strings.HasPrefix(raw, "nacos://") {
 		return "", "", fmt.Errorf("source must use nacos:// scheme")
 	}
@@ -1364,6 +1466,9 @@ func parseNacosRemoteSource(raw string) (nacosAddr, namespace string, err error)
 // all listed agents. Called when switching from legacy password mode to
 // AppService mode to prevent stale password files from lingering.
 func (d *Deployer) CleanLegacyPasswordFiles(ctx context.Context, names []string) error {
+	// 逻辑说明：CleanLegacyPasswordFiles 接收 ctx(context.Context)、names([]string)，依次借助 DeleteObject清理运行时配置的期望结果。
+	// 返回/状态：返回 error；可能把配置、技能或运行文档写入本地目录或 MinIO/S3 的稳定对象键。
+	// 失败/重试：校验、序列化或 I/O 失败会返回错误；旧配置保持可用，上层可用相同对象键覆盖重试。
 	logger := log.FromContext(ctx).WithName("password-cleanup")
 	for _, name := range names {
 		key := fmt.Sprintf("agents/%s/credentials/matrix/password", name)
@@ -1375,6 +1480,9 @@ func (d *Deployer) CleanLegacyPasswordFiles(ctx context.Context, names []string)
 }
 
 func (d *Deployer) CleanupOSSData(ctx context.Context, workerName string) error {
+	// 逻辑说明：CleanupOSSData 接收 ctx(context.Context)、workerName(string)，依次借助 DeletePrefix清理运行时配置的期望结果。
+	// 返回/状态：返回 error；可能把配置、技能或运行文档写入本地目录或 MinIO/S3 的稳定对象键。
+	// 失败/重试：校验、序列化或 I/O 失败会返回错误；旧配置保持可用，上层可用相同对象键覆盖重试。
 	agentPrefix := fmt.Sprintf("agents/%s/", workerName)
 	if err := d.oss.DeletePrefix(ctx, agentPrefix); err != nil {
 		return fmt.Errorf("delete agent data: %w", err)
@@ -1390,6 +1498,9 @@ func (d *Deployer) CleanupOSSData(ctx context.Context, workerName string) error 
 
 // EnsureTeamStorage creates the shared storage directories for a team.
 func (d *Deployer) EnsureTeamStorage(ctx context.Context, teamName string) error {
+	// 逻辑说明：EnsureTeamStorage 接收 ctx(context.Context)、teamName(string)，依次借助 ensureDirectoryObject、PutObject确保运行时配置的期望结果。
+	// 返回/状态：返回 error；可能把配置、技能或运行文档写入本地目录或 MinIO/S3 的稳定对象键。
+	// 失败/重试：校验、序列化或 I/O 失败会返回错误；旧配置保持可用，上层可用相同对象键覆盖重试。
 	prefix := fmt.Sprintf("teams/%s/", teamName)
 	if err := d.ensureDirectoryObject(ctx, prefix); err != nil {
 		return fmt.Errorf("create %s: %w", prefix, err)
@@ -1406,6 +1517,9 @@ func (d *Deployer) EnsureTeamStorage(ctx context.Context, teamName string) error
 }
 
 func (d *Deployer) ensureDirectoryObject(ctx context.Context, key string) error {
+	// 逻辑说明：ensureDirectoryObject 接收 ctx(context.Context)、key(string)，依次借助 HasSuffix、PutObject确保运行时配置的期望结果。
+	// 返回/状态：返回 error；可能把配置、技能或运行文档写入本地目录或 MinIO/S3 的稳定对象键。
+	// 失败/重试：校验、序列化或 I/O 失败会返回错误；旧配置保持可用，上层可用相同对象键覆盖重试。
 	if key == "" || !strings.HasSuffix(key, "/") {
 		return fmt.Errorf("directory object key must end with /: %q", key)
 	}
@@ -1443,6 +1557,9 @@ type ManagerDeployRequest struct {
 // revision. Prompt and skill artifacts are uploaded first; the runtime document
 // is the activation barrier and is always uploaded last.
 func (d *Deployer) DeployManagerConfig(ctx context.Context, req ManagerDeployRequest) error {
+	// 逻辑说明：DeployManagerConfig 接收 ctx(context.Context)、req(ManagerDeployRequest)，依次借助 managerDurationSeconds、ReadFile、Join、mergeManagerIdentity部署运行时配置的期望结果。
+	// 返回/状态：返回 error；可能把配置、技能或运行文档写入本地目录或 MinIO/S3 的稳定对象键。
+	// 失败/重试：校验、序列化或 I/O 失败会返回错误；旧配置保持可用，上层可用相同对象键覆盖重试。
 	if d.oss == nil {
 		return fmt.Errorf("Manager config deployment requires object storage")
 	}
@@ -1560,6 +1677,9 @@ func (d *Deployer) DeployManagerConfig(ctx context.Context, req ManagerDeployReq
 }
 
 func mergeManagerIdentity(soul, identity string) (string, error) {
+	// 逻辑说明：mergeManagerIdentity 接收 soul/identity(string)，依次借助 Index、TrimRight合并运行时配置的期望结果。
+	// 返回/状态：返回 string、error；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	const identityHeader = "## Identity & Personality"
 	start := strings.Index(soul, identityHeader)
 	value := strings.TrimSpace(identity)
@@ -1590,6 +1710,9 @@ func managerDurationSeconds(
 	fallback time.Duration,
 	field string,
 ) (int64, error) {
+	// 逻辑说明：managerDurationSeconds 接收 raw(string)、fallback(time.Duration)、field(string)，依次借助 ParseDuration、int64处理运行时配置的期望结果。
+	// 返回/状态：返回 int64、error；可能把配置、技能或运行文档写入本地目录或 MinIO/S3 的稳定对象键。
+	// 失败/重试：校验、序列化或 I/O 失败会返回错误；旧配置保持可用，上层可用相同对象键覆盖重试。
 	duration := fallback
 	if strings.TrimSpace(raw) != "" {
 		parsed, err := time.ParseDuration(strings.TrimSpace(raw))
@@ -1608,6 +1731,9 @@ func managerDurationSeconds(
 }
 
 func redactPackageURI(raw string) string {
+	// 逻辑说明：redactPackageURI 接收 raw(string)，依次借助 Parse、Username、User处理运行时配置的期望结果。
+	// 返回/状态：返回 string；可能把配置、技能或运行文档写入本地目录或 MinIO/S3 的稳定对象键。
+	// 失败/重试：校验、序列化或 I/O 失败会返回错误；旧配置保持可用，上层可用相同对象键覆盖重试。
 	u, err := url.Parse(raw)
 	if err != nil || u.User == nil {
 		return raw
@@ -1623,6 +1749,9 @@ func redactPackageURI(raw string) string {
 // prepareAndPushAgentsMD merges the builtin AGENTS.md section and injects
 // coordination context in a single OSS read-write cycle.
 func (d *Deployer) prepareAndPushAgentsMD(ctx context.Context, workerName, agentPrefix, role, runtime, teamName, teamLeaderName, teamAdminMatrixID string, teamCoordinatorIDs []string, inlineAgents string) error {
+	// 逻辑说明：prepareAndPushAgentsMD 接收 ctx(context.Context)、workerName/agentPrefix/role/runtime/teamName/teamLeaderName/teamAdminMatrixID(string)、teamCoordinatorIDs([]string)、inlineAgents(string)，依次借助 Join、builtinAgentDir、ReadFile、IsNotExist准备运行时配置的期望结果。
+	// 返回/状态：返回 error；可能把配置、技能或运行文档写入本地目录或 MinIO/S3 的稳定对象键。
+	// 失败/重试：校验、序列化或 I/O 失败会返回错误；旧配置保持可用，上层可用相同对象键覆盖重试。
 	logger := log.FromContext(ctx)
 	builtinPath := filepath.Join(d.builtinAgentDir(role, runtime), "AGENTS.md")
 	builtinContent, err := os.ReadFile(builtinPath)
@@ -1701,6 +1830,9 @@ func (d *Deployer) prepareAndPushAgentsMD(ctx context.Context, workerName, agent
 }
 
 func hasDecoupledTeamContext(content string) bool {
+	// 逻辑说明：hasDecoupledTeamContext 接收 content(string)，依次借助 Contains判断运行时配置的期望结果。
+	// 返回/状态：返回 bool；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	if !strings.Contains(content, "<!-- agentteams-team-context-start -->") {
 		return false
 	}
@@ -1712,6 +1844,9 @@ func hasDecoupledTeamContext(content string) bool {
 // pushBuiltinSkills copies builtin skill directories to the worker's OSS prefix.
 // Skills are read from the local agent template directory baked into the controller image.
 func (d *Deployer) pushBuiltinSkills(ctx context.Context, workerName, agentPrefix, role, runtime string) error {
+	// 逻辑说明：pushBuiltinSkills 接收 ctx(context.Context)、workerName/agentPrefix/role/runtime(string)，依次借助 Join、builtinAgentDir、ReadDir、IsNotExist上传运行时配置的期望结果。
+	// 返回/状态：返回 error；可能把配置、技能或运行文档写入本地目录或 MinIO/S3 的稳定对象键。
+	// 失败/重试：校验、序列化或 I/O 失败会返回错误；旧配置保持可用，上层可用相同对象键覆盖重试。
 	skillsDir := filepath.Join(d.builtinAgentDir(role, runtime), "skills")
 	entries, err := os.ReadDir(skillsDir)
 	if err != nil {
@@ -1736,6 +1871,9 @@ func (d *Deployer) pushBuiltinSkills(ctx context.Context, workerName, agentPrefi
 }
 
 func (d *Deployer) pushBuiltinTopLevelFiles(ctx context.Context, workerName, agentPrefix, role, runtime string) error {
+	// 逻辑说明：pushBuiltinTopLevelFiles 接收 ctx(context.Context)、workerName/agentPrefix/role/runtime(string)，依次借助 builtinAgentDir、GetObject、Join、ReadFile上传运行时配置的期望结果。
+	// 返回/状态：返回 error；可能把配置、技能或运行文档写入本地目录或 MinIO/S3 的稳定对象键。
+	// 失败/重试：校验、序列化或 I/O 失败会返回错误；旧配置保持可用，上层可用相同对象键覆盖重试。
 	agentDir := d.builtinAgentDir(role, runtime)
 	for _, name := range []string{"HEARTBEAT.md"} {
 		ossKey := agentPrefix + "/" + name
@@ -1759,6 +1897,9 @@ func (d *Deployer) pushBuiltinTopLevelFiles(ctx context.Context, workerName, age
 }
 
 func (d *Deployer) builtinAgentDir(role, runtime string) string {
+	// 逻辑说明：builtinAgentDir 接收 role/runtime(string)，依次借助 Dir、Join处理运行时配置的期望结果。
+	// 返回/状态：返回 string；可能把配置、技能或运行文档写入本地目录或 MinIO/S3 的稳定对象键。
+	// 失败/重试：校验、序列化或 I/O 失败会返回错误；旧配置保持可用，上层可用相同对象键覆盖重试。
 	baseDir := filepath.Dir(d.workerAgentDir)
 	switch role {
 	case "team_leader":
@@ -1786,6 +1927,9 @@ func (d *Deployer) builtinAgentDir(role, runtime string) string {
 // team-agnostic and would otherwise revert them to standalone [manager, admin]
 // on every reconcile, breaking team-scoped task delivery.
 func mergeUserPluginConfig(generatedJSON, existingJSON []byte) ([]byte, error) {
+	// 逻辑说明：mergeUserPluginConfig 接收 generatedJSON/existingJSON([]byte)，依次借助 Unmarshal、preserveChannelMatrixAllowFrom、MarshalIndent、deepMergeMap合并运行时配置的期望结果。
+	// 返回/状态：返回 []byte、error；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	var generated, existing map[string]interface{}
 	if err := json.Unmarshal(generatedJSON, &generated); err != nil {
 		return generatedJSON, err
@@ -1850,6 +1994,9 @@ func mergeUserPluginConfig(generatedJSON, existingJSON []byte) ([]byte, error) {
 }
 
 func toMap(v interface{}) map[string]interface{} {
+	// 逻辑说明：toMap 接收 v(interface{})，按本函数中的条件与转换步骤处理运行时配置的期望结果。
+	// 返回/状态：返回 map[string]interface{}；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	if m, ok := v.(map[string]interface{}); ok {
 		return m
 	}
@@ -1862,6 +2009,9 @@ func toMap(v interface{}) map[string]interface{} {
 // channel policies are not reverted to standalone defaults on every Worker
 // reconcile.
 func preserveChannelMatrixAllowFrom(generated, existing map[string]interface{}) {
+	// 逻辑说明：preserveChannelMatrixAllowFrom 接收 generated/existing(map[string]interface{})，按本函数中的条件与转换步骤保留运行时配置的期望结果。
+	// 返回/状态：返回 无；可能查询或改变 Matrix 用户、房间、别名、成员或权限状态。
+	// 失败/重试：Matrix 请求失败会返回错误；上层下一轮先重新观测实际状态，再只补做尚未满足的步骤。
 	existChannels, _ := existing["channels"].(map[string]interface{})
 	if existChannels == nil {
 		return
@@ -1900,6 +2050,9 @@ func preserveChannelMatrixAllowFrom(generated, existing map[string]interface{}) 
 // deepMergeMap recursively merges override into base; override wins on
 // leaf-level conflicts. Both inputs must be non-nil (caller guards).
 func deepMergeMap(base, override map[string]interface{}) map[string]interface{} {
+	// 逻辑说明：deepMergeMap 接收 base/override(map[string]interface{})，依次借助 deepMergeMap处理运行时配置的期望结果。
+	// 返回/状态：返回 map[string]interface{}；可能把配置、技能或运行文档写入本地目录或 MinIO/S3 的稳定对象键。
+	// 失败/重试：校验、序列化或 I/O 失败会返回错误；旧配置保持可用，上层可用相同对象键覆盖重试。
 	if base == nil {
 		return override
 	}
@@ -1928,6 +2081,9 @@ func deepMergeMap(base, override map[string]interface{}) map[string]interface{} 
 }
 
 func toStringSliceCompat(v interface{}) []string {
+	// 逻辑说明：toStringSliceCompat 接收 v(interface{})，按本函数中的条件与转换步骤处理运行时配置的期望结果。
+	// 返回/状态：返回 []string；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	if v == nil {
 		return nil
 	}

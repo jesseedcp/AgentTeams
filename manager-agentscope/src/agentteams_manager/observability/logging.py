@@ -24,6 +24,7 @@ _SENSITIVE_PARTS = (
 
 
 def redact_fields(value: Any, *, key: str = "") -> Any:
+    # 逻辑说明：按字段名递归遍历容器并在序列化前替换敏感值，避免嵌套 token 被结构化日志泄露。
     if any(part in key.casefold() for part in _SENSITIVE_PARTS):
         return "[REDACTED]"
     if isinstance(value, dict):
@@ -70,6 +71,7 @@ class JsonFormatter(logging.Formatter):
     )
 
     def format(self, record: logging.LogRecord) -> str:
+        # 逻辑说明：合并标准日志字段与业务上下文、格式化异常，然后统一脱敏并输出单行 JSON。
         payload = {
             "timestamp": datetime.now(UTC).isoformat(),
             "level": record.levelname,
@@ -93,6 +95,7 @@ class JsonFormatter(logging.Formatter):
 
 
 def configure_logging(level: str = "INFO") -> None:
+    # 逻辑说明：原子式重设根 logger 的唯一 JSON handler，使依赖库日志也遵循同一脱敏格式和级别。
     handler = logging.StreamHandler()
     handler.setFormatter(JsonFormatter())
     root = logging.getLogger()

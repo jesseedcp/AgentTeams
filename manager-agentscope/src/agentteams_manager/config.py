@@ -72,6 +72,7 @@ class RuntimeDocument(BaseModel):
 
     @model_validator(mode="after")
     def require_unique_mcp_names(self) -> RuntimeDocument:
+        # 逻辑说明：检查 MCP server 名称唯一性；重复名会造成工具覆盖，因此直接拒绝。
         names = [server.name for server in self.mcp_servers]
         if len(names) != len(set(names)):
             raise ValueError("MCP server names must be unique")
@@ -80,6 +81,7 @@ class RuntimeDocument(BaseModel):
     @classmethod
     def load(cls, path: Path) -> RuntimeDocument:
         """Load a document while producing a clear schema-version error."""
+        # 逻辑说明：读取 JSON runtime 文档、检查 schema 版本并交给 Pydantic 校验；错误保留清晰上下文。
         raw = json.loads(path.read_text(encoding="utf-8"))
         if raw.get("schema_version") != 1:
             raise ValueError(
@@ -115,6 +117,7 @@ class ExternalChannelDocument(BaseModel):
         cls,
         value: Any,
     ) -> Any:
+        # 逻辑说明：将旧 relay 无损映射到当前 channels，已有新字段优先且不修改非字典输入。
         if not isinstance(value, dict):
             return value
         if (
@@ -149,6 +152,7 @@ class ExternalChannelDocument(BaseModel):
     def validate_environment_references(
         self,
     ) -> ExternalChannelDocument:
+        # 逻辑说明：校验 channel 中 env:VAR 引用格式并拒绝明文秘密，随后返回已验证文档。
         pattern = re.compile(r"^env:[A-Z][A-Z0-9_]{2,127}$")
         for name, reference in self.secret_envs.items():
             if not re.fullmatch(r"[a-z][a-z0-9_]{0,63}", name):
@@ -263,6 +267,7 @@ class ManagerConfig(BaseModel):
 
     @model_validator(mode="after")
     def validate_coding_cli(self) -> ManagerConfig:
+        # 逻辑说明：校验 Coding CLI 类型、命令和权限组合，阻止无法执行或越权的委托配置。
         if len(self.coding_cli_providers) != len(
             set(self.coding_cli_providers),
         ):
@@ -276,6 +281,7 @@ class ManagerConfig(BaseModel):
     @classmethod
     def from_env(cls) -> ManagerConfig:
         """Build configuration from the Controller-provided environment."""
+        # 逻辑说明：读取部署环境变量，规范 URL、路径、开关与秘密引用，构造并验证最终配置。
         env = os.environ
         workspace = Path(
             env.get("AGENTTEAMS_MANAGER_WORKSPACE", str(Path.home())),

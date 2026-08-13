@@ -72,6 +72,7 @@ class AgentFactory:
         toolkit_factory: ToolkitFactory,
         mcp_registry: MCPRegistryPort | None = None,
     ) -> None:
+        # 逻辑说明：保存 Manager 配置、prompt/toolkit/MCP 依赖，并区分固定 RuntimeDocument 与可热更新 RuntimeRegistry；同时初始化 Agent 到 generation 的租约索引，构造阶段不创建模型或 MCP 连接。
         self._config = config
         self._registry = (
             runtime if isinstance(runtime, RuntimeRegistry) else None
@@ -86,9 +87,11 @@ class AgentFactory:
 
     @property
     def runtime_revision(self) -> int:
+        # 逻辑说明：从固定 RuntimeDocument 或 registry 当前 generation 统一读取 revision，供会话判断是否需要换代；这里只查询，不创建或退休 Agent。
         return self._current_runtime().revision
 
     def replace_runtime(self, runtime: RuntimeDocument) -> None:
+        # 逻辑说明：仅允许非 registry 模式用 revision 更高的 RuntimeDocument 替换固定配置；registry 模式或 revision 未递增时直接报错，校验失败不会改写当前 runtime。
         if self._registry is not None:
             raise RuntimeError(
                 "registry-backed runtime changes through ConfigWatcher",
@@ -106,6 +109,7 @@ class AgentFactory:
         model_override: str | None = None,
         thinking_effort: str | None = None,
     ) -> Agent:
+        # 逻辑说明：从当前 generation 和房间覆盖项构造模型、policy toolkit、MCP 与 system prompt，再用传入 state 或房间 session_id 创建 Agent；成功后才保留 MCP revision 租约，任一步异常均向上传播且不登记 Agent。
         runtime = self._current_runtime()
         credential = OpenAICredential(
             api_key=self._config.gateway_key,
@@ -162,6 +166,7 @@ class AgentFactory:
 
     async def retire(self, agent: Agent) -> None:
         """Release generation resources after the Agent's turn is idle."""
+        # 逻辑说明：按 Agent 对象身份移除其 generation 租约记录，并通知 MCP registry 释放该 revision；未启用 MCP 或 Agent 未登记时为空操作，释放失败由调用方处理。
         if self._mcp_registry is None:
             return
         revision = self._agent_generations.pop(id(agent), None)
@@ -173,6 +178,7 @@ class AgentFactory:
         )
 
     def _current_runtime(self) -> RuntimeDocument:
+        # 逻辑说明：registry 模式返回当前已激活 generation 的文档，否则返回固定 runtime；两种来源都不存在表示 factory 装配错误并抛出 RuntimeError。
         if self._registry is not None:
             return self._registry.current.document
         if self._runtime is None:

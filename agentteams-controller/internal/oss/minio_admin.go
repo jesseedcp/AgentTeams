@@ -23,6 +23,7 @@ type MinIOAdminClient struct {
 
 // NewMinIOAdminClient creates a StorageAdminClient for managing MinIO users.
 func NewMinIOAdminClient(cfg Config) *MinIOAdminClient {
+	// 逻辑说明：补齐 mc 与 alias 默认值后构造管理客户端；连接和管理员凭据验证延迟到第一次实际管理操作。
 	if cfg.MCBinary == "" {
 		cfg.MCBinary = "mc"
 	}
@@ -33,6 +34,7 @@ func NewMinIOAdminClient(cfg Config) *MinIOAdminClient {
 }
 
 func (c *MinIOAdminClient) ensureAlias(ctx context.Context) error {
+	// 逻辑说明：静态 alias 已建立或 endpoint 为空时不重复执行，否则运行 mc alias set；仅成功后写 aliasReady，失败保留 stderr 并允许下次重试。
 	if c.aliasReady || c.config.Endpoint == "" {
 		return nil
 	}
@@ -47,6 +49,7 @@ func (c *MinIOAdminClient) ensureAlias(ctx context.Context) error {
 }
 
 func (c *MinIOAdminClient) EnsureUser(ctx context.Context, username, password string) error {
+	// 逻辑说明：确保管理员 alias 后执行可重复的 user add（已存在时更新密码）；仅忽略 MinIO 明确的 already 状态，其余错误阻止后续策略配置。
 	if err := c.ensureAlias(ctx); err != nil {
 		return err
 	}
@@ -62,6 +65,7 @@ func (c *MinIOAdminClient) EnsureUser(ctx context.Context, username, password st
 }
 
 func (c *MinIOAdminClient) EnsurePolicy(ctx context.Context, req PolicyRequest) error {
+	// 逻辑说明：用互斥锁串行化同名策略文件的创建/附加，选择请求或默认 bucket，生成最小权限 JSON 临时文件并原位更新策略；成功创建后再附加用户，临时文件始终删除。
 	c.policyMu.Lock()
 	defer c.policyMu.Unlock()
 
@@ -118,6 +122,7 @@ func (c *MinIOAdminClient) EnsurePolicy(ctx context.Context, req PolicyRequest) 
 }
 
 func policyListPrefixes(policy s3Policy) []string {
+	// 逻辑说明：防御性检查策略第二条语句和动态 Condition 类型，再复制返回 ListBucket 前缀；格式不符合预期时返回 nil，避免日志辅助代码触发 panic 或暴露可变底层切片。
 	if len(policy.Statement) < 2 || policy.Statement[1].Condition == nil {
 		return nil
 	}
@@ -133,6 +138,7 @@ func policyListPrefixes(policy s3Policy) []string {
 }
 
 func policyObjectResources(policy s3Policy) []string {
+	// 逻辑说明：从对象权限语句复制资源列表供日志使用；策略不足三段时返回 nil，调用方不会取得内部切片的写权限。
 	if len(policy.Statement) < 3 {
 		return nil
 	}
@@ -140,6 +146,7 @@ func policyObjectResources(policy s3Policy) []string {
 }
 
 func (c *MinIOAdminClient) DeleteUser(ctx context.Context, username string) error {
+	// 逻辑说明：先尽力解除并删除 worker 专属策略，再删除用户；清理策略错误被刻意忽略以继续回收账号，用户本就不存在也视作幂等成功。
 	if err := c.ensureAlias(ctx); err != nil {
 		return err
 	}
@@ -168,6 +175,7 @@ type s3PolicyStatement struct {
 }
 
 func (c *MinIOAdminClient) buildWorkerPolicy(workerName, bucket, teamName string, isManager bool) s3Policy {
+	// 逻辑说明：以 worker 私有目录和 shared 为基础读写范围，Manager 额外获得 manager/teams，全体 worker 只读配置包；有 Team 时再加入该团队路径，最终生成 bucket 列举与对象权限分离的最小权限策略。
 	listPrefixes := []string{
 		"agents",
 		"agents/",
@@ -278,6 +286,7 @@ func (c *MinIOAdminClient) buildWorkerPolicy(workerName, bucket, teamName string
 }
 
 func (c *MinIOAdminClient) runMCAdmin(ctx context.Context, args ...string) (string, error) {
+	// 逻辑说明：为参数统一加 admin 子命令并在 context 下启动 mc，分离捕获输出；非零退出返回 stderr 诊断，成功只返回 stdout，调用方无需重复处理进程细节。
 	fullArgs := append([]string{"admin"}, args...)
 	cmd := exec.CommandContext(ctx, c.config.MCBinary, fullArgs...)
 	var stdout, stderr bytes.Buffer

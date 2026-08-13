@@ -87,6 +87,7 @@ class MemoryToolkit:
         context_provider: ContextProvider = current_tool_invocation,
         yolo: bool = False,
     ) -> None:
+        # 逻辑说明：绑定房间记忆策略、服务和 mutation context，并构造可见记忆工具；构造阶段不读取或写入记忆数据库。
         self._policy = policy
         self._service = service
         self._context_provider = context_provider
@@ -94,6 +95,7 @@ class MemoryToolkit:
         self.tools = self._build_tools()
 
     def _build_tools(self) -> tuple[ManagerTool, ...]:
+        # 逻辑说明：只在管理员私聊声明召回、长期记忆、项目决策和 Worker 评估工具，并按 allowed_tools 过滤；读工具标记为并发安全，写工具仍走权限策略。
         if self._policy.kind is not RoomKind.ADMIN_DM:
             return ()
         specs: tuple[
@@ -161,7 +163,9 @@ class MemoryToolkit:
         request_model: type[BaseModel],
         handler: Callable[[BaseModel], Awaitable[object]],
     ) -> Callable[..., Awaitable[object]]:
+        # 逻辑说明：为私有记忆操作生成 policy-bound 闭包；每次调用先确认仍是 Admin DM 并完成 schema 验证，越权输入不会到达记忆存储。
         async def invoke(**raw: Any) -> object:
+            # 逻辑说明：执行时再次确认是 Admin DM，验证闭合输入后调用固定记忆 handler；越权请求不会接触私有记忆仓库。
             if self._policy.kind is not RoomKind.ADMIN_DM:
                 raise PermissionDeniedError(
                     "private Manager memory is only available in Admin DM",
@@ -171,6 +175,7 @@ class MemoryToolkit:
         return invoke
 
     def _context(self) -> ToolInvocationContext:
+        # 逻辑说明：读取当前调用上下文并要求实际 room ID 与冻结的 policy 一致；不匹配立即拒绝，防止 ContextVar 串线泄漏跨房间记忆。
         context = self._context_provider()
         if context.room_id != self._policy.room_id:
             raise PermissionDeniedError(
@@ -179,6 +184,7 @@ class MemoryToolkit:
         return context
 
     async def _recall(self, request: BaseModel) -> object:
+        # 逻辑说明：验证查询过滤条件，绑定当前 Admin 房间后调用服务返回有界私有投影；limit 控制结果规模，仓库读取失败直接传播。
         item = RecallMemoryInput.model_validate(request)
         context = self._context()
         return await self._service.recall(
@@ -191,6 +197,7 @@ class MemoryToolkit:
         )
 
     async def _remember(self, request: BaseModel) -> object:
+        # 逻辑说明：验证类别、内容和重要度，用 event ID 与 tool-call ID 生成稳定 source ID 后持久化；重复调用由服务按来源去重。
         item = RememberMemoryInput.model_validate(request)
         context = self._context()
         return await self._service.remember(
@@ -205,6 +212,7 @@ class MemoryToolkit:
         self,
         request: BaseModel,
     ) -> object:
+        # 逻辑说明：验证项目决策与理由，绑定房间和稳定来源后交给服务写入；工具层不把实时状态或 Secret 混入决策记录。
         item = RecordProjectDecisionInput.model_validate(request)
         context = self._context()
         return await self._service.record_project_decision(
@@ -219,6 +227,7 @@ class MemoryToolkit:
         self,
         request: BaseModel,
     ) -> object:
+        # 逻辑说明：验证 Worker、能力、分数和证据，并以当前调用来源持久化评估；服务负责去重与可见性，失败不会返回伪造记录。
         item = RecordWorkerAssessmentInput.model_validate(request)
         context = self._context()
         return await self._service.record_worker_assessment(
@@ -238,6 +247,7 @@ class MemoryToolkitFactory:
         service: ManagerMemoryService,
         yolo: bool = False,
     ) -> None:
+        # 逻辑说明：保存共享 Memory workflow 与默认确认策略，后续为每个房间生成独立工具集合；此处不触发记忆整理。
         self._service = service
         self._yolo = yolo
 

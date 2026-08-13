@@ -21,6 +21,7 @@ from agentteams_cli.config_store import ConfigStore
 
 
 def _now() -> str:
+    # 逻辑说明：`_now` 读取 UTC 时钟并格式化为插件清单使用的稳定时间戳；不修改安装状态，时钟异常按原语义向上传播。
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
@@ -31,6 +32,7 @@ def _load_metadata(manifest_path: Path) -> Tuple[str, str, list[str]]:
     Keeping the CLI parser tiny avoids adding a PyYAML dependency for the fallback
     installer path.
     """
+    # 逻辑说明：`_load_metadata` 只读取 fallback 所需字段；缺字段或 I/O 错误显式失败。
     if not manifest_path.exists():
         raise ValueError(f"missing plugin.yaml: {manifest_path}")
 
@@ -64,6 +66,7 @@ def _load_metadata(manifest_path: Path) -> Tuple[str, str, list[str]]:
 
 def _safe_extract_tar(package: Path, target: Path) -> None:
     """只把归档成员解压到 ``target`` 内，拒绝 ``../`` 与绝对路径逃逸。"""
+    # 逻辑说明：`_safe_extract_tar` 先验证成员路径与类型，全部通过后才产生解包副作用。
     try:
         with tarfile.open(package, "r:gz") as archive:
             root = target.resolve()
@@ -81,6 +84,7 @@ def _safe_extract_tar(package: Path, target: Path) -> None:
 
 
 def _find_plugin_root(search_root: Path) -> Path:
+    # 逻辑说明：`_find_plugin_root` 接受直接根或唯一单层子目录；歧义和缺少 manifest 都拒绝继续。
     if (search_root / "plugin.yaml").is_file():
         return search_root
     candidates = [
@@ -94,6 +98,7 @@ def _find_plugin_root(search_root: Path) -> Path:
 
 
 def _copytree(src: Path, dst: Path) -> None:
+    # 逻辑说明：`_copytree` 用来源完整替换旧 content 并过滤缓存；复制失败直接终止安装。
     if dst.exists():
         shutil.rmtree(dst)
     shutil.copytree(
@@ -104,6 +109,7 @@ def _copytree(src: Path, dst: Path) -> None:
 
 
 def _hash_path(path: Path) -> str:
+    # 逻辑说明：`_hash_path` 按相对路径稳定计算 SHA-256；digest 记录安装内容而不用于鉴权。
     digest = hashlib.sha256()
     if path.is_file():
         digest.update(path.read_bytes())
@@ -116,6 +122,7 @@ def _hash_path(path: Path) -> str:
 
 
 def _script_env(store: ConfigStore, name: str, content_dir: Path) -> dict[str, str]:
+    # 逻辑说明：`_script_env` 复制当前环境并补齐 lifecycle 变量；setdefault 保留显式设置。
     env = dict(os.environ)
     env.setdefault("AGENTTEAMS_PROJECT_DIR", str(store.project_dir))
     env.setdefault("AGENTTEAMS_PLUGIN_NAME", name)
@@ -128,6 +135,7 @@ def _script_env(store: ConfigStore, name: str, content_dir: Path) -> dict[str, s
 
 
 def _run_lifecycle(store: ConfigStore, name: str, content_dir: Path, script_name: str) -> bool:
+    # 逻辑说明：`_run_lifecycle` 在项目目录运行 shell；捕获输出并以 bool 返回，非零不算成功。
     script = content_dir / "scripts" / script_name
     if not script.exists():
         return script_name == "uninstall.sh"
@@ -148,6 +156,7 @@ def _run_lifecycle(store: ConfigStore, name: str, content_dir: Path, script_name
 
 
 def _prepare_package(package: Path) -> Tuple[Path, Optional[tempfile.TemporaryDirectory[str]]]:
+    # 逻辑说明：`_prepare_package` 直接解析目录或安全解包归档；临时句柄由调用方最终清理。
     if not package.exists():
         raise ValueError(f"package not found: {package}")
     if package.is_dir():
@@ -166,6 +175,8 @@ def install(
     package: Optional[Path] = None,
     source: Optional[Path] = None,
 ) -> bool:
+    # 逻辑说明：`install` 规范化来源、验证、替换并运行 lifecycle；全部成功后才持久化清单。
+    # 任一步失败均返回 False，finally 始终清理临时解包目录，避免残留被误认作已安装状态。
     if not package and not source:
         print("ERROR: Use --package or --source.")
         return False
@@ -221,6 +232,7 @@ def update(
     package: Optional[Path] = None,
     source: Optional[Path] = None,
 ) -> bool:
+    # 逻辑说明：`update` 确认旧插件存在后复用 install 路径，并比较前后版本输出结果。
     old = store.get_plugin_manifest(name)
     if not old:
         print(f"Plugin '{name}' is not installed. Use 'install' first.")
@@ -233,6 +245,7 @@ def update(
 
 
 def uninstall(store: ConfigStore, name: str) -> bool:
+    # 逻辑说明：`uninstall` 先运行 lifecycle，成功后才删除项目状态；失败时保留清单便于恢复。
     manifest = store.get_plugin_manifest(name)
     if not manifest:
         print(f"Plugin '{name}' is not installed.")
@@ -246,4 +259,5 @@ def uninstall(store: ConfigStore, name: str) -> bool:
 
 
 def list_plugins(store: ConfigStore) -> list[Dict[str, Any]]:
+    # 逻辑说明：`list_plugins` 返回 ConfigStore 的稳定清单，不触发 lifecycle 或文件写入。
     return store.list_plugins()

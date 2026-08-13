@@ -48,6 +48,7 @@ type EmbeddedAPIServer struct {
 // Start launches kube-apiserver as a subprocess and waits for it to be ready.
 // Returns a rest.Config that can be used by controller-runtime.
 func Start(ctx context.Context, cfg Config) (*rest.Config, error) {
+	// 逻辑说明：补齐嵌入式默认值，持久化证书/管理员 token，启动 kube-apiserver，等健康后注册 CRD 并返回认证配置。
 	logger := log.FromContext(ctx).WithName("embedded-apiserver")
 
 	if cfg.EtcdURL == "" {
@@ -154,6 +155,7 @@ func Start(ctx context.Context, cfg Config) (*rest.Config, error) {
 // waitForReady polls the apiserver until it responds to HTTP requests.
 // Any HTTP response (including 401) means the server is up and ready.
 func waitForReady(ctx context.Context, cfg *rest.Config) error {
+	// 逻辑说明：用生成的 CA 构建受信 HTTP client，在 60 秒内轮询 /healthz；任何 HTTP 响应表示进程已监听。
 	// Build a simple HTTP client with the CA cert
 	caCert, err := os.ReadFile(cfg.TLSClientConfig.CAFile)
 	if err != nil {
@@ -186,6 +188,7 @@ func waitForReady(ctx context.Context, cfg *rest.Config) error {
 
 // registerCRDs reads CRD YAML files from a directory and applies them.
 func registerCRDs(ctx context.Context, cfg *rest.Config, crdDir string) error {
+	// 逻辑说明：遍历 YAML CRD，存在则保留 resourceVersion 更新，否则创建；单文件失败记录后继续，最后等待全部 Established。
 	logger := log.FromContext(ctx).WithName("crd-register")
 
 	client, err := apiextensionsclient.NewForConfig(cfg)
@@ -248,6 +251,7 @@ func registerCRDs(ctx context.Context, cfg *rest.Config, crdDir string) error {
 }
 
 func waitForCRDsEstablished(ctx context.Context, client apiextensionsclient.Interface, names []string) error {
+	// 逻辑说明：在限定时间内逐个读取目标 CRD，只有每个都有 Established=True 才返回成功，瞬时缺失继续等待。
 	return wait.PollUntilContextTimeout(ctx, time.Second, 30*time.Second, true, func(ctx context.Context) (bool, error) {
 		for _, name := range names {
 			crd, err := client.ApiextensionsV1().CustomResourceDefinitions().Get(ctx, name, metav1.GetOptions{})
@@ -271,6 +275,7 @@ func waitForCRDsEstablished(ctx context.Context, client apiextensionsclient.Inte
 
 // generateCerts creates a self-signed CA and serving cert for the embedded apiserver.
 func generateCerts(certDir, bindAddr string) error {
+	// 逻辑说明：生成自签 CA、服务端 ECDSA 证书和 SA 签名密钥，并以受限权限分别写入指定 PKI 目录。
 	// Generate CA key
 	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -355,6 +360,7 @@ func generateCerts(certDir, bindAddr string) error {
 }
 
 func writePEM(path, pemType string, data []byte) error {
+	// 逻辑说明：以 0600 创建或截断目标文件，编码单个 PEM block，并通过 defer 保证描述符关闭。
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
 	if err != nil {
 		return err
@@ -364,6 +370,7 @@ func writePEM(path, pemType string, data []byte) error {
 }
 
 func writeECKey(path string, key *ecdsa.PrivateKey) error {
+	// 逻辑说明：先按 SEC1 编码 EC 私钥，再复用受限 PEM 写入；编码失败不会留下目标内容。
 	data, err := x509.MarshalECPrivateKey(key)
 	if err != nil {
 		return err
@@ -372,6 +379,7 @@ func writeECKey(path string, key *ecdsa.PrivateKey) error {
 }
 
 func writeECPubKey(path string, key *ecdsa.PublicKey) error {
+	// 逻辑说明：将公钥编码为 PKIX 格式后复用 PEM 写入，供 kube-apiserver 验证 SA token。
 	data, err := x509.MarshalPKIXPublicKey(key)
 	if err != nil {
 		return err
@@ -384,6 +392,7 @@ func writeECPubKey(path string, key *ecdsa.PublicKey) error {
 // and persists it to dataDir/admin-token. Subsequent calls (including after
 // container restart) reuse the persisted value.
 func generateOrLoadAdminToken(dataDir string) (string, error) {
+	// 逻辑说明：优先复用非空持久 token；否则用 crypto/rand 生成 256 位随机值，并以 0600 原子边界持久化供重启复用。
 	tokenPath := filepath.Join(dataDir, "admin-token")
 	if data, err := os.ReadFile(tokenPath); err == nil {
 		token := strings.TrimSpace(string(data))

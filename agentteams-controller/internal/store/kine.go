@@ -35,6 +35,7 @@ type KineServer struct {
 // embedded Kubernetes API 的 CR 状态，与 AgentScope Manager 用于会话/操作的 SQLite
 // 是不同职责，不应混用或互相直接读表。
 func StartKine(ctx context.Context, cfg Config) (*KineServer, error) {
+	// 逻辑说明：补齐数据目录和监听地址，确保目录存在后构造启用 WAL/shared cache/busy timeout 的 SQLite DSN；随后让 kine 绑定 context 启动 etcd 兼容端点，只有监听成功才返回连接配置。
 	if cfg.DataDir == "" {
 		cfg.DataDir = "/data/agentteams-controller"
 	}

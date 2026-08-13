@@ -17,6 +17,7 @@ import (
 const shutdownTimeout = 10 * time.Second
 
 func main() {
+	// 逻辑说明：建立信号 context、加载配置并构造/启动 App；退出时用独立 10 秒 context 优雅收尾，再传播启动失败状态。
 	ctrl.SetLogger(zap.New())
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

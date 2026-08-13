@@ -68,6 +68,7 @@ AGENTTEAMS_KNOWN_STABLE_VERSION="latest"   # fallback if the Fork has no release
 AGENTTEAMS_RELEASE_REPOSITORY="${AGENTTEAMS_RELEASE_REPOSITORY:-jesseedcp/AgentTeams}"
 AGENTTEAMS_IMAGE_REPOSITORY="${AGENTTEAMS_IMAGE_REPOSITORY:-jesseedcp}"
 
+# 逻辑说明：把用户、Release API 和旧 env 的版本写法归一为可比较的 vX.Y.Z；无法识别时保留原值并让后续比较保守失败。
 _normalize_version() {
     local version="${1:-}"
     [ "${version}" = "latest" ] && {
@@ -99,6 +100,7 @@ _normalize_version() {
 # labels at the v1.2.0 boundary use the current contract because that is when
 # the new environment names first shipped. Unknown values fail closed to the
 # current contract instead of guessing that an image is legacy.
+# 逻辑说明：仅比较已归一化的语义版本核心；未知值按当前契约处理，避免误把新镜像套用旧环境变量。
 _ver_lt() {
     local left right
     left="$(_normalize_version "${1:-}")"
@@ -122,6 +124,7 @@ _ver_lt() {
     [ "${left_patch}" -lt "${right_patch}" ]
 }
 
+# 逻辑说明：根据实际选中镜像是否早于 v1.2 决定环境契约，`latest` 使用已知稳定版本而不是盲猜。
 _use_legacy_image_env() {
     local version
     version="$(_normalize_version "${1:-}")"
@@ -131,6 +134,7 @@ _use_legacy_image_env() {
     _ver_lt "${version}" "v1.2.0"
 }
 
+# 逻辑说明：返回目标 Controller 镜像理解的环境变量前缀，使升级只发布一套互相一致的字段。
 _controller_env_prefix() {
     if _use_legacy_image_env "${1:-}"; then
         printf '%s%s' 'HIC' 'LAW_'
@@ -139,6 +143,7 @@ _controller_env_prefix() {
     fi
 }
 
+# 逻辑说明：返回与镜像版本匹配的对象存储前缀，防止升级后 Controller 找不到旧配置。
 _controller_storage_prefix() {
     if _use_legacy_image_env "${1:-}"; then
         printf '%s%s' 'hic' 'law/agentteams-storage'
@@ -176,14 +181,17 @@ fi
 # Utility functions (needed early for timezone detection)
 # ============================================================
 
+# 逻辑说明：统一安装步骤日志格式并写入终端/日志文件，不用于输出 API Key 或密码。
 log() {
     echo -e "\033[36m[AgentTeams]\033[0m $1"
 }
 
+# 逻辑说明：把可恢复错误写到 stderr；调用方决定回到上一步还是终止安装。
 error() {
     echo -e "\033[31m[AgentTeams ERROR]\033[0m $1" >&2
 }
 
+# 逻辑说明：报告无法恢复的安装前置错误并退出，防止继续创建半配置容器。
 die() {
     error "$1"
     exit 1
@@ -193,6 +201,7 @@ die() {
 # Timezone detection (compatible with Linux and macOS)
 # ============================================================
 
+# 逻辑说明：优先使用显式时区，再从系统推断并回退安全默认值，结果同时影响语言和容器 TZ。
 detect_timezone() {
     local tz=""
 
@@ -238,6 +247,7 @@ AGENTTEAMS_TIMEZONE="${AGENTTEAMS_TIMEZONE:-$(detect_timezone)}"
 # Language detection based on timezone
 # ============================================================
 
+# 逻辑说明：按显式设置、locale 与时区选择中英文提示；只改变交互文案，不改变安装契约。
 detect_language() {
     local tz="${AGENTTEAMS_TIMEZONE}"
     case "${tz}" in
@@ -280,6 +290,7 @@ export AGENTTEAMS_LANGUAGE
 
 # msg() function: look up message by key, with printf-style argument substitution
 # Falls back to English if the current language translation is missing.
+# 逻辑说明：按当前语言查找文案并执行占位符替换，缺少翻译时回退英文键值。
 msg() {
     local key="$1"
     shift
@@ -1024,6 +1035,7 @@ msg() {
 # Registry selection based on timezone
 # ============================================================
 
+# 逻辑说明：结合显式变量和网络区域选择应用镜像 registry，结果保存为本轮统一来源。
 detect_registry() {
     local tz="${AGENTTEAMS_TIMEZONE}"
 
@@ -1052,6 +1064,7 @@ COPAW_WORKER_IMAGE="${AGENTTEAMS_INSTALL_COPAW_WORKER_IMAGE:-}"
 QWENPAW_WORKER_IMAGE="${AGENTTEAMS_INSTALL_QWENPAW_WORKER_IMAGE:-}"
 HERMES_WORKER_IMAGE="${AGENTTEAMS_INSTALL_HERMES_WORKER_IMAGE:-}"
 
+# 逻辑说明：从 Release/用户版本解析 Manager 与各 Worker 镜像 tag，并保证同一次安装不混用不兼容版本。
 resolve_image_tags() {
     AGENTTEAMS_VERSION="$(_normalize_version "${AGENTTEAMS_VERSION}")"
     local _image_prefix="${AGENTTEAMS_REGISTRY}/${AGENTTEAMS_IMAGE_REPOSITORY}"
@@ -1073,6 +1086,7 @@ resolve_image_tags() {
 
 # Resolve the infrastructure Controller image. The Manager is always a separate
 # AgentScope process and installation fails if its Controller image is unavailable.
+# 逻辑说明：优先采用本地覆盖，否则解析并验证 Controller 镜像；无法获得时在启动 Manager 前终止。
 resolve_embedded_image() {
     # If the user explicitly overrode the image (e.g. `make install-embedded` passes
     # a locally-built tag), respect it as-is without any registry probe.
@@ -1121,6 +1135,7 @@ resolve_embedded_image() {
 # ============================================================
 KNOWN_MODELS="gpt-5.4 gpt-5.3-codex gpt-5-mini gpt-5-nano claude-opus-4-6 claude-sonnet-4-6 claude-haiku-4-5 qwen3.6-plus qwen3.5-plus deepseek-v4-flash deepseek-v4-pro deepseek-chat deepseek-reasoner kimi-k2.5 glm-5 MiniMax-M2.7 MiniMax-M2.7-highspeed MiniMax-M2.5"
 
+# 逻辑说明：判断模型是否已有内置上下文和能力元数据，未知模型需要额外收集参数。
 is_known_model() {
     local model="$1"
     for m in ${KNOWN_MODELS}; do
@@ -1131,6 +1146,7 @@ is_known_model() {
 
 # Prompt user for custom model parameters when model is not in the known list.
 # Sets: AGENTTEAMS_MODEL_CONTEXT_WINDOW, AGENTTEAMS_MODEL_MAX_TOKENS, AGENTTEAMS_MODEL_REASONING, AGENTTEAMS_MODEL_VISION
+# 逻辑说明：为未知模型收集上下文、输出、推理和视觉能力，并写入统一配置供 Manager/Worker 使用。
 prompt_custom_model_params() {
     local model="$1"
     if is_known_model "${model}"; then
@@ -1170,6 +1186,7 @@ prompt_custom_model_params() {
 # Uses Python's standard library because the slim Manager image does not ship curl.
 # ============================================================
 
+# 逻辑说明：在限定时间内轮询 Manager readiness；超时输出诊断并失败，不把容器 Running 误认为服务可用。
 wait_manager_ready() {
     local timeout="${AGENTTEAMS_READY_TIMEOUT:-300}"
     local elapsed=0
@@ -1193,6 +1210,7 @@ wait_manager_ready() {
     die "$(msg install.wait_ready.timeout "${timeout}" "${container}")"
 }
 
+# 逻辑说明：单独等待 Matrix homeserver 响应，避免前端可打开但登录必然失败时误报安装完成。
 wait_matrix_ready() {
     local timeout="${AGENTTEAMS_READY_TIMEOUT:-300}"
     local elapsed=0
@@ -1216,6 +1234,7 @@ wait_matrix_ready() {
 
 # Read secret input with masked echo (shows * per keystroke, supports backspace)
 # Usage: read_secret "prompt text: "; value="${_RS_RESULT}"
+# 逻辑说明：以无回显方式读取秘密并支持默认/自动化来源，返回值只进入配置而不写安装日志。
 read_secret() {
     local _rs_prompt="$1"
     _RS_RESULT=""
@@ -1240,6 +1259,7 @@ read_secret() {
 }
 
 # Load current parameter values from env file for upgrade mode display
+# 逻辑说明：升级时从已有 env 读取受支持字段供交互展示，保留身份凭据且不执行任意 Shell 内容。
 load_current_params_from_env() {
     local env_file="${AGENTTEAMS_ENV_FILE:-${HOME}/agentteams-manager.env}"
     if [ -f "${env_file}" ]; then
@@ -1255,6 +1275,7 @@ load_current_params_from_env() {
 
 # In non-interactive mode, uses default or errors if required and no default.
 # Usage: prompt VAR_NAME "Prompt text" "default" [true=secret]
+# 逻辑说明：统一处理默认值、秘密、可选字段、返回上一步和非交互变量，最终把已校验值写入指定配置变量。
 prompt() {
     local var_name="$1"
     local prompt_text="$2"
@@ -1332,6 +1353,7 @@ prompt() {
 # Skips prompt if variable is already defined in environment (even if empty)
 # In upgrade mode, shows current value and lets user change it.
 # In non-interactive mode, defaults to empty string.
+# 逻辑说明：包装可留空输入，同时保留 prompt 的非交互、返回和秘密处理规则。
 prompt_optional() {
     local var_name="$1"
     local prompt_text="$2"
@@ -1396,6 +1418,7 @@ prompt_optional() {
     eval "export ${var_name}='${value}'"
 }
 
+# 逻辑说明：从密码学随机源生成安装内部秘密；只通过返回值交给 env 写入逻辑。
 generate_key() {
     openssl rand -hex 32
 }
@@ -1407,6 +1430,7 @@ generate_key() {
 #             (Crucial for unmasking 'podman' disguised as 'docker'.
 #              Must be strictly resolved prior, e.g., via check_container_runtime)
 # ============================================================
+# 逻辑说明：探测 Docker/Podman 实际 socket 并验证可访问性，避免把不存在的路径挂进 Controller。
 detect_socket() {
     local socket_path
 
@@ -1467,6 +1491,7 @@ detect_socket() {
 }
 
 # Ensure Podman API socket is active (State mutation)
+# 逻辑说明：需要时启动或启用 Podman API socket，并在继续安装前确认客户端能够通信。
 ensure_podman_socket() {
     local socket_path
 
@@ -1495,6 +1520,7 @@ ensure_podman_socket() {
 }
 
 # Detect local LAN IP address (cross-platform: macOS and Linux)
+# 逻辑说明：从可用路由中选择局域网地址供非本机访问提示；失败时回退 loopback 而不修改网络。
 detect_lan_ip() {
     local ip=""
 
@@ -1547,6 +1573,7 @@ detect_lan_ip() {
 # ============================================================
 
 # should_skip_step: returns 0 (skip) when the step is irrelevant in current mode
+# 逻辑说明：根据 Quick Start、升级和非交互模式判断向导步骤是否已有确定答案，避免重复提示。
 should_skip_step() {
     local step_fn="$1"
     case "${step_fn}" in
@@ -1591,6 +1618,7 @@ should_skip_step() {
 }
 
 # clear_step_vars: unset variables set by a step so it will re-prompt on re-entry
+# 逻辑说明：用户返回上一步时只清理该步骤及其下游派生值，保留更早确认的配置。
 clear_step_vars() {
     local step_fn="$1"
     case "${step_fn}" in
@@ -1628,6 +1656,7 @@ clear_step_vars() {
 # Individual step functions
 # ============================================================
 
+# 逻辑说明：确定本轮交互语言并同步到环境，后续所有提示通过同一语言表输出。
 step_lang() {
     local lang_default_choice="2"
     [ "${AGENTTEAMS_LANGUAGE}" = "zh" ] && lang_default_choice="1"
@@ -1648,6 +1677,7 @@ step_lang() {
     log ""
 }
 
+# 逻辑说明：选择 Quick Start 或逐项配置模式，并设置后续步骤的跳过策略。
 step_mode() {
     log "$(msg install.mode.title)"
     echo ""
@@ -1675,6 +1705,7 @@ step_mode() {
     log ""
 }
 
+# 逻辑说明：收集或解析目标版本，并立即据此确定兼容环境契约与镜像 tag。
 step_version() {
     # Skip if version already provided via env var
     if [ -n "${AGENTTEAMS_VERSION}" ]; then
@@ -1728,6 +1759,7 @@ step_version() {
     resolve_image_tags
 }
 
+# 逻辑说明：检测已有 env/容器后让用户选择升级、重装或返回；保留数据的选项不会先行删除资源。
 step_existing() {
     local existing_env="${AGENTTEAMS_ENV_FILE:-${HOME}/agentteams-manager.env}"
     log "$(msg install.existing.detected "${existing_env}")"
@@ -1886,6 +1918,7 @@ step_existing() {
     fi
 }
 
+# 逻辑说明：收集 Provider、模型、Base URL、API Key 和能力元数据，并在写配置前验证组合一致性。
 step_llm() {
     log "$(msg llm.title)"
     if [ "${AGENTTEAMS_NON_INTERACTIVE}" = "1" ]; then
@@ -2231,6 +2264,7 @@ step_llm() {
     log ""
 }
 
+# 逻辑说明：收集管理员身份并生成或验证密码；升级时默认保留现有 Matrix 身份。
 step_admin() {
     log "$(msg admin.title)"
     prompt AGENTTEAMS_ADMIN_USER "$(msg admin.username_prompt)" "admin" || return 0
@@ -2267,6 +2301,7 @@ step_admin() {
     log ""
 }
 
+# 逻辑说明：确定服务只绑定本机还是允许局域网访问，结果控制端口发布地址而非防火墙规则。
 step_network() {
     log "$(msg port.local_only.title)"
     echo ""
@@ -2295,6 +2330,7 @@ step_network() {
     fi
 }
 
+# 逻辑说明：集中收集 Gateway、Console、Cinny 等宿主端口并检查相互冲突。
 step_ports() {
     log "$(msg port.title)"
     if [ -z "${AGENTTEAMS_PORT_CINNY:-}" ] && [ -n "${AGENTTEAMS_PORT_ELEMENT_WEB:-}" ]; then
@@ -2307,6 +2343,7 @@ step_ports() {
     log ""
 }
 
+# 逻辑说明：生成 Matrix/Higress 使用的域名与端口组合，保证客户端配置和 homeserver 身份一致。
 step_domains() {
     log "$(msg domain.title)"
     log "$(msg domain.hint)"
@@ -2317,11 +2354,13 @@ step_domains() {
     log ""
 }
 
+# 逻辑说明：可选收集 GitHub token 供 Worker 协作；秘密只进入 env，不打印明文。
 step_github() {
     log "$(msg github.title)"
     prompt_optional AGENTTEAMS_GITHUB_TOKEN "$(msg github.token_prompt)" "true" || return 0
 }
 
+# 逻辑说明：收集可选 Skill registry 地址，留空表示禁用外部发现而不是使用未知默认服务。
 step_skills() {
     log ""
     log "$(msg skills.title)"
@@ -2329,6 +2368,7 @@ step_skills() {
     log ""
 }
 
+# 逻辑说明：选择持久数据卷；非交互模式采用明确默认值，避免提示阻塞自动安装。
 step_volume() {
     log "$(msg data.title)"
     # ── Non-interactive guard (deep defense) ──────────────────────────
@@ -2350,6 +2390,7 @@ step_volume() {
     log "$(msg data.volume_using "${AGENTTEAMS_DATA_DIR}")"
 }
 
+# 逻辑说明：解析 Manager workspace 的宿主绝对路径并准备挂载，不能把未解析 HOME 当清理目标。
 step_workspace() {
     log "$(msg workspace.title)"
     # ── Non-interactive guard (deep defense) ──────────────────────────
@@ -2383,6 +2424,7 @@ step_workspace() {
     log "$(msg workspace.dir_label "${AGENTTEAMS_WORKSPACE_DIR}")"
 }
 
+# 逻辑说明：选择以后新 Worker 的默认 runtime；这不改变唯一 Manager 仍为 AgentScope。
 step_runtime() {
     log "$(msg worker_runtime.title)"
     echo ""
@@ -2422,6 +2464,7 @@ step_runtime() {
     log "$(msg worker_runtime.selected "${AGENTTEAMS_DEFAULT_WORKER_RUNTIME}")"
 }
 
+# 逻辑说明：选择 Matrix E2EE 策略并记录为显式开关，非交互安装不会暗中启用密钥状态。
 step_e2ee() {
     log ""
     log "$(msg matrix_e2ee.title)"
@@ -2470,6 +2513,7 @@ step_e2ee() {
     fi
 }
 
+# 逻辑说明：收集 Worker 空闲休眠分钟数并验证数值，零/禁用语义由运行时统一解释。
 step_idle() {
     # ── Non-interactive guard (deep defense) ──────────────────────────
     if [ "${AGENTTEAMS_NON_INTERACTIVE}" = "1" ]; then
@@ -2496,6 +2540,7 @@ step_idle() {
     log "$(msg idle_timeout.selected "${AGENTTEAMS_WORKER_IDLE_TIMEOUT}")"
 }
 
+# 逻辑说明：解析允许共享给 Worker 的宿主目录；该目录稍后以精确挂载传入，不能扩大到其他路径。
 step_hostshare() {
     # ── Non-interactive guard (deep defense) ──────────────────────────
     if [ "${AGENTTEAMS_NON_INTERACTIVE}" = "1" ]; then
@@ -2517,6 +2562,7 @@ step_hostshare() {
     export AGENTTEAMS_HOST_SHARE_DIR
 }
 
+# 逻辑说明：询问是否为 Podman API 配置开机启动；只记录选择，不在此步骤直接修改系统服务。
 step_podman_autostart() {
     echo ""
     log "$(msg podman.autostart.title)"
@@ -2561,6 +2607,7 @@ step_podman_autostart() {
 # ============================================================
 # Setup dedicated Podman autostart service for AgentTeams
 # ============================================================
+# 逻辑说明：按已确认选择安装用户级 Podman socket 自启动，并核验服务状态；失败时给出可恢复提示。
 setup_podman_autostart() {
     # Only execute if using podman and autostart is enabled
     if [ "${DOCKER_CMD:-docker}" != "podman" ] || [ "${AGENTTEAMS_PODMAN_AUTOSTART:-0}" != "1" ]; then
@@ -2670,6 +2717,7 @@ WantedBy=default.target"
 # Manager Installation (Interactive)
 # ============================================================
 
+# 逻辑说明：把全部已校验配置写入 env，拉取/复用镜像并创建 Controller 与唯一 AgentScope Manager；每个外部副作用前后都做存在性或就绪核验。
 install_manager() {
     log "$(msg install.title)"
     log "$(msg install.registry "${AGENTTEAMS_REGISTRY}")"
@@ -2974,6 +3022,7 @@ EOF
     fi
 
     # Pull the single Manager image and all five Worker runtime images.
+    # 逻辑说明：识别显式本地镜像引用，避免安装器错误地尝试从 registry 拉取开发构建。
     _is_local_image() {
         case "$1" in
             agentteams/*) return 0 ;;
@@ -2981,6 +3030,7 @@ EOF
         esac
     }
 
+    # 逻辑说明：向当前容器运行时查询镜像是否已存在，仅用退出码返回结果。
     _local_image_exists() {
         local _img="$1"
         [ -z "${_img}" ] && return 1
@@ -2990,6 +3040,7 @@ EOF
 
     # Helper: pull or skip a single image
     # Args: $1=image  $2=exists_msg_key  $3=pulling_msg_key
+    # 逻辑说明：本地覆盖存在时直接复用，其余镜像执行拉取并在失败时阻止后续容器创建。
     _pull_image() {
         local _img="$1" _exists_key="$2" _pull_key="$3"
         [ -z "${_img}" ] && return 0
@@ -3199,6 +3250,7 @@ EOF
         log "Embedded controller started: agentteams-controller"
 
         # Wait for infrastructure inside the controller container
+        # 逻辑说明：在超时上限内等待 HTTP URL 可响应，供 embedded 配套服务启动排序使用。
         _wait_for_url() {
             local url="$1" ctr="$2" max_wait="${3:-120}" desc="${4:-service}"
             local elapsed=0
@@ -3384,6 +3436,7 @@ EOF
 # Worker Installation (One-Click)
 # ============================================================
 
+# 逻辑说明：校验 Worker 名称和文件系统参数后，通过 Controller 创建声明式 Worker；不直接复制 Manager 容器充当 Worker。
 install_worker() {
     local WORKER_NAME=""
     local FS=""
@@ -3478,6 +3531,7 @@ install_worker() {
 # LLM API connectivity test
 # ============================================================
 
+# 逻辑说明：向 OpenAI-compatible endpoint 发送最小模型请求验证 URL、Key 和模型组合，错误信息必须脱敏。
 test_llm_connectivity() {
     local base_url="$1"
     local api_key="$2"
@@ -3522,6 +3576,7 @@ test_llm_connectivity() {
     fi
 }
 
+# 逻辑说明：发送最小 embedding 请求并校验向量响应；禁用 embedding 时跳过而不误报失败。
 test_embedding_connectivity() {
     local base_url="$1"
     local api_key="$2"
@@ -3555,6 +3610,7 @@ test_embedding_connectivity() {
 # Uninstall
 # ============================================================
 
+# 逻辑说明：列出精确的 AgentTeams 容器和可选数据目标后按确认执行清理，不使用模糊路径或项目外资源。
 uninstall_agentteams() {
     log "$(msg uninstall.title)"
 
@@ -3676,6 +3732,7 @@ uninstall_agentteams() {
 # ============================================================
 # Check container runtime (docker or podman) and environment
 # ============================================================
+# 逻辑说明：确认 Docker/Podman CLI 与 daemon 均可用，并选择后续所有命令使用的统一 runtime。
 check_container_runtime() {
     # Ensure the rootless environment baseline (XDG_RUNTIME_DIR) is ready before engine detection.
     if [ "$(id -u)" -ne 0 ] && [ -z "${XDG_RUNTIME_DIR:-}" ]; then

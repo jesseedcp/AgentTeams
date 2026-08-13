@@ -150,6 +150,7 @@ class MinioJournalStore:
     """Adapt bucket-relative MinIO operations to the journal protocol."""
 
     def __init__(self, minio: MinioClient | Any) -> None:
+        # 逻辑说明：保存 MinIO 客户端作为 journal 存储适配器；构造时不执行网络请求。
         self._minio = minio
 
     async def put(
@@ -160,6 +161,7 @@ class MinioJournalStore:
         content_type: str,
         if_none_match: bool,
     ) -> str:
+        # 逻辑说明：上传 journal 字节并实现幂等 if-none-match；冲突内容不同才真正报错。
         if if_none_match:
             try:
                 receipt = await self._minio.put_bytes_if_version(
@@ -186,12 +188,14 @@ class MinioJournalStore:
         return str(receipt.etag)
 
     async def get(self, key: str) -> bytes:
+        # 逻辑说明：读取对象字节；存储层 ObjectNotFound 翻译为 journal 约定的 KeyError。
         try:
             return await self._minio.get_bytes(key)
         except ObjectNotFound as exc:
             raise KeyError(key) from exc
 
     async def list(self, prefix: str) -> tuple[str, ...]:
+        # 逻辑说明：列出前缀下的对象 receipt 并只返回键元组，隔离 MinIO SDK 类型。
         return tuple(
             receipt.key
             for receipt in await self._minio.list_prefix(prefix)
@@ -209,6 +213,7 @@ class MatrixRuntime:
         metrics: MetricsRegistry,
         tracer: Any | None,
     ) -> None:
+        # 逻辑说明：保存 Matrix、router 与观测依赖，生命周期由 start/stop 显式控制。
         self._matrix = matrix
         self._router = router
         self._metrics = metrics
@@ -223,6 +228,7 @@ class MatrixRuntime:
         return self._matrix.supervisor_live
 
     async def start(self) -> None:
+        # 逻辑说明：先启动 router 再启动 Matrix 同步并等待就绪；失败会停止 router 回滚。
         await self._router.start()
         try:
             await self._matrix.start(self._submit)
@@ -232,10 +238,12 @@ class MatrixRuntime:
             raise
 
     async def stop(self) -> None:
+        # 逻辑说明：先停止 Matrix 入站再停止 router，避免关闭期间产生无人处理事件。
         await self._matrix.stop()
         await self._router.stop()
 
     async def _submit(self, event: InboundEvent) -> None:
+        # 逻辑说明：记录入站指标并在 trace span 中提交 router；背压与失败由上层监督。
         self._metrics.increment(
             "agentteams_manager_matrix_events_total",
         )
@@ -245,9 +253,11 @@ class MatrixRuntime:
 
 class MatrixMedia:
     def __init__(self, matrix: MatrixClient) -> None:
+        # 逻辑说明：保存 Matrix 客户端，为媒体端口提供薄适配，不提前访问网络。
         self._matrix = matrix
 
     async def download(self, event: InboundEvent) -> tuple[Any, ...]:
+        # 逻辑说明：遍历事件媒体引用、逐个下载并展平成内容块元组；下载失败向上报告。
         blocks: list[Any] = []
         for reference in event.media:
             blocks.extend(await self._matrix.download_media(reference))
@@ -256,6 +266,7 @@ class MatrixMedia:
 
 class WorkerNotifier:
     def __init__(self, *, agt: AgtClient, matrix: MatrixClient) -> None:
+        # 逻辑说明：保存 Controller 与 Matrix 客户端，供通知时解析 Worker 房间并发送消息。
         self._agt = agt
         self._matrix = matrix
 
@@ -266,6 +277,7 @@ class WorkerNotifier:
         *,
         source_operation_id: str,
     ) -> None:
+        # 逻辑说明：查询 Worker 房间并用可重放 txn_id 发送文本；资源或房间缺失明确失败。
         resource = await self._agt.get_worker(worker)
         if resource is None or not resource.room_id:
             raise RuntimeError(
@@ -287,6 +299,7 @@ class HeartbeatRuntime:
         metrics: MetricsRegistry,
         tracer: Any | None,
     ) -> None:
+        # 逻辑说明：保存心跳、周期与观测依赖；后台任务只由 start 创建一次。
         self._heartbeat = heartbeat
         self._interval = interval
         self._metrics = metrics
@@ -295,6 +308,7 @@ class HeartbeatRuntime:
         self.ready = False
 
     async def start(self) -> None:
+        # 逻辑说明：幂等创建心跳后台任务并设置 ready；已有任务时不重复启动。
         if self._task is not None:
             return
         self._task = asyncio.create_task(
@@ -304,6 +318,7 @@ class HeartbeatRuntime:
         self.ready = True
 
     async def stop(self) -> None:
+        # 逻辑说明：取出任务、取消并等待结束，最后清除 ready；未启动时为空操作。
         task, self._task = self._task, None
         if task is not None:
             task.cancel()
@@ -314,6 +329,7 @@ class HeartbeatRuntime:
         self.ready = False
 
     async def _run(self) -> None:
+        # 逻辑说明：按动态周期执行单轮心跳；单轮异常计数后继续，取消则正常退出。
         while True:
             try:
                 await self._run_once()
@@ -327,6 +343,7 @@ class HeartbeatRuntime:
             await asyncio.sleep(max(1, float(self._interval())))
 
     async def _run_once(self) -> None:
+        # 逻辑说明：在 span 中执行 heartbeat 并按报告分类累加恢复成功和失败指标。
         with _span(self._tracer, "manager.heartbeat"):
             report = await self._heartbeat.run_once()
         self._metrics.increment("agentteams_manager_heartbeats_total")
@@ -361,6 +378,7 @@ class SnapshotScheduler:
         journal: S3Journal,
         temporary_path: Path,
     ) -> None:
+        # 逻辑说明：保存数据库、操作序列、journal 与临时路径，首次快照时加载远端基线。
         self._database = database
         self._operations = operations
         self._journal = journal
@@ -368,6 +386,7 @@ class SnapshotScheduler:
         self._last_sequence: int | None = None
 
     async def snapshot_if_due(self) -> bool:
+        # 逻辑说明：仅当 applied sequence 前进时备份 SQLite 并上传，临时文件无论成功失败都删除。
         if self._last_sequence is None:
             latest = await self._journal.download_latest_snapshot()
             self._last_sequence = latest[0].sequence if latest else 0
@@ -398,6 +417,7 @@ async def create_application(
     “启动”使测试可以注入 fake，也保证恢复协调器、workflow 与 tool 引用的是同一组
     repository/client 实例。
     """
+    # 逻辑说明：连接存储等外部依赖后调用统一装配；连接失败或组装异常会关闭已建资源。
     storage = await MinioClient.connect(
         endpoint_url=config.fs_endpoint,
         bucket=config.fs_bucket,
@@ -422,6 +442,7 @@ def build_application(
     tracer: Any | None = None,
 ) -> ManagerApplication:
     """为已有事件循环之外的调用者提供同步装配入口。"""
+    # 逻辑说明：校验管理员身份并构造共享 repositories、领域服务、runtime 和生命周期依赖图。
     if not config.admin_user_id:
         raise ValueError("Manager admin Matrix user ID is required")
     if not config.manager_admin_room_id:
@@ -454,6 +475,7 @@ def build_application(
     )
 
     async def migrate_legacy_confirmations() -> None:
+        # 逻辑说明：启动时将旧会话审批记录迁移进新仓库；迁移幂等，失败会阻止使用不一致状态。
         await confirmations.migrate_legacy_sessions(
             admin_room_id=config.manager_admin_room_id,
             admin_user_id=config.admin_user_id,
@@ -526,6 +548,7 @@ def build_application(
     resumers: dict[OperationKind, Any] = {}
 
     async def resume(operation: Any) -> None:
+        # 逻辑说明：按 operation kind 查找专用恢复器并继续未完成操作；未知类型明确记录失败。
         handler = resumers.get(operation.kind)
         if handler is None:
             raise RuntimeError(
@@ -648,6 +671,7 @@ def build_application(
     )
 
     async def prepare_runtime(document: RuntimeDocument) -> None:
+        # 逻辑说明：在提交 runtime 前准备 MCP 和模型外部资源；任一失败阻止发布半可用配置。
         await mcp_registry.prepare(document)
         metrics.increment("agentteams_manager_runtime_reloads_total")
         metrics.set(
@@ -802,6 +826,7 @@ def build_application(
         event: InboundEvent,
         error: str,
     ) -> None:
+        # 逻辑说明：记录死信指标与安全日志，并将不可恢复 Matrix 事件交给管理员告警通道。
         metrics.increment(
             "agentteams_manager_matrix_dead_letters_total",
         )
@@ -994,6 +1019,7 @@ def build_application(
 
 
 def _initial_runtime(config: ManagerConfig) -> RuntimeDocument:
+    # 逻辑说明：由静态配置构造首个 runtime 文档，为配置仓库提供确定的启动默认值。
     return RuntimeDocument(
         revision=0,
         manager_name=config.manager_name,
@@ -1011,6 +1037,7 @@ def _initial_runtime(config: ManagerConfig) -> RuntimeDocument:
 
 
 def _load_known_models() -> dict[str, ModelCapabilities]:
+    # 逻辑说明：读取内置模型能力清单并规范为按名称索引的映射；异常会阻止错误路由。
     path = Path(
         os.environ.get(
             "AGENTTEAMS_KNOWN_MODELS_PATH",
@@ -1032,6 +1059,7 @@ def _load_known_models() -> dict[str, ModelCapabilities]:
 
 
 def _higress_client(config: ManagerConfig) -> HigressClient | None:
+    # 逻辑说明：仅在 Higress 管理地址与凭据完整时构造客户端，否则返回 None。
     if (
         config.higress_admin_url is None
         or config.higress_admin_user is None
@@ -1050,6 +1078,7 @@ def _higress_client(config: ManagerConfig) -> HigressClient | None:
 
 
 def _environment_secret(reference: str) -> SecretStr:
+    # 逻辑说明：解析 env:VAR 秘密引用并读取环境值；缺失时失败且不回显秘密。
     match = _SECRET_REFERENCE.fullmatch(reference)
     if match is None:
         raise ValueError(
@@ -1062,6 +1091,7 @@ def _environment_secret(reference: str) -> SecretStr:
 
 
 def _initialize_metrics(metrics: MetricsRegistry) -> None:
+    # 逻辑说明：预创建核心计数器，使尚未发生事件时监控输出仍包含零值序列。
     for name in (
         "agentteams_manager_errors_total",
         "agentteams_manager_heartbeats_total",
@@ -1080,6 +1110,7 @@ def _initialize_metrics(metrics: MetricsRegistry) -> None:
 
 
 def _span(tracer: Any | None, name: str):
+    # 逻辑说明：有 tracer 时创建真实 span，否则返回空上下文，使观测不成为硬依赖。
     if tracer is None:
         return nullcontext()
     return tracer.start_as_current_span(name)

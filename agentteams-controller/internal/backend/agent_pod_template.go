@@ -94,6 +94,7 @@ type PodOverlay struct {
 // Any other deployMode value (including the empty string) only consults the
 // standard key, preserving the original behaviour.
 func LoadAgentPodTemplate(ctx context.Context, client K8sCoreClient, namespace, name, deployMode string) corev1.PodTemplateSpec {
+	// 逻辑说明：实时读取 Controller ConfigMap 中与本地/远程模式对应的唯一模板键并解析为 PodTemplateSpec；缺配置、RBAC/API 或 YAML 错误都记录后回退空模板，绝不阻断 Agent 创建。
 	logger := log.FromContext(ctx).WithName("agent-pod-template")
 	if client == nil || namespace == "" || name == "" {
 		return corev1.PodTemplateSpec{}
@@ -172,6 +173,7 @@ func LoadAgentPodTemplate(ctx context.Context, client K8sCoreClient, namespace, 
 //     spread constraints, runtimeClassName, schedulerName, priorityClassName,
 //     dnsPolicy, dnsConfig, etc.).
 func ApplyPodTemplate(tmpl corev1.PodTemplateSpec, overlay PodOverlay) *corev1.Pod {
+	// 逻辑说明：深拷贝用户模板后按“Controller 身份/运行字段优先、用户调度字段保留”的规则合并主容器、sidecar、资源、卷和 HostAliases，返回新 Pod 且不修改 informer 缓存对象。
 	// DeepCopy 很重要：Kubernetes 对象含有 map/slice。如果只做浅拷贝，
 	// 下面 append label/volume 可能修改调用者持有的 template，使后续
 	// reconcile 在没有 spec 变化的情况下产生不同结果。
@@ -213,6 +215,7 @@ func ApplyPodTemplate(tmpl corev1.PodTemplateSpec, overlay PodOverlay) *corev1.P
 // splitAgentContainer locates the agent container (by name) within tmpl and
 // returns (base, sidecars). When no match exists, returns (zero, tmpl).
 func splitAgentContainer(containers []corev1.Container, agentName string) (corev1.Container, []corev1.Container) {
+	// 逻辑说明：按名称从模板容器列表中只取第一个 Agent 容器作为合并基底，其余保持原顺序作为 sidecar；名称为空使用 `worker`，未找到时返回零值基底和全部原容器。
 	if agentName == "" {
 		agentName = "worker"
 	}
@@ -235,6 +238,7 @@ func splitAgentContainer(containers []corev1.Container, agentName string) (corev
 // the final agent container. Resources are resolved per the documented
 // precedence (overlay override > template > backend default).
 func overlayAgentContainer(base corev1.Container, overlay PodOverlay) corev1.Container {
+	// 逻辑说明：在模板主容器副本上覆盖镜像、环境、工作目录和必要挂载，并按请求覆盖 > 模板 > 后端默认选择资源；禁用 token 时不追加投影挂载。
 	out := base
 	if out.Name == "" {
 		out.Name = overlay.Container.Name
@@ -269,12 +273,14 @@ func overlayAgentContainer(base corev1.Container, overlay PodOverlay) corev1.Con
 }
 
 func isResourcesEmpty(r corev1.ResourceRequirements) bool {
+	// 逻辑说明：只有 limits、requests 与 claims 三类资源声明都为空时才认为模板未配置资源，从而允许后端默认值接管。
 	return len(r.Limits) == 0 && len(r.Requests) == 0 && len(r.Claims) == 0
 }
 
 // mergeStringMaps returns base + overrides with overrides winning on
 // key collision. A new map is always returned; inputs are not mutated.
 func mergeStringMaps(base, overrides map[string]string) map[string]string {
+	// 逻辑说明：创建新 map 后先复制基础项再复制覆盖项，使同名键由 overlay 获胜；两边都空时返回 nil，并保证不改变任一输入 map。
 	if len(base) == 0 && len(overrides) == 0 {
 		return nil
 	}
@@ -296,6 +302,7 @@ func ExtractSchedulingFields(tmpl corev1.PodTemplateSpec) (
 	tolerations []corev1.Toleration,
 	affinity *corev1.Affinity,
 ) {
+	// 逻辑说明：从模板直接提取 nodeSelector、tolerations 和 affinity 三类调度字段并通过命名返回值交给调用者；缺失字段自然保持零值。
 	nodeSelector = tmpl.Spec.NodeSelector
 	tolerations = tmpl.Spec.Tolerations
 	affinity = tmpl.Spec.Affinity
@@ -306,6 +313,7 @@ func ExtractSchedulingFields(tmpl corev1.PodTemplateSpec) (
 // from a PodTemplateSpec.
 // If no "worker" container exists, volumeMounts is nil.
 func ExtractVolumes(tmpl corev1.PodTemplateSpec) ([]corev1.Volume, []corev1.VolumeMount) {
+	// 逻辑说明：返回模板全部 Pod volumes，并扫描名为 `worker` 的容器提取其挂载；找不到主容器时挂载为 nil，且不合并其他 sidecar 的挂载。
 	volumes := tmpl.Spec.Volumes
 	var volumeMounts []corev1.VolumeMount
 	for _, c := range tmpl.Spec.Containers {
@@ -321,6 +329,7 @@ func ExtractVolumes(tmpl corev1.PodTemplateSpec) ([]corev1.Volume, []corev1.Volu
 // PodTemplateSpec.
 // Returns nil if no "worker" container exists or it has no env vars.
 func ExtractEnv(tmpl corev1.PodTemplateSpec) []corev1.EnvVar {
+	// 逻辑说明：扫描模板并返回第一个名为 `worker` 的容器环境变量；不存在时返回 nil，调用者据此保留 Controller 生成的环境。
 	for _, c := range tmpl.Spec.Containers {
 		if c.Name == "worker" {
 			return c.Env

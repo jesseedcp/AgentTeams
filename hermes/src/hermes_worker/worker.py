@@ -53,6 +53,7 @@ class Worker:
     """
 
     def __init__(self, config: WorkerConfig) -> None:
+        # 逻辑说明：初始化配置、同步器、后台任务和 Hermes 子进程槽位；副作用统一由 start 触发。
         self.config = config
         self.worker_name = config.worker_name
         self.sync: Optional[FileSync] = None
@@ -65,6 +66,7 @@ class Worker:
     # ------------------------------------------------------------------
 
     async def run(self) -> None:
+        # 逻辑说明：启动成功后等待停止事件；启动失败直接返回，结束前由 stop 负责清理。
         if not await self.start():
             return
         try:
@@ -75,6 +77,7 @@ class Worker:
             await self.stop()
 
     async def stop(self) -> None:
+        # 逻辑说明：幂等取消同步任务、停止 Gateway 子进程并等待退出，最后设置 stopped 事件。
         if self._stopping:
             return
         self._stopping = True
@@ -92,6 +95,7 @@ class Worker:
     # ------------------------------------------------------------------
 
     async def start(self) -> bool:
+        # 逻辑说明：检查 mc、恢复存储、生成 Hermes 配置、启动 Gateway 与同步任务；失败回滚。
         # 每一步都可能因存储、身份或配置失败而停止 readiness；宁可暂不接任务，也
         # 不能让一个只启动了一半的 Worker 在 Matrix 房间里表现为正常成员。
         console.print(
@@ -186,6 +190,7 @@ class Worker:
     # ------------------------------------------------------------------
 
     async def _run_hermes_gateway(self) -> None:
+        # 逻辑说明：加载 Gateway 配置并运行 Matrix gateway；退出或异常会触发 Worker 停止。
         # Imports are deferred so that earlier setup (env, HERMES_HOME) is
         # already in place when hermes-agent's modules read it at import time.
         from gateway.config import load_gateway_config
@@ -219,6 +224,7 @@ class Worker:
         ``device_id`` and access token, which keeps the per-restart Olm
         identity rotation invisible to other Matrix clients.
         """
+        # 逻辑说明：使用配置凭据重新登录 Matrix、保存新 token 并返回更新配置；失败向上报告。
         import json
         import urllib.error
         import urllib.request
@@ -299,6 +305,7 @@ class Worker:
 
     def _ensure_mc(self) -> None:
         """Install ``mc`` to ~/.local/bin if it isn't already on PATH."""
+        # 逻辑说明：确认 mc 已在 PATH；缺失时按平台安装，下载或权限失败会阻止启动。
         if shutil.which("mc"):
             return
 
@@ -350,6 +357,7 @@ class Worker:
     # ------------------------------------------------------------------
 
     def _sync_skills(self) -> None:
+        # 逻辑说明：从对象存储拉取技能到本地，删除已移除的受管技能并保留其他目录。
         if self.sync is None:
             return
         skills_dir = self._hermes_home / "skills"
@@ -402,6 +410,7 @@ class Worker:
         ``config/mcporter.json`` for workers that opt-in via skills.  Place a
         copy in the worker's home so any tool that walks ``./config/`` finds it.
         """
+        # 逻辑说明：从同步目录复制 mcporter 配置到 Hermes 期望位置；缺失时幂等跳过。
         if self.sync is None:
             return
         src = self.sync.local_dir / "config" / "mcporter.json"
@@ -418,6 +427,7 @@ class Worker:
 
     async def _on_files_pulled(self, pulled_files: list[str]) -> None:
         """React to Manager-side file changes by re-bridging only when needed."""
+        # 逻辑说明：按变化文件重建桥接配置、技能或 mcporter，并在需要时触发 Gateway 重载。
         if self.sync is None:
             return
 
@@ -451,6 +461,7 @@ class Worker:
 
     @staticmethod
     def _read_text_file(path: Path) -> Optional[str]:
+        # 逻辑说明：以 UTF-8 读取可选文本；文件缺失或读取失败返回 None 供调用方安全回落。
         try:
             return path.read_text() if path.exists() else None
         except OSError:
@@ -459,6 +470,7 @@ class Worker:
     @staticmethod
     def _load_env_file(env_path: Path) -> None:
         """Source ``env_path`` into ``os.environ`` for this process."""
+        # 逻辑说明：解析 dotenv 并只设置尚未存在的进程变量，保留部署显式注入值。
         if not env_path.exists():
             return
         try:

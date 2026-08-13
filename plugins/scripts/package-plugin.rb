@@ -28,6 +28,7 @@ FileUtils.rm_f(out_path)
 
 includes = manifest.fetch("package").fetch("include")
 
+# 逻辑说明：接收插件根目录、临时 staging 根目录和 manifest 中的一条 include；源不存在就终止打包，目录递归复制、文件按原相对路径复制，写入范围仅限 staging。
 def copy_entry(plugin_root, staging_root, entry)
   src = plugin_root / entry
   abort("package include missing: #{src}") unless src.exist?
@@ -45,6 +46,7 @@ def copy_entry(plugin_root, staging_root, entry)
   end
 end
 
+# 逻辑说明：遍历传入的临时 staging 目录，只移除 `__pycache__`、`.pyc` 和 `.DS_Store` 等生成物；不返回业务数据，也不会清理源码目录之外的路径。
 def prune_generated(path)
   Dir.glob((path / "**/*").to_s, File::FNM_DOTMATCH).each do |item|
     base = File.basename(item)

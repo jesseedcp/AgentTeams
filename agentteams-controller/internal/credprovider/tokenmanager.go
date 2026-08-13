@@ -45,6 +45,7 @@ func NewTokenManager(client Client, req IssueRequest) *TokenManager {
 // WithRefreshMargin sets a custom margin: the token is refreshed when
 // less than margin is left before expiry. Useful in tests.
 func (m *TokenManager) WithRefreshMargin(d time.Duration) *TokenManager {
+	// 逻辑说明：覆盖 token 提前刷新的安全余量并返回同一管理器，供构造阶段链式配置；调用方应在并发取 token 前完成设置。
 	m.margin = d
 	return m
 }
@@ -52,6 +53,7 @@ func (m *TokenManager) WithRefreshMargin(d time.Duration) *TokenManager {
 // Token returns a valid STS token, refreshing it if the cached one is
 // missing or about to expire.
 func (m *TokenManager) Token(ctx context.Context) (*IssueResponse, error) {
+	// 逻辑说明：用互斥锁串行化缓存检查与刷新；缓存离过期时间仍超过安全余量时直接复用，否则向侧车签发新 token，并按返回寿命更新过期点，失败时不覆盖旧状态。
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -70,6 +72,7 @@ func (m *TokenManager) Token(ctx context.Context) (*IssueResponse, error) {
 
 // Invalidate forces the next Token call to refresh.
 func (m *TokenManager) Invalidate() {
+	// 逻辑说明：在互斥锁保护下同时清空缓存对象和过期时间，使下一次 Token 必须重新签发；它不立即访问凭据侧车。
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.cached = nil

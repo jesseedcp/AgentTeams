@@ -154,6 +154,7 @@ class GatewayToolkit:
         secret_resolver: SecretResolver | None = None,
         yolo: bool = False,
     ) -> None:
+        # 逻辑说明：绑定 Gateway workflow、房间授权、秘密解析器与 mutation context，再建立受限工具表；构造不会访问 Higress 或解封 Secret。
         self._policy = policy
         self._service = service
         self._context_provider = (
@@ -164,6 +165,7 @@ class GatewayToolkit:
         self.tools = self._build_tools()
 
     def _build_tools(self) -> tuple[ManagerTool, ...]:
+        # 逻辑说明：仅为管理员私聊构造三类 Higress 资源的 list/get/upsert/delete 工具，并按 allowed_tools 过滤；写操作携带确认提示，非管理员不暴露任何入口。
         if self._policy.kind is not RoomKind.ADMIN_DM:
             return ()
         candidates = (
@@ -225,7 +227,9 @@ class GatewayToolkit:
         read_only: bool = False,
         confirmation_message: str | None = None,
     ) -> ManagerTool:
+        # 逻辑说明：按资源工具规范构造带 schema、只读标志和可选确认文案的 ManagerTool；invoke 执行时要求管理员房间且再次检查 allowed_tools 后才访问 Higress。
         async def invoke(**raw: Any) -> object:
+            # 逻辑说明：执行时同时复核房间种类和工具白名单，随后验证闭合输入并调用固定 handler；越权或校验失败不会发起 Higress 请求。
             if (
                 self._policy.kind is not RoomKind.ADMIN_DM
                 or name not in self._policy.allowed_tools
@@ -247,6 +251,7 @@ class GatewayToolkit:
         )
 
     async def _list(self, request: BaseModel) -> object:
+        # 逻辑说明：验证资源种类、调用服务获取已脱敏对象，再转成 JSON 列表返回；读取失败直接传播，不缓存过期网关状态。
         item = _ListInput.model_validate(request)
         resources = await self._service.list(item.resource_kind)
         return {
@@ -258,6 +263,7 @@ class GatewayToolkit:
         }
 
     async def _get(self, request: BaseModel) -> object:
+        # 逻辑说明：验证种类和名称后读取单个网关资源，并只返回服务层的无 Secret 表示；不存在或远端错误原样报告。
         item = _GetInput.model_validate(request)
         resource = await self._service.get(
             item.resource_kind,
@@ -266,6 +272,7 @@ class GatewayToolkit:
         return resource.model_dump(mode="json")
 
     async def _upsert(self, request: BaseModel) -> object:
+        # 逻辑说明：把带判别字段的输入转换成具体 Higress 请求，按引用解析 Secret，再携带当前幂等上下文调用可恢复 upsert workflow。
         item = _UpsertInput.model_validate(request)
         resource = await self._resource_request(item.resource)
         return await self._service.upsert(
@@ -274,6 +281,7 @@ class GatewayToolkit:
         )
 
     async def _delete(self, request: BaseModel) -> object:
+        # 逻辑说明：验证删除目标并取得当前操作上下文后交给服务；删除副作用与 journal 回执由 workflow 负责，工具层不伪造成功。
         item = _DeleteInput.model_validate(request)
         return await self._service.delete(
             item.resource_kind,
@@ -285,6 +293,7 @@ class GatewayToolkit:
         self,
         item: ResourceInput,
     ) -> GatewayRequest:
+        # 逻辑说明：按 provider/route/consumer 分支构造强类型请求；provider 与 consumer 的 Secret 引用逐个异步解析，任一失败即停止且不提交网关变更。
         if isinstance(item, _ProviderInput):
             return LLMProviderRequest(
                 name=item.name,
@@ -330,6 +339,7 @@ class GatewayToolkit:
         )
 
     async def _resolve_secret(self, reference: str) -> SecretStr:
+        # 逻辑说明：要求配置 Secret resolver，支持同步或异步解析并验证返回类型与非空值；只返回 SecretStr，不把明文写入工具回执。
         if self._secret_resolver is None:
             raise RuntimeError(
                 "gateway secret references are not configured",
@@ -344,6 +354,7 @@ class GatewayToolkit:
         return value
 
     async def _context(self) -> MutationContext:
+        # 逻辑说明：解析并验证当前 Matrix turn 的 MutationContext，作为网关 workflow 的稳定 operation 身份；无效上下文拒绝外部副作用。
         value = self._context_provider()
         if inspect.isawaitable(value):
             value = await value
@@ -360,6 +371,7 @@ class GatewayToolkitFactory:
         secret_resolver: SecretResolver | None = None,
         yolo: bool = False,
     ) -> None:
+        # 逻辑说明：保存共享 Gateway 服务、Secret resolver 和默认确认策略，供房间级 toolkit 复用；此时不创建 Provider、Route 或 Consumer。
         self._service = service
         self._secret_resolver = secret_resolver
         self._yolo = yolo
@@ -368,6 +380,7 @@ class GatewayToolkitFactory:
         self,
         policy: RoomPolicy,
     ) -> tuple[ManagerTool, ...]:
+        # 逻辑说明：用共享 Gateway 服务和 Secret resolver 为当前 policy 临时装配 toolkit，返回的工具已限定管理员房间与白名单，不复用其他会话实例。
         return GatewayToolkit(
             policy=policy,
             service=self._service,
@@ -377,6 +390,7 @@ class GatewayToolkitFactory:
 
 
 def _current_mutation_context() -> MutationContext:
+    # 逻辑说明：从统一工具上下文复制 room/event/call ID，保证同一次模型重试能映射到同一可恢复网关操作。
     invocation = current_tool_invocation()
     return MutationContext(
         room_id=invocation.room_id,

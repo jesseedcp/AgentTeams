@@ -19,6 +19,7 @@ class SupervisionStateRepository:
     """Count consecutive heartbeat cycles without observable progress."""
 
     def __init__(self, database: Database) -> None:
+        # 逻辑说明：保存监督心跳计数器使用的数据库；构造过程不记录 ping，连续无进展次数只由 record_ping 的原子事务推进。
         self._database = database
 
     async def record_ping(
@@ -28,10 +29,12 @@ class SupervisionStateRepository:
         observed_token: str,
         pinged_at: datetime,
     ) -> int:
+        # 逻辑说明：先拒绝无时区时间，再在单一事务比较本次与上次进度 token；相同则累计无进展次数，变化则清零，并返回新的计数供告警节流。
         if pinged_at.tzinfo is None or pinged_at.utcoffset() is None:
             raise ValueError("pinged_at must be timezone-aware")
 
         def write(connection: sqlite3.Connection) -> int:
+            # 逻辑说明：读取旧观察值、计算 missed_cycles 并原子 upsert 新游标；事务失败不留下已递增但未保存的半状态。
             row = connection.execute(
                 """
                 SELECT observed_token, missed_cycles

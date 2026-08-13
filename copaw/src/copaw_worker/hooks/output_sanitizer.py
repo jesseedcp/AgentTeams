@@ -67,10 +67,13 @@ class OutputSanitizer:
     """Manages built-in + user-defined sanitization patterns."""
 
     def __init__(self) -> None:
+        # 逻辑说明：为每个脱敏器复制一份内置正则规则列表，使后续加载用户规则只改变本实例，避免不同 Worker 或测试实例互相污染。
         self._patterns: list[tuple[re.Pattern[str], str]] = list(_BUILTIN_PATTERNS)
 
     def load_user_rules(self, rules: list[dict[str, Any]]) -> None:
         """Replace user-defined rules from credagent.json output_sanitize."""
+        # 逻辑说明：`load_user_rules` 接收 rules，加载用户 rules，返回 None；
+        # 会更新对象内存状态。失败策略：已知失败按现有 except 转为错误结果或日志，未覆盖异常继续上抛；本函数不额外重试，避免掩盖持续故障。
         self._patterns = list(_BUILTIN_PATTERNS)
         skipped = 0
         for rule in rules:
@@ -84,6 +87,7 @@ class OutputSanitizer:
             logger.warning("output_sanitizer: loaded %d rules, skipped %d invalid", loaded, skipped)
 
     def _add_rule(self, rule: dict[str, Any]) -> None:
+        # 逻辑说明：`_add_rule` 接收 rule，执行 模型输出脱敏 中的“add 规则”步骤，返回 None；会访问网络服务。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
         rule_type = rule.get("type", "")
         if rule_type == "prefix":
             prefix = rule["prefix"]
@@ -113,6 +117,7 @@ class OutputSanitizer:
 
     def sanitize(self, text: str) -> str:
         """Apply all patterns to text, returning sanitized version."""
+        # 逻辑说明：`sanitize` 接收 text，按内置与用户规则替换输出中的敏感值，返回 str；不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
         for pattern, replacement in self._patterns:
             text = pattern.sub(replacement, text)
         return text
@@ -135,10 +140,16 @@ def get_sanitizer() -> OutputSanitizer:
 def create_sanitizer_middleware() -> Callable[..., Any]:
     """Create an agentscope Toolkit middleware that sanitizes tool output."""
 
+    # 逻辑说明：构造 AgentScope toolkit 异步中间件；它消费下游工具响应流，逐个清洗 content 中的文本块后再原顺序 yield，防止凭据进入模型上下文。
+    # 无文本内容保持不变；下游 handler 或 sanitizer 异常继续抛出，避免把未脱敏响应静默放行。
     async def _sanitizer_middleware(
         kwargs: dict[str, Any],
         next_handler: Callable[..., Any],
     ) -> "AsyncGenerator[Any, None]":
+        # 逻辑说明：`_sanitizer_middleware` 接收 kwargs、next_handler，执行 模型输出脱敏 中的“sanitizer middleware”步骤，
+        # 返回 'AsyncGenerator[Any, None]'；
+        #
+        # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
         async for response in await next_handler(**kwargs):
             content = getattr(response, "content", None)
             if content:

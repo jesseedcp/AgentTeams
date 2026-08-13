@@ -30,6 +30,7 @@ type FileWatcher struct {
 }
 
 func New(watchDir string, c client.Client) *FileWatcher {
+	// 逻辑说明：保存镜像目录与 Kubernetes client，并创建空的路径→spec 摘要表；摘要将在同步时防止 status 回写再次触发 reconcile。
 	return &FileWatcher{
 		WatchDir: watchDir,
 		Client:   c,
@@ -39,6 +40,7 @@ func New(watchDir string, c client.Client) *FileWatcher {
 
 // InitialSync performs a full scan of the watch directory and syncs all YAML files to kine.
 func (w *FileWatcher) InitialSync(ctx context.Context) error {
+	// 逻辑说明：递归扫描监控目录，只处理 yaml/yml 普通文件；单文件同步失败记日志后继续统计其余资源，目录遍历本身的最终错误返回给启动方。
 	logger := log.FromContext(ctx).WithName("file-watcher")
 	logger.Info("starting initial sync", "dir", w.WatchDir)
 
@@ -65,6 +67,7 @@ func (w *FileWatcher) InitialSync(ctx context.Context) error {
 
 // Watch starts the fsnotify watcher loop. Blocks until context is cancelled.
 func (w *FileWatcher) Watch(ctx context.Context) error {
+	// 逻辑说明：创建 fsnotify 并确保标准子目录存在，注册当前全部目录后进入单 goroutine 事件循环；YAML 事件按路径合并并延迟 500ms 批处理，context 取消或通道关闭时释放 watcher。
 	logger := log.FromContext(ctx).WithName("file-watcher")
 
 	watcher, err := fsnotify.NewWatcher()
@@ -136,6 +139,7 @@ func (w *FileWatcher) Watch(ctx context.Context) error {
 }
 
 func (w *FileWatcher) processPending(ctx context.Context, pending map[string]fsnotify.Op) {
+	// 逻辑说明：逐个合并后的路径判断最终事件类型，删除/重命名走资源清理，创建/写入走 upsert；单个文件失败只记录，不阻断同批其他文件。
 	logger := log.FromContext(ctx).WithName("file-watcher")
 
 	for path, op := range pending {
@@ -153,6 +157,7 @@ func (w *FileWatcher) processPending(ctx context.Context, pending map[string]fsn
 
 // syncFile reads a YAML file, parses it, and upserts the resource into kine.
 func (w *FileWatcher) syncFile(ctx context.Context, path string) error {
+	// 逻辑说明：读取 YAML 并计算排除 status 的摘要，在锁内与旧摘要比较以切断 controller 状态回写循环；spec 有变化时按相对目录解析 kind/name，再分派对应 CR upsert。
 	logger := log.FromContext(ctx).WithName("file-watcher")
 
 	data, err := os.ReadFile(path)
@@ -192,6 +197,7 @@ func (w *FileWatcher) syncFile(ctx context.Context, path string) error {
 }
 
 func (w *FileWatcher) upsertWorker(ctx context.Context, name string, data []byte) error {
+	// 逻辑说明：解析 Worker YAML，以文件名作为权威名称并补默认 namespace；查询现存 CR，未取到时创建，取到时只替换 Spec 后更新，从而保留 resourceVersion 与 Status。
 	var worker v1beta1.Worker
 	if err := yaml.Unmarshal(data, &worker); err != nil {
 		return fmt.Errorf("parse worker YAML: %w", err)
@@ -213,6 +219,7 @@ func (w *FileWatcher) upsertWorker(ctx context.Context, name string, data []byte
 }
 
 func (w *FileWatcher) upsertTeam(ctx context.Context, name string, data []byte) error {
+	// 逻辑说明：解析 Team YAML，以文件路径纠正名称并补 default namespace；查询失败按新对象创建，存在时仅同步 Spec，避免文件内容覆盖服务端 Status/元数据。
 	var team v1beta1.Team
 	if err := yaml.Unmarshal(data, &team); err != nil {
 		return fmt.Errorf("parse team YAML: %w", err)
@@ -232,6 +239,7 @@ func (w *FileWatcher) upsertTeam(ctx context.Context, name string, data []byte) 
 }
 
 func (w *FileWatcher) upsertHuman(ctx context.Context, name string, data []byte) error {
+	// 逻辑说明：解析 Human YAML，使用文件名/default namespace 定位对象；不存在则创建，存在则把期望 Spec 写入原对象并更新，以保留并发控制字段。
 	var human v1beta1.Human
 	if err := yaml.Unmarshal(data, &human); err != nil {
 		return fmt.Errorf("parse human YAML: %w", err)
@@ -252,6 +260,7 @@ func (w *FileWatcher) upsertHuman(ctx context.Context, name string, data []byte)
 
 // handleDelete removes a resource from kine when its YAML file is deleted.
 func (w *FileWatcher) handleDelete(ctx context.Context, path string) error {
+	// 逻辑说明：先在锁内移除文件摘要，再从路径推导 CR 类型与名称；对已知类型删除 default namespace 对象并忽略 NotFound，使重复文件事件保持幂等。
 	logger := log.FromContext(ctx).WithName("file-watcher")
 
 	w.mu.Lock()
@@ -288,6 +297,7 @@ func (w *FileWatcher) handleDelete(ctx context.Context, path string) error {
 // parsePathKindName extracts kind and name from path like:
 // /root/agentteams-fs/agentteams-config/workers/alice.yaml → ("worker", "alice")
 func parsePathKindName(path, watchDir string) (kind, name string) {
+	// 逻辑说明：把绝对路径转成监控根目录下的两段相对路径，仅接受 workers/teams/humans 目录，并去掉文件扩展名生成对应单数 kind 与资源名。
 	rel, err := filepath.Rel(watchDir, path)
 	if err != nil {
 		return "", ""
@@ -315,6 +325,7 @@ func parsePathKindName(path, watchDir string) (kind, name string) {
 // hashSpecPortion computes a hash of the YAML content excluding status fields,
 // so that status-only writes by the reconciler don't trigger re-sync.
 func hashSpecPortion(data []byte) string {
+	// 逻辑说明：逐行排除顶层 status 块，遇到下一顶层字段恢复收集，再对其余 YAML 计算截短 SHA-256；因此纯状态更新不会被误判为期望 Spec 变化。
 	// Simple approach: hash everything before "status:" line
 	lines := strings.Split(string(data), "\n")
 	var specLines []string

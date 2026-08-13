@@ -4,6 +4,7 @@
 # 把 scope 判断集中在这里，能避免 Controller 无意下载 Worker 会话/产物，也保留旧版
 # 恢复路径的兼容性；新的 AgentScope Manager 不会因此重新变成旧 Manager runtime。
 
+# 逻辑说明：根据 controller/worker scope 选择首次恢复前缀；Controller 只拉管理配置，Worker 拉自己的运行目录。
 agentteams_mirror_initial() {
     local scope="$1"
     local storage_prefix="$2"
@@ -20,6 +21,7 @@ agentteams_mirror_initial() {
     mc mirror "${storage_prefix}/" "${local_root}/" --overwrite
 }
 
+# 逻辑说明：仅为旧 Worker 布局提供短时间窗口的兼容回拉，Controller 禁止使用以免污染权威配置。
 agentteams_mirror_fallback() {
     local scope="$1"
     local storage_prefix="$2"

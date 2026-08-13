@@ -94,6 +94,7 @@ class ReconcileResult(BaseModel):
 
     @classmethod
     def effect_absent(cls) -> ReconcileResult:
+        # 逻辑说明：`effect_absent` 接收 当前服务状态，记录外部效果 absent，核心调用为 `cls`，返回 `ReconcileResult`。 它只在内存中计算、校验或组装数据；下游异常按原语义向上传递，不会伪造成功结果。
         return cls(disposition=ReconcileDisposition.EFFECT_ABSENT)
 
     @classmethod
@@ -103,6 +104,7 @@ class ReconcileResult(BaseModel):
         receipt: dict[str, Any] | None = None,
         message: str = "",
     ) -> ReconcileResult:
+        # 逻辑说明：`pending` 接收 `receipt`、`message`，生成 pending 结果 Worker、Team、Human 与拓扑，核心调用为 `cls`，返回 `ReconcileResult`。 它只在内存中计算、校验或组装数据；下游异常按原语义向上传递，不会伪造成功结果。
         return cls(
             disposition=ReconcileDisposition.PENDING,
             receipt=receipt or {},
@@ -115,6 +117,7 @@ class ReconcileResult(BaseModel):
         *,
         receipt: dict[str, Any],
     ) -> ReconcileResult:
+        # 逻辑说明：`succeeded` 接收 `receipt`，生成成功结果 Worker、Team、Human 与拓扑，核心调用为 `cls`，返回 `ReconcileResult`。 它只在内存中计算、校验或组装数据；下游异常按原语义向上传递，不会伪造成功结果。
         return cls(
             disposition=ReconcileDisposition.SUCCEEDED,
             receipt=receipt,
@@ -122,6 +125,7 @@ class ReconcileResult(BaseModel):
 
     @classmethod
     def failed(cls, message: str) -> ReconcileResult:
+        # 逻辑说明：`failed` 接收 `message`，生成失败结果 Worker、Team、Human 与拓扑，核心调用为 `cls`，返回 `ReconcileResult`。 它只在内存中计算、校验或组装数据；下游异常按原语义向上传递，不会伪造成功结果。
         return cls(
             disposition=ReconcileDisposition.FAILED,
             message=message,
@@ -157,12 +161,14 @@ class ResourceReconciler:
     }
 
     def __init__(self, controller: ReconciliationController) -> None:
+        # 逻辑说明：`__init__` 校验并保存 `controller`，为Worker、Team、Human 与拓扑建立进程内服务状态；配置不合法时立即抛错，且构造阶段不执行远端变更。
         self._controller = controller
 
     async def reconcile(
         self,
         operation: OperationRecord,
     ) -> ReconcileResult:
+        # 逻辑说明：`reconcile` 接收 `operation`，恢复未完成操作 Worker、Team、Human 与拓扑，核心调用为 `get`、`ValueError`、`_target_name`，返回 `ReconcileResult`。 它可能读写仓库、Controller、Matrix 或对象存储；前置条件不满足时保留现有领域异常，防止错误状态继续传播。
         resource_type = (
             self._CREATE_KINDS.get(operation.kind)
             or self._UPDATE_KINDS.get(operation.kind)
@@ -207,6 +213,7 @@ class ResourceReconciler:
         resource_type: str,
         name: str,
     ) -> WorkerResource | TeamResource | HumanResource | None:
+        # 逻辑说明：`_get` 接收 `resource_type`、`name`，读取 Worker、Team、Human 与拓扑，核心调用为 `get_worker`、`get_team`、`get_human`，返回 `WorkerResource | TeamResource | HumanResource | None`。 它可能读写仓库、Controller、Matrix 或对象存储；下游异常按原语义向上传递，不会伪造成功结果。
         if resource_type == "worker":
             return await self._controller.get_worker(name)
         if resource_type == "team":
@@ -225,6 +232,7 @@ class MutationContext(BaseModel):
 
     @property
     def operation_id(self) -> str:
+        # 逻辑说明：`operation_id` 接收 当前服务状态，读取 operation id，核心调用为 `operation_id_for`，返回 `str`。 它只在内存中计算、校验或组装数据；下游异常按原语义向上传递，不会伪造成功结果。
         return operation_id_for(
             self.room_id,
             self.event_id,
@@ -395,6 +403,7 @@ class TeamSpec(BaseModel):
 
     @model_validator(mode="after")
     def validate_roster(self) -> TeamSpec:
+        # 逻辑说明：`validate_roster` 检查 Team 的 leader 不会同时出现在 workers，且成员名称无重复；通过后返回自身，避免生成角色冲突的 Team 配置。
         names = [self.leader_name, *self.worker_names]
         if len(names) != len(set(names)):
             raise ValueError("Team member names must be unique")
@@ -410,9 +419,11 @@ class TeamSpec(BaseModel):
 
     @property
     def member_names(self) -> tuple[ResourceName, ...]:
+        # 逻辑说明：`member_names` 接收 当前服务状态，提取成员 names，返回 `tuple[ResourceName, ...]`。 它只在内存中计算、校验或组装数据；下游异常按原语义向上传递，不会伪造成功结果。
         return (self.leader_name, *self.worker_names)
 
     def to_create_request(self) -> TeamCreateRequest:
+        # 逻辑说明：`to_create_request` 接收 当前服务状态，转换请求 create request，核心调用为 `TeamCreateRequest`，返回 `TeamCreateRequest`。 它只在内存中计算、校验或组装数据；下游异常按原语义向上传递，不会伪造成功结果。
         return TeamCreateRequest(
             name=self.name,
             leader_name=self.leader_name,
@@ -426,6 +437,7 @@ class TeamSpec(BaseModel):
         )
 
     def to_apply_document(self) -> bytes:
+        # 逻辑说明：`to_apply_document` 接收 当前服务状态，转换请求 apply document，核心调用为 `encode`、`dumps`，返回 `bytes`。 它只在内存中计算、校验或组装数据；下游异常按原语义向上传递，不会伪造成功结果。
         spec: dict[str, object] = {
             "teamName": self.team_name or self.name,
             "workerMembers": [
@@ -521,6 +533,7 @@ class ResourceService:
             "This room is your direct coordination channel."
         ),
     ) -> None:
+        # 逻辑说明：`__init__` 校验并保存 `controller`、`supervisor`、`topology`、`matrix`、`admin_room_id`、`nacos`、`confirmation_key`、`sleeper`、`worker_poll_delays`、`team_poll_delays`、`human_poll_delays`、`delete_poll_delays`、`greeting`，为Worker、Team、Human 与拓扑建立进程内服务状态；配置不合法时立即抛错，且构造阶段不执行远端变更。
         if not worker_poll_delays:
             raise ValueError("worker_poll_delays cannot be empty")
         if any(delay < 0 for delay in worker_poll_delays):
@@ -558,25 +571,32 @@ class ResourceService:
         ] = {}
 
     async def get_worker(self, name: str) -> WorkerResource | None:
+        # 逻辑说明：`get_worker` 接收 `name`，读取 worker，核心调用为 `get_worker`，返回 `WorkerResource | None`。 它可能读写仓库、Controller、Matrix 或对象存储；下游异常按原语义向上传递，不会伪造成功结果。
         return await self._controller.get_worker(name)
 
     async def list_workers(self) -> tuple[WorkerResource, ...]:
+        # 逻辑说明：`list_workers` 接收 当前服务状态，列出 workers，核心调用为 `list_workers`，返回 `tuple[WorkerResource, ...]`。 它可能读写仓库、Controller、Matrix 或对象存储；下游异常按原语义向上传递，不会伪造成功结果。
         return await self._controller.list_workers()
 
     async def get_team(self, name: str) -> TeamResource | None:
+        # 逻辑说明：`get_team` 接收 `name`，读取 team，核心调用为 `get_team`，返回 `TeamResource | None`。 它可能读写仓库、Controller、Matrix 或对象存储；下游异常按原语义向上传递，不会伪造成功结果。
         return await self._controller.get_team(name)
 
     async def list_teams(self) -> tuple[TeamResource, ...]:
+        # 逻辑说明：`list_teams` 接收 当前服务状态，列出 teams，核心调用为 `list_teams`，返回 `tuple[TeamResource, ...]`。 它可能读写仓库、Controller、Matrix 或对象存储；下游异常按原语义向上传递，不会伪造成功结果。
         return await self._controller.list_teams()
 
     async def get_human(self, name: str) -> HumanResource | None:
+        # 逻辑说明：`get_human` 接收 `name`，读取 human，核心调用为 `get_human`，返回 `HumanResource | None`。 它可能读写仓库、Controller、Matrix 或对象存储；下游异常按原语义向上传递，不会伪造成功结果。
         return await self._controller.get_human(name)
 
     async def list_humans(self) -> tuple[HumanResource, ...]:
+        # 逻辑说明：`list_humans` 接收 当前服务状态，列出 humans，核心调用为 `list_humans`，返回 `tuple[HumanResource, ...]`。 它可能读写仓库、Controller、Matrix 或对象存储；下游异常按原语义向上传递，不会伪造成功结果。
         return await self._controller.list_humans()
 
     async def find_worker(self, query: str) -> WorkerDiscovery:
         """Search Nacos without performing any Controller mutation."""
+        # 逻辑说明：`find_worker` 接收 `query`，查找 worker，核心调用为 `WorkerImportError`、`join`、`split`，返回 `WorkerDiscovery`。 它可能读写仓库、Controller、Matrix 或对象存储；前置条件不满足时保留现有领域异常，防止错误状态继续传播。
         if self._nacos is None:
             raise WorkerImportError("Nacos discovery is not configured")
         normalized = " ".join(query.split())
@@ -607,6 +627,7 @@ class ResourceService:
         worker_name: str,
     ) -> WorkerImportConfirmation:
         """Bind an explicit candidate choice to its local Worker name."""
+        # 逻辑说明：`confirm_import` 接收 `discovery`、`candidate_name`、`worker_name`，确认 import，核心调用为 `model_dump`、`_confirmation_signature`、`compare_digest`，返回 `WorkerImportConfirmation`。 它只在内存中计算、校验或组装数据；前置条件不满足时保留现有领域异常，防止错误状态继续传播。
         unsigned_discovery = {
             "query": discovery.query,
             "candidates": [
@@ -654,6 +675,7 @@ class ResourceService:
         worker_name: str,
     ) -> WorkerImportConfirmation:
         """Inspect but do not search one explicit URI, then bind its import."""
+        # 逻辑说明：`confirm_direct_import` 接收 `package_uri`、`worker_name`，确认 direct import，核心调用为 `WorkerImportError`、`inspect_worker_uri`、`WorkerDiscovery`，返回 `WorkerImportConfirmation`。 它可能读写仓库、Controller、Matrix 或对象存储；前置条件不满足时保留现有领域异常，防止错误状态继续传播。
         if self._nacos is None:
             raise WorkerImportError("Nacos discovery is not configured")
         candidate = await self._nacos.inspect_worker_uri(package_uri)
@@ -685,6 +707,7 @@ class ResourceService:
         context: MutationContext,
     ) -> WorkerResource:
         """Import exactly the confirmed package, with no generic fallback."""
+        # 逻辑说明：`import_worker` 接收 `confirmation`、`context`，处理 worker，核心调用为 `_validate_import_confirmation`、`begin`、`model_dump`，返回 `WorkerResource`。 它可能读写仓库、Controller、Matrix 或对象存储；下游异常按原语义向上传递，不会伪造成功结果。
         self._validate_import_confirmation(confirmation)
         operation = await self._supervisor.begin(
             operation_id=context.operation_id,
@@ -698,6 +721,7 @@ class ResourceService:
         self,
         operation: OperationRecord,
     ) -> WorkerResource:
+        # 逻辑说明：`resume_worker_import` 接收 `operation`，恢复 worker import，核心调用为 `ValueError`、`model_validate`、`_validate_import_confirmation`，返回 `WorkerResource`。 它可能读写仓库、Controller、Matrix 或对象存储；前置条件不满足时保留现有领域异常，防止错误状态继续传播。
         if operation.kind is not OperationKind.IMPORT_WORKER:
             raise ValueError("operation is not a Worker import")
         confirmation = WorkerImportConfirmation.model_validate(
@@ -876,6 +900,7 @@ class ResourceService:
         self,
         confirmation: WorkerImportConfirmation,
     ) -> None:
+        # 逻辑说明：`_validate_import_confirmation` 重新计算 Worker 包导入确认签名并用常量时间比较，同时核对确认用途与候选内容；不匹配时拒绝继续下载或创建 Worker。
         payload = {
             "candidate": confirmation.candidate.model_dump(mode="json"),
             "worker_name": confirmation.worker_name,
@@ -892,6 +917,7 @@ class ResourceService:
         purpose: str,
         payload: Mapping[str, object],
     ) -> str:
+        # 逻辑说明：`_confirmation_signature` 接收 `purpose`、`payload`，处理 signature，核心调用为 `encode`、`dumps`、`hexdigest`，返回 `str`。 它只在内存中计算、校验或组装数据；下游异常按原语义向上传递，不会伪造成功结果。
         encoded = json.dumps(
             {"purpose": purpose, "payload": payload},
             ensure_ascii=False,
@@ -910,6 +936,7 @@ class ResourceService:
         *,
         context: MutationContext,
     ) -> WorkerResource:
+        # 逻辑说明：`create_worker` 接收 `request`、`context`，创建 worker，核心调用为 `begin`、`model_dump`、`_require_worker`，返回 `WorkerResource`。 它可能读写仓库、Controller、Matrix 或对象存储；前置条件不满足时保留现有领域异常，防止错误状态继续传播。
         operation = await self._supervisor.begin(
             operation_id=context.operation_id,
             kind=OperationKind.CREATE_WORKER,
@@ -943,6 +970,7 @@ class ResourceService:
         self,
         operation: OperationRecord,
     ) -> WorkerResource:
+        # 逻辑说明：`resume_worker_create` 接收 `operation`，恢复 worker create，核心调用为 `ValueError`、`model_validate`、`ConflictError`，返回 `WorkerResource`。 它可能读写仓库、Controller、Matrix 或对象存储；前置条件不满足时保留现有领域异常，防止错误状态继续传播。
         if operation.kind is not OperationKind.CREATE_WORKER:
             raise ValueError("operation is not a Worker create")
         request = WorkerCreateRequest.model_validate(operation.request)
@@ -1053,6 +1081,7 @@ class ResourceService:
     ) -> WorkerResource | None:
         """Submit the Controller mutation without waiting for room readiness."""
 
+        # 逻辑说明：`_accept_worker_create` 接收 `operation`、`request`，验收 worker create，核心调用为 `get_worker`、`effect_failed`、`ConflictError`，返回 `WorkerResource | None`。 它可能读写仓库、Controller、Matrix 或对象存储；前置条件不满足时保留现有领域异常，防止错误状态继续传播。
         worker: WorkerResource | None
         if operation.status is OperationStatus.PLANNED:
             existing = await self._controller.get_worker(request.name)
@@ -1103,6 +1132,7 @@ class ResourceService:
         self,
         operation_id: str,
     ) -> None:
+        # 逻辑说明：`_schedule_worker_create_finalization` 接收 `operation_id`，调度 worker create finalization，核心调用为 `get`、`done`、`create_task`，返回 `None`。 它只在内存中计算、校验或组装数据；下游异常按原语义向上传递，不会伪造成功结果。
         current = self._background_worker_creates.get(operation_id)
         if current is not None and not current.done():
             return
@@ -1113,6 +1143,7 @@ class ResourceService:
         self._background_worker_creates[operation_id] = task
 
         def clear_completed(completed: asyncio.Task[None]) -> None:
+            # 逻辑说明：`clear_completed` 接收 `completed`，清理完成后台任务 completed，核心调用为 `get`、`pop`，返回 `None`。 它只在内存中计算、校验或组装数据；下游异常按原语义向上传递，不会伪造成功结果。
             if (
                 self._background_worker_creates.get(operation_id)
                 is completed
@@ -1125,6 +1156,7 @@ class ResourceService:
         self,
         operation_id: str,
     ) -> None:
+        # 逻辑说明：`_finalize_worker_create_in_background` 接收 `operation_id`，完成后台收敛 worker create in background，核心调用为 `get`、`RecoveryError`、`resume_worker_create`，返回 `None`。 它可能读写仓库、Controller、Matrix 或对象存储；前置条件不满足时保留现有领域异常，防止错误状态继续传播。
         try:
             operation = await self._supervisor.get(operation_id)
             if operation is None:
@@ -1149,6 +1181,7 @@ class ResourceService:
         operation_id: str,
         exc: Exception,
     ) -> None:
+        # 逻辑说明：`_notify_worker_create_pending_or_failed` 接收 `operation_id`、`exc`，通知 worker create pending or failed，核心调用为 `get`、`_target_name`、`_safe_reason`，返回 `None`。 它可能读写仓库、Controller、Matrix 或对象存储；下游异常按原语义向上传递，不会伪造成功结果。
         if self._admin_room_id is None:
             return
         try:
@@ -1175,6 +1208,7 @@ class ResourceService:
     async def wait_for_background_worker_creates(self) -> None:
         """Wait for currently scheduled creates; primarily a test/shutdown hook."""
 
+        # 逻辑说明：`wait_for_background_worker_creates` 接收 当前服务状态，等待收敛 for background worker creates，核心调用为 `values`、`gather`，返回 `None`。 它可能读写仓库、Controller、Matrix 或对象存储；下游异常按原语义向上传递，不会伪造成功结果。
         while self._background_worker_creates:
             tasks = tuple(self._background_worker_creates.values())
             await asyncio.gather(*tasks, return_exceptions=True)
@@ -1182,6 +1216,7 @@ class ResourceService:
     async def close(self) -> None:
         """Cancel finalizers safely; durable recovery resumes them on startup."""
 
+        # 逻辑说明：`close` 接收 当前服务状态，关闭 Worker、Team、Human 与拓扑，核心调用为 `values`、`clear`、`cancel`，返回 `None`。 它可能读写仓库、Controller、Matrix 或对象存储；下游异常按原语义向上传递，不会伪造成功结果。
         tasks = tuple(self._background_worker_creates.values())
         self._background_worker_creates.clear()
         for task in tasks:
@@ -1195,12 +1230,15 @@ class ResourceService:
         *,
         context: MutationContext,
     ) -> WorkerResource:
+        # 逻辑说明：`update_worker` 接收 `request`、`context`，更新 worker，核心调用为 `_require_worker`、`_run_worker_mutation`、`model_dump`，返回 `WorkerResource`。 它可能读写仓库、Controller、Matrix 或对象存储；前置条件不满足时保留现有领域异常，防止错误状态继续传播。
         await self._require_worker(request.name)
 
         async def mutate() -> None:
+            # 逻辑说明：`mutate` 是当前资源操作的局部回调，调用 `update_worker` 发起一次变更；异常原样交给外层 operation 状态机处理。
             await self._controller.update_worker(request)
 
         async def prove() -> WorkerResource | None:
+            # 逻辑说明：`prove` 重新读取 Worker 并逐项比较 update 请求中的模型、身份、技能与暴露端口，只有控制面真实收敛才返回成功；读取异常交给外层 operation 处理。
             worker = await self._controller.get_worker(request.name)
             if worker is None or not _matches_worker_update(worker, request):
                 return None
@@ -1227,12 +1265,15 @@ class ResourceService:
         *,
         context: MutationContext,
     ) -> WorkerResource:
+        # 逻辑说明：`sleep_worker` 接收 `name`、`context`，休眠 worker，核心调用为 `_require_worker`、`_run_worker_mutation`、`NotFoundError`，返回 `WorkerResource`。 它可能读写仓库、Controller、Matrix 或对象存储；前置条件不满足时保留现有领域异常，防止错误状态继续传播。
         await self._require_worker(name)
 
         async def mutate() -> None:
+            # 逻辑说明：`mutate` 是当前资源操作的局部回调，调用 `sleep_worker` 发起一次变更；异常原样交给外层 operation 状态机处理。
             await self._controller.sleep_worker(name)
 
         async def prove() -> WorkerResource | None:
+            # 逻辑说明：`prove` 重新读取 Worker 并检查其 phase 是否已变为 sleeping，作为 sleep 外部效果的事实证明；尚未收敛时返回 false 让外层继续轮询。
             worker = await self._controller.get_worker(name)
             if worker is None:
                 return None
@@ -1257,12 +1298,15 @@ class ResourceService:
         *,
         context: MutationContext,
     ) -> WorkerResource:
+        # 逻辑说明：`wake_worker` 接收 `name`、`context`，唤醒 worker，核心调用为 `_require_worker`、`_run_worker_mutation`、`NotFoundError`，返回 `WorkerResource`。 它可能读写仓库、Controller、Matrix 或对象存储；前置条件不满足时保留现有领域异常，防止错误状态继续传播。
         await self._require_worker(name)
 
         async def mutate() -> None:
+            # 逻辑说明：`mutate` 是当前资源操作的局部回调，调用 `wake_worker` 发起一次变更；异常原样交给外层 operation 状态机处理。
             await self._controller.wake_worker(name)
 
         async def prove() -> WorkerResource | None:
+            # 逻辑说明：`prove` 重新读取 Worker 并检查其 phase 是否已恢复为 running，作为 wake 操作完成的事实证明；未收敛时不生成成功回执。
             worker = await self._controller.get_worker(name)
             if worker is None:
                 return None
@@ -1288,6 +1332,7 @@ class ResourceService:
         context: MutationContext,
     ) -> WorkerResource:
         """Recreate one Worker from a journaled copy of its desired state."""
+        # 逻辑说明：`reset_worker` 接收 `name`、`context`，处理 worker，核心调用为 `_require_worker`、`_worker_create_from_resource`、`begin`，返回 `WorkerResource`。 它可能读写仓库、Controller、Matrix 或对象存储；下游异常按原语义向上传递，不会伪造成功结果。
         current = await self._require_worker(name)
         desired = _worker_create_from_resource(current)
         operation = await self._supervisor.begin(
@@ -1307,13 +1352,16 @@ class ResourceService:
         *,
         context: MutationContext,
     ) -> None:
+        # 逻辑说明：`delete_worker` 接收 `name`、`context`，删除 worker，核心调用为 `get`、`_require_worker`、`_run_worker_mutation`，返回 `None`。 它可能读写仓库、Controller、Matrix 或对象存储；下游异常按原语义向上传递，不会伪造成功结果。
         if await self._supervisor.get(context.operation_id) is None:
             await self._require_worker(name)
 
         async def mutate() -> None:
+            # 逻辑说明：`mutate` 是当前资源操作的局部回调，调用 `delete_worker` 发起一次变更；异常原样交给外层 operation 状态机处理。
             await self._controller.delete_worker(name)
 
         async def prove() -> WorkerResource | None | bool:
+            # 逻辑说明：`prove` 是当前资源操作的局部回调，读取 `_wait_for_absence` 核对变更后的真实状态；异常原样交给外层 operation 状态机处理。
             absent = await self._wait_for_absence(
                 self._controller.get_worker,
                 name,
@@ -1336,6 +1384,7 @@ class ResourceService:
         *,
         context: MutationContext,
     ) -> TeamResource:
+        # 逻辑说明：`create_team` 接收 `spec`、`context`，创建 team，核心调用为 `_run_team_upsert`，返回 `TeamResource`。 它可能读写仓库、Controller、Matrix 或对象存储；下游异常按原语义向上传递，不会伪造成功结果。
         return await self._run_team_upsert(
             spec=spec,
             context=context,
@@ -1350,6 +1399,7 @@ class ResourceService:
         *,
         context: MutationContext,
     ) -> TeamResource:
+        # 逻辑说明：`apply_team` 接收 `spec`、`context`，处理 team，核心调用为 `_run_team_upsert`，返回 `TeamResource`。 它可能读写仓库、Controller、Matrix 或对象存储；下游异常按原语义向上传递，不会伪造成功结果。
         return await self._run_team_upsert(
             spec=spec,
             context=context,
@@ -1364,6 +1414,7 @@ class ResourceService:
         *,
         context: MutationContext,
     ) -> tuple[str, ...]:
+        # 逻辑说明：`delete_team` 接收 `name`、`context`，删除 team，核心调用为 `get`、`get_team`、`begin`，返回 `tuple[str, ...]`。 它可能读写仓库、Controller、Matrix 或对象存储；前置条件不满足时保留现有领域异常，防止错误状态继续传播。
         recorded_operation = await self._supervisor.get(
             context.operation_id,
         )
@@ -1466,6 +1517,7 @@ class ResourceService:
         *,
         context: MutationContext,
     ) -> HumanResource:
+        # 逻辑说明：`create_human` 接收 `request`、`context`，创建 human，核心调用为 `begin`、`model_dump`、`_require_human`，返回 `HumanResource`。 它可能读写仓库、Controller、Matrix 或对象存储；前置条件不满足时保留现有领域异常，防止错误状态继续传播。
         operation = await self._supervisor.begin(
             operation_id=context.operation_id,
             kind=OperationKind.CREATE_HUMAN,
@@ -1553,6 +1605,7 @@ class ResourceService:
         *,
         context: MutationContext,
     ) -> None:
+        # 逻辑说明：`delete_human` 接收 `name`、`context`，删除 human，核心调用为 `begin`、`ConflictError`、`_wait_for_absence`，返回 `None`。 它可能读写仓库、Controller、Matrix 或对象存储；前置条件不满足时保留现有领域异常，防止错误状态继续传播。
         operation = await self._supervisor.begin(
             operation_id=context.operation_id,
             kind=OperationKind.DELETE_HUMAN,
@@ -1626,6 +1679,7 @@ class ResourceService:
         *,
         context: MutationContext,
     ) -> HumanResource:
+        # 逻辑说明：`update_human` 接收 `request`、`context`，更新 human，核心调用为 `begin`、`model_dump`、`_require_human`，返回 `HumanResource`。 它可能读写仓库、Controller、Matrix 或对象存储；前置条件不满足时保留现有领域异常，防止错误状态继续传播。
         operation = await self._supervisor.begin(
             operation_id=context.operation_id,
             kind=OperationKind.UPDATE_HUMAN,
@@ -1718,6 +1772,7 @@ class ResourceService:
         name: str,
         initial: HumanResource | None,
     ) -> HumanResource:
+        # 逻辑说明：`_wait_for_human` 在有限次数内轮询for human（复用 `get_human`、`casefold`），收敛后返回 `HumanResource`；超时会记录 ambiguous effect，避免把尚未生效的控制面变更报告为成功。
         human = initial
         attempts = len(self._human_poll_delays) + 1
         for index in range(attempts):
@@ -1750,6 +1805,7 @@ class ResourceService:
         raise AmbiguousEffectError(f"human/{name} is not ready")
 
     async def _require_human(self, name: str) -> HumanResource:
+        # 逻辑说明：`_require_human` 通过 `get_human`、`NotFoundError` 读取并验证 human，返回 `HumanResource`；目标不存在、依赖未启用或数据不合法时在产生后续副作用前抛出领域错误。
         human = await self._controller.get_human(name)
         if human is None:
             raise NotFoundError(f"human/{name} does not exist")
@@ -1764,6 +1820,7 @@ class ResourceService:
         force_apply: bool,
         reject_existing: bool,
     ) -> TeamResource:
+        # 逻辑说明：`_run_team_upsert` 接收 `spec`、`context`、`kind`、`force_apply`、`reject_existing`，执行一轮 team upsert，核心调用为 `begin`、`model_dump`、`_require_team`，返回 `TeamResource`。 它可能读写仓库、Controller、Matrix 或对象存储；前置条件不满足时保留现有领域异常，防止错误状态继续传播。
         mode = "apply" if force_apply else "create"
         operation = await self._supervisor.begin(
             operation_id=context.operation_id,
@@ -1882,6 +1939,7 @@ class ResourceService:
         spec: TeamSpec,
         initial: TeamResource | None,
     ) -> TeamResource:
+        # 逻辑说明：`_wait_for_team` 在有限次数内轮询for team（复用 `get_team`、`casefold`），收敛后返回 `TeamResource`；超时会记录 ambiguous effect，避免把尚未生效的控制面变更报告为成功。
         team = initial
         attempts = len(self._team_poll_delays) + 1
         for index in range(attempts):
@@ -1919,6 +1977,7 @@ class ResourceService:
         self,
         operation_id: str,
     ) -> None:
+        # 逻辑说明：`_refresh_topology_or_reconcile` 接收 `operation_id`，刷新 topology or reconcile，核心调用为 `refresh`、`effect_ambiguous`，返回 `None`。 它可能读写仓库、Controller、Matrix 或对象存储；前置条件不满足时保留现有领域异常，防止错误状态继续传播。
         try:
             await self._topology.refresh()
         except Exception as exc:
@@ -1935,6 +1994,7 @@ class ResourceService:
         name: str,
         poll_delays: tuple[float, ...],
     ) -> bool:
+        # 逻辑说明：`_wait_for_absence` 在有限次数内轮询for absence（复用 `getter`、`_sleeper`），收敛后返回 `bool`；超时会记录 ambiguous effect，避免把尚未生效的控制面变更报告为成功。
         attempts = len(poll_delays) + 1
         for index in range(attempts):
             if await getter(name) is None:
@@ -1944,6 +2004,7 @@ class ResourceService:
         return False
 
     async def _require_team(self, name: str) -> TeamResource:
+        # 逻辑说明：`_require_team` 通过 `get_team`、`NotFoundError` 读取并验证 team，返回 `TeamResource`；目标不存在、依赖未启用或数据不合法时在产生后续副作用前抛出领域错误。
         team = await self._controller.get_team(name)
         if team is None:
             raise NotFoundError(f"team/{name} does not exist")
@@ -1962,6 +2023,7 @@ class ResourceService:
             Awaitable[WorkerResource | None | bool],
         ],
     ) -> WorkerResource | None:
+        # 逻辑说明：`_run_worker_mutation` 接收 `context`、`kind`、`name`、`request`、`mutate`、`prove`，执行一轮 worker mutation，核心调用为 `begin`、`ConflictError`、`prove`，返回 `WorkerResource | None`。 它可能读写仓库、Controller、Matrix 或对象存储；前置条件不满足时保留现有领域异常，防止错误状态继续传播。
         operation = await self._supervisor.begin(
             operation_id=context.operation_id,
             kind=kind,
@@ -2042,6 +2104,7 @@ class ResourceService:
         name: str,
         initial: WorkerResource | None,
     ) -> WorkerResource:
+        # 逻辑说明：`_wait_for_worker_room` 在有限次数内轮询for worker room（复用 `get_worker`、`casefold`），收敛后返回 `WorkerResource`；超时会记录 ambiguous effect，避免把尚未生效的控制面变更报告为成功。
         worker = initial
         attempts = len(self._worker_poll_delays) + 1
         for index in range(attempts):
@@ -2084,6 +2147,7 @@ class ResourceService:
         effect: ExternalEffect,
         exc: Exception,
     ) -> WorkerResource:
+        # 逻辑说明：`_handle_ambiguous_worker_effect` 接收 `operation_id`、`name`、`effect`、`exc`，处理请求 ambiguous worker effect，核心调用为 `_ambiguous_exception`、`effect_failed`、`_safe_reason`，返回 `WorkerResource`。 它可能读写仓库、Controller、Matrix 或对象存储；前置条件不满足时保留现有领域异常，防止错误状态继续传播。
         if not _ambiguous_exception(exc):
             await self._supervisor.effect_failed(
                 operation_id,
@@ -2108,6 +2172,7 @@ class ResourceService:
         operation: OperationRecord,
     ) -> WorkerResource | TeamResource | HumanResource | None:
         """Prove and finish one already-dispatched resource operation."""
+        # 逻辑说明：`resume_operation` 从持久化 operation/request 重建Worker、Team、Human 与拓扑上下文，通过 `resume_worker_create`、`resume_worker_import`、`_resume_worker_mutation` 证明或补做下一阶段，最终返回 `WorkerResource | TeamResource | HumanResource | None`；字段缺失、状态冲突或效果不可证明时保持失败/歧义状态而不是重复执行。
         if operation.kind is OperationKind.CREATE_WORKER:
             return await self.resume_worker_create(operation)
         if operation.kind is OperationKind.IMPORT_WORKER:
@@ -2147,6 +2212,7 @@ class ResourceService:
         self,
         operation: OperationRecord,
     ) -> WorkerResource:
+        # 逻辑说明：`_resume_worker_mutation` 从持久化 operation/request 重建Worker、Team、Human 与拓扑上下文，通过 `_target_name`、`get`、`_resume_worker_reset` 证明或补做下一阶段，最终返回 `WorkerResource`；字段缺失、状态冲突或效果不可证明时保持失败/歧义状态而不是重复执行。
         name = _target_name(operation.target_key, "worker")
         action = str(operation.request.get("action", ""))
         if action == "reset":
@@ -2187,6 +2253,7 @@ class ResourceService:
         self,
         operation: OperationRecord,
     ) -> WorkerResource:
+        # 逻辑说明：`_resume_worker_reset` 从持久化 operation/request 重建Worker、Team、Human 与拓扑上下文，通过 `_target_name`、`get`、`RecoveryError` 证明或补做下一阶段，最终返回 `WorkerResource`；字段缺失、状态冲突或效果不可证明时保持失败/歧义状态而不是重复执行。
         name = _target_name(operation.target_key, "worker")
         raw_desired = operation.request.get("desired")
         if not isinstance(raw_desired, dict):
@@ -2293,6 +2360,7 @@ class ResourceService:
         self,
         operation: OperationRecord,
     ) -> TeamResource:
+        # 逻辑说明：`_resume_team_upsert` 从持久化 operation/request 重建Worker、Team、Human 与拓扑上下文，通过 `get`、`ConflictError`、`model_validate` 证明或补做下一阶段，最终返回 `TeamResource`；字段缺失、状态冲突或效果不可证明时保持失败/歧义状态而不是重复执行。
         raw_spec = operation.request.get("spec")
         if not isinstance(raw_spec, dict):
             raise ConflictError("Team recovery request has no typed spec")
@@ -2322,6 +2390,7 @@ class ResourceService:
         self,
         operation: OperationRecord,
     ) -> HumanResource:
+        # 逻辑说明：`_resume_human_create` 从持久化 operation/request 重建Worker、Team、Human 与拓扑上下文，通过 `model_validate`、`get_human`、`AmbiguousEffectError` 证明或补做下一阶段，最终返回 `HumanResource`；字段缺失、状态冲突或效果不可证明时保持失败/歧义状态而不是重复执行。
         request = HumanCreateRequest.model_validate(operation.request)
         human = await self._controller.get_human(request.name)
         if human is None:
@@ -2344,6 +2413,7 @@ class ResourceService:
         self,
         operation: OperationRecord,
     ) -> HumanResource:
+        # 逻辑说明：`_resume_human_update` 从持久化 operation/request 重建Worker、Team、Human 与拓扑上下文，通过 `model_validate`、`get_human`、`_matches_human_update` 证明或补做下一阶段，最终返回 `HumanResource`；字段缺失、状态冲突或效果不可证明时保持失败/歧义状态而不是重复执行。
         request = HumanUpdateRequest.model_validate(operation.request)
         human = await self._controller.get_human(request.name)
         if human is None or not _matches_human_update(human, request):
@@ -2359,6 +2429,7 @@ class ResourceService:
         *,
         resource_type: str,
     ) -> None:
+        # 逻辑说明：`_resume_resource_delete` 从持久化 operation/request 重建Worker、Team、Human 与拓扑上下文，通过 `_target_name`、`_wait_for_absence`、`AmbiguousEffectError` 证明或补做下一阶段，最终返回 `None`；字段缺失、状态冲突或效果不可证明时保持失败/歧义状态而不是重复执行。
         name = _target_name(operation.target_key, resource_type)
         getter = getattr(self._controller, f"get_{resource_type}")
         if not await self._wait_for_absence(
@@ -2381,6 +2452,7 @@ class ResourceService:
         operation: OperationRecord,
         resource: WorkerResource | TeamResource | HumanResource,
     ) -> None:
+        # 逻辑说明：`_finish_recovered_resource` 接收 `operation`、`resource`，结束恢复 recovered resource，核心调用为 `_refresh_topology_or_reconcile`、`effect_succeeded`、`_resource_receipt`，返回 `None`。 它可能读写仓库、Controller、Matrix 或对象存储；下游异常按原语义向上传递，不会伪造成功结果。
         await self._refresh_topology_or_reconcile(operation.operation_id)
         await self._supervisor.effect_succeeded(
             operation.operation_id,
@@ -2389,6 +2461,7 @@ class ResourceService:
         )
 
     async def _require_worker(self, name: str) -> WorkerResource:
+        # 逻辑说明：`_require_worker` 通过 `get_worker`、`NotFoundError` 读取并验证 worker，返回 `WorkerResource`；目标不存在、依赖未启用或数据不合法时在产生后续副作用前抛出领域错误。
         worker = await self._controller.get_worker(name)
         if worker is None:
             raise NotFoundError(f"worker/{name} does not exist")
@@ -2422,11 +2495,13 @@ class ResourceHeartbeat:
         resources: ResourceService,
         matrix_resources: AuxiliaryOperationResumer | None = None,
     ) -> None:
+        # 逻辑说明：`__init__` 校验并保存 `operations`、`resources`、`matrix_resources`，为Worker、Team、Human 与拓扑建立进程内服务状态；配置不合法时立即抛错，且构造阶段不执行远端变更。
         self._operations = operations
         self._resources = resources
         self._matrix_resources = matrix_resources
 
     async def reconcile_pending_resources(self) -> ResourceRecoveryReport:
+        # 逻辑说明：`reconcile_pending_resources` 从 operation 仓库列出尚未终结的 resources，逐项恢复并把成功与失败 ID 汇总为 `ResourceRecoveryReport`；单项失败不会阻断本轮其余恢复。
         resource_kinds = {
             OperationKind.CREATE_WORKER,
             OperationKind.IMPORT_WORKER,
@@ -2482,6 +2557,7 @@ class ResourceHeartbeat:
 
     async def reconcile_pending_workers(self) -> ResourceRecoveryReport:
         """Compatibility alias for the original Worker-only heartbeat API."""
+        # 逻辑说明：`reconcile_pending_workers` 从 operation 仓库列出尚未终结的 workers，逐项恢复并把成功与失败 ID 汇总为 `ResourceRecoveryReport`；单项失败不会阻断本轮其余恢复。
         return await self.reconcile_pending_resources()
 
 
@@ -2515,6 +2591,7 @@ class TopologyResolver:
         admin_user_id: str,
         admin_room_id: str,
     ) -> None:
+        # 逻辑说明：`__init__` 校验并保存 `controller`、`matrix`、`topology`、`manager_user_id`、`admin_user_id`、`admin_room_id`，为Worker、Team、Human 与拓扑建立进程内服务状态；配置不合法时立即抛错，且构造阶段不执行远端变更。
         self._controller = controller
         self._matrix = matrix
         self._topology = topology
@@ -2524,10 +2601,12 @@ class TopologyResolver:
         self._refresh_lock = asyncio.Lock()
 
     async def refresh(self) -> TopologySnapshot:
+        # 逻辑说明：`refresh` 接收 当前服务状态，刷新 Worker、Team、Human 与拓扑，核心调用为 `_refresh`，返回 `TopologySnapshot`。 它可能读写仓库、Controller、Matrix 或对象存储；下游异常按原语义向上传递，不会伪造成功结果。
         async with self._refresh_lock:
             return await self._refresh()
 
     async def _refresh(self) -> TopologySnapshot:
+        # 逻辑说明：`_refresh` 接收 当前服务状态，刷新 Worker、Team、Human 与拓扑，核心调用为 `gather`、`list_workers`、`list_teams`，返回 `TopologySnapshot`。 它可能读写仓库、Controller、Matrix 或对象存储；前置条件不满足时保留现有领域异常，防止错误状态继续传播。
         workers, teams, humans, joined_rooms = await asyncio.gather(
             self._controller.list_workers(),
             self._controller.list_teams(),
@@ -2631,6 +2710,7 @@ class TopologyResolver:
         room_id: str,
         sender_id: str,
     ) -> RoomPolicy:
+        # 逻辑说明：`policy_for` 接收 `room_id`、`sender_id`，计算房间策略 for，核心调用为 `revision`、`RoomPolicy`、`room_binding`，返回 `RoomPolicy`。 它可能读写仓库、Controller、Matrix 或对象存储；下游异常按原语义向上传递，不会伪造成功结果。
         revision = await self._topology.revision()
         if room_id == self._admin_room_id:
             if sender_id == self._admin_user_id:
@@ -2714,6 +2794,7 @@ class TopologyResolver:
         joined_rooms: frozenset[str],
         memberships: dict[str, frozenset[str]],
     ) -> None:
+        # 逻辑说明：`_validate_memberships` 对照 Worker/Human、应加入房间、禁入房间和实际成员表，发现缺席、越权加入或未知成员就抛 ConflictError；这里只核对拓扑快照。
         for room_id in join_targets:
             if (
                 room_id not in joined_rooms
@@ -2752,6 +2833,7 @@ class TopologyResolver:
 
 
 def _target_name(target_key: str, resource_type: str) -> str:
+    # 逻辑说明：`_target_name` 接收 `target_key`、`resource_type`，解析目标 name，核心调用为 `startswith`、`ValueError`，返回 `str`。 它只在内存中计算、校验或组装数据；前置条件不满足时保留现有领域异常，防止错误状态继续传播。
     prefix = f"{resource_type}/"
     if not target_key.startswith(prefix) or len(target_key) == len(prefix):
         raise ValueError(
@@ -2763,12 +2845,14 @@ def _target_name(target_key: str, resource_type: str) -> str:
 def _resource_receipt(
     resource: WorkerResource | TeamResource | HumanResource,
 ) -> dict[str, Any]:
+    # 逻辑说明：`_resource_receipt` 从 `resource` 构造 `dict[str, Any]`，统一调用方看到的Worker、Team、Human 与拓扑结果；它只转换数据，不执行远端 I/O。
     return resource.model_dump(mode="json")
 
 
 def _resource_phase(
     resource: WorkerResource | TeamResource | HumanResource,
 ) -> str:
+    # 逻辑说明：`_resource_phase` 接收 `resource`，解析资源 phase，核心调用为 `get`，返回 `str`。 它只在内存中计算、校验或组装数据；下游异常按原语义向上传递，不会伪造成功结果。
     if isinstance(resource, (WorkerResource, TeamResource)):
         return resource.phase or ""
     value = resource.status.get("phase")
@@ -2778,6 +2862,7 @@ def _resource_phase(
 def _resource_message(
     resource: WorkerResource | TeamResource | HumanResource,
 ) -> str:
+    # 逻辑说明：`_resource_message` 接收 `resource`，解析资源 message，核心调用为 `get`，返回 `str`。 它只在内存中计算、校验或组装数据；下游异常按原语义向上传递，不会伪造成功结果。
     value = resource.status.get("message")
     return str(value) if value is not None else ""
 
@@ -2786,6 +2871,7 @@ def _matches_worker_create(
     worker: WorkerResource,
     request: WorkerCreateRequest,
 ) -> bool:
+    # 逻辑说明：`_matches_worker_create` 比较期望请求与已观测 worker create，返回 `bool` 供 operation 判断外部效果是否已经发生；它只读数据，不修改资源。
     console_enabled, console_port = _worker_console_state(worker)
     return (
         worker.name == request.name
@@ -2826,6 +2912,7 @@ def _matches_worker_create(
 def _worker_create_from_resource(
     worker: WorkerResource,
 ) -> WorkerCreateRequest:
+    # 逻辑说明：`_worker_create_from_resource` 接收 `worker`，处理 Worker create from resource，核心调用为 `ConflictError`、`WorkerCreateRequest`、`get`，返回 `WorkerCreateRequest`。 它只在内存中计算、校验或组装数据；前置条件不满足时保留现有领域异常，防止错误状态继续传播。
     if not worker.model:
         raise ConflictError(
             f"worker/{worker.name} has no desired model to preserve",
@@ -2854,6 +2941,7 @@ def _matches_worker_update(
     worker: WorkerResource,
     request: WorkerUpdateRequest,
 ) -> bool:
+    # 逻辑说明：`_matches_worker_update` 比较期望请求与已观测 worker update，返回 `bool` 供 operation 判断外部效果是否已经发生；它只读数据，不修改资源。
     if request.model is not None and worker.model != request.model:
         return False
     if request.runtime is not None and worker.runtime != request.runtime:
@@ -2898,6 +2986,7 @@ def _matches_worker_update(
 
 
 def _worker_console_state(worker: WorkerResource) -> tuple[bool, int]:
+    # 逻辑说明：`_worker_console_state` 接收 `worker`，处理 Worker console state，核心调用为 `get`，返回 `tuple[bool, int]`。 它只在内存中计算、校验或组装数据；下游异常按原语义向上传递，不会伪造成功结果。
     console = worker.spec.get("console")
     if not isinstance(console, dict):
         return False, 8088
@@ -2914,6 +3003,7 @@ def _matches_human_create(
     human: HumanResource,
     request: HumanCreateRequest,
 ) -> bool:
+    # 逻辑说明：`_matches_human_create` 比较期望请求与已观测 human create，返回 `bool` 供 operation 判断外部效果是否已经发生；它只读数据，不修改资源。
     return (
         human.permission_level == request.permission_level
         and human.spec.get("displayName") == request.display_name
@@ -2930,6 +3020,7 @@ def _matches_human_update(
     human: HumanResource,
     request: HumanUpdateRequest,
 ) -> bool:
+    # 逻辑说明：`_matches_human_update` 比较期望请求与已观测 human update，返回 `bool` 供 operation 判断外部效果是否已经发生；它只读数据，不修改资源。
     fields: tuple[tuple[object | None, object], ...] = (
         (request.display_name, human.spec.get("displayName")),
         (request.email, human.spec.get("email", "")),
@@ -2955,6 +3046,7 @@ def _document_value(
     key: str,
     value: object | None,
 ) -> None:
+    # 逻辑说明：`_document_value` 接收 `document`、`key`、`value`，读取文档字段 value，返回 `None`。 它只在内存中计算、校验或组装数据；下游异常按原语义向上传递，不会伪造成功结果。
     if value is not None and value != "":
         document[key] = value
 
@@ -2964,6 +3056,7 @@ def _team_is_ready(
     *,
     expected_workers: int,
 ) -> bool:
+    # 逻辑说明：`_team_is_ready` 比较期望请求与已观测 is ready，返回 `bool` 供 operation 判断外部效果是否已经发生；它只读数据，不修改资源。
     if (team.phase or "").casefold() not in {"active", "ready", "running"}:
         return False
     if not bool(team.status.get("leaderReady")):
@@ -2977,6 +3070,7 @@ def _team_is_ready(
 
 
 def _ambiguous_exception(exc: BaseException) -> bool:
+    # 逻辑说明：`_ambiguous_exception` 接收 `exc`，判断歧义 exception，返回 `bool`。 它只在内存中计算、校验或组装数据；下游异常按原语义向上传递，不会伪造成功结果。
     return isinstance(
         exc,
         (
@@ -2993,6 +3087,7 @@ def _safe_reason(exc: BaseException) -> str:
 
 
 def _safe_import_reason(exc: BaseException) -> str:
+    # 逻辑说明：`_safe_import_reason` 把 `exc` 转成适合持久化或日志的 `str`，删除/隐藏敏感值并限制不安全结构；该过程不修改原对象。
     message = str(exc).strip() or type(exc).__name__
     message = re.sub(
         r"(?i)(nacos://)[^/@\s]+:[^/@\s]+@",
@@ -3014,6 +3109,7 @@ def _unique_by_name(
     | tuple[HumanResource, ...],
     label: str,
 ) -> dict[str, Any]:
+    # 逻辑说明：`_unique_by_name` 接收 `resources`、`label`，处理 by name，核心调用为 `ConflictError`，返回 `dict[str, Any]`。 它只在内存中计算、校验或组装数据；前置条件不满足时保留现有领域异常，防止错误状态继续传播。
     indexed: dict[str, Any] = {}
     for resource in resources:
         if resource.name in indexed:
@@ -3025,6 +3121,7 @@ def _unique_by_name(
 
 
 def _add_string_room(rooms: set[str], value: object) -> None:
+    # 逻辑说明：`_add_string_room` 接收 `rooms`、`value`，添加 string room，核心调用为 `add`，返回 `None`。 它只在内存中计算、校验或组装数据；下游异常按原语义向上传递，不会伪造成功结果。
     if isinstance(value, str) and value:
         rooms.add(value)
 
@@ -3035,6 +3132,7 @@ def _deny_policy(
     *,
     silent: bool = False,
 ) -> RoomPolicy:
+    # 逻辑说明：`_deny_policy` 接收 `room_id`、`revision`、`silent`，生成拒绝策略 policy，核心调用为 `RoomPolicy`，返回 `RoomPolicy`。 它只在内存中计算、校验或组装数据；下游异常按原语义向上传递，不会伪造成功结果。
     return RoomPolicy(
         room_id=room_id,
         kind=RoomKind.UNKNOWN,

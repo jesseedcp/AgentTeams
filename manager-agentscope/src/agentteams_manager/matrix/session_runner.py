@@ -184,6 +184,7 @@ class MatrixSessionRunner:
         task_reader: TaskProtocolReader | None = None,
         project_workflow: ProjectProtocolWorkflow | None = None,
     ) -> None:
+        # 逻辑说明：保存会话、Matrix、审批、媒体和记忆依赖，并冻结模型目录及时间策略；构造阶段不发送消息，真实副作用从 handle/handle_control 开始。
         self._sessions = sessions
         self._matrix = matrix
         self._admin_user_id = admin_user_id
@@ -212,6 +213,7 @@ class MatrixSessionRunner:
         policy: RoomPolicy,
     ) -> None:
         """处理一条普通入站事件，直到回复、审批暂停或确定性失败。"""
+        # 逻辑说明：为普通事件记录指标和已读/输入状态，依次处理过期审批、定时重置、命令、审批命令和任务协议，全部未命中才启动模型 turn；finally 必定关闭输入提示。
         if self._metrics is not None:
             self._metrics.increment(
                 "agentteams_manager_matrix_turns_total",
@@ -244,6 +246,7 @@ class MatrixSessionRunner:
         self,
         event: InboundEvent,
     ) -> bool:
+        # 逻辑说明：识别 Worker 的 TASK_BLOCKED 协议并核对任务属于 Project，再通过工作流持久化阻塞原因；TASK_COMPLETED 只作为模型唤醒信号，不在此自动验收。
         completed = _parse_task_completed(event.body)
         if completed is not None:
             # A completion mention is a wake-up signal, not proof that the
@@ -300,6 +303,7 @@ class MatrixSessionRunner:
         *,
         task_id: str,
     ) -> None:
+        # 逻辑说明：用来源事件和 task_id 派生稳定 transaction ID，把协议处理结果回发原线程并提及上报者；Matrix 发送失败由上层事件重试处理。
         operation_id = operation_id_for(
             event.room_id,
             event.event_id,
@@ -319,6 +323,7 @@ class MatrixSessionRunner:
         policy: RoomPolicy,
     ) -> None:
         """Handle queue-bypassing commands such as /stop."""
+        # 逻辑说明：只允许已授权、非 silent 的精确 /stop 绕过普通房间队列；命中后先标已读再取消当前 turn，其余控制输入不产生副作用。
         if (
             policy.silent
             or event.sender_id not in policy.allowed_senders
@@ -338,6 +343,7 @@ class MatrixSessionRunner:
         event: InboundEvent,
         policy: RoomPolicy,
     ) -> None:
+        # 逻辑说明：下载当前事件附件，拼接排除自身的房间历史与权限允许的记忆投影，构造成带 Matrix 元数据的 UserMsg 后交给流式执行器。
         attachments: tuple[Any, ...] = ()
         if event.media:
             if self._media is None:
@@ -391,6 +397,7 @@ class MatrixSessionRunner:
         event: InboundEvent,
         policy: RoomPolicy,
     ) -> bool:
+        # 逻辑说明：在管理员私聊解析 /confirm、/deny、/reset、/status 或自然语言确认；无命令但原房间有悬挂审批时发送提醒并阻止新消息进入模型。
         parsed = _global_confirmation_command(event.body)
         if parsed is not None:
             action, confirmation_id = parsed
@@ -422,6 +429,7 @@ class MatrixSessionRunner:
         return False
 
     async def _expire_confirmations(self) -> None:
+        # 逻辑说明：批量领取到期审批，逐项重置来源房间会话并用固定序号通知过期；这样不会留下永远等待 continuation 的 Agent 状态。
         for expired in await self._confirmations.expire_due():
             await self._sessions.reset(expired.source_room_id)
             await self._send_confirmation_notice(
@@ -436,6 +444,7 @@ class MatrixSessionRunner:
         event: InboundEvent,
         policy: RoomPolicy,
     ) -> bool:
+        # 逻辑说明：确定性解析所有会话斜杠命令，阻止与悬挂审批冲突的 reset/new/compact，并分别查询或更新模型、思考、显示、审批、队列和上下文设置后回复。
         confirmation_command = _global_confirmation_command(event.body)
         if confirmation_command is not None:
             confirmation_action, confirmation_id = confirmation_command
@@ -624,6 +633,7 @@ class MatrixSessionRunner:
         policy: RoomPolicy,
         argument: str | None,
     ) -> None:
+        # 逻辑说明：处理 /model 的列表、状态和切换分支；模型参数先由目录/序号校验，再保留原上下文切换会话模型，非法输入仅回复错误不改设置。
         normalized = argument.lower() if argument is not None else "list"
         if normalized == "list":
             await self._send_session_command_result(
@@ -667,6 +677,7 @@ class MatrixSessionRunner:
         event: InboundEvent,
         argument: str | None,
     ) -> None:
+        # 逻辑说明：读取并校验 /think 等级，on 兼容映射为 medium；若当前已知模型不支持 reasoning 则拒绝更新，否则持久化房间思考设置。
         settings = await self._sessions.settings(event.room_id)
         if argument is None or argument.lower() == "status":
             await self._send_session_command_result(
@@ -723,6 +734,7 @@ class MatrixSessionRunner:
         choices: frozenset[str],
         action: SessionCommandAction,
     ) -> None:
+        # 逻辑说明：作为 reasoning/verbose/elevated 的通用枚举设置器，status 只查询，非法值只回复允许集合，合法值才调用 update_settings 并报告新值。
         settings = await self._sessions.settings(event.room_id)
         current = str(getattr(settings, field))
         if value is None or value.lower() == "status":
@@ -756,6 +768,7 @@ class MatrixSessionRunner:
         policy: RoomPolicy,
         value: str | None,
     ) -> None:
+        # 逻辑说明：强制 /elevated 只能由管理员在管理员私聊修改，将旧别名 on 归一为 ask，再复用枚举设置器持久化 off/ask/full 策略。
         if (
             event.sender_id != self._admin_user_id
             or event.sender_id not in policy.allowed_senders
@@ -784,6 +797,7 @@ class MatrixSessionRunner:
         event: InboundEvent,
         arguments: tuple[str, ...],
     ) -> None:
+        # 逻辑说明：查询或设置房间 followup/collect/interrupt 队列模式，把 queue 旧别名映射为 followup，并严格限制队列上限为 1..100。
         settings = await self._sessions.settings(event.room_id)
         if not arguments or arguments[0].lower() == "status":
             await self._send_session_command_result(
@@ -831,6 +845,7 @@ class MatrixSessionRunner:
         )
 
     async def _send_stop_result(self, event: InboundEvent) -> None:
+        # 逻辑说明：请求 RoomSessionManager 取消本房间当前 task，并根据是否确有运行任务生成不同提示，再通过会话命令回执使用稳定 txn_id 发送。
         stopped = await self._sessions.cancel(event.room_id)
         text = (
             "已停止当前任务，未完成的回复不会写入会话历史。"
@@ -844,6 +859,7 @@ class MatrixSessionRunner:
         )
 
     def _resolve_model(self, argument: str | None) -> str | None:
+        # 逻辑说明：把 default 映射为无 override、数字映射为模型目录序号，并允许目录中的名称或显式 provider/model；缺失和越界输入抛 ValueError。
         if argument is None:
             raise ValueError("missing model")
         normalized = argument.lower()
@@ -863,6 +879,7 @@ class MatrixSessionRunner:
         )
 
     def _model_catalog(self) -> str:
+        # 逻辑说明：按当前动态模型目录生成带序号的用户可读列表，并标记有效默认模型；目录为空返回明确提示，不改变任何会话设置。
         known_models = self._current_known_models()
         if not known_models:
             return "当前没有已配置的已知模型。"
@@ -886,6 +903,7 @@ class MatrixSessionRunner:
         policy: RoomPolicy,
         pending: tuple[ConfirmationRequest, ...],
     ) -> None:
+        # 逻辑说明：读取房间会话状态、有效模型和全局待审批项，汇总设置、上下文、重置时间及审批工具后发送 /status 回执，不修改会话。
         status = await self._sessions.status(event.room_id)
         model = self._effective_model(status.model_override)
         lines = [
@@ -925,6 +943,7 @@ class MatrixSessionRunner:
         )
 
     def _effective_default_model(self) -> str | None:
+        # 逻辑说明：优先调用动态默认模型 provider 并忽略其空白结果，未提供有效动态值时回退构造时冻结的默认模型。
         if self._default_model_provider is not None:
             model = (self._default_model_provider() or "").strip()
             if model:
@@ -932,6 +951,7 @@ class MatrixSessionRunner:
         return self._default_model
 
     def _current_known_models(self) -> dict[str, bool]:
+        # 逻辑说明：从动态 provider 读取模型到“是否支持思考”的映射，清理空名称并复制返回；动态目录为空时回退构造时快照，避免外部修改内部字典。
         if self._known_models_provider is not None:
             models = {
                 model.strip(): reasoning
@@ -949,6 +969,7 @@ class MatrixSessionRunner:
         *,
         action: str,
     ) -> None:
+        # 逻辑说明：用来源房间、事件和命令 action 派生幂等 transaction ID，把命令结果发回原 thread；同一事件重试不会生成另一条独立回执。
         await self._matrix.send_text(
             event.room_id,
             text,
@@ -968,6 +989,7 @@ class MatrixSessionRunner:
         event: InboundEvent,
         detail: str,
     ) -> None:
+        # 逻辑说明：把审批解析或状态冲突异常转换成管理员可见消息，并以 confirmation-error 派生稳定 txn_id；本函数不改变审批记录。
         await self._matrix.send_text(
             event.room_id,
             f"无法处理审批请求：{detail}",
@@ -986,6 +1008,7 @@ class MatrixSessionRunner:
         self,
         event: InboundEvent,
     ) -> str | None:
+        # 逻辑说明：省略请求 ID 时仅在全局恰有一个待审批项才自动选择；零个或多个会列出原因/候选并返回 None，避免批准错对象。
         pending = await self._confirmations.pending()
         if len(pending) == 1:
             return pending[0].confirmation_id
@@ -1020,6 +1043,7 @@ class MatrixSessionRunner:
         self,
         event: InboundEvent,
     ) -> None:
+        # 逻辑说明：读取所有 pending 审批并格式化请求 ID、来源房间和工具名，以稳定 status transaction 回管理员房间；这是只读查询。
         pending = await self._confirmations.pending()
         text = (
             "当前没有等待审批的请求。"
@@ -1055,6 +1079,7 @@ class MatrixSessionRunner:
         event: InboundEvent,
         confirmation_id: str,
     ) -> None:
+        # 逻辑说明：以管理员身份原子取消指定审批，再重置来源房间以丢弃等待 continuation 的 Agent 状态，并通知原房间取消结果。
         request = await self._confirmations.cancel(
             confirmation_id,
             admin_id=event.sender_id,
@@ -1074,6 +1099,7 @@ class MatrixSessionRunner:
         *,
         confirmed: bool,
     ) -> None:
+        # 逻辑说明：领取审批并构造与原 reply/tool call 对应的 UserConfirmResultEvent，在来源房间续跑；若重启导致 continuation 丢失则取消并重置，成功后才 complete 并通知决定。
         request = await self._confirmations.resolve(
             confirmation_id,
             admin_id=event.sender_id,
@@ -1147,6 +1173,7 @@ class MatrixSessionRunner:
         event: InboundEvent,
         policy: RoomPolicy,
     ) -> None:
+        # 逻辑说明：同时核验发送者是配置管理员且当前策略属于 ADMIN_DM，不满足即抛 PermissionError，防止其他房间解析审批命令后越权执行。
         if (
             event.sender_id != self._admin_user_id
             or policy.kind is not RoomKind.ADMIN_DM
@@ -1160,6 +1187,7 @@ class MatrixSessionRunner:
         event: InboundEvent,
         pending: ConfirmationRequest,
     ) -> None:
+        # 逻辑说明：来源房间仍有 pending 时列出工具和管理员应使用的 confirm/deny 命令，并按新消息派生 txn_id；该消息不会交给模型。
         tools = ", ".join(call.name for call in pending.tool_calls)
         confirmation_id = pending.confirmation_id
         prompt = (
@@ -1189,6 +1217,7 @@ class MatrixSessionRunner:
         tool_event_id: str | None = None,
         transient_context: str = "",
     ) -> None:
+        # 逻辑说明：运行房间 Agent 的事件流，按节流间隔首次发送或编辑公开投影；收集同一 reply 的确认工具调用，流结束后创建 durable 审批而不自行执行工具。
         projector = EventStreamProjector()
         settings = await self._sessions.settings(event.room_id)
         operation_id = operation_id_for(
@@ -1206,6 +1235,7 @@ class MatrixSessionRunner:
             agent_event: object,
             state: AgentState,
         ) -> None:
+            # 逻辑说明：回调只捕获 RequireUserConfirmEvent，按 tool_call.id 合并同一 reply 的多批调用；若一次 run 出现不同 reply_id 立即报错，避免错误续跑。
             nonlocal pending
             del state
             if not isinstance(agent_event, RequireUserConfirmEvent):
@@ -1302,6 +1332,7 @@ class MatrixSessionRunner:
         policy: RoomPolicy,
         pending: RequireUserConfirmEvent,
     ) -> None:
+        # 逻辑说明：由来源事件和 reply_id 生成稳定审批 ID，持久化工具调用、权限快照与到期时间；原房间先获通知，完整审批提示投递管理员渠道。
         now = self._now().astimezone(UTC)
         confirmation_id = operation_id_for(
             event.room_id,
@@ -1357,6 +1388,7 @@ class MatrixSessionRunner:
         *,
         sequence: int,
     ) -> None:
+        # 逻辑说明：把审批状态和请求 ID 发给指定房间，transaction ID 由 confirmation_id 与阶段 sequence 派生，使创建、决定、过期通知可重试且互不覆盖。
         await self._matrix.send_text(
             room_id,
             f"{text}\n请求 ID：{confirmation_id}",
@@ -1364,6 +1396,7 @@ class MatrixSessionRunner:
         )
 
     async def _set_typing(self, room_id: str, enabled: bool) -> None:
+        # 逻辑说明：兼容可选 Matrix set_typing 能力并切换房间输入提示；适配器缺失或网络失败均静默忽略，因为辅助 UI 状态不能中断主 turn。
         method = getattr(self._matrix, "set_typing", None)
         if method is None:
             return
@@ -1373,6 +1406,7 @@ class MatrixSessionRunner:
             return
 
     async def _mark_read(self, room_id: str, event_id: str) -> None:
+        # 逻辑说明：兼容可选 Matrix mark_read 能力并推进指定事件回执；适配器缺失或失败不向上抛，防止已读状态故障阻塞消息处理。
         method = getattr(self._matrix, "mark_read", None)
         if method is None:
             return
@@ -1383,6 +1417,7 @@ class MatrixSessionRunner:
 
 
 def _parse_task_completed(body: str) -> tuple[str, str] | None:
+    # 逻辑说明：逐行清理 Markdown 包装并完整匹配 TASK_COMPLETED、Task ID 与可选摘要；首个合法报告返回结构化结果，否则返回 None，不写任务状态。
     for raw_line in body.splitlines():
         line = raw_line.strip().replace("**", "").replace("`", "")
         line = re.sub(r"^[*-]\s+", "", line)
@@ -1402,6 +1437,7 @@ def _parse_task_completed(body: str) -> tuple[str, str] | None:
 
 
 def _parse_task_blocked(body: str) -> tuple[str, str] | None:
+    # 逻辑说明：从多行 Worker 文本提取 BLOCKED Task ID，并兼容同行或独立“阻塞原因/reason”；没有 Task ID 返回 None，缺原因使用明确默认说明。
     task_id: str | None = None
     reason: str | None = None
     for raw_line in body.splitlines():
@@ -1435,6 +1471,7 @@ def _parse_task_blocked(body: str) -> tuple[str, str] | None:
 def _global_confirmation_command(
     body: str,
 ) -> tuple[str, str | None] | None:
+    # 逻辑说明：把自然语言确认/拒绝及 /confirm、/deny、/reset、/status 解析为动作和可选 ID；参数个数不合规则返回 None，权限检查留给 runner。
     normalized = body.strip()
     if normalized in {"确认", "同意", "确认保存"}:
         return "confirm", None
@@ -1491,6 +1528,7 @@ def _stream_projection_text(
     projection: StreamProjection,
     settings: SessionSettings,
 ) -> str:
+    # 逻辑说明：从流式投影选取当前可公开正文；仅在 stream 模式以固定安全文案表示正在推理，full 模式附加工具状态，绝不暴露模型内部思维。
     text = projection.text
     if (
         not text
@@ -1510,6 +1548,7 @@ def _final_projection_text(
     projection: StreamProjection,
     settings: SessionSettings,
 ) -> str:
+    # 逻辑说明：turn 结束时组合最终正文、安全的“使用了推理”摘要和按 verbose 设置允许的工具概览，生成用于最后一次发送/编辑的文本。
     text = projection.text
     if (
         projection.thinking_observed
@@ -1525,6 +1564,7 @@ def _final_projection_text(
 
 
 def _tool_summary(projection: StreamProjection) -> str:
+    # 逻辑说明：只把 projector 已脱敏的工具名称与执行状态格式化为列表，不包含工具参数、返回数据或内部 reasoning。
     lines = ["工具执行："]
     lines.extend(
         f"- {tool.name} ({tool.state})"
@@ -1538,6 +1578,7 @@ def _append_public_section(text: str, section: str) -> str:
 
 
 def _approval_prompt(request: ConfirmationRequest) -> str:
+    # 逻辑说明：生成管理员审批卡片，包含请求 ID、来源、请求人、逐个工具及脱敏参数，并列出三种精确命令；仅格式化，不更改请求状态。
     calls = "\n".join(
         f"- {call.name}: {_summarize_arguments(call.input)}"
         for call in request.tool_calls
@@ -1555,6 +1596,7 @@ def _approval_prompt(request: ConfirmationRequest) -> str:
 
 
 def _summarize_arguments(raw: object) -> str:
+    # 逻辑说明：字符串参数先按 JSON 解析，失败返回固定占位；结构化值递归脱敏后以稳定键序压缩成最多 300 字符，供审批提示展示。
     value: object = raw
     if isinstance(raw, str):
         try:
@@ -1572,6 +1614,7 @@ def _summarize_arguments(raw: object) -> str:
 
 
 def _redact_secrets(value: object) -> object:
+    # 逻辑说明：递归复制字典和列表，疑似密钥字段整值替换为 [REDACTED]，其他标量原样返回；不修改原始 tool input。
     if isinstance(value, dict):
         return {
             str(key): (
@@ -1587,6 +1630,7 @@ def _redact_secrets(value: object) -> object:
 
 
 def _looks_secret(key: str) -> bool:
+    # 逻辑说明：先统一字段名大小写和连字符，再检查 password、token、api/access/private key 等标记，为递归脱敏提供保守判定。
     normalized = key.lower().replace("-", "_")
     return any(
         marker in normalized

@@ -67,6 +67,7 @@ class MemoryRepository:
         *,
         per_scope_limit: int = 200,
     ) -> None:
+        # 逻辑说明：拒绝非正的每 scope 容量，并保存数据库与确定性裁剪上限；后续所有写入在同一事务内插入并修剪。
         if per_scope_limit <= 0:
             raise ValueError("memory scope limit must be positive")
         self._database = database
@@ -80,11 +81,13 @@ class MemoryRepository:
         source_event_id: str,
         now: datetime,
     ) -> DailyMemory:
+        # 逻辑说明：规范正文、统一 UTC 时间并从房间和来源生成稳定 ID；事务内幂等插入并裁剪旧项，随后回读返回实际保留记录。
         body = _required(content, "daily memory")
         created = now.astimezone(UTC)
         memory_id = _stable_id("daily", room_id, source_event_id)
 
         def write(connection: sqlite3.Connection) -> None:
+            # 逻辑说明：按 room/source 去重写入后，以稳定排序只保留该房间最新 limit 条，保证重复事件不扩增记忆。
             connection.execute(
                 """
                 INSERT INTO daily_memories(
@@ -124,9 +127,11 @@ class MemoryRepository:
         room_id: str,
         day: date,
     ) -> tuple[DailyMemory, ...]:
+        # 逻辑说明：按房间与日期读取日记忆，转换日期/时间并按最新优先返回；只读不改变裁剪状态。
         def read(
             connection: sqlite3.Connection,
         ) -> tuple[DailyMemory, ...]:
+            # 逻辑说明：在同一快照查询并逐行构造不可变 DailyMemory。
             rows = connection.execute(
                 """
                 SELECT * FROM daily_memories
@@ -157,6 +162,7 @@ class MemoryRepository:
         days: int = 2,
         limit: int = 50,
     ) -> tuple[DailyMemory, ...]:
+        # 逻辑说明：先验证天数窗口和结果上限，再查询截至指定日期的有界近期记忆；非法边界在数据库访问前拒绝。
         if days <= 0:
             raise ValueError("memory day window must be positive")
         if limit <= 0:
@@ -165,6 +171,7 @@ class MemoryRepository:
         def read(
             connection: sqlite3.Connection,
         ) -> tuple[DailyMemory, ...]:
+            # 逻辑说明：用 SQLite 日期运算筛选窗口并按最新时间限制结果，统一转换为领域对象。
             rows = connection.execute(
                 """
                 SELECT * FROM daily_memories
@@ -205,6 +212,7 @@ class MemoryRepository:
         importance: float,
         now: datetime,
     ) -> LongTermMemory:
+        # 逻辑说明：规范正文与重要度，生成内容寻址 ID 后在事务中 upsert 并按重要度裁剪；回读保留项，若刚写项被容量策略淘汰则返回所请求快照作回执。
         body = _required(content, "long-term memory")
         if not 0 <= importance <= 10:
             raise ValueError("memory importance must be between 0 and 10")
@@ -212,6 +220,7 @@ class MemoryRepository:
         memory_id = _stable_id("long-term", scope, category, body)
 
         def write(connection: sqlite3.Connection) -> None:
+            # 逻辑说明：相同内容只更新时间和重要度，再以重要度/更新时间稳定保留每 scope 前 limit 条，避免无界增长。
             connection.execute(
                 """
                 INSERT INTO long_term_memories(
@@ -268,9 +277,11 @@ class MemoryRepository:
         self,
         scope: str,
     ) -> tuple[LongTermMemory, ...]:
+        # 逻辑说明：读取指定 scope 的长期记忆并按重要度、更新时间稳定排序，供上下文召回使用。
         def read(
             connection: sqlite3.Connection,
         ) -> tuple[LongTermMemory, ...]:
+            # 逻辑说明：在一致读快照转换浮点数与 ISO 时间，返回不可变元组。
             rows = connection.execute(
                 """
                 SELECT * FROM long_term_memories WHERE scope=?
@@ -302,6 +313,7 @@ class MemoryRepository:
         now: datetime,
         visibility: Literal["private", "project"] = "private",
     ) -> ProjectDecision:
+        # 逻辑说明：规范决策与理由、校验可见性并生成稳定 ID；事务中去重插入和按项目裁剪，随后回读实际记录。
         decision_text = _required(decision, "project decision")
         rationale_text = _required(rationale, "decision rationale")
         if visibility not in {"private", "project"}:
@@ -316,6 +328,7 @@ class MemoryRepository:
         )
 
         def write(connection: sqlite3.Connection) -> None:
+            # 逻辑说明：同一内容决策不重复写入，并只保留项目最近 limit 条，使来源重试幂等且空间有界。
             connection.execute(
                 """
                 INSERT INTO project_decisions(
@@ -359,9 +372,11 @@ class MemoryRepository:
         *,
         include_private: bool = True,
     ) -> tuple[ProjectDecision, ...]:
+        # 逻辑说明：按项目读取决策，并根据 include_private 决定是否只投影 project 可见项；始终限制数量与稳定排序。
         def read(
             connection: sqlite3.Connection,
         ) -> tuple[ProjectDecision, ...]:
+            # 逻辑说明：在同一读事务选择私有或项目公开查询，再统一转换成强类型决策。
             if include_private:
                 rows = connection.execute(
                     """
@@ -400,12 +415,14 @@ class MemoryRepository:
         *,
         limit: int = 50,
     ) -> tuple[ProjectDecision, ...]:
+        # 逻辑说明：验证全局结果上限后读取最近项目决策，供 Admin 召回；这里只查询，不改变可见性。
         if limit <= 0:
             raise ValueError("memory result limit must be positive")
 
         def read(
             connection: sqlite3.Connection,
         ) -> tuple[ProjectDecision, ...]:
+            # 逻辑说明：按时间和稳定 ID 排序限制结果，并反序列化为领域对象。
             rows = connection.execute(
                 """
                 SELECT * FROM project_decisions
@@ -437,12 +454,14 @@ class MemoryRepository:
         evidence: str,
         now: datetime,
     ) -> WorkerAssessment:
+        # 逻辑说明：校验 0..1 分数和非空证据，事务中按 worker/capability upsert 并裁剪较弱旧项，随后回读返回实际评估。
         if not 0 <= score <= 1:
             raise ValueError("Worker capability score must be between 0 and 1")
         evidence_text = _required(evidence, "Worker assessment evidence")
         timestamp = now.astimezone(UTC)
 
         def write(connection: sqlite3.Connection) -> None:
+            # 逻辑说明：原子更新同一能力的分数、证据与时间，再按分数/时间只保留该 Worker 前 limit 项。
             connection.execute(
                 """
                 INSERT INTO worker_capability_assessments(
@@ -486,9 +505,11 @@ class MemoryRepository:
         self,
         worker_name: str,
     ) -> tuple[WorkerAssessment, ...]:
+        # 逻辑说明：读取某 Worker 的有界能力评估并按分数和更新时间排序，结果仅是证据记忆而非实时 Worker 状态。
         def read(
             connection: sqlite3.Connection,
         ) -> tuple[WorkerAssessment, ...]:
+            # 逻辑说明：在一致快照查询并转换分数和时间字段。
             rows = connection.execute(
                 """
                 SELECT * FROM worker_capability_assessments
@@ -516,12 +537,14 @@ class MemoryRepository:
         *,
         limit: int = 50,
     ) -> tuple[WorkerAssessment, ...]:
+        # 逻辑说明：验证结果上限并跨 Worker 读取最近评估，供 Admin 记忆召回；不会据此直接调度任务。
         if limit <= 0:
             raise ValueError("memory result limit must be positive")
 
         def read(
             connection: sqlite3.Connection,
         ) -> tuple[WorkerAssessment, ...]:
+            # 逻辑说明：按更新时间稳定排序并限制数量，逐行恢复不可变评估对象。
             rows = connection.execute(
                 """
                 SELECT * FROM worker_capability_assessments
@@ -545,6 +568,7 @@ class MemoryRepository:
 
 
 def _required(value: str, label: str) -> str:
+    # 逻辑说明：去掉首尾空白并拒绝空内容，返回规范文本供稳定 ID 和持久化共同使用。
     normalized = value.strip()
     if not normalized:
         raise ValueError(f"{label} must not be empty")
@@ -552,5 +576,6 @@ def _required(value: str, label: str) -> str:
 
 
 def _stable_id(*parts: str) -> str:
+    # 逻辑说明：用不可混淆分隔符连接身份字段并计算 SHA-256，截取稳定 128-bit 十六进制 ID，实现内容级幂等而不保存原文到键中。
     digest = hashlib.sha256("\x1f".join(parts).encode()).hexdigest()
     return digest[:32]

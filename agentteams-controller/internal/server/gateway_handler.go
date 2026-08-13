@@ -15,10 +15,12 @@ type GatewayHandler struct {
 }
 
 func NewGatewayHandler(gw gateway.Client) *GatewayHandler {
+	// 逻辑说明：保存可选 gateway 抽象；具体请求在使用前检查 nil，因此未配置网关的部署仍能启动其他 API。
 	return &GatewayHandler{gw: gw}
 }
 
 func (h *GatewayHandler) CreateConsumer(w http.ResponseWriter, r *http.Request) {
+	// 逻辑说明：先确认 gateway 后端可用，再解析并校验 consumer 名称，调用幂等 EnsureConsumer 创建凭据；成功返回 ID/API key/status，后端错误统一记录并映射 500。
 	if h.gw == nil {
 		httputil.WriteError(w, http.StatusNotImplemented, "no gateway backend available")
 		return
@@ -53,6 +55,7 @@ func (h *GatewayHandler) CreateConsumer(w http.ResponseWriter, r *http.Request) 
 }
 
 func (h *GatewayHandler) BindConsumer(w http.ResponseWriter, r *http.Request) {
+	// 逻辑说明：校验 gateway 与路径中的 consumer 名称，再授权其访问 AI routes；只有授权完成才返回 204，防止前端把失败绑定当成功。
 	if h.gw == nil {
 		httputil.WriteError(w, http.StatusNotImplemented, "no gateway backend available")
 		return
@@ -74,6 +77,7 @@ func (h *GatewayHandler) BindConsumer(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *GatewayHandler) DeleteConsumer(w http.ResponseWriter, r *http.Request) {
+	// 逻辑说明：检查后端及路径身份后调用 gateway 删除 consumer；外部删除失败保留错误响应，成功以无正文 204 表示资源已回收。
 	if h.gw == nil {
 		httputil.WriteError(w, http.StatusNotImplemented, "no gateway backend available")
 		return

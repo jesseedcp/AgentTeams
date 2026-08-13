@@ -14,11 +14,13 @@ INSTALLER="auto"
 SKIP_RELOAD=0
 CLEANUP_DIR=""
 
+# 逻辑说明：退出时只删除本轮从 ZIP 解出的暂存目录，用户传入的原始插件包保持不变。
 cleanup() {
   [ -z "$CLEANUP_DIR" ] || rm -rf "$CLEANUP_DIR"
 }
 trap cleanup EXIT
 
+# 逻辑说明：输出精确的安装器、包路径和 reload 参数契约，不执行任何安装副作用。
 usage() {
   cat <<'EOF'
 Usage:
@@ -44,10 +46,12 @@ Options:
 EOF
 }
 
+# 逻辑说明：所有进度写入 stderr，使 stdout 可留给脚本调用方解析结果。
 log() {
   printf '[teamharness-plugin-reload] %s\n' "$*" >&2
 }
 
+# 逻辑说明：统一报告不可恢复的插件校验或安装失败并立即终止，避免继续触发半安装插件的 reload。
 fail() {
   log "ERROR: $*"
   exit 1
@@ -115,6 +119,7 @@ print(Path(sys.argv[1]).expanduser().resolve())
 PY
 )"
 
+# 逻辑说明：通过目录 manifest 或 ZIP 后缀识别 QwenPaw 原生包；旧 AgentTeams 包走另一条兼容安装路径。
 is_qwenpaw_native_package() {
   local package="$1"
   if [ -d "$package" ]; then
@@ -127,6 +132,7 @@ is_qwenpaw_native_package() {
   esac
 }
 
+# 逻辑说明：在 Python 中校验 ZIP 成员路径后解压到专用目录，阻止 `../` 路径逃逸覆盖宿主文件。
 extract_qwenpaw_package() {
   local zip_path="$1"
   local target_dir="$2"
@@ -158,6 +164,7 @@ print(packages[0])
 PY
 }
 
+# 逻辑说明：把目录或安全解压后的 ZIP 交给 QwenPaw 原生 CLI，临时目录由全局 cleanup 回收。
 install_with_qwenpaw() {
   command -v qwenpaw >/dev/null 2>&1 || fail "qwenpaw command not found"
 
@@ -175,6 +182,7 @@ install_with_qwenpaw() {
   qwenpaw plugin install "$package_dir" --force
 }
 
+# 逻辑说明：兼容旧 AgentTeams CLI，并依据现有 manifest 选择 install/update，避免重复注册。
 install_with_agentteams() {
   command -v agentteams >/dev/null 2>&1 || fail "agentteams command not found"
   mkdir -p "$PROJECT_DIR"
@@ -191,6 +199,7 @@ install_with_agentteams() {
   )
 }
 
+# 逻辑说明：根据显式 installer 分派唯一安装路径；未知值直接失败而不猜测包格式。
 install_plugin() {
   case "$INSTALLER" in
     qwenpaw)
@@ -214,6 +223,7 @@ install_plugin() {
   esac
 }
 
+# 逻辑说明：安装成功后调用 Worker 本地 reload API，让活动 workspace 重新投射 Prompt、Skill 和 MCP；HTTP 失败会使命令失败。
 post_reload() {
   local url="${API_BASE%/}/${RELOAD_PATH#/}"
   log "triggering agent reload: $url"

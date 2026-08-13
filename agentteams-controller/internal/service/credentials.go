@@ -50,6 +50,9 @@ type FileCredentialStore struct {
 }
 
 func (s *FileCredentialStore) Load(_ context.Context, workerName string) (*WorkerCredentials, error) {
+	// 逻辑说明：Load 接收 _(context.Context)、workerName(string)，依次借助 Join、Open、IsNotExist、Close读取凭据记录的期望结果。
+	// 返回/状态：返回 *WorkerCredentials、error；可能读写凭据文件或 Kubernetes Secret，敏感内容只经返回值传递，禁止写日志。
+	// 失败/重试：随机源、文件系统或 Secret API 失败会返回错误；调用方重新读取现状后可安全重试。
 	path := filepath.Join(s.Dir, workerName+".env")
 	f, err := os.Open(path)
 	if err != nil {
@@ -83,6 +86,9 @@ func (s *FileCredentialStore) Load(_ context.Context, workerName string) (*Worke
 }
 
 func (s *FileCredentialStore) Save(_ context.Context, workerName string, creds *WorkerCredentials) error {
+	// 逻辑说明：Save 接收 _(context.Context)、workerName(string)、creds(*WorkerCredentials)，依次借助 MkdirAll、Join、WriteFile保存凭据记录的期望结果。
+	// 返回/状态：返回 error；可能读写凭据文件或 Kubernetes Secret，敏感内容只经返回值传递，禁止写日志。
+	// 失败/重试：随机源、文件系统或 Secret API 失败会返回错误；调用方重新读取现状后可安全重试。
 	if err := os.MkdirAll(s.Dir, 0755); err != nil {
 		return fmt.Errorf("create credentials dir: %w", err)
 	}
@@ -95,6 +101,9 @@ func (s *FileCredentialStore) Save(_ context.Context, workerName string, creds *
 }
 
 func (s *FileCredentialStore) Delete(_ context.Context, workerName string) error {
+	// 逻辑说明：Delete 接收 _(context.Context)、workerName(string)，依次借助 Join、Remove、IsNotExist删除凭据记录的期望结果。
+	// 返回/状态：返回 error；可能读写凭据文件或 Kubernetes Secret，敏感内容只经返回值传递，禁止写日志。
+	// 失败/重试：随机源、文件系统或 Secret API 失败会返回错误；调用方重新读取现状后可安全重试。
 	path := filepath.Join(s.Dir, workerName+".env")
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		return err
@@ -103,6 +112,9 @@ func (s *FileCredentialStore) Delete(_ context.Context, workerName string) error
 }
 
 func (s *FileCredentialStore) List(_ context.Context) ([]string, error) {
+	// 逻辑说明：List 接收 _(context.Context)，依次借助 ReadDir、IsNotExist、Name、IsDir列出凭据记录的期望结果。
+	// 返回/状态：返回 []string、error；可能读写凭据文件或 Kubernetes Secret，敏感内容只经返回值传递，禁止写日志。
+	// 失败/重试：随机源、文件系统或 Secret API 失败会返回错误；调用方重新读取现状后可安全重试。
 	entries, err := os.ReadDir(s.Dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -121,6 +133,9 @@ func (s *FileCredentialStore) List(_ context.Context) ([]string, error) {
 }
 
 func parseEnvLine(line string) (string, string) {
+	// 逻辑说明：parseEnvLine 接收 line(string)，依次借助 IndexByte、Trim解析凭据记录的期望结果。
+	// 返回/状态：返回 string、string；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	idx := strings.IndexByte(line, '=')
 	if idx < 0 {
 		return line, ""
@@ -133,6 +148,9 @@ func parseEnvLine(line string) (string, string) {
 
 // GenerateCredentials creates a fresh set of worker credentials.
 func GenerateCredentials() (*WorkerCredentials, error) {
+	// 逻辑说明：GenerateCredentials 接收 无，依次借助 generateRandomHex生成凭据记录的期望结果。
+	// 返回/状态：返回 *WorkerCredentials、error；可能读写凭据文件或 Kubernetes Secret，敏感内容只经返回值传递，禁止写日志。
+	// 失败/重试：随机源、文件系统或 Secret API 失败会返回错误；调用方重新读取现状后可安全重试。
 	matrixPw, err := generateRandomHex(16)
 	if err != nil {
 		return nil, fmt.Errorf("generate matrix password: %w", err)
@@ -153,6 +171,9 @@ func GenerateCredentials() (*WorkerCredentials, error) {
 }
 
 func generateRandomHex(n int) (string, error) {
+	// 逻辑说明：generateRandomHex 接收 n(int)，依次借助 Read、EncodeToString生成凭据记录的期望结果。
+	// 返回/状态：返回 string、error；可能读写凭据文件或 Kubernetes Secret，敏感内容只经返回值传递，禁止写日志。
+	// 失败/重试：随机源、文件系统或 Secret API 失败会返回错误；调用方重新读取现状后可安全重试。
 	b := make([]byte, n)
 	if _, err := rand.Read(b); err != nil {
 		return "", err
@@ -181,6 +202,9 @@ func (s *SecretCredentialStore) secretName(workerName string) string {
 }
 
 func (s *SecretCredentialStore) Load(ctx context.Context, workerName string) (*WorkerCredentials, error) {
+	// 逻辑说明：Load 接收 ctx(context.Context)、workerName(string)，依次借助 Get、Secrets、CoreV1、secretName读取凭据记录的期望结果。
+	// 返回/状态：返回 *WorkerCredentials、error；可能读写凭据文件或 Kubernetes Secret，敏感内容只经返回值传递，禁止写日志。
+	// 失败/重试：随机源、文件系统或 Secret API 失败会返回错误；调用方重新读取现状后可安全重试。
 	secret, err := s.Client.CoreV1().Secrets(s.Namespace).Get(ctx, s.secretName(workerName), metav1.GetOptions{})
 	if err != nil {
 		if apierrors.IsNotFound(err) {
@@ -197,6 +221,9 @@ func (s *SecretCredentialStore) Load(ctx context.Context, workerName string) (*W
 }
 
 func (s *SecretCredentialStore) Save(ctx context.Context, workerName string, creds *WorkerCredentials) error {
+	// 逻辑说明：Save 接收 ctx(context.Context)、workerName(string)、creds(*WorkerCredentials)，依次借助 secretName、WorkerAppLabel、Get、Secrets保存凭据记录的期望结果。
+	// 返回/状态：返回 error；可能读写凭据文件或 Kubernetes Secret，敏感内容只经返回值传递，禁止写日志。
+	// 失败/重试：随机源、文件系统或 Secret API 失败会返回错误；调用方重新读取现状后可安全重试。
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      s.secretName(workerName),
@@ -230,6 +257,9 @@ func (s *SecretCredentialStore) Save(ctx context.Context, workerName string, cre
 }
 
 func (s *SecretCredentialStore) Delete(ctx context.Context, workerName string) error {
+	// 逻辑说明：Delete 接收 ctx(context.Context)、workerName(string)，依次借助 Delete、Secrets、CoreV1、secretName删除凭据记录的期望结果。
+	// 返回/状态：返回 error；可能读写凭据文件或 Kubernetes Secret，敏感内容只经返回值传递，禁止写日志。
+	// 失败/重试：随机源、文件系统或 Secret API 失败会返回错误；调用方重新读取现状后可安全重试。
 	err := s.Client.CoreV1().Secrets(s.Namespace).Delete(ctx, s.secretName(workerName), metav1.DeleteOptions{})
 	if apierrors.IsNotFound(err) {
 		return nil
@@ -238,6 +268,9 @@ func (s *SecretCredentialStore) Delete(ctx context.Context, workerName string) e
 }
 
 func (s *SecretCredentialStore) List(ctx context.Context) ([]string, error) {
+	// 逻辑说明：List 接收 ctx(context.Context)，依次借助 List、Secrets、CoreV1列出凭据记录的期望结果。
+	// 返回/状态：返回 []string、error；可能读写凭据文件或 Kubernetes Secret，敏感内容只经返回值传递，禁止写日志。
+	// 失败/重试：随机源、文件系统或 Secret API 失败会返回错误；调用方重新读取现状后可安全重试。
 	secrets, err := s.Client.CoreV1().Secrets(s.Namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: v1beta1.LabelController + "=" + s.ControllerName,
 	})

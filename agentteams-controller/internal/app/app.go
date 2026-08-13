@@ -99,6 +99,7 @@ type App struct {
 // HTTP handler 连上去。构造与 Start 分开后，任一步失败都不会留下半启动
 // 的后台任务，测试也可先检查组装结果。
 func New(ctx context.Context, cfg *config.Config) (*App, error) {
+	// 逻辑说明：按依赖顺序执行具名初始化步骤；任一步失败用阶段名包装并停止，成功才返回完整但尚未运行的 App。
 	a := &App{cfg: cfg, namespace: cfg.Namespace()}
 
 	steps := []struct {
@@ -137,6 +138,7 @@ func New(ctx context.Context, cfg *config.Config) (*App, error) {
 // 副本仍可以提供健康检查。Stop 会先停止接收新请求，再等待已启动
 // goroutine 退出，避免正在写 status 时粗暴终止进程。
 func (a *App) Start(ctx context.Context) error {
+	// 逻辑说明：启动 HTTP、可选缓存维护和 leader 限定初始化，再运行 controller manager；所有后台任务计入 WaitGroup。
 	logger := ctrl.Log.WithName("app")
 
 	// Log AppService configuration at startup so operators can see
@@ -271,6 +273,7 @@ func (a *App) Start(ctx context.Context) error {
 // for every background goroutine launched from Start to exit. Safe to call
 // after Start returns. The caller is expected to bound ctx with a timeout.
 func (a *App) Stop(ctx context.Context) error {
+	// 逻辑说明：先优雅关闭 HTTP，随后等待 Start 创建的 goroutine；保留首个错误并服从调用方超时 context。
 	logger := ctrl.Log.WithName("app")
 	var firstErr error
 	if a.httpServer != nil {
@@ -288,6 +291,7 @@ func (a *App) Stop(ctx context.Context) error {
 // =========================================================================
 
 func (a *App) initScheme(_ context.Context) error {
+	// 逻辑说明：创建共享 Kubernetes Scheme，依次注册核心类型和 AgentTeams CR，供 manager/client/owner reference 共用。
 	a.scheme = runtime.NewScheme()
 	_ = clientgoscheme.AddToScheme(a.scheme)
 	if err := v1beta1.AddToScheme(a.scheme); err != nil {
@@ -297,6 +301,7 @@ func (a *App) initScheme(_ context.Context) error {
 }
 
 func (a *App) initInfraClients(_ context.Context) error {
+	// 逻辑说明：按配置选择 Matrix、Gateway、存储和凭据 provider 实现，并构造 Agent 配置/包解析依赖；缺失必需项立即失败。
 	cfg := a.cfg
 	logger := ctrl.Log.WithName("app")
 
@@ -379,6 +384,7 @@ type ossControllerCredSource struct {
 }
 
 func (s *ossControllerCredSource) Resolve(ctx context.Context) (oss.Credentials, error) {
+	// 逻辑说明：每次 OSS 操作前从 TokenManager 获取仍有效的 STS 三元组，失败不返回部分凭据。
 	t, err := s.tm.Token(ctx)
 	if err != nil {
 		return oss.Credentials{}, err
@@ -391,6 +397,7 @@ func (s *ossControllerCredSource) Resolve(ctx context.Context) (oss.Credentials,
 }
 
 func (a *App) initBackends(_ context.Context) error {
+	// 逻辑说明：有 sidecar 时先创建远端集群 client cache，再按运行模式选择 Worker backend 并注册为统一路由表。
 	// Initialize the remote-cluster k8s client cache when the credential
 	// provider sidecar is configured. The cache holds references to
 	// mgr.GetClient() and the credential client; actual List calls happen
@@ -410,6 +417,7 @@ func (a *App) initBackends(_ context.Context) error {
 }
 
 func (a *App) initControllerManager(ctx context.Context) error {
+	// 逻辑说明：依据 kubeMode 分派嵌入式或集群内启动路径，并把生成的 REST 配置保存在 App 供后续认证使用。
 	var err error
 	if a.cfg.KubeMode == "embedded" {
 		a.restCfg, err = a.startEmbedded(ctx)
@@ -422,6 +430,7 @@ func (a *App) initControllerManager(ctx context.Context) error {
 // initFieldIndexers registers the Team membership reverse lookup used by auth
 // enrichment, REST validation, and Worker-triggered Team reconciliation.
 func (a *App) initFieldIndexers(ctx context.Context) error {
+	// 逻辑说明：为 Team.workerMembers.name 建反向索引，过滤空成员名；认证补全和 Worker 触发 reconcile 因此无需全表扫描。
 	if a.mgr == nil {
 		return nil
 	}
@@ -445,6 +454,7 @@ func (a *App) initFieldIndexers(ctx context.Context) error {
 }
 
 func (a *App) initAuth(ctx context.Context) error {
+	// 逻辑说明：有 REST 配置时组合 TokenReview、CR 身份补全和 Authorizer 并启动缓存清理；否则显式构造无认证中间件。
 	logger := ctrl.Log.WithName("app")
 
 	if a.restCfg != nil {
@@ -467,6 +477,7 @@ func (a *App) initAuth(ctx context.Context) error {
 }
 
 func (a *App) initServiceLayer(_ context.Context) error {
+	// 逻辑说明：在基础 client/manager 就绪后构造可选 STS、凭据存储、Provisioner、Deployer 与 Manager 配置存储。
 	cfg := a.cfg
 
 	// Build the STS service now that the controller-runtime Manager (and
@@ -546,6 +557,7 @@ func (a *App) initServiceLayer(_ context.Context) error {
 }
 
 func (a *App) initReconcilers(_ context.Context) error {
+	// 逻辑说明：构造动态 client 和四类 reconciler，按 ManagerEnabled 决定 Manager 路径，并注册 CR 数量采集器。
 	resourcePrefix := authpkg.ResourcePrefix(a.cfg.ResourcePrefix)
 	var dynamicClient dynamic.Interface
 	if a.restCfg != nil {
@@ -643,6 +655,7 @@ func (a *App) initReconcilers(_ context.Context) error {
 }
 
 func (a *App) initHTTPServer(_ context.Context) error {
+	// 逻辑说明：把已组装的 client、backend、鉴权和服务层注入单一 HTTPServer；此阶段只构造不监听端口。
 	a.httpServer = server.NewHTTPServer(a.cfg.HTTPAddr, server.ServerDeps{
 		Client:         a.mgr.GetClient(),
 		Backend:        a.registry,
@@ -667,6 +680,7 @@ func (a *App) initHTTPServer(_ context.Context) error {
 // =========================================================================
 
 func (a *App) startEmbedded(ctx context.Context) (*rest.Config, error) {
+	// 逻辑说明：顺序启动 Kine、嵌入式 API server 和 controller manager，再做文件初始同步并启动持续 watcher。
 	logger := ctrl.Log.WithName("app")
 	cfg := a.cfg
 	logger.Info("starting embedded mode", "dataDir", cfg.DataDir, "configDir", cfg.ConfigDir)
@@ -717,6 +731,7 @@ func (a *App) startEmbedded(ctx context.Context) (*rest.Config, error) {
 }
 
 func (a *App) startInCluster() (*rest.Config, error) {
+	// 逻辑说明：要求唯一 controllerName，配置 leader election/namespace，并以 owner label 限制 informer cache 后创建 manager。
 	logger := ctrl.Log.WithName("app")
 	logger.Info("starting in-cluster mode")
 
@@ -807,6 +822,7 @@ const adminCLITokenPath = "/var/run/agentteams/cli-token"
 // degraded (operator can still hit the HTTP API directly with their own
 // SA token, or re-run after a controller restart).
 func bootstrapAdminCLIToken(ctx context.Context, prov *service.Provisioner) error {
+	// 逻辑说明：确保 Admin SA、签发新 token，并以 0600 写入容器固定路径；无 Provisioner/token 时安全跳过。
 	if prov == nil {
 		return nil
 	}
@@ -844,6 +860,7 @@ func bootstrapAdminCLIToken(ctx context.Context, prov *service.Provisioner) erro
 // Gateway selection is handled in initInfraClients via gateway.Client,
 // so this function only cares about worker runtimes (docker vs k8s).
 func buildWorkerBackends(cfg *config.Config, scheme *runtime.Scheme, remoteCache backend.RemoteClusterClientProvider) []backend.WorkerBackend {
+	// 逻辑说明：嵌入模式加入 Docker；解析集群默认 backend 后尝试加入 K8s，构造失败记录警告而不伪造可用后端。
 	var workers []backend.WorkerBackend
 
 	if cfg.KubeMode == "embedded" {

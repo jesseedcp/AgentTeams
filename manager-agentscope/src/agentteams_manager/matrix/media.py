@@ -44,6 +44,7 @@ class MediaAdapter:
         *,
         max_decoded_bytes: int = MAX_DECODED_MEDIA_BYTES,
     ) -> None:
+        # 逻辑说明：保存 nio 媒体客户端与允许的解码后最大字节数，供后续每个附件统一校验；初始化本身既不读取文件也不访问 homeserver。
         self._client = nio_client
         self._max_decoded_bytes = max_decoded_bytes
 
@@ -51,6 +52,7 @@ class MediaAdapter:
         self,
         source: InboundEvent | MediaReference,
     ) -> tuple[DataBlock, ...]:
+        # 逻辑说明：若输入是 InboundEvent 就按其 media 顺序逐个下载，否则包装单个引用；只有所有附件都转换成功才返回 DataBlock 元组，任一异常会终止且不返回部分集合。
         references = (
             source.media
             if isinstance(source, InboundEvent)
@@ -62,6 +64,7 @@ class MediaAdapter:
         return tuple(blocks)
 
     async def _download_one(self, reference: MediaReference) -> DataBlock:
+        # 逻辑说明：先拒绝超限声明和非 mxc URI，再从响应字节或文件路径取内容；加密附件须元数据齐全并通过解密校验，真实大小及 MIME 合法后才 Base64 编成 DataBlock。
         if (
             reference.size is not None
             and reference.size > self._max_decoded_bytes
@@ -119,6 +122,7 @@ class MediaAdapter:
         )
 
     async def upload(self, path: Path) -> str:
+        # 逻辑说明：解析绝对路径并验证普通文件，读取大小、按扩展名推断 MIME 后将 Path 作为 nio data provider 上传；仅返回以 mxc:// 开头的 content_uri，否则抛媒体校验错误。
         path = path.resolve()
         if not path.is_file():
             raise MediaValidationError(f"media file does not exist: {path}")

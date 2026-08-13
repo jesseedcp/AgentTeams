@@ -28,6 +28,7 @@ import (
 //	(e.g. "@agentteams-.*:<domain>") that covers only AgentTeams-managed localparts,
 //	and ensure AgentTeams-managed users are created under that prefix.
 func RenderAppServiceRegistration(cfg Config) AppServiceRegistration {
+	// 逻辑说明：把 domain、token、sender 和可选 push URL 组装成 registration；未显式给用户 regex 时才采用受管 homeserver 的全本地用户 namespace。
 	domain := cfg.Domain
 	userRegex := cfg.AppServiceUserNamespaceRegex
 	if userRegex == "" {
@@ -64,6 +65,7 @@ func RenderAppServiceRegistration(cfg Config) AppServiceRegistration {
 // clean state regardless of Tuwunel's overwrite semantics for same-ID
 // registrations.
 func (c *TuwunelClient) RegisterAppService(ctx context.Context, reg AppServiceRegistration) error {
+	// 逻辑说明：先用当前 token 做幂等 smoke test；失败时尽力注销旧 ID、序列化并发送新 registration，再等待 homeserver 异步应用或响应 context 取消。
 	// Fast path: current token already works.
 	if err := c.AppServiceSmokeTest(ctx); err == nil {
 		return nil
@@ -99,6 +101,7 @@ func (c *TuwunelClient) RegisterAppService(ctx context.Context, reg AppServiceRe
 // Uses the admin bot command; works regardless of the current as_token validity
 // because admin commands authenticate via admin user login, not as_token.
 func (c *TuwunelClient) UnregisterAppService(ctx context.Context, id string) error {
+	// 逻辑说明：把 registration ID 编入 homeserver 管理命令并用管理员用户身份发送；它不依赖待撤销的 as_token，因此 token 已失效时仍可完成回收。
 	cmd := fmt.Sprintf("!admin appservices unregister %s", id)
 	return c.AdminCommand(ctx, cmd)
 }
@@ -107,6 +110,7 @@ func (c *TuwunelClient) UnregisterAppService(ctx context.Context, id string) err
 // attempting an AS login as the sender_localpart user. Retries up to 5 times
 // with 2-second intervals to account for async admin command processing.
 func (c *TuwunelClient) AppServiceSmokeTest(ctx context.Context) error {
+	// 逻辑说明：校验 sender 后最多五次尝试 appservice 登录；成功且 token 非空立即返回，间隔等待服从 context 取消，耗尽后返回最后错误。
 	sender := c.config.AppServiceSenderLocalpart
 	if sender == "" {
 		return fmt.Errorf("appservice smoke test: sender_localpart not configured")

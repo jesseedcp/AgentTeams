@@ -35,6 +35,7 @@ const (
 // InjectCoordinationContext inserts the team-context block into AGENTS.md content.
 // It replaces any existing team-context block, or appends after the builtin-end marker.
 func InjectCoordinationContext(agentsContent string, ctx CoordinationContext) string {
+	// 逻辑说明：先删除所有旧协调区块，再把当前角色区块插到内置段后；无内置 marker 时追加到文末。
 	block := buildCoordinationBlock(ctx)
 	cleaned := removeCoordinationBlock(agentsContent)
 
@@ -49,6 +50,7 @@ func InjectCoordinationContext(agentsContent string, ctx CoordinationContext) st
 }
 
 func buildCoordinationBlock(ctx CoordinationContext) string {
+	// 逻辑说明：按 Leader、团队 Worker、独立 Worker 三类角色生成其真实上游、房间和汇报边界，缺失字段不伪造。
 	var b strings.Builder
 	b.WriteString("\n")
 	b.WriteString(teamCtxStart)
@@ -123,6 +125,7 @@ func buildCoordinationBlock(ctx CoordinationContext) string {
 }
 
 func writeTeamCoordinators(b *strings.Builder, ids []string, adminID string) {
+	// 逻辑说明：去除空值、重复值和已单列的 Admin 后，才把协调成员按输入顺序写入提示块。
 	ids = uniqueCoordinationIDs(ids, adminID)
 	if len(ids) == 0 {
 		return
@@ -134,6 +137,7 @@ func writeTeamCoordinators(b *strings.Builder, ids []string, adminID string) {
 }
 
 func uniqueCoordinationIDs(ids []string, exclude string) []string {
+	// 逻辑说明：稳定去重并排除空值/指定管理员 ID，既避免重复权限提示又不改变首现顺序。
 	seen := make(map[string]struct{}, len(ids))
 	out := make([]string, 0, len(ids))
 	for _, id := range ids {
@@ -150,6 +154,7 @@ func uniqueCoordinationIDs(ids []string, exclude string) []string {
 }
 
 func removeCoordinationBlock(content string) string {
+	// 逻辑说明：循环删除每个完整 marker 区块及其单个尾换行；遇到不完整 marker 时保留原文避免误删用户内容。
 	for {
 		startIdx := strings.Index(content, teamCtxStart)
 		if startIdx < 0 {

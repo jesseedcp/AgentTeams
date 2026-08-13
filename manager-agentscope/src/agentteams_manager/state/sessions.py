@@ -63,10 +63,13 @@ class SessionSettings:
 
 class SessionRepository:
     def __init__(self, database: Database) -> None:
+        # 逻辑说明：保存 room-scoped AgentState 的持久化入口；构造时不加载任何房间，避免应用启动一次性反序列化全部会话。
         self._database = database
 
     async def load(self, room_id: str) -> StoredSession | None:
+        # 逻辑说明：按 Matrix 房间加载序列化 AgentScope 状态和最后事件游标；不存在返回 None，解析失败向上抛出以避免静默丢失上下文。
         def read(connection: sqlite3.Connection) -> StoredSession | None:
+            # 逻辑说明：在读事务查询单个房间，并把 JSON state 与时间字段恢复为强类型对象。
             row = connection.execute(
                 "SELECT * FROM sessions WHERE room_id=?",
                 (room_id,),
@@ -93,10 +96,12 @@ class SessionRepository:
         policy_revision: int,
         last_event_id: str | None,
     ) -> StoredSession:
+        # 逻辑说明：先在事务外生成统一更新时间并序列化 AgentState，再按 room ID 原子 upsert；成功后返回与持久内容一致的会话快照。
         updated_at = datetime.now(UTC)
         serialized = state.model_dump_json()
 
         def write(connection: sqlite3.Connection) -> None:
+            # 逻辑说明：一次 upsert 同步替换状态、策略 revision 和最后事件 ID，防止这些恢复游标分开提交。
             connection.execute(
                 """
                 INSERT INTO sessions(
@@ -128,7 +133,9 @@ class SessionRepository:
         )
 
     async def delete(self, room_id: str) -> bool:
+        # 逻辑说明：在写事务删除指定房间的会话状态并返回是否命中；设置表由独立生命周期管理，不在这里连带清除。
         def write(connection: sqlite3.Connection) -> bool:
+            # 逻辑说明：用影响行数区分成功删除和本来不存在，重复 reset 因而可以安全重试。
             cursor = connection.execute(
                 "DELETE FROM sessions WHERE room_id=?",
                 (room_id,),
@@ -144,6 +151,7 @@ class SessionRepository:
         now: datetime,
         timezone: str = "UTC",
     ) -> SessionSettings:
+        # 逻辑说明：先读取房间设置，存在则原样返回；不存在才按默认模型和时区创建，避免每次访问重算每日 reset 边界。
         existing = await self._read_settings(room_id)
         if existing is not None:
             return existing
@@ -162,6 +170,7 @@ class SessionRepository:
         timezone: str,
         now: datetime,
     ) -> SessionSettings:
+        # 逻辑说明：通过统一存储路径设置模型与时区并要求重算 reset 日程；校验或数据库失败直接传播，不返回未持久化设置。
         return await self._store_settings(
             room_id,
             model_override=model_override,
@@ -184,6 +193,7 @@ class SessionRepository:
         queue_limit: int | _Unset = _UNSET,
     ) -> SessionSettings:
         """Update selected controls without resetting unrelated settings."""
+        # 逻辑说明：把未提供字段保留为 _UNSET，委托统一事务只更新显式选择的控制项；不会因为普通设置修改而重置每日清理时间。
         return await self._store_settings(
             room_id,
             model_override=model_override,
@@ -212,9 +222,11 @@ class SessionRepository:
         timezone: str | _Unset = _UNSET,
         reset_schedule: bool,
     ) -> SessionSettings:
+        # 逻辑说明：在一个事务中读取当前设置、合并显式变更、校验枚举和队列上限，再 upsert 完整快照；任何校验或 SQL 失败都不会留下部分设置。
         normalized_now = now.astimezone(UTC)
 
         def write(connection: sqlite3.Connection) -> SessionSettings:
+            # 逻辑说明：以当前记录为默认值解析所有 _UNSET 字段，必要时重算 reset，然后一次写入并返回同值对象，保证返回值就是实际提交内容。
             row = connection.execute(
                 "SELECT * FROM session_settings WHERE room_id=?",
                 (room_id,),
@@ -325,11 +337,13 @@ class SessionRepository:
         self,
         now: datetime,
     ) -> tuple[SessionSettings, ...]:
+        # 逻辑说明：把输入时间规范到 UTC 后查询到期房间，按 reset 时间和 room ID 稳定排序；这里只识别候选，不执行会话删除。
         normalized_now = now.astimezone(UTC)
 
         def read(
             connection: sqlite3.Connection,
         ) -> tuple[SessionSettings, ...]:
+            # 逻辑说明：在同一读快照筛选已到每日边界的设置并批量转换。
             rows = connection.execute(
                 """
                 SELECT * FROM session_settings
@@ -348,6 +362,7 @@ class SessionRepository:
         *,
         now: datetime,
     ) -> SessionSettings:
+        # 逻辑说明：读取或创建当前设置，再保留模型与时区调用 configure 重算下一次边界；两个 await 之间若失败，旧边界仍保留以便稍后重试。
         current = await self.settings(room_id, now=now)
         return await self.configure(
             room_id,
@@ -360,9 +375,11 @@ class SessionRepository:
         self,
         room_id: str,
     ) -> SessionSettings | None:
+        # 逻辑说明：在只读事务按 room ID 获取设置；不存在返回 None，供 settings 决定是否初始化默认值。
         def read(
             connection: sqlite3.Connection,
         ) -> SessionSettings | None:
+            # 逻辑说明：执行单行参数化查询并统一反序列化时间和控制项字段。
             row = connection.execute(
                 "SELECT * FROM session_settings WHERE room_id=?",
                 (room_id,),
@@ -373,6 +390,7 @@ class SessionRepository:
 
 
 def _settings_from_row(row: sqlite3.Row) -> SessionSettings:
+    # 逻辑说明：把数据库行转换为会话设置对象，并把 ISO 时间恢复为 datetime；字段或时间损坏时主动失败而非套用默认值。
     return SessionSettings(
         room_id=row["room_id"],
         model_override=row["model_override"],
@@ -389,6 +407,7 @@ def _settings_from_row(row: sqlite3.Row) -> SessionSettings:
 
 
 def _next_daily_reset(now: datetime, timezone: str) -> datetime:
+    # 逻辑说明：解析 IANA 时区，在当地时间计算下一次凌晨 4 点并转换回 UTC；未知时区明确报错，已过今日边界则顺延一天。
     try:
         zone = ZoneInfo(timezone)
     except ZoneInfoNotFoundError as error:
@@ -417,6 +436,7 @@ def _validate_settings(
     queue_mode: str,
     queue_limit: int,
 ) -> None:
+    # 逻辑说明：集中校验 thinking、reasoning、verbose、elevated、queue 枚举和队列范围；发现非法值立即报错，使写事务在落库前整体失败。
     if (
         thinking_effort is not None
         and thinking_effort not in THINKING_EFFORTS

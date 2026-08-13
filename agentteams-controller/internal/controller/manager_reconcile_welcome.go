@@ -98,6 +98,9 @@ const welcomeRequeueInterval = 5 * time.Second
 //     ate the first message. Missing welcome is recoverable; permanent
 //     double welcome is not.
 func (r *ManagerReconciler) reconcileManagerWelcome(ctx context.Context, s *managerScope) (reconcile.Result, error) {
+	// 逻辑说明：reconcileManagerWelcome 接收 ctx(context.Context)、s(*managerScope)，依次借助 managerBackend、Status、managerContainerName、IsManagerJoinedDM调谐Manager的期望结果。
+	// 返回/状态：返回 reconcile.Result、error；会更新 Manager的内存状态，存在客户端调用时还可能同步相应外部资源。
+	// 失败/重试：输入或依赖调用失败会返回错误；是否重排由上层调谐器决定，本函数不隐藏失败。
 	m := s.manager
 	if m.Status.WelcomeSent {
 		return reconcile.Result{}, nil

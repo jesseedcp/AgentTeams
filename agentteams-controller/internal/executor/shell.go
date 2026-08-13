@@ -33,6 +33,7 @@ func NewShell(scriptsDir string) *Shell {
 
 // Run executes a script with the given arguments and returns the parsed result.
 func (s *Shell) Run(ctx context.Context, script string, args ...string) (*Result, error) {
+	// 逻辑说明：给 bash 子进程套执行超时并分别捕获 stdout/stderr；非零退出返回两路诊断，成功时可解析 `---RESULT---` 后 JSON 并提取 Matrix/Room ID，普通输出仍完整保留。
 	ctx, cancel := context.WithTimeout(ctx, s.Timeout)
 	defer cancel()
 
@@ -69,6 +70,7 @@ func (s *Shell) Run(ctx context.Context, script string, args ...string) (*Result
 
 // RunSimple executes a script and returns raw output without JSON parsing.
 func (s *Shell) RunSimple(ctx context.Context, script string, args ...string) (string, error) {
+	// 逻辑说明：在统一超时内执行 bash 脚本并返回原始 stdout；失败时附 stderr 而不尝试 JSON 解析，context 取消通过 CommandContext 终止子进程。
 	ctx, cancel := context.WithTimeout(ctx, s.Timeout)
 	defer cancel()
 

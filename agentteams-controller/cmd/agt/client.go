@@ -26,11 +26,13 @@ type APIError struct {
 }
 
 func (e *APIError) Error() string {
+	// 逻辑说明：把结构化 HTTP 状态与安全消息渲染为 CLI 错误文本，上层仍可用类型断言读取 StatusCode。
 	return fmt.Sprintf("HTTP %d: %s", e.StatusCode, e.Message)
 }
 
 // NewAPIClient constructs a client from environment variables.
 func NewAPIClient() *APIClient {
+	// 逻辑说明：从环境解析并清理 Controller 基址，按优先级发现 token，并固定 30 秒 HTTP 超时。
 	baseURL := os.Getenv("AGENTTEAMS_CONTROLLER_URL")
 	if baseURL == "" {
 		baseURL = "http://localhost:8090"
@@ -51,6 +53,7 @@ func NewAPIClient() *APIClient {
 //  2. AGENTTEAMS_AUTH_TOKEN_FILE token file
 //  3. empty string (unauthenticated, for controllers with auth disabled)
 func discoverToken() string {
+	// 逻辑说明：环境内 token 优先，其次读取并去空白 token 文件；读取失败或空文件安全降级为无认证。
 	if token := os.Getenv("AGENTTEAMS_AUTH_TOKEN"); token != "" {
 		return token
 	}
@@ -71,6 +74,7 @@ func discoverToken() string {
 // 浏览器历史或错误信息。请求 context 承载超时/取消，调用方不应在其后
 // 绕过客户端重新发起一个无界等待的请求。
 func (c *APIClient) Do(method, path string, body interface{}) (*http.Response, error) {
+	// 逻辑说明：可选 body 序列化为 JSON，token 仅放 Authorization header，再交给有界 HTTP client 执行。
 	url := c.BaseURL + path
 
 	var bodyReader io.Reader
@@ -103,6 +107,7 @@ func (c *APIClient) Do(method, path string, body interface{}) (*http.Response, e
 // 它为所有 CLI 子命令提供统一错误语义，因此 AgentScope workflow 能区分
 // 认证失败、资源不存在与网络超时，而不需要解析人类文本。
 func (c *APIClient) DoJSON(method, path string, body, result interface{}) error {
+	// 逻辑说明：统一关闭/读取 response；非 2xx 优先提取 JSON error，成功且有目标时才解码响应对象。
 	resp, err := c.Do(method, path, body)
 	if err != nil {
 		return err
@@ -138,6 +143,7 @@ func (c *APIClient) DoJSON(method, path string, body, result interface{}) error 
 // fieldName is the form field name for the file (e.g. "file").
 // Extra string key-value pairs are sent as form fields.
 func (c *APIClient) DoMultipart(path, fieldName, fileName string, fileData []byte, fields map[string]string, result interface{}) error {
+	// 逻辑说明：在内存中构造完整 multipart 表单并关闭 writer 后发送，统一鉴权、状态错误提取和结果解码。
 	var buf bytes.Buffer
 	writer := multipart.NewWriter(&buf)
 
@@ -201,6 +207,7 @@ func (c *APIClient) DoMultipart(path, fieldName, fileName string, fileData []byt
 // ResourceExists checks whether a resource exists by issuing a GET request.
 // Returns true on 2xx, false on 404, and an error for other status codes.
 func (c *APIClient) ResourceExists(path string) (bool, error) {
+	// 逻辑说明：用 GET 探测并立即关闭 body；2xx/404 分别映射 true/false，其余状态保留为类型化 APIError。
 	resp, err := c.Do("GET", path, nil)
 	if err != nil {
 		return false, err

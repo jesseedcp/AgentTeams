@@ -31,6 +31,7 @@ type Handler struct {
 
 // NewHandler creates a Docker API proxy handler that forwards to the given socket.
 func NewHandler(socketPath string, validator *SecurityValidator) *Handler {
+	// 逻辑说明：创建只通过指定 Unix socket 连接 Docker daemon 的 transport，并让反向代理重写上游 scheme/host；validator 保留在外层，先做授权再转发。
 	transport := &http.Transport{
 		DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
 			return net.Dial("unix", socketPath)
@@ -53,6 +54,7 @@ func NewHandler(socketPath string, validator *SecurityValidator) *Handler {
 
 // ServeHTTP handles Docker API requests with security filtering.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// 逻辑说明：GET/HEAD 作为只读请求直接代理；写请求必须同时匹配方法与固定 Docker API 路径白名单，容器创建还进入载荷校验，其余请求记录并返回 403。
 	path := r.URL.Path
 
 	// GET/HEAD requests are read-only, always allow
@@ -88,6 +90,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleContainerCreate(w http.ResponseWriter, r *http.Request) {
+	// 逻辑说明：完整读取并解析创建载荷，连同 query 中容器名交给安全策略校验；拒绝时返回不含原始敏感载荷的 JSON，允许时重建已消费的 Body 后再代理给 Docker。
 	body, err := io.ReadAll(r.Body)
 	r.Body.Close()
 	if err != nil {

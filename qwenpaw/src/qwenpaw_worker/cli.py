@@ -20,6 +20,7 @@ from qwenpaw_worker.worker import Worker
 
 def main() -> None:
     """Entry point registered in pyproject.toml."""
+    # 逻辑说明：声明 Typer 命令并把进程参数交给异步 Worker；参数或运行异常最终表现为 CLI 退出状态。
 
     def _run(
         name: str = typer.Option(..., "--name", help="Worker name"),
@@ -39,6 +40,7 @@ def main() -> None:
         ),
     ) -> None:
         """Start the QwenPaw Worker."""
+        # 逻辑说明：将命令行值组装成 WorkerConfig、初始化日志和 Worker，再用 asyncio.run 托管生命周期。
         config = WorkerConfig(
             worker_name=name,
             worker_cr_name=cr_name,
@@ -57,9 +59,11 @@ def main() -> None:
         worker = Worker(config)
 
         async def _async_run() -> None:
+            # 逻辑说明：注册 SIGINT/SIGTERM 的优雅停止回调并等待 Worker；Windows 不支持信号 API 时继续运行。
             loop = asyncio.get_running_loop()
 
             def _shutdown() -> None:
+                # 逻辑说明：收到终止信号时异步请求 Worker 停止，让后台任务和子进程有机会清理。
                 asyncio.create_task(worker.stop())
 
             try:

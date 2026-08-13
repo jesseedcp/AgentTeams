@@ -77,6 +77,9 @@ func (r *ManagerReconciler) managerContainerName(name string) string {
 // 和容器收敛到 Manager spec。它可被重复调用，因此每个阶段都必须
 // 能识别“已经完成”，而不是把 reconcile 当作仅执行一遍的启动脚本。
 func (r *ManagerReconciler) Reconcile(ctx context.Context, req reconcile.Request) (retres reconcile.Result, reterr error) {
+	// 逻辑说明：Reconcile 接收 ctx(context.Context)、req(reconcile.Request)，依次借助 Now、Observe、Get、IgnoreNotFound调谐Manager的期望结果。
+	// 返回/状态：返回 retres、reterr；会调用下层服务修改外部资源，并把阶段、条件与已应用版本写回 CR status。
+	// 失败/重试：error 或 RequeueAfter 交给 controller-runtime；重复执行必须把同一 spec 收敛到同一状态。
 	start := time.Now()
 	defer func() { metrics.Observe("manager", start, reterr) }()
 
@@ -140,6 +143,9 @@ func (r *ManagerReconciler) Reconcile(ctx context.Context, req reconcile.Request
 // reconcileManagerNormal runs the declarative convergence loop: infrastructure,
 // config, container. Critical-path phases are serial with early return on error.
 func (r *ManagerReconciler) reconcileManagerNormal(ctx context.Context, s *managerScope) (reconcile.Result, error) {
+	// 逻辑说明：reconcileManagerNormal 接收 ctx(context.Context)、s(*managerScope)，依次借助 ResolveModelProvider、reconcileManagerInfrastructure、AuthorizeAIRoutes、EnsureManagerServiceAccount调谐Manager的期望结果。
+	// 返回/状态：返回 reconcile.Result、error；会调用下层服务修改外部资源，并把阶段、条件与已应用版本写回 CR status。
+	// 失败/重试：error 或 RequeueAfter 交给 controller-runtime；重复执行必须把同一 spec 收敛到同一状态。
 	if s.manager.Spec.ModelProvider != "" && r.GatewayClient != nil {
 		info, err := r.GatewayClient.ResolveModelProvider(ctx, s.manager.Spec.ModelProvider)
 		if err != nil {
@@ -188,6 +194,9 @@ func (r *ManagerReconciler) reconcileManagerNormal(ctx context.Context, s *manag
 }
 
 func (r *ManagerReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	// 逻辑说明：SetupWithManager 接收 mgr(ctrl.Manager)，依次借助 For、NewControllerManagedBy、GetBackendForType、Background设置Manager的期望结果。
+	// 返回/状态：返回 error；会注册 watch、事件过滤器或对象到调谐请求的映射，不直接创建业务资源。
+	// 失败/重试：注册失败会阻止 Controller 正常启动；事件处理本身由 controller-runtime 持续驱动。
 	bldr := ctrl.NewControllerManagedBy(mgr).
 		For(&v1beta1.Manager{})
 

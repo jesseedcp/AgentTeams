@@ -23,14 +23,17 @@ logger = logging.getLogger(__name__)
 
 
 def _now() -> str:
+    # 逻辑说明：生成带时区的当前 UTC 时间字符串，作为本地心跳快照更新时间。
     return datetime.now(timezone.utc).isoformat()
 
 
 def _rfc3339_utc(value: datetime) -> str:
+    # 逻辑说明：将任意带时区时间归一化为秒精度 UTC RFC3339，供 Controller 稳定比较。
     return value.astimezone(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def _parse_rfc3339(value: Any) -> datetime | None:
+    # 逻辑说明：兼容 Z 后缀并解析时间；无效值返回 None，让心跳上报继续而不是崩溃。
     if not isinstance(value, str) or not value.strip():
         return None
     text = value.strip()
@@ -59,6 +62,7 @@ class WorkerHeartbeat:
         message: str = "",
         details: Dict[str, Any] | None = None,
     ) -> None:
+        # 逻辑说明：校验 ready/not_ready 并更新内存快照字段，非法状态直接拒绝。
         if status not in ("ready", "not_ready"):
             raise ValueError(f"invalid worker heartbeat status: {status}")
         self.status = status
@@ -78,11 +82,13 @@ class WorkerHeartbeat:
         return self.status == "ready"
 
     def persist(self) -> None:
+        # 逻辑说明：确保父目录存在，再把当前心跳快照以 UTF-8 JSON 覆盖写入健康检查文件。
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text(json.dumps(self.snapshot(), indent=2, ensure_ascii=False), encoding="utf-8")
 
 
 def check_qwenpaw_heartbeat(port: int) -> Tuple[str, str, Dict[str, Any]]:
+    # 逻辑说明：访问本机版本 API 判断就绪；连接失败转成 not_ready 数据而不是终止 Worker。
     url = f"http://127.0.0.1:{port}/api/version"
     try:
         with urllib.request.urlopen(url, timeout=5) as response:
@@ -94,6 +100,7 @@ def check_qwenpaw_heartbeat(port: int) -> Tuple[str, str, Dict[str, Any]]:
 
 def get_qwenpaw_last_active_at(port: int, agent_id: str = "default") -> str | None:
     """Read QwenPaw's agent-status endpoint and map it to controller lastActiveAt."""
+    # 逻辑说明：读取 Agent 最近活动时间、兼容秒/毫秒时间戳并转为 RFC3339；不可用时返回 None。
 
     url = f"http://127.0.0.1:{port}/api/agents/{agent_id}/agent-status"
     try:
@@ -129,6 +136,7 @@ class ControllerHeartbeatReporter:
 
     @classmethod
     def from_env(cls, worker_name: str) -> "ControllerHeartbeatReporter":
+        # 逻辑说明：从环境变量构造 Controller 上报器；URL 为空表示本部署不启用远端心跳。
         return cls(
             worker_name=worker_name,
             controller_url=os.getenv("AGENTTEAMS_CONTROLLER_URL", "").rstrip("/"),
@@ -138,6 +146,7 @@ class ControllerHeartbeatReporter:
         return bool(self.controller_url)
 
     def report_ready(self, last_active_at: str | None = None) -> bool:
+        # 逻辑说明：把启动就绪事件以 Controller 约定的 `ready` 动作上报，并透传可选最后活动时间；网络、认证和 HTTP 失败由 `_post` 转成 False 供启动方处理。
         return self._post("ready", last_active_at)
 
     def report_heartbeat(self, last_active_at: str | None = None) -> bool:
@@ -145,6 +154,7 @@ class ControllerHeartbeatReporter:
         return self._post("ready", last_active_at)
 
     def _post(self, action: str, last_active_at: str | None) -> bool:
+        # 逻辑说明：带可选活动时间和 Bearer token 请求 Controller；失败返回 False，交给下一轮重试。
         if not self.enabled():
             return False
         path = f"/api/v1/workers/{self.worker_name}/{action}"
@@ -193,6 +203,7 @@ async def run_worker_heartbeat_loop(
     reporter: ControllerHeartbeatReporter | None = None,
 ) -> None:
     """Probe QwenPaw locally and report worker status to the controller."""
+    # 逻辑说明：持续探测本机 QwenPaw、落盘健康状态并按独立周期上报 Controller；取消任务时退出。
 
     reporter = reporter or ControllerHeartbeatReporter.from_env(worker_name)
     report_every = report_interval if report_interval is not None else float(
@@ -246,6 +257,7 @@ async def run_worker_heartbeat_loop(
 
 
 def _discover_auth_token() -> str:
+    # 逻辑说明：优先读取直接环境变量，其次安全读取挂载文件；缺失或读取失败时返回空 token。
     token = os.getenv("AGENTTEAMS_AUTH_TOKEN", "")
     if token:
         return token

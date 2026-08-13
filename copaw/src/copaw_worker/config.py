@@ -25,6 +25,9 @@ class WorkerConfig:
         worker_port: int | None = None,
         worker_cr_name: str | None = None,
     ) -> None:
+        # 逻辑说明：`__init__` 接收 Worker 身份、对象存储连接、同步周期和端口，
+        # 规范化默认值并保存为启动配置，返回 None；
+        # 会更新对象内存状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
         self.worker_name = worker_name
         self.worker_cr_name = worker_cr_name or worker_name
         self.minio_endpoint = minio_endpoint
@@ -43,6 +46,7 @@ class WorkerConfig:
 
 
 def _default_install_dir() -> Path:
+    # 逻辑说明：按 `COPAW_INSTALL_DIR`、`HOME/.agentteams-worker`、系统用户目录的优先级选择默认安装根目录；只计算并返回路径，不创建目录。
     if configured := os.environ.get("COPAW_INSTALL_DIR"):
         return Path(configured)
     if configured_home := os.environ.get("HOME"):

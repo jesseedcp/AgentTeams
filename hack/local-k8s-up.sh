@@ -41,7 +41,9 @@ LLM_API_KEY="${AGENTTEAMS_LLM_API_KEY:-}"
 REGISTRATION_TOKEN="${AGENTTEAMS_REGISTRATION_TOKEN:-}"
 ADMIN_PASSWORD="${AGENTTEAMS_ADMIN_PASSWORD:-}"
 
+# 逻辑说明：为本地构建、加载镜像和 Helm 部署输出统一的集群日志前缀。
 log() { echo -e "\033[36m[AgentTeams K8s]\033[0m $1"; }
+# 逻辑说明：报告无法继续的前置条件并立即退出，防止在缺少工具时留下半套集群。
 error() { echo -e "\033[31m[AgentTeams K8s ERROR]\033[0m $1" >&2; exit 1; }
 
 # ── Preflight checks ──────────────────────────────────────────────────────

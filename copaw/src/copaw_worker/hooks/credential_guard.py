@@ -27,6 +27,8 @@ def apply_credential_guard(standard_dir: Path, runtime_dir: Path) -> int:
 
     Returns the number of protected paths applied.
     """
+    # 逻辑说明：`apply_credential_guard` 接收 standard_dir、runtime_dir，扫描 runtime 投影，移除或替换不应暴露给 Worker 的凭据，返回 int；
+    # 会读写本地文件。失败策略：已知失败按现有 except 转为错误结果或日志，未覆盖异常继续上抛；本函数不额外重试，避免掩盖持续故障。
     credagent_path = standard_dir / "config" / "credagent.json"
     if not credagent_path.exists():
         return 0
@@ -116,6 +118,8 @@ def apply_credential_guard(standard_dir: Path, runtime_dir: Path) -> int:
 
 def install_credential_guard_hook() -> None:
     """Make SENSITIVE_FILE_ACCESS findings auto-denied (no user approval)."""
+    # 逻辑说明：一次性包装 CoPawAgent 的 guard 决策方法，把含 SENSITIVE_FILE_ACCESS finding 的待审批动作改为自动拒绝，其他决策保持上游结果。
+    # 上游方法不存在时记录兼容警告并标记已检查；marker 与模块标志共同防止重复猴子补丁。
     global _GUARD_HOOK_INSTALLED
     if _GUARD_HOOK_INSTALLED:
         return
@@ -133,6 +137,8 @@ def install_credential_guard_hook() -> None:
         return
 
     async def _decide_with_credential_block(self, tool_call):  # type: ignore[override]
+        # 逻辑说明：`_decide_with_credential_block` 接收 tool_call，执行 凭据防泄漏保护 中的“decide with credential block”步骤，返回 异步完成信号；
+        # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
         action = await original(self, tool_call)
         if action is None:
             return None

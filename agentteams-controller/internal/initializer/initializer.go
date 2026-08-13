@@ -88,6 +88,7 @@ type Initializer struct {
 }
 
 func (i *Initializer) Run(ctx context.Context) error {
+	// 逻辑说明：按存储、Matrix、AppService、网关、GitHub MCP、Manager CR 的依赖顺序执行一次性引导；必需基础设施失败立即停止，可选集成按配置跳过，成功后保证声明式资源已创建或合并。
 	logger := ctrl.Log.WithName("initializer")
 	logger.Info("starting cluster initialization")
 
@@ -187,6 +188,7 @@ func (i *Initializer) Run(ctx context.Context) error {
 // or mutate anything — it just polls ListObjects to confirm that the
 // controller's credentials grant access to the configured bucket.
 func (i *Initializer) waitForOSS(ctx context.Context) error {
+	// 逻辑说明：自管 MinIO 且支持 BucketManager 时重试创建/确认桶，否则只通过列对象验证外部 OSS 权限；两条路径都受五分钟超时与 context 取消控制。
 	if i.Config.managesStorage() {
 		if bm, ok := i.OSS.(oss.BucketManager); ok {
 			return retry(ctx, 3*time.Second, 5*time.Minute, func() error {
@@ -201,6 +203,7 @@ func (i *Initializer) waitForOSS(ctx context.Context) error {
 }
 
 func (i *Initializer) ensureOSSStructure(ctx context.Context) error {
+	// 逻辑说明：依次向约定的共享、Worker、Team、Human 和 Agent 前缀写入空 `.gitkeep`，建立对象存储目录骨架；任一写入失败立即返回并指出具体前缀，重复调用保持幂等。
 	dirs := []string{
 		"shared/knowledge/",
 		"shared/tasks/",
@@ -220,6 +223,7 @@ func (i *Initializer) ensureOSSStructure(ctx context.Context) error {
 
 // waitForMatrix polls the Matrix server until it responds.
 func (i *Initializer) waitForMatrix(ctx context.Context) error {
+	// 逻辑说明：用故意无效的健康检查账号反复登录；连接类错误表示服务未就绪需重试，而 401/403 等 HTTP 响应证明 Matrix 已可达并视为成功。
 	return retry(ctx, 3*time.Second, 5*time.Minute, func() error {
 		_, err := i.Matrix.Login(ctx, "__healthcheck__", "invalid")
 		if err != nil && isMatrixConnError(err) {
@@ -231,6 +235,7 @@ func (i *Initializer) waitForMatrix(ctx context.Context) error {
 }
 
 func (i *Initializer) registerAdmin(ctx context.Context) error {
+	// 逻辑说明：用初始化配置中的账号密码幂等确保 Matrix 管理员存在；忽略成功时的用户详情，只把创建或更新失败交给启动流程中止。
 	_, err := i.Matrix.EnsureUser(ctx, matrix.EnsureUserRequest{
 		Username: i.Config.AdminUser,
 		Password: i.Config.AdminPassword,
@@ -241,6 +246,7 @@ func (i *Initializer) registerAdmin(ctx context.Context) error {
 // registerAppService registers the AgentTeams controller as a Matrix Application
 // Service via the Tuwunel admin bot, then verifies with a smoke test.
 func (i *Initializer) registerAppService(ctx context.Context) error {
+	// 逻辑说明：从初始化配置渲染 Tuwunel AppService 注册内容，先提交注册再执行冒烟测试；两步任一失败都带阶段上下文返回，避免宣告一个不可用桥接。
 	cfg := matrix.Config{
 		Domain:                    i.Config.MatrixDomain,
 		AppServiceID:              i.Config.AppServiceID,
@@ -261,6 +267,7 @@ func (i *Initializer) registerAppService(ctx context.Context) error {
 
 // waitForGateway polls the Higress Console until it responds.
 func (i *Initializer) waitForGateway(ctx context.Context) error {
+	// 逻辑说明：每三秒调用网关健康检查，最多等待五分钟；成功立即返回，超时或 context 取消由统一 retry 保留最后错误。
 	return retry(ctx, 3*time.Second, 5*time.Minute, func() error {
 		return i.Gateway.Healthy(ctx)
 	})
@@ -270,6 +277,7 @@ func (i *Initializer) waitForGateway(ctx context.Context) error {
 // infrastructure routes (Matrix, Cinny) in Higress. All calls are
 // idempotent — safe to re-run on controller restart.
 func (i *Initializer) initGatewayRoutes(ctx context.Context) error {
+	// 逻辑说明：按部署模式幂等注册 Tuwunel、Cinny、Manager Admin、LLM Provider 与 AI 路由，并清理旧 Element/默认路由；单项网关配置失败记录为非致命错误，让其余独立路由仍可收敛。
 	logger := ctrl.Log.WithName("initializer")
 	cfg := i.Config
 
@@ -507,6 +515,7 @@ func (i *Initializer) initGatewayRoutes(ctx context.Context) error {
 
 // parseHostPort extracts host and port from a URL like "http://host:port".
 func parseHostPort(rawURL string) (string, int, error) {
+	// 逻辑说明：解析服务 URL 并返回主机与整数端口；未显式写端口时按 HTTPS=443、其他=80 回退，非法端口保留原文本包装错误。
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return "", 0, err
@@ -529,6 +538,7 @@ func parseHostPort(rawURL string) (string, int, error) {
 func (i *Initializer) bootstrapGitHubMCP(
 	ctx context.Context,
 ) (gateway.MCPServerEndpoint, error) {
+	// 逻辑说明：从 Skills 目录读取 GitHub MCP 模板，确认恰有一个空凭据槽后注入转义 token，再调用网关创建仅 Manager 可用的 REST MCP；模板异常时不发送任何配置。
 	skillsDir := i.Config.SkillsDir
 	if skillsDir == "" {
 		skillsDir = "/opt/agentteams/agent/skills"
@@ -577,6 +587,7 @@ func (i *Initializer) ensureManagerCR(
 	ctx context.Context,
 	desiredMCPServers []v1beta1.MCPServer,
 ) error {
+	// 逻辑说明：获取默认 Manager CR；已存在时只合并 GitHub MCP 与 Coding CLI 差异并按需 Update，不存在时组装完整 spec/控制器标签后 Create，其他 API 错误不被误判成缺失。
 	logger := ctrl.Log.WithName("initializer")
 
 	dynClient := i.Dynamic
@@ -728,6 +739,7 @@ func (i *Initializer) ensureManagerCR(
 func managerCodingCLIMap(
 	spec *v1beta1.ManagerCodingCLISpec,
 ) (map[string]interface{}, error) {
+	// 逻辑说明：先按 CRD 规则校验 Coding CLI 配置，再转换为 unstructured map 供动态客户端写入；验证或转换失败均携带字段阶段返回。
 	if err := spec.Validate(); err != nil {
 		return nil, fmt.Errorf("validate Manager coding CLI state: %w", err)
 	}
@@ -742,6 +754,7 @@ func mergeManagerMCPServers(
 	existing []interface{},
 	desired []v1beta1.MCPServer,
 ) []interface{} {
+	// 逻辑说明：复制现有 MCP 列表并按 name 建索引，用期望配置替换同名项、追加新项，同时保留未知/非 map 旧项；返回新切片，避免原地改变调用者输入。
 	result := append([]interface{}(nil), existing...)
 	indexByName := make(map[string]int, len(result))
 	for index, raw := range result {
@@ -772,6 +785,7 @@ func mergeManagerMCPServers(
 
 // retry calls fn repeatedly until it succeeds or the timeout is reached.
 func retry(ctx context.Context, interval, timeout time.Duration, fn func() error) error {
+	// 逻辑说明：立即执行操作，失败后按 interval 重试直到成功、总超时或 context 取消；超时时包装最后一次错误，等待通过 select 保证关停不会被 sleep 卡住。
 	deadline := time.Now().Add(timeout)
 	for {
 		err := fn()
@@ -792,6 +806,7 @@ func retry(ctx context.Context, interval, timeout time.Duration, fn func() error
 // isMatrixConnError returns true if the error indicates a transport-level failure
 // (connection refused, DNS error, etc.) as opposed to an HTTP-level response.
 func isMatrixConnError(err error) bool {
+	// 逻辑说明：把错误文本与已知 DNS、TCP、超时、EOF 传输特征逐一匹配，区分“服务不可达”和“服务已响应但拒绝登录”；nil 或 HTTP 业务错误返回 false。
 	if err == nil {
 		return false
 	}
@@ -805,10 +820,12 @@ func isMatrixConnError(err error) bool {
 }
 
 func contains(s, substr string) bool {
+	// 逻辑说明：先用长度保护避免后续扫描越界，再委托朴素子串搜索；结果只用于 Matrix 连接错误分类。
 	return len(s) >= len(substr) && searchString(s, substr)
 }
 
 func searchString(s, substr string) bool {
+	// 逻辑说明：从左到右比较所有可能切片并在首次相等时返回 true；循环上界保证切片合法，遍历完成仍未命中则返回 false。
 	for i := 0; i <= len(s)-len(substr); i++ {
 		if s[i:i+len(substr)] == substr {
 			return true

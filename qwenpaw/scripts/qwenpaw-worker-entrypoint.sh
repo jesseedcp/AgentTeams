@@ -28,6 +28,7 @@ INSTALL_DIR="/root/agentteams-fs/agents"
 WORKER_HOME="${AGENTTEAMS_WORKER_HOME:-${INSTALL_DIR}/${WORKER_NAME}}"
 CONSOLE_PORT="${AGENTTEAMS_CONSOLE_PORT:-}"
 
+# 逻辑说明：为 QwenPaw 启动、配置同步和退出信息添加统一时间戳，便于按 Pod 日志排错。
 log() {
     echo "[agentteams-qwenpaw-worker $(date '+%Y-%m-%d %H:%M:%S')] $1"
 }

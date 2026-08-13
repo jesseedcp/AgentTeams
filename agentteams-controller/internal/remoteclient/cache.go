@@ -81,6 +81,7 @@ type Cache struct {
 
 // NewCache creates a new remote client cache.
 func NewCache(cfg CacheConfig) *Cache {
+	// 逻辑说明：初始化按 cluster ID 索引的空缓存，并保存 STS、controller client、scheme 与远端 watch 标签所需配置；构造阶段不访问任何集群。
 	return &Cache{
 		entries:        make(map[string]*ClusterEntry),
 		credClient:     cfg.CredClient,
@@ -95,12 +96,14 @@ func NewCache(cfg CacheConfig) *Cache {
 // BEFORE any remote cluster is connected. When a remote cluster cache is
 // created, all registered watches are applied via ctrl.Watch(source.Kind(...)).
 func (c *Cache) RegisterWatch(ctrl controller.Controller, obj client.Object, h handler.EventHandler, preds ...predicate.Predicate) {
+	// 逻辑说明：在启动期保存一份 watch 描述，后续每个新建的远端 cache 都会应用同一对象、事件处理器和 predicates；该方法要求在并发连接前调用。
 	c.watches = append(c.watches, remoteWatch{ctrl: ctrl, object: obj, handler: h, predicates: preds})
 }
 
 // GetOrCreate returns the cached client for the cluster, or creates one
 // by calling the STS provider.
 func (c *Cache) GetOrCreate(ctx context.Context, clusterID string) (*ClusterEntry, error) {
+	// 逻辑说明：先用读锁返回尚未过期的快路径；未命中再取得写锁并二次检查，确保并发请求只向 STS 构建一次 entry，构建成功后才写入共享缓存。
 	// Fast path: read-lock, return if valid.
 	c.mu.RLock()
 	if entry, ok := c.entries[clusterID]; ok && time.Now().Before(entry.Expiration) {
@@ -130,6 +133,7 @@ func (c *Cache) GetOrCreate(ctx context.Context, clusterID string) (*ClusterEntr
 
 // Remove deletes a cached cluster entry and stops its informer.
 func (c *Cache) Remove(clusterID string) {
+	// 逻辑说明：写锁下查找目标 entry，先调用 cancel 停止其远端 informer，再从 map 删除；目标不存在时保持幂等。
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -149,6 +153,7 @@ func (c *Cache) Remove(clusterID string) {
 //     2. If no workers deployed: Remove the entry.
 //     3. If workers deployed: call STS to renew kubeconfig, rebuild client, update expiration.
 func (c *Cache) StartMaintenanceLoop(ctx context.Context) {
+	// 逻辑说明：启动随父 context 生命周期结束的后台 goroutine，每个维护周期调用 maintain；退出时停止 ticker，避免计时器与 goroutine 泄漏。
 	go func() {
 		ticker := time.NewTicker(maintenanceInterval)
 		defer ticker.Stop()
@@ -166,6 +171,7 @@ func (c *Cache) StartMaintenanceLoop(ctx context.Context) {
 
 // maintain runs one maintenance pass over all cached entries.
 func (c *Cache) maintain(ctx context.Context) {
+	// 逻辑说明：读锁下只快照 cluster ID/过期时间后释放锁，逐项处理临近过期 entry；无引用则移除，有引用才续期，单集群检查/续期失败仅记录并留待下轮重试。
 	// Snapshot current cluster IDs and expirations under read lock.
 	type snapshot struct {
 		clusterID  string
@@ -207,6 +213,7 @@ func (c *Cache) maintain(ctx context.Context) {
 // renewEntry rebuilds the k8s client for the given cluster using a fresh
 // kubeconfig from the STS provider.
 func (c *Cache) renewEntry(ctx context.Context, clusterID string) error {
+	// 逻辑说明：写锁保证续期与 Get/Remove 串行；entry 可能已被删除则直接成功，否则先完整构建新身份与 client，成功后停止旧 informer 并原子替换。
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -234,6 +241,7 @@ func (c *Cache) renewEntry(ctx context.Context, clusterID string) error {
 // buildEntry fetches a kubeconfig from the STS provider and constructs a
 // ClusterEntry. Caller must hold c.mu (write).
 func (c *Cache) buildEntry(ctx context.Context, clusterID string) (*ClusterEntry, error) {
+	// 逻辑说明：从 STS 获取 kubeconfig，依次解析 REST 配置、创建 core/auth client、限时健康检查并解析到期时间；基础 client 成功后绑定独立 cancel context，远端 informer 启动失败只降级为轮询。
 	resp, err := c.credClient.GetKubeconfig(ctx, clusterID)
 	if err != nil {
 		return nil, fmt.Errorf("get kubeconfig for cluster %s: %w", clusterID, err)
@@ -293,6 +301,7 @@ func (c *Cache) buildEntry(ctx context.Context, clusterID string) (*ClusterEntry
 // cluster and applies every registered watch. The cache lifecycle is bound
 // to ctx: when ctx is cancelled (via entry.cancel), the cache stops.
 func (c *Cache) startRemoteCache(ctx context.Context, restCfg *rest.Config, clusterID string) error {
+	// 逻辑说明：没有注册 watch 时跳过；否则为所有对象施加 controller 标签过滤，后台启动远端 informer 并限时等待首次同步，只有同步完成后才逐项挂到 controller，防止读到未初始化缓存。
 	if len(c.watches) == 0 {
 		return nil
 	}
@@ -340,6 +349,7 @@ func (c *Cache) startRemoteCache(ctx context.Context, restCfg *rest.Config, clus
 // The open-source Worker API no longer exposes remote target clusters, so this
 // currently always returns false.
 func (c *Cache) hasWorkersDeployed(ctx context.Context, clusterID string) (bool, error) {
+	// 逻辑说明：开源 Worker API 当前没有远端 cluster 引用字段，因此显式忽略参数并返回 false；维护循环据此回收临近过期的远端 entry，而不是假装存在引用。
 	_ = ctx
 	_ = clusterID
 	return false, nil
@@ -348,6 +358,7 @@ func (c *Cache) hasWorkersDeployed(ctx context.Context, clusterID string) (bool,
 // ResolveClient returns the cached K8sCoreClient for the given cluster ID.
 // This implements backend.RemoteClientProvider.
 func (c *Cache) ResolveClient(ctx context.Context, clusterID string) (backend.K8sCoreClient, error) {
+	// 逻辑说明：复用 GetOrCreate 的缓存、并发和续期语义，只有 entry 完整可用时才暴露其 core client；创建失败不返回部分 client。
 	entry, err := c.GetOrCreate(ctx, clusterID)
 	if err != nil {
 		return nil, err
@@ -358,6 +369,7 @@ func (c *Cache) ResolveClient(ctx context.Context, clusterID string) (backend.K8
 // ResolveDynamicClient returns a dynamic client for the given remote cluster.
 // Sandbox backends need this for provider CRDs such as SandboxClaim.
 func (c *Cache) ResolveDynamicClient(ctx context.Context, clusterID string) (dynamic.Interface, error) {
+	// 逻辑说明：先取得有效 entry，再从同一 REST 配置构造 dynamic client 供 Sandbox 等 CRD 使用；配置或构造失败原样返回。
 	entry, err := c.GetOrCreate(ctx, clusterID)
 	if err != nil {
 		return nil, err

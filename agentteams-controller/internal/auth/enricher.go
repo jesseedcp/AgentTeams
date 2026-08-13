@@ -29,6 +29,7 @@ type CREnricher struct {
 }
 
 func NewCREnricher(c client.Client, namespace string, prefix ...ResourcePrefix) *CREnricher {
+	// 逻辑说明：采用默认或首个显式资源前缀，并绑定只读 CR client/namespace 供认证后补全身份。
 	p := DefaultResourcePrefix
 	if len(prefix) > 0 {
 		p = prefix[0].Or(DefaultResourcePrefix)
@@ -37,6 +38,7 @@ func NewCREnricher(c client.Client, namespace string, prefix ...ResourcePrefix) 
 }
 
 func (e *CREnricher) EnrichIdentity(ctx context.Context, identity *CallerIdentity) error {
+	// 逻辑说明：Admin/Manager 已由 SA 完整解析；Worker 则回读 CR 和 Team 成员关系，补 runtimeName、team 和 leader 角色。
 	if identity == nil {
 		return nil
 	}
@@ -75,6 +77,7 @@ func (e *CREnricher) EnrichIdentity(ctx context.Context, identity *CallerIdentit
 }
 
 func (e *CREnricher) lookupTeamWorkerMember(ctx context.Context, name string) (*v1beta1.Team, string, bool, error) {
+	// 逻辑说明：优先使用字段索引查询成员；索引不可用时退化为 namespace 全量扫描，并返回首个明确引用及默认 worker 角色。
 	var list v1beta1.TeamList
 	if err := e.client.List(ctx, &list,
 		client.InNamespace(e.namespace),

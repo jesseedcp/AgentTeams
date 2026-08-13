@@ -12,6 +12,9 @@ import (
 // DeployManagerConfig writes referenced artifacts before the generation-stamped
 // runtime document, which acts as the AgentScope activation barrier.
 func (r *ManagerReconciler) reconcileManagerConfig(ctx context.Context, s *managerScope) (reconcile.Result, error) {
+	// 逻辑说明：reconcileManagerConfig 接收 ctx(context.Context)、s(*managerScope)，依次借助 DeployPackage、DeployManagerConfig调谐Manager的期望结果。
+	// 返回/状态：返回 reconcile.Result、error；可能把配置、技能或运行文档写入本地目录或 MinIO/S3 的稳定对象键。
+	// 失败/重试：校验、序列化或 I/O 失败会返回错误；旧配置保持可用，上层可用相同对象键覆盖重试。
 	if s.provResult == nil {
 		return reconcile.Result{}, nil
 	}

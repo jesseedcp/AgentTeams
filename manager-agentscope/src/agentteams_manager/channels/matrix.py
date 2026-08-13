@@ -17,10 +17,12 @@ from .base import ChannelMessage
 
 class MatrixChannelEscalation:
     def __init__(self, *, matrix: MatrixPort, admin_room_id: str) -> None:
+        # 逻辑说明：固定 Matrix 传输和受控管理员房间，外部身份永远不能自行指定特权目标房间。
         self._matrix = matrix
         self._admin_room_id = admin_room_id
 
     async def first_contact(self, message: ChannelMessage) -> None:
+        # 逻辑说明：把陌生联系人升级到 Admin room，并提示管理员走显式审核工具。
         await self._send(
             message,
             "首次外部联系人等待审批",
@@ -28,6 +30,7 @@ class MatrixChannelEscalation:
         )
 
     async def trusted_message(self, message: ChannelMessage) -> None:
+        # 逻辑说明：可信消息仍进入 Matrix policy 边界，而不是从外部渠道直接获得管理能力。
         await self._send(message, "外部渠道消息", message.text)
 
     async def _send(
@@ -36,6 +39,7 @@ class MatrixChannelEscalation:
         title: str,
         detail: str,
     ) -> None:
+        # 逻辑说明：用 provider、联系人和消息 ID 派生幂等 txn，重试不会生成重复 Matrix 消息。
         seed = (
             f"channel:{message.provider}:{message.external_user_id}:"
             f"{message.message_id}"

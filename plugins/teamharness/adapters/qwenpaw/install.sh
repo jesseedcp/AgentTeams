@@ -19,6 +19,7 @@ if ! command -v ruby >/dev/null 2>&1; then
 fi
 
 stage_dir="$(mktemp -d "${TMPDIR:-/tmp}/teamharness-qwenpaw-install.XXXXXX")"
+# 逻辑说明：无论打包、校验或安装是否成功，都删除本次专用暂存目录，避免残留可执行插件副本。
 cleanup() {
   rm -rf "$stage_dir"
 }

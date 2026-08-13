@@ -51,11 +51,13 @@ REGION_ID_ENV_NAMES = ("AGENTTEAMS_REGION", "ALIBABA_CLOUD_REGION_ID", "REGION_I
 
 
 def _section(data: Dict[str, Any], name: str) -> Dict[str, Any]:
+    # 逻辑说明：从配置中取一个字典分区；缺失或类型错误统一为空字典，避免调用方重复判型。
     value = data.get(name) or {}
     return value if isinstance(value, dict) else {}
 
 
 def _string(value: Any) -> str:
+    # 逻辑说明：把可选配置值规范为去空白字符串，None 表示未配置而不是文本 "None"。
     return str(value).strip() if value is not None else ""
 
 
@@ -63,6 +65,7 @@ _ENV_NAME_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
 def _instance_id_from_controller_url(value: str) -> str:
+    # 逻辑说明：从 controller.<instance> 主机名提取实例 ID；格式不匹配时返回空值。
     host = urlparse(value.strip()).hostname or ""
     parts = host.split(".")
     if len(parts) >= 2 and parts[0] == "controller":
@@ -71,6 +74,7 @@ def _instance_id_from_controller_url(value: str) -> str:
 
 
 def _worker_instance_id() -> str:
+    # 逻辑说明：优先读显式实例 ID，否则从 Controller URL 推断，供凭据名称去实例前缀使用。
     explicit = _string(os.getenv("AGENTTEAMS_INSTANCE_ID"))
     if explicit:
         return explicit
@@ -80,6 +84,7 @@ def _worker_instance_id() -> str:
 
 
 def _worker_region_id() -> str:
+    # 逻辑说明：按兼容环境变量顺序查找地域 ID；全部缺失时返回空值，由上层决定是否启用云能力。
     for name in REGION_ID_ENV_NAMES:
         value = _string(os.getenv(name))
         if value:
@@ -88,6 +93,7 @@ def _worker_region_id() -> str:
 
 
 def credential_provider_env_name(provider_name: str, instance_id: str = "") -> str:
+    # 逻辑说明：校验 provider 是否能安全作为环境变量名，并兼容去掉当前实例前缀后的名称。
     text = _string(provider_name)
     if _ENV_NAME_PATTERN.fullmatch(text):
         return text
@@ -100,15 +106,18 @@ def credential_provider_env_name(provider_name: str, instance_id: str = "") -> s
 
 
 def _credential_provider_env_name(provider_name: str) -> str:
+    # 逻辑说明：使用当前 Worker 实例 ID 调用公共名称规范器，避免调用处各自解析环境。
     return credential_provider_env_name(provider_name, _worker_instance_id())
 
 
 def _download_path_part(value: str, fallback: str) -> str:
+    # 逻辑说明：把远端名称清洗为安全的本地下载目录片段，清洗为空时采用 fallback。
     text = value.strip() or fallback
     return re.sub(r"[^A-Za-z0-9._=-]+", "_", text).strip("._") or fallback
 
 
 def _string_list(value: Any) -> List[str]:
+    # 逻辑说明：只接受列表并提取其中非空文本，忽略无效项以形成稳定的配置列表。
     if not isinstance(value, list):
         return []
     result = []
@@ -129,6 +138,7 @@ def _stable_json(value: Any) -> str:
 
 
 def _count_collection(value: Any) -> int:
+    # 逻辑说明：为日志统计字典或列表长度；其他类型视为零，避免诊断代码影响主流程。
     if isinstance(value, dict):
         return len(value)
     if isinstance(value, list):
@@ -137,6 +147,7 @@ def _count_collection(value: Any) -> int:
 
 
 def _named_keys(value: Any) -> str:
+    # 逻辑说明：将字典的非空键排序拼成日志字段，不是字典或无键时使用占位符。
     if not isinstance(value, dict):
         return "-"
     names = sorted(str(name).strip() for name in value.keys() if str(name).strip())
@@ -144,10 +155,12 @@ def _named_keys(value: Any) -> str:
 
 
 def _duration_ms(started_at: float) -> int:
+    # 逻辑说明：用单调时钟计算非负毫秒耗时，避免系统时间调整产生负数。
     return max(0, int((time.monotonic() - started_at) * 1000))
 
 
 def _strip_json_line_comments(text: str) -> str:
+    # 逻辑说明：逐字符移除 JSON 字符串之外的 // 行注释，同时保留字符串内的斜杠和转义字符。
     result: List[str] = []
     in_string = False
     escaped = False
@@ -181,6 +194,7 @@ def _strip_json_line_comments(text: str) -> str:
 
 
 def _string_fields(value: Any, keys: Iterable[str]) -> Dict[str, str]:
+    # 逻辑说明：从字典白名单字段中抽取非空文本，隔离未知配置并统一空值行为。
     if not isinstance(value, dict):
         return {}
     result: Dict[str, str] = {}
@@ -192,11 +206,13 @@ def _string_fields(value: Any, keys: Iterable[str]) -> Dict[str, str]:
 
 
 def _env_bool(name: str) -> bool:
+    # 逻辑说明：把环境变量常见真值文本转成布尔值，未设置或其他文本均为 False。
     value = _string(os.getenv(name)).lower()
     return value in {"1", "true", "yes", "on"}
 
 
 def _bool(value: Any) -> bool:
+    # 逻辑说明：兼容布尔、数字和文本真值，将松散 YAML/JSON 配置规范为 bool。
     if isinstance(value, bool):
         return value
     if isinstance(value, (int, float)):
@@ -220,6 +236,7 @@ class MemberRuntimeConfig:
 
     @classmethod
     def load(cls, path: Path) -> "MemberRuntimeConfig":
+        # 逻辑说明：读取 YAML、验证根对象和 runtime 类型后构造不可变快照；缺失或格式错误直接失败。
         if not path.exists():
             raise FileNotFoundError(f"runtime config missing: {path}")
         data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
@@ -233,6 +250,7 @@ class MemberRuntimeConfig:
 
     @property
     def generation(self) -> str:
+        # 逻辑说明：从 metadata 读取并规范化 generation，供更新器判断是否出现新配置。
         return _string(_section(self.raw, "metadata").get("generation"))
 
     @property
@@ -241,6 +259,7 @@ class MemberRuntimeConfig:
 
     @property
     def team_members(self) -> List[Dict[str, str]]:
+        # 逻辑说明：筛选成员列表中允许的文本字段，跳过非字典或全空成员，返回规范化名册。
         raw = self.team.get("members")
         if not isinstance(raw, list):
             return []
@@ -271,16 +290,19 @@ class MemberRuntimeConfig:
 
     @property
     def agent_identity_data(self) -> Dict[str, str]:
+        # 逻辑说明：只暴露身份服务 endpoint/regionId 两个文本字段，避免下游依赖未知结构。
         return _string_fields(
             _section(self.raw, "agentIdentityData"), ("endpoint", "regionId")
         )
 
     @property
     def agent_identity_data_region_id(self) -> str:
+        # 逻辑说明：优先采用 runtime config 地域，缺失时回落 Worker 环境中的地域配置。
         return _string(self.agent_identity_data.get("regionId")) or _worker_region_id()
 
     @property
     def agent_identity_data_endpoint(self) -> str:
+        # 逻辑说明：优先使用显式 endpoint，否则由地域拼出标准地址；无地域时表示功能不可用。
         endpoint = _string(self.agent_identity_data.get("endpoint"))
         if endpoint:
             return endpoint
@@ -291,16 +313,19 @@ class MemberRuntimeConfig:
 
     @property
     def agent_identity(self) -> Dict[str, str]:
+        # 逻辑说明：从 desired 配置提取允许的工作负载身份名称，作为凭据运行时输入。
         return _string_fields(
             _section(self.desired, "agentIdentity"), ("workloadIdentityName",)
         )
 
     @property
     def workload_identity_name(self) -> str:
+        # 逻辑说明：从规范化身份字典读取名称并再次清理空白，缺失返回空字符串。
         return _string(self.agent_identity.get("workloadIdentityName"))
 
     @property
     def credential_bindings(self) -> List[Dict[str, Any]]:
+        # 逻辑说明：验证每条凭据绑定、保留引用与可选工具白名单，忽略不完整条目。
         raw = self.desired.get("credentialBindings")
         if not isinstance(raw, list):
             return []
@@ -322,6 +347,7 @@ class MemberRuntimeConfig:
 
     @property
     def credential_binding_env_names(self) -> List[str]:
+        # 逻辑说明：把绑定 provider 转成不重复的安全环境变量名，供敏感输出清洗使用。
         names: List[str] = []
         for binding in self.credential_bindings:
             name = _credential_provider_env_name(
@@ -335,6 +361,7 @@ class MemberRuntimeConfig:
 
     @property
     def credential_binding_env_provider_names(self) -> Dict[str, str]:
+        # 逻辑说明：建立环境变量名到原 provider 名的首个映射，供运行时注入凭据时查找。
         providers: Dict[str, str] = {}
         for binding in self.credential_bindings:
             provider_name = _string(
@@ -347,6 +374,7 @@ class MemberRuntimeConfig:
 
     @property
     def credential_runtime_identity(self) -> str:
+        # 逻辑说明：仅选取会改变运行期凭据身份的 Agent 身份、内联/远端身份数据和 credential bindings，做稳定 JSON 序列化；调用方可据此精确判断是否需要重建凭据运行时。
         return _stable_json(
             {
                 "agentIdentity": self.agent_identity,
@@ -358,14 +386,17 @@ class MemberRuntimeConfig:
 
     @property
     def team_name(self) -> str:
+        # 逻辑说明：读取并规范化 Team 名称；空值表示当前 Worker 尚未加入团队。
         return _string(self.team.get("name"))
 
     @property
     def member_name(self) -> str:
+        # 逻辑说明：优先成员展示名、回落 runtimeName，得到当前 Worker 的稳定成员名称。
         return _string(self.member.get("name") or self.member.get("runtimeName"))
 
     @property
     def member_role(self) -> str:
+        # 逻辑说明：读取成员角色，未配置时默认为普通 worker，避免误获得 Leader 权限。
         return _string(self.member.get("role") or "worker")
 
     @property
@@ -374,6 +405,7 @@ class MemberRuntimeConfig:
 
     @property
     def agent_package_identity(self) -> Tuple[str, str, str, str]:
+        # 逻辑说明：将包引用、名称、版本和摘要组成稳定元组，用于判断包内容是否变化。
         package = self.agent_package
         return (
             _string(package.get("ref")),
@@ -384,6 +416,7 @@ class MemberRuntimeConfig:
 
     @property
     def inline_config(self) -> Dict[str, str]:
+        # 逻辑说明：只提取 Controller 允许内联覆盖的身份、SOUL 和 AGENTS 文本。
         return _string_fields(
             _section(self.desired, "inlineConfig"), ("identity", "soul", "agents")
         )
@@ -394,6 +427,7 @@ class MemberRuntimeConfig:
 
     @property
     def mcp_servers(self) -> Any:
+        # 逻辑说明：保留 MCP 配置原始容器形状以兼容字典/列表版本；完全缺失时返回空字典。
         value = self.desired.get("mcpServers")
         return value if value is not None else {}
 
@@ -403,6 +437,7 @@ class MemberRuntimeConfig:
 
     @property
     def dingtalk_channel(self) -> Optional[Dict[str, Any]]:
+        # 逻辑说明：仅当钉钉 channel 为字典时返回配置，其他类型视为未启用。
         value = self.channels.get("dingtalk")
         return value if isinstance(value, dict) else None
 
@@ -412,6 +447,7 @@ class MemberRuntimeConfig:
 
     @property
     def desired_identity(self) -> Tuple[str, str, str, str, str, str, str, str, str]:
+        # 逻辑说明：将影响运行行为的各分区稳定序列化为元组，供 changed_from 做深层变化判断。
         return (
             *self.agent_package_identity,
             _stable_json(self.inline_config),
@@ -423,6 +459,7 @@ class MemberRuntimeConfig:
 
     @property
     def team_context_facts(self) -> Dict[str, Any]:
+        # 逻辑说明：从 Team、成员、模型和协调者字段构建最小上下文事实；只输出存在的信息。
         team = _string_fields(
             self.team,
             ("name", "teamRoomId", "leaderName", "leaderRuntimeName", "leaderDmRoomId"),
@@ -480,6 +517,7 @@ class MemberRuntimeConfig:
 
     @property
     def coordinator_matrix_user_id(self) -> str:
+        # 逻辑说明：普通成员优先找到 Leader Matrix ID，Leader 或无 Team 时回落 Manager；无法推断则为空。
         role = self.member_role.casefold()
         member_id = _string(self.member.get("matrixUserId"))
         domain = member_id.split(":", 1)[1] if ":" in member_id else ""
@@ -509,6 +547,7 @@ class MemberRuntimeConfig:
 
     @property
     def team_context_identity(self) -> str:
+        # 逻辑说明：把已规范化的团队事实稳定序列化为身份指纹，供更新循环判断 Team 上下文是否变化；这里只计算字符串，不写配置或触发运行时重建。
         return _stable_json(self.team_context_facts)
 
     @property
@@ -517,10 +556,12 @@ class MemberRuntimeConfig:
 
     @property
     def output_sanitize_keywords(self) -> List[str]:
+        # 逻辑说明：将输出清洗关键字规范为非空文本列表，供日志/消息发送前匹配。
         return _string_list(self.output_sanitize_policy.get("keywords"))
 
     @property
     def output_sanitize_env_refs(self) -> List[str]:
+        # 逻辑说明：合并显式 envRefs 与内置秘密环境变量名并去重，避免凭据出现在 Agent 输出。
         refs = _string_list(self.output_sanitize_policy.get("envRefs"))
         for key in (
             "matrixTokenEnv",
@@ -534,6 +575,7 @@ class MemberRuntimeConfig:
         return refs
 
     def changed_from(self, previous: "MemberRuntimeConfig") -> bool:
+        # 逻辑说明：比较 generation 以及所有会影响运行、Team、凭据和存储的稳定身份，返回是否需重应用。
         return (
             self.generation != previous.generation
             or self.desired_identity != previous.desired_identity
@@ -554,6 +596,7 @@ class AgentPackageManager:
     """
 
     def __init__(self, root_dir: Path, workspace_dir: Optional[Path] = None) -> None:
+        # 逻辑说明：建立包缓存、当前版本和 identity 标记路径；实际下载和文件替换延迟到 apply。
         self.root_dir = root_dir
         self.workspace_dir = workspace_dir
         self.current_dir = root_dir / "current"
@@ -561,6 +604,7 @@ class AgentPackageManager:
         self.root_dir.mkdir(parents=True, exist_ok=True)
 
     def apply(self, config: MemberRuntimeConfig) -> Optional[Path]:
+        # 逻辑说明：比较期望包 identity，必要时下载、校验、原子应用并提交标记；未变化时幂等返回。
         identity = config.agent_package_identity
         if not any(identity):
             return None
@@ -588,12 +632,14 @@ class AgentPackageManager:
             raise
 
     def _current_identity(self) -> Tuple[str, str, str, str]:
+        # 逻辑说明：读取当前 identity JSON 标记并规范为四元组；文件缺失或损坏视为尚未安装。
         if not self.marker_path.exists():
             return ("", "", "", "")
         parts = self.marker_path.read_text(encoding="utf-8").splitlines()
         return tuple((parts + ["", "", "", ""])[:4])  # type: ignore[return-value]
 
     def _fetch(self, ref: str) -> Path:
+        # 逻辑说明：按 ref 协议分派本地、HTTP、OSS 或 Nacos 下载，验证可选摘要并返回可解包路径。
         if not ref:
             raise RuntimeError("desired.agentPackage.ref is required")
         parsed = urlparse(ref)
@@ -625,6 +671,7 @@ class AgentPackageManager:
         raise RuntimeError(f"unsupported agent package ref scheme: {parsed.scheme}")
 
     def _fetch_oss(self, parsed) -> Path:
+        # 逻辑说明：解析 OSS 桶/键并通过 ossutil 下载到隔离目录；工具缺失或命令失败会中止更新。
         oss_path = f"{parsed.netloc}{parsed.path}".strip("/")
         if not oss_path:
             raise RuntimeError("oss agent package path is required")
@@ -671,6 +718,7 @@ class AgentPackageManager:
         return target
 
     def _fetch_nacos(self, parsed) -> Path:
+        # 逻辑说明：解析 Nacos AgentSpec 引用，优先 HTTP 资源 API，必要时回落 CLI 下载。
         parts = [part for part in parsed.path.strip("/").split("/") if part]
         if len(parts) < 2:
             raise RuntimeError(
@@ -732,6 +780,7 @@ class AgentPackageManager:
         label: str,
         auth_type: str,
     ) -> Path:
+        # 逻辑说明：组装鉴权和版本参数运行 Nacos CLI，再定位输出目录；缺少 CLI 或产物时失败。
         host = parsed.hostname
         if not host:
             raise RuntimeError(
@@ -764,6 +813,7 @@ class AgentPackageManager:
             if security_token:
                 command.extend(["--security-token", security_token])
         command.extend(["agentspec-get", spec_name, "-o", str(output_dir)])
+        # 逻辑说明：版本和标签是可选筛选条件，只在非空时加入 argv；凭据保持独立参数，日志不会展开 secret 或 security token。
         if version:
             command.extend(["--version", version])
         if label:
@@ -809,6 +859,7 @@ class AgentPackageManager:
         version: str,
         label: str,
     ) -> Path:
+        # 逻辑说明：按 namespace、AgentSpec 名和版本/标签生成稳定隔离的 Nacos 下载目录。
         if version:
             selector = f"version-{version}"
         elif label:
@@ -827,6 +878,7 @@ class AgentPackageManager:
     def _get_nacos_agentspec(
         self, parsed, namespace: str, spec_name: str, version: str, label: str
     ) -> Dict[str, Any]:
+        # 逻辑说明：请求 Nacos AgentSpec 元数据并验证返回对象；鉴权或 JSON 错误向上报告。
         host = parsed.hostname
         if not host:
             raise RuntimeError(
@@ -872,6 +924,7 @@ class AgentPackageManager:
         return data
 
     def _nacos_auth_headers(self, parsed, namespace: str) -> Dict[str, str]:
+        # 逻辑说明：按 query/env/STS 的优先级构造 Nacos 鉴权头，缺少凭据时保持匿名请求。
         query = parse_qs(parsed.query)
         auth_type = (query.get("authType") or [""])[0].strip()
         token = os.getenv("AGENTTEAMS_NACOS_TOKEN", "").strip()
@@ -895,6 +948,7 @@ class AgentPackageManager:
         return {"Authorization": f"Bearer {access_token}"}
 
     def _nacos_sts_auth_headers(self, namespace: str) -> Dict[str, str]:
+        # 逻辑说明：获取临时 AK/SK/token 并生成签名请求头；无临时凭据时返回空头。
         access_key, secret_key, security_token = self._nacos_sts_credentials()
         timestamp = str(int(time.time() * 1000))
         sign_data = f"{namespace}+DEFAULT_GROUP+{timestamp}" if namespace else timestamp
@@ -913,6 +967,7 @@ class AgentPackageManager:
         return headers
 
     def _nacos_sts_credentials(self) -> Tuple[str, str, str]:
+        # 逻辑说明：从 Controller STS 响应兼容提取三项临时凭据，不完整时返回全空元组。
         sts = self._fetch_controller_sts()
         access_key = _string(
             sts.get("access_key_id")
@@ -935,6 +990,7 @@ class AgentPackageManager:
         return access_key, secret_key, security_token
 
     def _fetch_controller_sts(self) -> Dict[str, Any]:
+        # 逻辑说明：带 Worker Bearer token 请求 Controller STS；未配置、网络或格式失败返回空对象。
         controller_url = os.getenv("AGENTTEAMS_CONTROLLER_URL", "").strip().rstrip("/")
         if not controller_url:
             raise RuntimeError(
@@ -967,6 +1023,7 @@ class AgentPackageManager:
         return payload
 
     def _controller_bearer_token(self) -> str:
+        # 逻辑说明：优先直接环境 token，其次读取挂载文件；读失败返回空值且不记录秘密。
         token = os.getenv("AGENTTEAMS_AUTH_TOKEN", "").strip()
         if token:
             return token
@@ -985,6 +1042,7 @@ class AgentPackageManager:
         )
 
     def _nacos_login(self, parsed, username: str, password: str) -> str:
+        # 逻辑说明：用静态用户名密码请求 Nacos 登录 token；主机缺失、网络或响应无 token 时失败。
         host = parsed.hostname
         if not host:
             raise RuntimeError(
@@ -1015,6 +1073,7 @@ class AgentPackageManager:
         raise RuntimeError("nacos login failed")
 
     def _write_nacos_resource(self, target: Path, resource: Dict[str, Any]) -> None:
+        # 逻辑说明：校验资源路径位于目标目录内，按内容编码写入文件，拒绝路径穿越和无效资源。
         content = resource.get("content")
         if content in (None, ""):
             return
@@ -1035,6 +1094,7 @@ class AgentPackageManager:
         destination.write_bytes(data)
 
     def _nacos_resource_path(self, resource: Dict[str, Any]) -> str:
+        # 逻辑说明：把 Nacos 资源类型/名称映射为包内相对路径，并经过越界校验返回目标文件。
         resource_type = _string(resource.get("type"))
         resource_name = _string(resource.get("name")).strip("/")
         if not resource_type:
@@ -1047,6 +1107,7 @@ class AgentPackageManager:
         )
 
     def _extract(self, package_path: Path, target_dir: Path) -> None:
+        # 逻辑说明：清空目标后按目录、tar 或 zip 类型安全展开；未知归档格式直接拒绝。
         if package_path.is_dir():
             shutil.copytree(package_path, target_dir, dirs_exist_ok=True)
             return
@@ -1061,6 +1122,7 @@ class AgentPackageManager:
         raise RuntimeError(f"unsupported agent package format: {package_path}")
 
     def _ensure_inside_target(self, target_dir: Path, names: Iterable[str]) -> None:
+        # 逻辑说明：解析真实路径并确认候选位于目标根内，阻断归档中的 ../ 或绝对路径穿越。
         target_root = target_dir.resolve()
         for name in names:
             resolved = (target_dir / name).resolve()
@@ -1070,6 +1132,7 @@ class AgentPackageManager:
                 raise RuntimeError(f"unsafe agent package path: {name}")
 
     def _safe_extract_tar(self, archive: tarfile.TarFile, target_dir: Path) -> None:
+        # 逻辑说明：先检查所有 tar 成员路径，全部安全后才整体解包，避免部分恶意内容落盘。
         members = archive.getmembers()
         for member in members:
             if member.issym() or member.islnk():
@@ -1078,11 +1141,13 @@ class AgentPackageManager:
         archive.extractall(target_dir, members=members)
 
     def _safe_extract_zip(self, archive: zipfile.ZipFile, target_dir: Path) -> None:
+        # 逻辑说明：先检查所有 zip 成员路径，全部安全后才解包，失败时不留下越界文件。
         names = archive.namelist()
         self._ensure_inside_target(target_dir, names)
         archive.extractall(target_dir)
 
     def _apply_to_workspace_atomic(self, package_dir: Path) -> None:
+        # 逻辑说明：应用前快照工作区，失败时完整恢复，成功后清理快照，实现跨文件近似原子更新。
         snapshot = self._snapshot_workspace(package_dir)
         try:
             self._apply_to_workspace(package_dir)
@@ -1094,6 +1159,7 @@ class AgentPackageManager:
     def _apply_to_workspace(
         self, package_dir: Path, previous_package_dir: Optional[Path] = None
     ) -> None:
+        # 逻辑说明：确定包内容根，将提示词、配置和技能复制到实时工作区，并清理旧包遗留目标。
         if self.workspace_dir is None:
             return
         workspace_dir = self.workspace_dir
@@ -1112,6 +1178,7 @@ class AgentPackageManager:
             self._copy_skills_to_workspace(skills_dir)
 
     def _package_content_root(self, package_dir: Path) -> Path:
+        # 逻辑说明：识别包本身或唯一子目录作为内容根；多层或模糊结构保持原目录供后续验证。
         if self._looks_like_agent_package(package_dir):
             return package_dir
         children = [path for path in package_dir.iterdir() if path.is_dir()]
@@ -1120,6 +1187,7 @@ class AgentPackageManager:
         return package_dir
 
     def _looks_like_agent_package(self, path: Path) -> bool:
+        # 逻辑说明：检查提示词、配置或技能等标记，判断目录是否已经是 Agent 包内容根。
         markers = (
             "manifest.json",
             "template.json",
@@ -1135,6 +1203,7 @@ class AgentPackageManager:
         return any((path / marker).exists() for marker in markers)
 
     def _config_files(self, config_dir: Path) -> List[Tuple[Path, Path]]:
+        # 逻辑说明：递归收集允许同步的配置源/目标对，排除运行时自有和单独管理的文件。
         if self.workspace_dir is None:
             return []
         files: List[Tuple[Path, Path]] = []
@@ -1149,6 +1218,7 @@ class AgentPackageManager:
         return files
 
     def _workspace_targets(self, package_dir: Path) -> List[Path]:
+        # 逻辑说明：列出本次包会修改的提示、配置和技能目标，作为原子快照边界。
         if self.workspace_dir is None:
             return []
         package_root = self._package_content_root(package_dir)
@@ -1172,6 +1242,7 @@ class AgentPackageManager:
         return self._dedupe_paths(targets)
 
     def _workspace_state_targets(self, package_dir: Path) -> List[Path]:
+        # 逻辑说明：合并本次与当前包会影响的工作区路径，使新旧状态都处于快照保护范围。
         if self.workspace_dir is None:
             return []
         return []
@@ -1181,6 +1252,7 @@ class AgentPackageManager:
         package_dir: Path,
         previous_package_dir: Optional[Path] = None,
     ) -> Optional[Tuple[Path, List[Tuple[Path, Path, bool]]]]:
+        # 逻辑说明：把去重后的现有目标复制到临时目录并记录原存在性，返回恢复所需清单。
         targets = self._dedupe_paths(
             self._workspace_targets(package_dir)
             + self._workspace_state_targets(package_dir)
@@ -1219,6 +1291,7 @@ class AgentPackageManager:
     def _cleanup_stale_workspace_targets(
         self, previous_package_dir: Optional[Path], package_dir: Path
     ) -> None:
+        # 逻辑说明：比较新旧包目标，仅删除旧包曾管理而新包不再提供的路径，并清理空父目录。
         if previous_package_dir is None or self.workspace_dir is None:
             return
         current_targets = {str(path) for path in self._workspace_targets(package_dir)}
@@ -1238,6 +1311,7 @@ class AgentPackageManager:
             self._cleanup_empty_parent_dirs(target.parent)
 
     def _cleanup_empty_parent_dirs(self, path: Path) -> None:
+        # 逻辑说明：从被删除目标向上移除空目录，但绝不越过工作区根目录。
         if self.workspace_dir is None:
             return
         workspace_root = self.workspace_dir.resolve()
@@ -1252,6 +1326,7 @@ class AgentPackageManager:
             current = current.parent
 
     def _dedupe_paths(self, paths: Iterable[Path]) -> List[Path]:
+        # 逻辑说明：按路径文本保序去重，避免同一目标被重复快照或恢复。
         result = []
         seen = set()
         for path in paths:
@@ -1264,6 +1339,7 @@ class AgentPackageManager:
     def _restore_workspace_snapshot(
         self, snapshot: Optional[Tuple[Path, List[Tuple[Path, Path, bool]]]]
     ) -> None:
+        # 逻辑说明：先移除本次修改目标，再从快照复制原内容；原本缺失的目标保持删除。
         if snapshot is None:
             return
         backup_root, entries = snapshot
@@ -1286,12 +1362,14 @@ class AgentPackageManager:
     def _cleanup_workspace_snapshot(
         self, snapshot: Optional[Tuple[Path, List[Tuple[Path, Path, bool]]]]
     ) -> None:
+        # 逻辑说明：递归删除临时快照目录；无快照时为空操作，文件系统错误向上暴露。
         if snapshot is not None:
             shutil.rmtree(snapshot[0], ignore_errors=True)
 
     def _commit_current(
         self, staging: Path, identity: Tuple[str, str, str, str]
     ) -> None:
+        # 逻辑说明：以备份交换方式替换 current 目录并写 identity；中途失败则恢复旧包。
         backup = Path(
             tempfile.mkdtemp(
                 prefix="qwenpaw-agent-package-current-", dir=str(self.root_dir)
@@ -1317,17 +1395,20 @@ class AgentPackageManager:
             raise
 
     def _write_current_identity(self, identity: Tuple[str, str, str, str]) -> None:
+        # 逻辑说明：先写同目录临时 JSON 再原子替换标记，避免断电留下半个 identity 文件。
         tmp = self.marker_path.with_name(f".{self.marker_path.name}.tmp")
         tmp.write_text("\n".join(identity), encoding="utf-8")
         tmp.replace(self.marker_path)
 
     def _copy_config_to_workspace(self, config_dir: Path) -> None:
+        # 逻辑说明：把筛选后的配置源逐个替换到实时工作区，父目录和覆盖规则由 helper 统一处理。
         if self.workspace_dir is None:
             return
         for source, target in self._config_files(config_dir):
             self._replace_path(source, target)
 
     def _clear_missing_package_prompt_files(self, package_root: Path) -> None:
+        # 逻辑说明：删除新包明确不再提供的受管提示词，同时保护 runtime 自有 TEAMS.md。
         if self.workspace_dir is None:
             return
         config_dir = package_root / "config"
@@ -1341,6 +1422,7 @@ class AgentPackageManager:
     def _package_mcp_clients(
         self, package_root: Optional[Path]
     ) -> Dict[str, Dict[str, Any]]:
+        # 逻辑说明：读取包内 MCP 配置、兼容不同结构并转换为 QwenPaw API client payload 映射。
         if package_root is None:
             return {}
         mcp_path = package_root / "mcp.json"
@@ -1393,11 +1475,13 @@ class AgentPackageManager:
     def package_mcp_clients(
         self, package_dir: Optional[Path]
     ) -> Dict[str, Dict[str, Any]]:
+        # 逻辑说明：将可选包目录规范到内容根后解析 MCP；无包时返回空映射。
         if package_dir is None:
             return {}
         return self._package_mcp_clients(self._package_content_root(package_dir))
 
     def package_skill_names(self, package_dir: Optional[Path]) -> List[str]:
+        # 逻辑说明：扫描包内容根的 skills 子目录，返回含 SKILL.md 的排序技能名。
         if package_dir is None:
             return []
         skills_dir = self._package_content_root(package_dir) / "skills"
@@ -1408,6 +1492,7 @@ class AgentPackageManager:
     def _qwenpaw_mcp_client_payload(
         self, name: str, item: Dict[str, Any]
     ) -> Dict[str, Any]:
+        # 逻辑说明：校验单条 MCP 配置并翻译 transport/命令/环境字段；无有效名称时跳过。
         payload = dict(item)
         payload.pop("id", None)
         if "name" not in payload:
@@ -1431,11 +1516,13 @@ class AgentPackageManager:
         return payload
 
     def _mcp_workspace_env_value(self) -> str:
+        # 逻辑说明：返回实时工作区绝对路径，未配置工作区时使用当前目录，供 stdio MCP 注入。
         if self.workspace_dir is not None:
             return str(self.workspace_dir)
         return _string(os.getenv("AGENT_WORKSPACE"))
 
     def _expand_mcp_workspace_placeholders(self, value: Any) -> Any:
+        # 逻辑说明：递归替换 MCP 配置中的工作区占位符，保留字典/列表结构和其他值。
         workspace = self._mcp_workspace_env_value()
         if not workspace:
             return value
@@ -1453,6 +1540,7 @@ class AgentPackageManager:
         return value
 
     def _ensure_mcp_stdio_workspace_env(self, payload: Dict[str, Any]) -> None:
+        # 逻辑说明：仅为 stdio MCP 补齐 cwd 与工作区环境变量，不覆盖包已显式指定的值。
         workspace = self._mcp_workspace_env_value()
         if not workspace:
             return
@@ -1466,6 +1554,7 @@ class AgentPackageManager:
         payload["env"] = env
 
     def _copy_skills_to_workspace(self, skills_dir: Path) -> List[str]:
+        # 逻辑说明：把每个有效技能目录替换到实时 skills 目录，并返回实际复制的排序名称。
         if self.workspace_dir is None:
             return []
         target_root = self.workspace_dir / "skills"
@@ -1478,6 +1567,7 @@ class AgentPackageManager:
         return copied
 
     def _replace_path(self, source: Path, target: Path) -> None:
+        # 逻辑说明：先删除目标再按文件或目录复制 source；父目录自动创建，形成确定性替换语义。
         if target.exists():
             if target.is_dir():
                 shutil.rmtree(target)
@@ -1517,6 +1607,7 @@ class RuntimeUpdater:
         api_client: Optional[QwenPawApiClient] = None,
         runtime_reconcile: Optional[Callable[[MemberRuntimeConfig], None]] = None,
     ) -> None:
+        # 逻辑说明：保存运行依赖与当前快照槽位；构造时不读取配置，便于启动阶段按顺序恢复状态。
         self.config = config
         self.adapter_apply = adapter_apply
         self.runtime_config_pull = runtime_config_pull
@@ -1530,12 +1621,14 @@ class RuntimeUpdater:
         self.current_config: Optional[MemberRuntimeConfig] = None
 
     def load(self) -> MemberRuntimeConfig:
+        # 逻辑说明：可选地先从对象存储拉取 runtime.yaml，再解析为经过验证的不可变配置快照。
         if self.runtime_config_pull is not None:
             self.runtime_config_pull()
         return MemberRuntimeConfig.load(self.config.runtime_config_path)
 
     def refresh_team_context(self, config: MemberRuntimeConfig) -> None:
         """Reconcile the runtime-owned TEAMS.md block after asset writers run."""
+        # 逻辑说明：重新写入 runtime 自有 Team 上下文块，修复包或插件复制后对 TEAMS.md 的覆盖。
         self._apply_team_context_prompt(config)
 
     def apply_once(
@@ -1550,6 +1643,7 @@ class RuntimeUpdater:
         上下文。若中途抛错，旧 generation 仍被视为当前版本，轮询或重启可再次执行。
         各写入操作必须幂等，才能安全处理“上次实际成功但响应丢失”的情况。
         """
+        # 逻辑说明：按身份、存储、模型、MCP、channel、包与 Team 上下文顺序应用；全成功才更新快照。
         started_at = time.monotonic()
         config = runtime_config or self.load()
         previous = self.current_config
@@ -1632,6 +1726,7 @@ class RuntimeUpdater:
         )
 
     def _apply_inline_config(self, config: MemberRuntimeConfig) -> None:
+        # 逻辑说明：将 Controller 内联提示字段写入对应工作区文件；未提供的字段不覆盖现状。
         prompt_files = {
             "IDENTITY.md": config.inline_config.get("identity", ""),
             "SOUL.md": config.inline_config.get("soul", ""),
@@ -1651,6 +1746,7 @@ class RuntimeUpdater:
                 tmp.replace(path)
 
     def _adapter_neutral_change(self, config: MemberRuntimeConfig) -> bool:
+        # 逻辑说明：比较旧快照判断变化是否不影响适配器；首轮或关键字段变化返回 False。
         previous = self.current_config
         if previous is None:
             return False
@@ -1670,14 +1766,17 @@ class RuntimeUpdater:
         )
 
     def _team_context_content_identity(self, config: MemberRuntimeConfig) -> str:
+        # 逻辑说明：移除 generation 后稳定序列化 Team 事实，避免仅版本号变化触发内容重写。
         facts = dict(config.team_context_facts)
         facts.pop("metadata", None)
         return _stable_json(facts)
 
     def _load_and_apply_once(self) -> None:
+        # 逻辑说明：供监听器回调使用，重新加载权威配置并应用，同时保留现有适配器进程。
         self.apply_once(runtime_config=self.load(), reapply_adapter=False)
 
     def _apply_team_context_prompt(self, config: MemberRuntimeConfig) -> None:
+        # 逻辑说明：生成受标记的 Team 上下文块并替换旧块；内容未变时避免磁盘写入。
         block = self._runtime_team_context_block(config)
         if not block:
             return
@@ -1705,6 +1804,7 @@ class RuntimeUpdater:
         tmp.replace(path)
 
     def _render_full_team_context_prompt(self, config: MemberRuntimeConfig) -> str:
+        # 逻辑说明：有外部 renderer 时生成完整上下文并确保内部控制标记存在；否则返回空。
         if self.team_context_renderer is None:
             return ""
         try:
@@ -1719,6 +1819,7 @@ class RuntimeUpdater:
         return text if isinstance(text, str) and text.strip() else ""
 
     def _ensure_teams_internal_marker(self, text: str) -> str:
+        # 逻辑说明：幂等加入 runtime 管理标记，供包清理逻辑识别并保护 TEAMS.md。
         if TEAMS_INTERNAL_CONTROL_MARKER in text:
             return text
         body = text.lstrip("\n")
@@ -1729,6 +1830,7 @@ class RuntimeUpdater:
         )
 
     def _runtime_team_context_block(self, config: MemberRuntimeConfig) -> str:
+        # 逻辑说明：把规范化 Team 事实渲染为 Agent 可读的 Markdown 受控块；无事实返回空。
         facts = config.team_context_facts
         if not facts:
             return ""
@@ -1793,6 +1895,7 @@ class RuntimeUpdater:
         return "\n".join(lines)
 
     def _apply_member_identity(self, config: MemberRuntimeConfig) -> None:
+        # 逻辑说明：把成员名和角色映射到默认 Agent 身份配置，并通过 API 写入验证。
         role = config.member_role
         if role:
             self.config.agent_role = role
@@ -1800,6 +1903,7 @@ class RuntimeUpdater:
             os.environ["AGENTTEAMS_WORKER_ROLE"] = role
 
     def _apply_model(self, config: MemberRuntimeConfig) -> None:
+        # 逻辑说明：解析期望 provider/model 与网关地址，调用 QwenPaw API 建模并切换活动模型。
         model = config.model
         if not model:
             return
@@ -1842,12 +1946,14 @@ class RuntimeUpdater:
         )
 
     def _openai_compatible_base_url(self, base_url: str) -> str:
+        # 逻辑说明：规范化 OpenAI 兼容网关 URL，缺少 /v1 时补上，空值保持为空。
         value = base_url.rstrip("/")
         if value.endswith("/v1"):
             return value
         return f"{value}/v1"
 
     def _apply_mcp_servers(self, config: MemberRuntimeConfig) -> None:
+        # 逻辑说明：将 runtime MCP 与现有受管客户端做增删改并校验工具，不触碰其他客户端。
         servers = self._mcporter_servers(config)
         if self.api_client is None:
             if servers:
@@ -1891,6 +1997,7 @@ class RuntimeUpdater:
         )
 
     def _apply_package_mcp_servers(self, package_dir: Optional[Path]) -> None:
+        # 逻辑说明：解析包附带 MCP 并与 QwenPaw 对账，删除旧包已移除的受管项。
         package_clients = getattr(self.package_manager, "package_mcp_clients", None)
         servers = package_clients(package_dir) if callable(package_clients) else {}
         if self.api_client is None:
@@ -1923,6 +2030,7 @@ class RuntimeUpdater:
         )
 
     def _apply_package_skills(self, package_dir: Optional[Path]) -> None:
+        # 逻辑说明：收集包内技能并调用 API 刷新启用；依赖或技能缺失时幂等跳过。
         if package_dir is None or self.api_client is None:
             return
         package_skills = getattr(self.package_manager, "package_skill_names", None)
@@ -1931,6 +2039,7 @@ class RuntimeUpdater:
             self.api_client.refresh_and_enable_skills(skill_names)
 
     def _apply_channel_policy(self, config: MemberRuntimeConfig) -> None:
+        # 逻辑说明：计算 Matrix 群聊/私聊允许与拒绝集合，并写入 ACL 后读回验证。
         group_allow, dm_allow, group_deny, dm_deny = self._matrix_policy_ids(config)
         if not (group_allow or dm_allow or group_deny or dm_deny):
             return
@@ -1948,6 +2057,7 @@ class RuntimeUpdater:
         self._write_matrix_access_control(whitelist, blacklist)
 
     def _apply_matrix_channel(self, config: MemberRuntimeConfig) -> None:
+        # 逻辑说明：构造 Matrix 期望配置、写入秘密保留字段和访问标志，再停用遗留客户端。
         desired = self._matrix_channel_desired_state(config)
         if desired is None:
             return
@@ -2000,6 +2110,7 @@ class RuntimeUpdater:
         active duplicates replies and applies the stale ``matrix`` ACL instead
         of the current Team roster.
         """
+        # 逻辑说明：将旧 matrix channel 设为禁用，防止两个消费者争抢同一 sync token。
         if self.api_client is None:
             raise RuntimeError(
                 "QwenPaw API client is required for Matrix configuration"
@@ -2014,6 +2125,7 @@ class RuntimeUpdater:
         )
 
     def _apply_dingtalk_channel(self, config: MemberRuntimeConfig) -> None:
+        # 逻辑说明：将可选钉钉配置写入 QwenPaw 并保留秘密字段；未配置时不创建 channel。
         desired = config.dingtalk_channel
         if desired is None:
             return
@@ -2114,6 +2226,7 @@ class RuntimeUpdater:
     def _matrix_channel_desired_state(
         self, config: MemberRuntimeConfig
     ) -> Optional[Dict[str, str]]:
+        # 逻辑说明：汇总环境和成员配置形成 Matrix channel 期望状态；关键连接字段缺失则返回 None。
         homeserver = _string(
             os.getenv("AGENTTEAMS_MATRIX_URL")
             or os.getenv("AGENTTEAMS_MATRIX_SERVER")
@@ -2151,6 +2264,7 @@ class RuntimeUpdater:
         *,
         require_mention: bool,
     ) -> bool:
+        # 逻辑说明：复制房间配置、移除旧 autoReply 并设置 mention 策略；返回是否真的发生变化。
         room_cfg = dict(groups.get(room_id) or {})
         changed = False
         if room_cfg.pop("autoReply", None) is not None:
@@ -2165,6 +2279,7 @@ class RuntimeUpdater:
     def _matrix_policy_ids(
         self, config: MemberRuntimeConfig
     ) -> Tuple[List[str], List[str], List[str], List[str]]:
+        # 逻辑说明：从默认名册和额外规则生成四类 ACL，补齐 Matrix 域并保序去重。
         policy = config.channel_policy
         domain = _string(os.getenv("AGENTTEAMS_MATRIX_DOMAIN"))
         group_allow = self._default_group_allow(config, domain)
@@ -2189,6 +2304,7 @@ class RuntimeUpdater:
     def _default_group_allow(
         self, config: MemberRuntimeConfig, domain: str
     ) -> List[str]:
+        # 逻辑说明：优先按完整 Team 名册产生允许列表；名册不可用时安全回落管理员与协调者。
         team_admin = _string(_section(config.team, "admin").get("matrixUserId"))
         system_admin_user = _string(os.getenv("AGENTTEAMS_ADMIN_USER") or "admin")
         system_admin = self._matrix_id(system_admin_user, domain)
@@ -2220,6 +2336,7 @@ class RuntimeUpdater:
     def _team_roster_group_allow(
         self, config: MemberRuntimeConfig, domain: str, admin: str
     ) -> List[str]:
+        # 逻辑说明：从 Team 名册提取管理员、当前成员及同队成员 Matrix ID，缺数据时拒绝猜测。
         members = config.team_members
         if not config.team or not members:
             return []
@@ -2262,6 +2379,7 @@ class RuntimeUpdater:
         return [item for item in (manager, *leader_ids, admin, *peer_ids) if item]
 
     def _member_matrix_id(self, member: Dict[str, str], domain: str) -> str:
+        # 逻辑说明：优先采用成员显式 mxid，否则用 runtimeName/name 和已知域构造 ID。
         mxid = _string(member.get("matrixUserId"))
         if mxid:
             return mxid
@@ -2277,6 +2395,7 @@ class RuntimeUpdater:
         ]
 
     def _matrix_id(self, value: str, domain: str) -> str:
+        # 逻辑说明：保留已有用户/房间 ID；普通名称仅在有域时转换，避免生成无效 mxid。
         text = _string(value)
         if not text:
             return ""
@@ -2285,6 +2404,7 @@ class RuntimeUpdater:
         return f"@{text}:{domain}" if domain else ""
 
     def _mcporter_servers(self, config: MemberRuntimeConfig) -> Dict[str, Any]:
+        # 逻辑说明：兼容 MCP 列表或映射形态，逐条转换为 mcporter 配置并注入可选网关认证。
         raw = config.mcp_servers
         gateway_key = self._gateway_key(config)
         if isinstance(raw, dict) and isinstance(raw.get("mcpServers"), dict):
@@ -2311,6 +2431,7 @@ class RuntimeUpdater:
     def _mcporter_server_payload(
         self, item: Dict[str, Any], gateway_key: str
     ) -> Dict[str, Any]:
+        # 逻辑说明：验证远端 MCP URL、合并 headers 和网关 Bearer token，返回标准 HTTP client 配置。
         url = _string(item.get("url"))
         if not url:
             return {}
@@ -2325,6 +2446,7 @@ class RuntimeUpdater:
         }
 
     def _gateway_key(self, config: MemberRuntimeConfig) -> str:
+        # 逻辑说明：按 runtime 指定的环境变量名读取模型/MCP 网关 key；缺失名称或值时为空。
         env_name = _string(
             config.credentials.get("gatewayKeyEnv") or "AGENTTEAMS_WORKER_GATEWAY_KEY"
         )
@@ -2333,6 +2455,7 @@ class RuntimeUpdater:
     def _apply_matrix_channel_access_flags(
         self, group_enabled: bool, dm_enabled: bool
     ) -> None:
+        # 逻辑说明：读取当前 Matrix channel、只更新群聊/私聊启用标志，并由 API 做读回校验。
         if self.api_client is None:
             raise RuntimeError(
                 "QwenPaw API client is required for Matrix ACL configuration"
@@ -2351,6 +2474,7 @@ class RuntimeUpdater:
     def _write_matrix_access_control(
         self, whitelist: List[str], blacklist: List[str]
     ) -> None:
+        # 逻辑说明：把计算后的允许/拒绝列表交给 API 差异化对账；无 API 时明确失败。
         if self.api_client is None:
             raise RuntimeError(
                 "QwenPaw API client is required for Matrix ACL configuration"
@@ -2358,6 +2482,7 @@ class RuntimeUpdater:
         self.api_client.reconcile_acl("agentteams_matrix", whitelist, blacklist)
 
     def _dedupe(self, values: List[str]) -> List[str]:
+        # 逻辑说明：按首次出现顺序去重 ID，保持策略可预测且避免重复 ACL 请求。
         result = []
         seen = set()
         for value in values:
@@ -2367,6 +2492,7 @@ class RuntimeUpdater:
         return result
 
     async def loop(self) -> None:
+        # 逻辑说明：按轮询周期加载并应用新 runtime config；单轮失败记录后继续，取消时正常退出。
         logger.info(
             "runtime config update loop started component=update worker=%s interval_seconds=%s",
             self.config.worker_name,

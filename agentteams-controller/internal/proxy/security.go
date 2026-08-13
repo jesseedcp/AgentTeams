@@ -10,6 +10,7 @@ import (
 const higressRegistrySuffix = ".cr.aliyuncs.com/"
 
 func isHigressRegistry(image string) bool {
+	// 逻辑说明：定位阿里云镜像仓库固定后缀，再要求后缀前缀以 higress-registry 开头；两项同时满足才允许任意地域的官方 Higress 镜像。
 	// Match higress-registry-*.cr.aliyuncs.com/* or higress-registry.*.cr.aliyuncs.com/*
 	idx := strings.Index(image, higressRegistrySuffix)
 	if idx < 0 {
@@ -20,6 +21,7 @@ func isHigressRegistry(image string) bool {
 }
 
 func isLocalImage(image string) bool {
+	// 逻辑说明：检查首个路径段是否含点号来区分显式远端 registry；无斜杠或首段无点按 Docker 本地镜像命名处理。
 	// Local images have no dots before the first slash: e.g. "agentteams/worker-agent:latest"
 	// Registry images have dots: e.g. "registry.example.com/repo/image:tag"
 	slashIdx := strings.Index(image, "/")
@@ -32,6 +34,7 @@ func isLocalImage(image string) bool {
 }
 
 func isLocalhostImage(image string) bool {
+	// 逻辑说明：只接受 localhost/127.0.0.1 的带端口或路径前缀，避免把名称中间偶然包含 localhost 的远端地址误判为本机镜像。
 	return strings.HasPrefix(image, "localhost/") || strings.HasPrefix(image, "localhost:") ||
 		strings.HasPrefix(image, "127.0.0.1/") || strings.HasPrefix(image, "127.0.0.1:")
 }
@@ -65,6 +68,7 @@ type SecurityValidator struct {
 
 // NewSecurityValidator creates a validator from environment variables.
 func NewSecurityValidator() *SecurityValidator {
+	// 逻辑说明：解析并清理附加 registry 白名单，再按显式容器前缀、资源自动前缀开关和默认值的优先级确定命名边界，同时建立禁止提权 capability 集合。
 	// Additional allowed image sources — can be a registry (e.g. "ghcr.io")
 	// or registry+path (e.g. "ghcr.io/myorg", "registry.example.com/team/workers")
 	var allowedRegistries []string
@@ -112,6 +116,7 @@ func NewSecurityValidator() *SecurityValidator {
 
 // ValidateContainerCreate checks a container creation request against security policies.
 func (v *SecurityValidator) ValidateContainerCreate(req ContainerCreateRequest, containerName string) error {
+	// 逻辑说明：按容器名、镜像源、主机挂载、privileged、host 网络/PID 和危险 capability 顺序拒绝越权配置；HostConfig 缺失时在名称与镜像已通过后安全返回。
 	// 1. Container name prefix
 	if containerName != "" && !strings.HasPrefix(containerName, v.ContainerPrefix) {
 		return fmt.Errorf("container name %q must start with %q", containerName, v.ContainerPrefix)
@@ -165,6 +170,7 @@ func (v *SecurityValidator) ValidateContainerCreate(req ContainerCreateRequest, 
 }
 
 func (v *SecurityValidator) isImageAllowed(image string) bool {
+	// 逻辑说明：依次接受官方 Higress、本地命名、loopback registry 和管理员配置的 registry/path 前缀；全部不匹配才拒绝，避免任意公网镜像进入 Docker daemon。
 	// Allow all images from Higress registries (any region)
 	if isHigressRegistry(image) {
 		return true

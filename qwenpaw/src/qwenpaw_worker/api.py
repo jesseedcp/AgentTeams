@@ -28,6 +28,7 @@ class QwenPawApiClient:
     ``QwenPawApiError``，避免上层误把一次超时当成成功。
     """
     def __init__(self, base_url: str, timeout: float = 10) -> None:
+        # 逻辑说明：规范化本机 API 地址并保存超时；这里只记录连接参数，不会立即发起网络请求。
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
 
@@ -37,6 +38,7 @@ class QwenPawApiClient:
         path: str,
         payload: Any | None = None,
     ) -> Any:
+        # 逻辑说明：把可选 JSON 编码为 HTTP 请求并统一解析响应；网络、状态码或 JSON 错误都转换成可识别异常。
         body = None if payload is None else json.dumps(payload).encode()
         request = urllib.request.Request(
             f"{self.base_url}{path}",
@@ -65,6 +67,7 @@ class QwenPawApiClient:
             ) from exc
 
     def get_version(self) -> str:
+        # 逻辑说明：读取本机 QwenPaw 版本并拒绝空值，避免把“API 有响应”误判为“版本正确”。
         payload = self._request("GET", "/api/version")
         version = str((payload or {}).get("version") or "").strip()
         if not version:
@@ -72,6 +75,7 @@ class QwenPawApiClient:
         return version
 
     def require_version(self, expected: str) -> None:
+        # 逻辑说明：比较实际与期望版本；不一致立即失败，避免向不兼容的管理 API 写配置。
         actual = self.get_version()
         if actual != expected:
             raise QwenPawApiError(
@@ -79,6 +83,7 @@ class QwenPawApiClient:
             )
 
     def get_channel(self, channel: str) -> dict[str, Any]:
+        # 逻辑说明：读取指定 channel；404 表示尚未配置并返回空字典，其他错误继续交给上层处理。
         try:
             return self._request(
                 "GET",
@@ -101,6 +106,7 @@ class QwenPawApiClient:
         API 的成功状态只说明请求被接受，不代表持久状态完全一致；读回检查能让
         RuntimeUpdater 在重启后重试，而不是把部分应用误报为完成。
         """
+        # 逻辑说明：合并需保留的秘密字段后 PUT，再 GET 比较非秘密字段；不一致时不会提交当前 generation。
         current = self.get_channel(channel)
         payload = dict(desired)
         secret_fields = set(secret_fields)
@@ -122,6 +128,7 @@ class QwenPawApiClient:
         return actual
 
     def get_acl(self, channel: str) -> dict[str, Any]:
+        # 逻辑说明：读取 channel 当前白名单和黑名单，供差异更新以及最终校验使用。
         return self._request(
             "GET",
             f"/api/access-control/{urllib.parse.quote(channel, safe='')}",
@@ -134,6 +141,7 @@ class QwenPawApiClient:
         blacklist: Iterable[str],
     ) -> dict[str, Any]:
         """按集合差异增删 allow/deny 项，再读回验证最终 ACL。"""
+        # 逻辑说明：计算期望集合与现状的增删差异，逐批调用 ACL API 后读回；最终集合不同即报错。
         desired_white = set(whitelist)
         desired_black = set(blacklist)
         current = self.get_acl(channel)
@@ -178,6 +186,7 @@ class QwenPawApiClient:
         channel: str,
         user_ids: Iterable[str],
     ) -> None:
+        # 逻辑说明：将用户 ID 排序为 API 条目后批量发送；空集合跳过，避免无意义请求。
         entries = [
             {"channel": channel, "user_id": user_id}
             for user_id in sorted(user_ids)
@@ -189,6 +198,7 @@ class QwenPawApiClient:
         return self._request("GET", "/api/mcp")
 
     def get_mcp(self, client_key: str) -> dict[str, Any]:
+        # 逻辑说明：按经过 URL 转义的 client key 读取单个 MCP 客户端的持久配置。
         return self._request(
             "GET",
             f"/api/mcp/{urllib.parse.quote(client_key, safe='')}",
@@ -199,6 +209,7 @@ class QwenPawApiClient:
         client_key: str,
         client: dict[str, Any],
     ) -> dict[str, Any]:
+        # 逻辑说明：创建 MCP 客户端后调用统一读回校验，确保服务实际保存了期望字段。
         self._request(
             "POST",
             "/api/mcp",
@@ -211,6 +222,7 @@ class QwenPawApiClient:
         client_key: str,
         updates: dict[str, Any],
     ) -> dict[str, Any]:
+        # 逻辑说明：对既有 MCP 客户端提交局部更新，再读取完整对象验证本次更新字段。
         self._request(
             "PUT",
             f"/api/mcp/{urllib.parse.quote(client_key, safe='')}",
@@ -223,6 +235,7 @@ class QwenPawApiClient:
         client_key: str,
         desired: dict[str, Any],
     ) -> dict[str, Any]:
+        # 逻辑说明：读取服务端 MCP 对象并逐字段比较；缺失或值不同会阻止上层把配置视为已应用。
         actual = self.get_mcp(client_key)
         observable = {
             "name",
@@ -247,6 +260,7 @@ class QwenPawApiClient:
         return actual
 
     def delete_mcp(self, client_key: str) -> None:
+        # 逻辑说明：删除指定 MCP 客户端后检查列表；对象仍存在就明确报告持久化失败。
         self._request(
             "DELETE",
             f"/api/mcp/{urllib.parse.quote(client_key, safe='')}",
@@ -257,12 +271,14 @@ class QwenPawApiClient:
             )
 
     def get_mcp_policy(self, client_key: str) -> dict[str, Any]:
+        # 逻辑说明：读取 MCP 工具授权策略，供更新后的读回校验使用。
         return self._request(
             "GET",
             f"/api/mcp/policy/{urllib.parse.quote(client_key, safe='')}",
         )
 
     def list_mcp_tools(self, client_key: str) -> list[dict[str, Any]]:
+        # 逻辑说明：查询 MCP 服务已发现的工具；结果用于判断服务是否完成异步启动。
         return self._request(
             "GET",
             f"/api/mcp/tools/{urllib.parse.quote(client_key, safe='')}",
@@ -275,6 +291,7 @@ class QwenPawApiClient:
         timeout: float = 30,
         interval: float = 0.5,
     ) -> list[dict[str, Any]]:
+        # 逻辑说明：在截止时间内轮询工具列表；临时 API 错误会重试，超时则携带最后错误失败。
         deadline = time.monotonic() + timeout
         last_error: Exception | None = None
         while time.monotonic() < deadline:
@@ -295,6 +312,7 @@ class QwenPawApiClient:
         client_key: str,
         desired: dict[str, Any],
     ) -> dict[str, Any]:
+        # 逻辑说明：写入 MCP 授权策略后读回逐字段验证，防止权限配置仅返回成功却未持久化。
         self._request(
             "PUT",
             f"/api/mcp/policy/{urllib.parse.quote(client_key, safe='')}",
@@ -326,6 +344,7 @@ class QwenPawApiClient:
         Worker 实际请求经过 Higress 模型网关；此处配置的是 QwenPaw 如何找到该
         provider，而不是把云厂商 key 暴露给 Matrix 或 Agent 提示词。
         """
+        # 逻辑说明：补建或更新 provider/model，切换默认 Agent 后逐层读回；任一步不一致都中止配置提交。
         providers = self._request("GET", "/api/models")
         provider = next(
             (item for item in providers if item.get("id") == provider_id),
@@ -405,6 +424,7 @@ class QwenPawApiClient:
         agent_id: str,
         updates: dict[str, Any],
     ) -> dict[str, Any]:
+        # 逻辑说明：合并目标 Agent 的原配置与更新，写入后逐字段读回；不一致时向上报告失败。
         encoded = urllib.parse.quote(agent_id, safe="")
         current = self._request("GET", f"/api/agents/{encoded}")
         payload = {**current, **updates, "id": agent_id}
@@ -428,6 +448,7 @@ class QwenPawApiClient:
         retry_delay: float = 1.0,
     ) -> bool:
         """幂等停用临时 Agent；HTTP 409 表示它仍忙，短暂等待后再试。"""
+        # 逻辑说明：仅对存在且启用的 Agent 停用；占用冲突按次数退避，最终读回保证确已停用。
         agents = self._request("GET", "/api/agents").get("agents") or []
         current = next(
             (agent for agent in agents if agent.get("id") == agent_id),
@@ -461,6 +482,7 @@ class QwenPawApiClient:
         return True
 
     def sync_plugin(self, plugin_id: str) -> dict[str, Any]:
+        # 逻辑说明：触发指定内置插件从磁盘同步运行状态，并把 API 的同步结果返回调用方。
         encoded = urllib.parse.quote(plugin_id, safe="")
         return self._request("POST", f"/api/{encoded}/sync", {})
 
@@ -468,6 +490,7 @@ class QwenPawApiClient:
         self,
         skill_names: Iterable[str],
     ) -> dict[str, Any]:
+        # 逻辑说明：先刷新技能索引，再批量启用去重后的技能；任一失败会汇总为明确异常。
         self._request("POST", "/api/skills/refresh", {})
         names = sorted(set(skill_names))
         if not names:

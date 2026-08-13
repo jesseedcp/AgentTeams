@@ -63,6 +63,7 @@ type AIGatewayClient struct {
 // APIG SDK, signing requests with cred (typically obtained from
 // credprovider.NewAliyunCredential wrapping a TokenManager).
 func NewAIGatewayClient(cfg AIGatewayConfig, cred credential.Credential) (*AIGatewayClient, error) {
+	// 逻辑说明：校验 region、gateway ID 与 SDK credential，组装带区域/端点的 OpenAPI 配置并创建 APIG client；任何必填项或 SDK 初始化失败都不返回半配置网关。
 	if cfg.Region == "" {
 		return nil, errors.New("ai-gateway: region is required")
 	}
@@ -86,6 +87,7 @@ func NewAIGatewayClient(cfg AIGatewayConfig, cred credential.Credential) (*AIGat
 }
 
 func apigEndpoint(region, override string) string {
+	// 逻辑说明：去空白后的显式 endpoint 优先，否则按 region 生成阿里云 APIG 标准域名；只返回地址，不发请求。
 	override = strings.TrimSpace(override)
 	if override != "" {
 		return override
@@ -105,6 +107,7 @@ func NewAIGatewayClientWithClient(cfg AIGatewayConfig, cli apigClient) *AIGatewa
 // consumer names do not collide across tenants sharing the same APIG
 // account. This mirrors the behaviour of the old backend.APIGBackend.
 func (a *AIGatewayClient) consumerName(name string) string {
+	// 逻辑说明：配置了 GatewayID 时给逻辑 Consumer 名加租户前缀，避免同账号多网关冲突；测试/缺配置时保留原名。
 	if a.config.GatewayID == "" {
 		return name
 	}
@@ -112,6 +115,7 @@ func (a *AIGatewayClient) consumerName(name string) string {
 }
 
 func (a *AIGatewayClient) EnsureConsumer(_ context.Context, req ConsumerRequest) (*ConsumerResult, error) {
+	// 逻辑说明：先按租户化名称查询并复用现有 Consumer/API Key；缺失时创建系统生成 Key 的 AI Consumer，并在并发重复错误后重新查询收敛，其他 SDK 错误返回。
 	name := a.consumerName(req.Name)
 
 	if id, key, err := a.findConsumer(name); err != nil {
@@ -161,6 +165,7 @@ func (a *AIGatewayClient) EnsureConsumer(_ context.Context, req ConsumerRequest)
 }
 
 func (a *AIGatewayClient) DeleteConsumer(_ context.Context, name string) error {
+	// 逻辑说明：先查找 Consumer ID，缺失视为幂等成功；存在则按精确 ID 删除并记录不含 Key 的日志，查询/删除失败上抛。
 	full := a.consumerName(name)
 	id, _, err := a.findConsumer(full)
 	if err != nil {
@@ -178,6 +183,7 @@ func (a *AIGatewayClient) DeleteConsumer(_ context.Context, name string) error {
 }
 
 func (a *AIGatewayClient) AuthorizeAIRoutes(_ context.Context, consumerName string, modelAPIID string) error {
+	// 逻辑说明：解析请求级或默认 Model API，确认 Consumer 存在并查询同环境 LLM 授权；已有规则直接成功，否则创建长期授权，缺配置/资源或 SDK 错误明确返回。
 	effectiveModelAPIID := a.config.ModelAPIID
 	if modelAPIID != "" {
 		effectiveModelAPIID = modelAPIID
@@ -225,6 +231,7 @@ func (a *AIGatewayClient) AuthorizeAIRoutes(_ context.Context, consumerName stri
 }
 
 func (a *AIGatewayClient) DeauthorizeAIRoutes(_ context.Context, consumerName string, modelAPIID string) error {
+	// 逻辑说明：缺模型/环境或 Consumer 时幂等跳过；否则查询所有匹配授权规则并逐个按 ID 删除，任一删除失败停止并保留具体规则错误。
 	effectiveModelAPIID := a.config.ModelAPIID
 	if modelAPIID != "" {
 		effectiveModelAPIID = modelAPIID
@@ -312,6 +319,7 @@ func (a *AIGatewayClient) EnsureAIRoute(_ context.Context, _ AIRouteRequest) err
 // Any error is bubbled up so that the initializer's waitForGateway can
 // retry until the control-plane is ready.
 func (a *AIGatewayClient) Healthy(_ context.Context) error {
+	// 逻辑说明：用最小分页 ListConsumers 同时验证 SDK 凭据刷新与 APIG 控制面连通性；错误包装返回供 initializer 重试，不读取业务列表。
 	req := (&apig.ListConsumersRequest{}).
 		SetGatewayType("AI").
 		SetPageNumber(1).
@@ -326,6 +334,7 @@ func (a *AIGatewayClient) Healthy(_ context.Context) error {
 // ResolveModelProvider looks up a named APIG Model API (HttpApi of type LLM)
 // and returns its basePath, Intranet subdomain URL, and httpApiId.
 func (a *AIGatewayClient) ResolveModelProvider(_ context.Context, name string) (*ModelProviderInfo, error) {
+	// 逻辑说明：分页查询目标 Gateway 下名称精确匹配的 LLM HttpApi，提取 API ID、basePath 与内网部署 URL；无网关、无内网域名、SDK 错误或遍历完未找到均失败。
 	if a.config.GatewayID == "" {
 		return nil, fmt.Errorf("ai-gateway: gateway ID is required to resolve model provider")
 	}
@@ -376,6 +385,7 @@ func (a *AIGatewayClient) ResolveModelProvider(_ context.Context, name string) (
 // resolveIntranetURL finds the Intranet subdomain in deploy configs and
 // constructs the full URL with basePath.
 func resolveIntranetURL(deployConfigs []*apig.HttpApiDeployConfig, basePath string) string {
+	// 逻辑说明：遍历部署配置的子域名，选择第一个 NetworkType=Intranet 且名称非空项，按协议拼接 basePath；没有合格地址返回空串。
 	for _, dc := range deployConfigs {
 		if dc == nil {
 			continue
@@ -406,6 +416,7 @@ func (a *AIGatewayClient) TriggerPush() {}
 // --- helpers ---
 
 func (a *AIGatewayClient) findConsumer(name string) (string, string, error) {
+	// 逻辑说明：以 NameLike 分页查询但只接受名称精确相等的 Consumer，命中后再取 API Key；空响应/最后一页返回未找到，SDK 错误不伪装为空。
 	page := int32(1)
 	for {
 		req := (&apig.ListConsumersRequest{}).
@@ -435,6 +446,7 @@ func (a *AIGatewayClient) findConsumer(name string) (string, string, error) {
 }
 
 func (a *AIGatewayClient) getConsumerAPIKey(id string) (string, error) {
+	// 逻辑说明：ID 非空时 GetConsumer 并安全穿透多层可选响应取第一把 API Key；数据不完整返回空值，SDK 错误返回 error。
 	if id == "" {
 		return "", nil
 	}
@@ -454,6 +466,7 @@ func (a *AIGatewayClient) getConsumerAPIKey(id string) (string, error) {
 }
 
 func isDuplicateErr(err error) bool {
+	// 逻辑说明：nil 返回 false，否则识别 SDK 的 ConsumerNameDuplicate 或 HTTP 409 文本；仅用于创建竞态后的重新查询补偿。
 	if err == nil {
 		return false
 	}

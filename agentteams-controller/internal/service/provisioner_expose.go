@@ -23,6 +23,9 @@ func ContainerDNSName(workerName string) string {
 // ReconcileExpose compares desired expose ports with current status, creates new
 // gateway resources for added ports, and removes resources for deleted ports.
 func (p *Provisioner) ReconcileExpose(ctx context.Context, workerName string, desired []v1beta1.ExposePort, current []v1beta1.ExposedPortStatus) ([]v1beta1.ExposedPortStatus, error) {
+	// 逻辑说明：ReconcileExpose 接收 ctx(context.Context)、workerName(string)、desired([]v1beta1.ExposePort)、current([]v1beta1.ExposedPortStatus)，依次借助 domainForExpose、ExposePort、ContainerDNSName、UnexposePort调谐Worker 端口路由的期望结果。
+	// 返回/状态：返回 []v1beta1.ExposedPortStatus、error；会调用下层服务修改外部资源，并把阶段、条件与已应用版本写回 CR status。
+	// 失败/重试：error 或 RequeueAfter 交给 controller-runtime；重复执行必须把同一 spec 收敛到同一状态。
 	if p.gateway == nil {
 		return current, nil
 	}

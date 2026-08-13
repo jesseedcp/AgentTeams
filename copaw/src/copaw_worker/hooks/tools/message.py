@@ -48,6 +48,8 @@ class MessageToolError(ValueError):
 
 
 def _response(payload: dict[str, Any]) -> ToolResponse:
+    # 逻辑说明：`_response` 接收 payload，执行 Matrix message 工具 中的“响应”步骤，返回 ToolResponse；
+    # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     return ToolResponse(
         content=[
             TextBlock(
@@ -68,6 +70,8 @@ def _error(message: str, **payload: Any) -> ToolResponse:
 
 def parse_matrix_target(target: str) -> MatrixTarget:
     """Parse OpenClaw-style Matrix targets."""
+    # 逻辑说明：`parse_matrix_target` 接收 target，解析Matrix target，返回 MatrixTarget；
+    # 不修改外部状态。失败策略：非法输入或状态会立即抛错，其他底层异常继续上抛；本函数不额外重试，避免掩盖持续故障。
     raw = (target or "").strip()
     if not raw:
         raise MessageToolError("target is required")
@@ -106,6 +110,8 @@ def validate_matrix_message_policy(
     room_id: str | None = None,
 ) -> str:
     """Filter outgoing messages and return the sanitized text."""
+    # 逻辑说明：`validate_matrix_message_policy` 接收 text、mentions、room_id，校验Matrix 消息 policy，返回 str；
+    # 不修改外部状态。失败策略：非法输入或状态会立即抛错，其他底层异常继续上抛；本函数不额外重试，避免掩盖持续故障。
     result = filter_outgoing_matrix_message(text, mentions, room_id=room_id)
     if result.suppressed:
         raise MessageToolError(result.suppress_reason or "message suppressed")
@@ -114,6 +120,8 @@ def validate_matrix_message_policy(
 
 def _render_inline_matrix_html(text: str) -> str:
     """Render a small, safe Markdown subset accepted by Matrix clients."""
+    # 逻辑说明：`_render_inline_matrix_html` 接收 text，渲染inline Matrix html，返回 str；会访问网络服务。失败策略：底层异常继续上抛，由调用链统一处理；
+    # 本函数不额外重试，避免掩盖持续故障。
     parts = re.split(r"(`[^`\n]+`)", text)
     rendered: list[str] = []
     for part in parts:
@@ -129,6 +137,8 @@ def _render_inline_matrix_html(text: str) -> str:
 
 def _render_matrix_formatted_body(text: str) -> str:
     """Render Matrix custom HTML without relying on optional Markdown deps."""
+    # 逻辑说明：`_render_matrix_formatted_body` 接收 text，渲染Matrix formatted body，返回 str；
+    # 会访问网络服务。失败策略：已知失败按现有 except 转为错误结果或日志，未覆盖异常继续上抛；本函数不额外重试，避免掩盖持续故障。
     try:
         from markdown_it import MarkdownIt
 
@@ -189,6 +199,8 @@ def _render_matrix_formatted_body(text: str) -> str:
 
 def build_matrix_text_content(text: str, mentions: list[str]) -> dict[str, Any]:
     """Build Matrix text content with visible mentions and m.mentions."""
+    # 逻辑说明：`build_matrix_text_content` 接收 text、mentions，构造Matrix 文本 内容，返回 dict[str, Any]；
+    # 会读写本地文件、会访问网络服务。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     body = text or ""
     formatted_body = _render_matrix_formatted_body(body)
 
@@ -222,6 +234,8 @@ def build_matrix_text_content(text: str, mentions: list[str]) -> dict[str, Any]:
 
 
 def _read_config_value(obj: Any, *names: str) -> Any:
+    # 逻辑说明：按优先级从字典或配置对象读取 Matrix channel 字段，兼容 access_token/accessToken 与 user_id/userId 等配置别名。
+    # 找到首个键或属性就返回其原值，全部缺失则返回 None；本函数不解析凭据、不访问 homeserver，也不更改配置。
     for name in names:
         if isinstance(obj, dict) and name in obj:
             return obj[name]
@@ -235,6 +249,8 @@ def _sanitize_session_filename(name: str) -> str:
 
 
 def _resolve_copaw_working_dir() -> Path:
+    # 逻辑说明：`_resolve_copaw_working_dir` 接收 当前对象/进程状态，解析copaw working dir，返回 Path；
+    # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     configured = os.environ.get("COPAW_WORKING_DIR")
     if configured:
         return Path(configured).expanduser().resolve()
@@ -250,6 +266,10 @@ def _matrix_session_path(
     room_id: str,
     account_id: str = "default",
 ) -> Path:
+    # 逻辑说明：`_matrix_session_path` 接收 working_dir、room_id、account_id，
+    # 执行 Matrix message 工具 中的“Matrix session 路径”步骤，返回 Path；
+    #
+    # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     session_id = f"matrix:{room_id}"
     safe_uid = _sanitize_session_filename(room_id)
     safe_sid = _sanitize_session_filename(session_id)
@@ -275,6 +295,10 @@ async def _record_matrix_outbound_to_session(
     agent queue. Recording the outbound message here keeps cross-room updates
     visible when that target room wakes up later.
     """
+    # 逻辑说明：`_record_matrix_outbound_to_session` 接收 room_id、text、message_id、account_id，
+    # 把主动发送的 Matrix 内容追加到相应 CoPaw session 记录，返回 bool；
+    #
+    # 会读写本地文件。失败策略：已知失败按现有 except 转为错误结果或日志，未覆盖异常继续上抛；本函数不额外重试，避免掩盖持续故障。
     path = _matrix_session_path(
         working_dir=_resolve_copaw_working_dir(),
         room_id=room_id,
@@ -348,6 +372,10 @@ async def _record_matrix_outbound_to_session(
 
 
 def _matrix_config_for_agent(account_id: str) -> tuple[str, str, str]:
+    # 逻辑说明：`_matrix_config_for_agent` 接收 account_id，执行 Matrix message 工具 中的“Matrix 配置 for Agent”步骤，
+    # 返回 tuple[str, str, str]；
+    #
+    # 会访问网络服务。失败策略：非法输入或状态会立即抛错，其他底层异常继续上抛；本函数不额外重试，避免掩盖持续故障。
     from copaw.config.config import load_agent_config
 
     agent_config = load_agent_config(account_id or "default")
@@ -380,6 +408,8 @@ async def _send_matrix_room_message(
     content: dict[str, Any],
     account_id: str,
 ) -> str | None:
+    # 逻辑说明：`_send_matrix_room_message` 接收 room_id、content、account_id，调用 Matrix send API 向指定房间写入格式化消息，返回 str | None；
+    # 会访问网络服务。失败策略：已知失败按现有 except 转为错误结果或日志，未覆盖异常继续上抛；本函数不额外重试，避免掩盖持续故障。
     from nio import AsyncClient
 
     homeserver, access_token, user_id = _matrix_config_for_agent(account_id)
@@ -411,6 +441,10 @@ async def message(
     dryRun: bool = False,
 ) -> ToolResponse:
     """Send a message using OpenClaw-compatible routing semantics."""
+    # 逻辑说明：`message` 接收 action、channel、target、message、accountId、dryRun，校验 Matrix 目标与发送策略，发送消息并把出站事件记录进 session，
+    # 返回 ToolResponse；
+    #
+    # 不修改外部状态。失败策略：已知失败按现有 except 转为错误结果或日志，未覆盖异常继续上抛；本函数不额外重试，避免掩盖持续故障。
     try:
         if action != "send":
             raise MessageToolError("only action='send' is supported")

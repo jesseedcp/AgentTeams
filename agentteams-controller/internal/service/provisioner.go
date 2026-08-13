@@ -247,6 +247,9 @@ func (p *Provisioner) roomAliasFull(localpart string) string {
 // differ from matrixUsername (e.g. manager credentials are stored under
 // the Manager CR name, but the Matrix localpart is always "manager").
 func (p *Provisioner) leaveAllRooms(ctx context.Context, credsKey, matrixUsername string) error {
+	// 逻辑说明：leaveAllRooms 接收 ctx(context.Context)、credsKey/matrixUsername(string)，依次借助 Load、ensureMatrixToken、ListJoinedRooms、LeaveRoom退出Matrix 身份与房间的期望结果。
+	// 返回/状态：返回 error；可能查询或改变 Matrix 用户、房间、别名、成员或权限状态。
+	// 失败/重试：Matrix 请求失败会返回错误；上层下一轮先重新观测实际状态，再只补做尚未满足的步骤。
 	logger := log.FromContext(ctx)
 
 	creds, err := p.creds.Load(ctx, credsKey)
@@ -282,6 +285,9 @@ func (p *Provisioner) leaveAllRooms(ctx context.Context, credsKey, matrixUsernam
 // `delete_rooms_after_leave`/`forget_forced_upon_leave` homeserver
 // settings act as a fallback if this never lands.
 func (p *Provisioner) deleteRoom(ctx context.Context, roomID string) error {
+	// 逻辑说明：deleteRoom 接收 ctx(context.Context)、roomID(string)，依次借助 AdminCommand删除Matrix 身份与房间的期望结果。
+	// 返回/状态：返回 error；可能查询或改变 Matrix 用户、房间、别名、成员或权限状态。
+	// 失败/重试：Matrix 请求失败会返回错误；上层下一轮先重新观测实际状态，再只补做尚未满足的步骤。
 	if roomID == "" {
 		return nil
 	}
@@ -294,24 +300,36 @@ func (p *Provisioner) deleteRoom(ctx context.Context, roomID string) error {
 // was the last local member get pruned via the tuwunel
 // delete_rooms_after_leave setting.
 func (p *Provisioner) LeaveAllWorkerRooms(ctx context.Context, workerName string) error {
+	// 逻辑说明：LeaveAllWorkerRooms 接收 ctx(context.Context)、workerName(string)，依次借助 leaveAllRooms退出Matrix 身份与房间的期望结果。
+	// 返回/状态：返回 error；可能查询或改变 Matrix 用户、房间、别名、成员或权限状态。
+	// 失败/重试：Matrix 请求失败会返回错误；上层下一轮先重新观测实际状态，再只补做尚未满足的步骤。
 	return p.leaveAllRooms(ctx, workerName, workerName)
 }
 
 // DeleteWorkerRoom asks tuwunel to delete the worker's exclusive DM room.
 // Fire-and-forget; callers should treat errors as non-fatal.
 func (p *Provisioner) DeleteWorkerRoom(ctx context.Context, roomID string) error {
+	// 逻辑说明：DeleteWorkerRoom 接收 ctx(context.Context)、roomID(string)，依次借助 deleteRoom删除Matrix 身份与房间的期望结果。
+	// 返回/状态：返回 error；可能查询或改变 Matrix 用户、房间、别名、成员或权限状态。
+	// 失败/重试：Matrix 请求失败会返回错误；上层下一轮先重新观测实际状态，再只补做尚未满足的步骤。
 	return p.deleteRoom(ctx, roomID)
 }
 
 // LeaveAllManagerRooms makes the manager leave every Matrix room it is
 // joined to. Used during manager deletion.
 func (p *Provisioner) LeaveAllManagerRooms(ctx context.Context, managerName string) error {
+	// 逻辑说明：LeaveAllManagerRooms 接收 ctx(context.Context)、managerName(string)，依次借助 leaveAllRooms退出Matrix 身份与房间的期望结果。
+	// 返回/状态：返回 error；可能查询或改变 Matrix 用户、房间、别名、成员或权限状态。
+	// 失败/重试：Matrix 请求失败会返回错误；上层下一轮先重新观测实际状态，再只补做尚未满足的步骤。
 	return p.leaveAllRooms(ctx, managerName, "manager")
 }
 
 // DeleteManagerRoom asks tuwunel to delete the manager's exclusive DM
 // room. Fire-and-forget.
 func (p *Provisioner) DeleteManagerRoom(ctx context.Context, roomID string) error {
+	// 逻辑说明：DeleteManagerRoom 接收 ctx(context.Context)、roomID(string)，依次借助 deleteRoom删除Matrix 身份与房间的期望结果。
+	// 返回/状态：返回 error；可能查询或改变 Matrix 用户、房间、别名、成员或权限状态。
+	// 失败/重试：Matrix 请求失败会返回错误；上层下一轮先重新观测实际状态，再只补做尚未满足的步骤。
 	return p.deleteRoom(ctx, roomID)
 }
 
@@ -322,6 +340,9 @@ func (p *Provisioner) DeleteManagerRoom(ctx context.Context, roomID string) erro
 // 重复调用会查找并复用现有资源，而不是创建第二个 Worker 身份。
 // 返回的 token/password 仅供当前部署链使用，不应记录到日志或 status。
 func (p *Provisioner) ProvisionWorker(ctx context.Context, req WorkerProvisionRequest) (*WorkerProvisionResult, error) {
+	// 逻辑说明：ProvisionWorker 接收 ctx(context.Context)、req(WorkerProvisionRequest)，依次借助 UserID、loadWorkerCredentials、GenerateCredentials、Save开通Matrix 身份与房间的期望结果。
+	// 返回/状态：返回 *WorkerProvisionResult、error；会更新 Matrix 身份与房间的内存状态，存在客户端调用时还可能同步相应外部资源。
+	// 失败/重试：输入或依赖调用失败会返回错误；是否重排由上层调谐器决定，本函数不隐藏失败。
 	logger := log.FromContext(ctx)
 	workerName := req.Name
 	credentialName := req.CredentialName
@@ -539,6 +560,9 @@ func (p *Provisioner) ProvisionWorker(ctx context.Context, req WorkerProvisionRe
 // exposed ports, container, gateway auth, MinIO user.
 // Best-effort: individual step errors are logged but don't fail the operation.
 func (p *Provisioner) DeprovisionWorker(ctx context.Context, req WorkerDeprovisionRequest) error {
+	// 逻辑说明：DeprovisionWorker 接收 ctx(context.Context)、req(WorkerDeprovisionRequest)，依次借助 domainForExpose、ReconcileExpose、DeauthorizeAIRoutes、DeleteConsumer回收Matrix 身份与房间的期望结果。
+	// 返回/状态：返回 error；可能回收 Matrix 身份与房间关联的外部资源，调用者只在成功后移除 finalizer。
+	// 失败/重试：把“已不存在”视为成功；其他错误会保留 finalizer，下一轮从剩余资源继续清理。
 	logger := log.FromContext(ctx)
 	consumerName := "worker-" + req.Name
 
@@ -587,6 +611,9 @@ func (p *Provisioner) DeprovisionWorker(ctx context.Context, req WorkerDeprovisi
 // Callers should Save the updated creds back to the credential store after
 // this returns so the token survives controller restarts.
 func (p *Provisioner) ensureMatrixToken(ctx context.Context, matrixUsername string, creds *WorkerCredentials) (string, error) {
+	// 逻辑说明：ensureMatrixToken 接收 ctx(context.Context)、matrixUsername(string)、creds(*WorkerCredentials)，依次借助 MatrixAppServiceEnabled、LoginAppServiceUser、Login确保Matrix 身份与房间的期望结果。
+	// 返回/状态：返回 string、error；可能查询或改变 Matrix 用户、房间、别名、成员或权限状态。
+	// 失败/重试：Matrix 请求失败会返回错误；上层下一轮先重新观测实际状态，再只补做尚未满足的步骤。
 	// Always reuse cached token. Re-login invalidates the old token on
 	// Tuwunel, breaking running Workers. On-demand refresh is available
 	// via POST /api/v1/credentials/matrix-token for 401 recovery.
@@ -611,6 +638,9 @@ func (p *Provisioner) ensureMatrixToken(ctx context.Context, matrixUsername stri
 // worker/manager, bypassing the cache. Called when the caller reports a 401
 // from the homeserver. Persists the new token to the credential store.
 func (p *Provisioner) ForceRefreshMatrixToken(ctx context.Context, name string) (*RefreshResult, error) {
+	// 逻辑说明：ForceRefreshMatrixToken 接收 ctx(context.Context)、name(string)，依次借助 Load、MatrixAppServiceEnabled、LoginAppServiceUser、Login强制执行Matrix 身份与房间的期望结果。
+	// 返回/状态：返回 *RefreshResult、error；可能查询或改变 Matrix 用户、房间、别名、成员或权限状态。
+	// 失败/重试：Matrix 请求失败会返回错误；上层下一轮先重新观测实际状态，再只补做尚未满足的步骤。
 	creds, err := p.creds.Load(ctx, name)
 	if err != nil {
 		return nil, fmt.Errorf("load credentials for %s: %w", name, err)
@@ -644,12 +674,18 @@ func (p *Provisioner) ForceRefreshMatrixToken(ctx context.Context, name string) 
 // RefreshCredentials loads persisted credentials and obtains a Matrix token,
 // reusing the cached token when present. Used during update operations.
 func (p *Provisioner) RefreshCredentials(ctx context.Context, workerName string) (*RefreshResult, error) {
+	// 逻辑说明：RefreshCredentials 接收 ctx(context.Context)、workerName(string)，依次借助 RefreshWorkerCredentials刷新Matrix 身份与房间的期望结果。
+	// 返回/状态：返回 *RefreshResult、error；可能读写凭据文件或 Kubernetes Secret，敏感内容只经返回值传递，禁止写日志。
+	// 失败/重试：随机源、文件系统或 Secret API 失败会返回错误；调用方重新读取现状后可安全重试。
 	return p.RefreshWorkerCredentials(ctx, workerName, workerName, "")
 }
 
 // RefreshWorkerCredentials loads worker credentials by their owning CR key while
 // refreshing the Matrix token for the runtime worker identity.
 func (p *Provisioner) RefreshWorkerCredentials(ctx context.Context, credentialName, workerName, teamName string) (*RefreshResult, error) {
+	// 逻辑说明：RefreshWorkerCredentials 接收 ctx(context.Context)、credentialName/workerName/teamName(string)，依次借助 loadWorkerCredentials、ensureMatrixToken、Save、EnsureUser刷新Matrix 身份与房间的期望结果。
+	// 返回/状态：返回 *RefreshResult、error；可能读写凭据文件或 Kubernetes Secret，敏感内容只经返回值传递，禁止写日志。
+	// 失败/重试：随机源、文件系统或 Secret API 失败会返回错误；调用方重新读取现状后可安全重试。
 	if credentialName == "" {
 		credentialName = workerName
 	}
@@ -689,6 +725,9 @@ func (p *Provisioner) RefreshWorkerCredentials(ctx context.Context, credentialNa
 }
 
 func (p *Provisioner) loadWorkerCredentials(ctx context.Context, credentialName string) (*WorkerCredentials, error) {
+	// 逻辑说明：loadWorkerCredentials 接收 ctx(context.Context)、credentialName(string)，依次借助 Load读取Matrix 身份与房间的期望结果。
+	// 返回/状态：返回 *WorkerCredentials、error；可能读写凭据文件或 Kubernetes Secret，敏感内容只经返回值传递，禁止写日志。
+	// 失败/重试：随机源、文件系统或 Secret API 失败会返回错误；调用方重新读取现状后可安全重试。
 	return p.creds.Load(ctx, credentialName)
 }
 
@@ -697,6 +736,9 @@ func (p *Provisioner) loadWorkerCredentials(ctx context.Context, credentialName 
 // Manager CR name (e.g. "default") differs from the Matrix username (always
 // "manager"), so this uses a dedicated method.
 func (p *Provisioner) RefreshManagerCredentials(ctx context.Context, managerName string) (*RefreshResult, error) {
+	// 逻辑说明：RefreshManagerCredentials 接收 ctx(context.Context)、managerName(string)，依次借助 Load、ensureMatrixToken、Save、EnsureUser刷新Matrix 身份与房间的期望结果。
+	// 返回/状态：返回 *RefreshResult、error；可能读写凭据文件或 Kubernetes Secret，敏感内容只经返回值传递，禁止写日志。
+	// 失败/重试：随机源、文件系统或 Secret API 失败会返回错误；调用方重新读取现状后可安全重试。
 	creds, err := p.creds.Load(ctx, managerName)
 	if err != nil || creds == nil {
 		return nil, fmt.Errorf("credentials not found for manager %s", managerName)
@@ -736,6 +778,9 @@ func (p *Provisioner) RefreshManagerCredentials(ctx context.Context, managerName
 // authorized on AI routes. Called during container recreation to restore auth
 // that may have been lost (e.g. after upgrade with fresh Higress state).
 func (p *Provisioner) EnsureManagerGatewayAuth(ctx context.Context, managerName, gatewayKey string) error {
+	// 逻辑说明：EnsureManagerGatewayAuth 接收 ctx(context.Context)、managerName/gatewayKey(string)，依次借助 EnsureConsumer、AuthorizeAIRoutes确保Matrix 身份与房间的期望结果。
+	// 返回/状态：返回 error；会更新 Matrix 身份与房间的内存状态，存在客户端调用时还可能同步相应外部资源。
+	// 失败/重试：输入或依赖调用失败会返回错误；是否重排由上层调谐器决定，本函数不隐藏失败。
 	consumerName := "manager"
 	_, err := p.gateway.EnsureConsumer(ctx, gateway.ConsumerRequest{
 		Name:          consumerName,
@@ -756,6 +801,9 @@ func (p *Provisioner) EnsureManagerGatewayAuth(ctx context.Context, managerName,
 // route was rewritten, or after upgrade with fresh Higress state). Mirrors
 // EnsureManagerGatewayAuth but uses the worker-scoped consumer name.
 func (p *Provisioner) EnsureWorkerGatewayAuth(ctx context.Context, workerName, gatewayKey string) error {
+	// 逻辑说明：EnsureWorkerGatewayAuth 接收 ctx(context.Context)、workerName/gatewayKey(string)，依次借助 EnsureConsumer、AuthorizeAIRoutes确保Matrix 身份与房间的期望结果。
+	// 返回/状态：返回 error；会更新 Matrix 身份与房间的内存状态，存在客户端调用时还可能同步相应外部资源。
+	// 失败/重试：输入或依赖调用失败会返回错误；是否重排由上层调谐器决定，本函数不隐藏失败。
 	consumerName := "worker-" + workerName
 	_, err := p.gateway.EnsureConsumer(ctx, gateway.ConsumerRequest{
 		Name:          consumerName,
@@ -782,6 +830,9 @@ func (p *Provisioner) EnsureWorkerGatewayAuth(ctx context.Context, workerName, g
 // 就应复用它并校正 membership。不能只根据 Status.RoomID 盲目信任缓存，
 // 因为 Matrix 中的别名所指真实房间才是外部实际状态。
 func (p *Provisioner) ProvisionTeamRooms(ctx context.Context, req TeamRoomRequest) (*TeamRoomResult, error) {
+	// 逻辑说明：ProvisionTeamRooms 接收 ctx(context.Context)、req(TeamRoomRequest)，依次借助 UserID、resolveTeamCoordinatorMatrixIDs、resolveTeamMemberMatrixIDs、resolveTeamAdminMatrixID开通Matrix 身份与房间的期望结果。
+	// 返回/状态：返回 *TeamRoomResult、error；可能查询或改变 Matrix 用户、房间、别名、成员或权限状态。
+	// 失败/重试：Matrix 请求失败会返回错误；上层下一轮先重新观测实际状态，再只补做尚未满足的步骤。
 	logger := log.FromContext(ctx)
 	managerMatrixID := p.matrix.UserID("manager")
 	adminMatrixID := p.matrix.UserID(p.adminUser)
@@ -939,6 +990,9 @@ func (p *Provisioner) ProvisionTeamRooms(ctx context.Context, req TeamRoomReques
 }
 
 func (p *Provisioner) ensureTeamAdminJoinedLeaderDM(ctx context.Context, roomID, teamAdminID, teamAdminToken, leaderCredentialName, leaderName, teamName string, created bool) error {
+	// 逻辑说明：ensureTeamAdminJoinedLeaderDM 接收 ctx(context.Context)、roomID/teamAdminID/teamAdminToken/leaderCredentialName/leaderName/teamName(string)、created(bool)，依次借助 JoinRoom、leaderInviteToken、InviteToRoomWithToken确保Matrix 身份与房间的期望结果。
+	// 返回/状态：返回 error；会更新 Matrix 身份与房间的内存状态，存在客户端调用时还可能同步相应外部资源。
+	// 失败/重试：输入或依赖调用失败会返回错误；是否重排由上层调谐器决定，本函数不隐藏失败。
 	if err := p.matrix.JoinRoom(ctx, roomID, teamAdminToken); err == nil {
 		return nil
 	} else if created {
@@ -960,6 +1014,9 @@ func (p *Provisioner) ensureTeamAdminJoinedLeaderDM(ctx context.Context, roomID,
 }
 
 func (p *Provisioner) leaderDMPowerLevels(managerMatrixID, adminMatrixID, leaderMatrixID, teamAdminID string, hasTeamAdmin bool) map[string]int {
+	// 逻辑说明：leaderDMPowerLevels 接收 managerMatrixID/adminMatrixID/leaderMatrixID/teamAdminID(string)、hasTeamAdmin(bool)，按本函数中的条件与转换步骤处理Matrix 身份与房间的期望结果。
+	// 返回/状态：返回 map[string]int；会更新 Matrix 身份与房间的内存状态，存在客户端调用时还可能同步相应外部资源。
+	// 失败/重试：输入或依赖调用失败会返回错误；是否重排由上层调谐器决定，本函数不隐藏失败。
 	levels := map[string]int{
 		managerMatrixID: 100,
 		leaderMatrixID:  100,
@@ -973,6 +1030,9 @@ func (p *Provisioner) leaderDMPowerLevels(managerMatrixID, adminMatrixID, leader
 }
 
 func (p *Provisioner) resolveTeamAdminMatrixID(admin *v1beta1.TeamAdminSpec) (string, bool) {
+	// 逻辑说明：resolveTeamAdminMatrixID 接收 admin(*v1beta1.TeamAdminSpec)，依次借助 UserID解析Matrix 身份与房间的期望结果。
+	// 返回/状态：返回 string、bool；可能查询或改变 Matrix 用户、房间、别名、成员或权限状态。
+	// 失败/重试：Matrix 请求失败会返回错误；上层下一轮先重新观测实际状态，再只补做尚未满足的步骤。
 	if admin == nil {
 		return "", false
 	}
@@ -986,6 +1046,9 @@ func (p *Provisioner) resolveTeamAdminMatrixID(admin *v1beta1.TeamAdminSpec) (st
 }
 
 func (p *Provisioner) resolveTeamCoordinatorMatrixIDs(admin *v1beta1.TeamAdminSpec, members []v1beta1.TeamMemberSpec) []string {
+	// 逻辑说明：resolveTeamCoordinatorMatrixIDs 接收 admin(*v1beta1.TeamAdminSpec)、members([]v1beta1.TeamMemberSpec)，依次借助 resolveTeamAdminMatrixID、teamMemberIsCoordinator、UserID、uniqueStrings解析Matrix 身份与房间的期望结果。
+	// 返回/状态：返回 []string；可能查询或改变 Matrix 用户、房间、别名、成员或权限状态。
+	// 失败/重试：Matrix 请求失败会返回错误；上层下一轮先重新观测实际状态，再只补做尚未满足的步骤。
 	ids := make([]string, 0, 1+len(members))
 	if id, ok := p.resolveTeamAdminMatrixID(admin); ok {
 		ids = append(ids, id)
@@ -1006,6 +1069,9 @@ func (p *Provisioner) resolveTeamCoordinatorMatrixIDs(admin *v1beta1.TeamAdminSp
 }
 
 func (p *Provisioner) resolveTeamMemberMatrixIDs(members []v1beta1.TeamMemberSpec) []string {
+	// 逻辑说明：resolveTeamMemberMatrixIDs 接收 members([]v1beta1.TeamMemberSpec)，依次借助 UserID、uniqueStrings解析Matrix 身份与房间的期望结果。
+	// 返回/状态：返回 []string；可能查询或改变 Matrix 用户、房间、别名、成员或权限状态。
+	// 失败/重试：Matrix 请求失败会返回错误；上层下一轮先重新观测实际状态，再只补做尚未满足的步骤。
 	ids := make([]string, 0, len(members))
 	for _, member := range members {
 		if member.MatrixUserID != "" {
@@ -1024,6 +1090,9 @@ func teamMemberIsCoordinator(member v1beta1.TeamMemberSpec) bool {
 }
 
 func appendUniqueStrings(base []string, values ...string) []string {
+	// 逻辑说明：appendUniqueStrings 接收 base([]string)、values(...string)，按本函数中的条件与转换步骤追加Matrix 身份与房间的期望结果。
+	// 返回/状态：返回 []string；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	seen := make(map[string]struct{}, len(base)+len(values))
 	out := make([]string, 0, len(base)+len(values))
 	for _, v := range base {
@@ -1054,6 +1123,9 @@ func uniqueStrings(values []string) []string {
 }
 
 func withoutString(values []string, target string) []string {
+	// 逻辑说明：withoutString 接收 values([]string)、target(string)，按本函数中的条件与转换步骤处理Matrix 身份与房间的期望结果。
+	// 返回/状态：返回 []string；会更新 Matrix 身份与房间的内存状态，存在客户端调用时还可能同步相应外部资源。
+	// 失败/重试：输入或依赖调用失败会返回错误；是否重排由上层调谐器决定，本函数不隐藏失败。
 	out := make([]string, 0, len(values))
 	for _, value := range values {
 		if value == target {
@@ -1065,6 +1137,9 @@ func withoutString(values []string, target string) []string {
 }
 
 func containsString(values []string, target string) bool {
+	// 逻辑说明：containsString 接收 values([]string)、target(string)，按本函数中的条件与转换步骤判断包含关系Matrix 身份与房间的期望结果。
+	// 返回/状态：返回 bool；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	for _, value := range values {
 		if value == target {
 			return true
@@ -1076,12 +1151,18 @@ func containsString(values []string, target string) bool {
 // EnsureRoomMember invites userID into roomID. Idempotent (treats
 // already-joined/invited as success). Returns nil on success.
 func (p *Provisioner) EnsureRoomMember(ctx context.Context, roomID, userID string) error {
+	// 逻辑说明：EnsureRoomMember 接收 ctx(context.Context)、roomID/userID(string)，依次借助 InviteToRoom确保Matrix 身份与房间的期望结果。
+	// 返回/状态：返回 error；可能查询或改变 Matrix 用户、房间、别名、成员或权限状态。
+	// 失败/重试：Matrix 请求失败会返回错误；上层下一轮先重新观测实际状态，再只补做尚未满足的步骤。
 	return p.matrix.InviteToRoom(ctx, roomID, userID)
 }
 
 // EnsureRoomNonMember kicks userID out of roomID. Idempotent (treats
 // not-in-room as success). Returns nil on success.
 func (p *Provisioner) EnsureRoomNonMember(ctx context.Context, roomID, userID, reason string) error {
+	// 逻辑说明：EnsureRoomNonMember 接收 ctx(context.Context)、roomID/userID/reason(string)，依次借助 KickFromRoom确保Matrix 身份与房间的期望结果。
+	// 返回/状态：返回 error；可能查询或改变 Matrix 用户、房间、别名、成员或权限状态。
+	// 失败/重试：Matrix 请求失败会返回错误；上层下一轮先重新观测实际状态，再只补做尚未满足的步骤。
 	return p.matrix.KickFromRoom(ctx, roomID, userID, reason)
 }
 
@@ -1095,14 +1176,23 @@ func (p *Provisioner) EnsureRoomNonMember(ctx context.Context, roomID, userID, r
 // 它先读 actual membership 再计算需邀请与需移除的差集，所以重复
 // reconcile 不会产生重复邀请，也不会把已不在房间的用户当作错误。
 func (p *Provisioner) ReconcileRoomMembership(ctx context.Context, roomID string, desired []string) error {
+	// 逻辑说明：ReconcileRoomMembership 接收 ctx(context.Context)、roomID(string)、desired([]string)，依次借助 ReconcileRoomMembershipWithActorToken调谐Matrix 身份与房间的期望结果。
+	// 返回/状态：返回 error；可能查询或改变 Matrix 用户、房间、别名、成员或权限状态。
+	// 失败/重试：Matrix 请求失败会返回错误；上层下一轮先重新观测实际状态，再只补做尚未满足的步骤。
 	return p.ReconcileRoomMembershipWithActorToken(ctx, roomID, desired, "", "")
 }
 
 func (p *Provisioner) ReconcileRoomMembershipWithInviteToken(ctx context.Context, roomID string, desired []string, inviteToken, inviteActor string) error {
+	// 逻辑说明：ReconcileRoomMembershipWithInviteToken 接收 ctx(context.Context)、roomID(string)、desired([]string)、inviteToken/inviteActor(string)，依次借助 ReconcileRoomMembershipWithActorToken调谐Matrix 身份与房间的期望结果。
+	// 返回/状态：返回 error；可能查询或改变 Matrix 用户、房间、别名、成员或权限状态。
+	// 失败/重试：Matrix 请求失败会返回错误；上层下一轮先重新观测实际状态，再只补做尚未满足的步骤。
 	return p.ReconcileRoomMembershipWithActorToken(ctx, roomID, desired, inviteToken, inviteActor)
 }
 
 func (p *Provisioner) ReconcileRoomMembershipWithActorToken(ctx context.Context, roomID string, desired []string, actorToken, actorName string) error {
+	// 逻辑说明：ReconcileRoomMembershipWithActorToken 接收 ctx(context.Context)、roomID(string)、desired([]string)、actorToken/actorName(string)，依次借助 ListRoomMembersWithToken、ListRoomMembers、InviteToRoomWithToken、InviteToRoom调谐Matrix 身份与房间的期望结果。
+	// 返回/状态：返回 error；可能查询或改变 Matrix 用户、房间、别名、成员或权限状态。
+	// 失败/重试：Matrix 请求失败会返回错误；上层下一轮先重新观测实际状态，再只补做尚未满足的步骤。
 	logger := log.FromContext(ctx)
 
 	var current []matrix.RoomMember
@@ -1204,6 +1294,9 @@ func (p *Provisioner) ReconcileRoomMembershipWithActorToken(ctx context.Context,
 }
 
 func (p *Provisioner) leaderInviteToken(ctx context.Context, credentialName, leaderName, teamName string) (string, error) {
+	// 逻辑说明：leaderInviteToken 接收 ctx(context.Context)、credentialName/leaderName/teamName(string)，依次借助 RefreshWorkerCredentials处理Matrix 身份与房间的期望结果。
+	// 返回/状态：返回 string、error；会更新 Matrix 身份与房间的内存状态，存在客户端调用时还可能同步相应外部资源。
+	// 失败/重试：输入或依赖调用失败会返回错误；是否重排由上层调谐器决定，本函数不隐藏失败。
 	if p.creds == nil {
 		return "", fmt.Errorf("credential store unavailable")
 	}
@@ -1221,6 +1314,9 @@ func (p *Provisioner) leaderInviteToken(ctx context.Context, credentialName, lea
 }
 
 func (p *Provisioner) observedRoomMembership(ctx context.Context, roomID, userID string) (bool, []string, error) {
+	// 逻辑说明：observedRoomMembership 接收 ctx(context.Context)、roomID/userID(string)，依次借助 ListRoomMembers、observedMembershipFromMembers、observedMembershipsFromMembers处理Matrix 身份与房间的期望结果。
+	// 返回/状态：返回 bool、[]string、error；可能查询或改变 Matrix 用户、房间、别名、成员或权限状态。
+	// 失败/重试：Matrix 请求失败会返回错误；上层下一轮先重新观测实际状态，再只补做尚未满足的步骤。
 	members, err := p.matrix.ListRoomMembers(ctx, roomID)
 	if err != nil {
 		return false, nil, err
@@ -1229,6 +1325,9 @@ func (p *Provisioner) observedRoomMembership(ctx context.Context, roomID, userID
 }
 
 func (p *Provisioner) observedRoomMembershipWithToken(ctx context.Context, roomID, userID, token string) (bool, []string, error) {
+	// 逻辑说明：observedRoomMembershipWithToken 接收 ctx(context.Context)、roomID/userID/token(string)，依次借助 ListRoomMembersWithToken、observedMembershipFromMembers、observedMembershipsFromMembers处理Matrix 身份与房间的期望结果。
+	// 返回/状态：返回 bool、[]string、error；可能查询或改变 Matrix 用户、房间、别名、成员或权限状态。
+	// 失败/重试：Matrix 请求失败会返回错误；上层下一轮先重新观测实际状态，再只补做尚未满足的步骤。
 	members, err := p.matrix.ListRoomMembersWithToken(ctx, roomID, token)
 	if err != nil {
 		return false, nil, err
@@ -1237,6 +1336,9 @@ func (p *Provisioner) observedRoomMembershipWithToken(ctx context.Context, roomI
 }
 
 func observedMembershipFromMembers(members []matrix.RoomMember, userID string) bool {
+	// 逻辑说明：observedMembershipFromMembers 接收 members([]matrix.RoomMember)、userID(string)，按本函数中的条件与转换步骤处理Matrix 身份与房间的期望结果。
+	// 返回/状态：返回 bool；可能查询或改变 Matrix 用户、房间、别名、成员或权限状态。
+	// 失败/重试：Matrix 请求失败会返回错误；上层下一轮先重新观测实际状态，再只补做尚未满足的步骤。
 	for _, member := range members {
 		if member.UserID == userID {
 			return true
@@ -1246,6 +1348,9 @@ func observedMembershipFromMembers(members []matrix.RoomMember, userID string) b
 }
 
 func observedMembershipsFromMembers(members []matrix.RoomMember, userID string) []string {
+	// 逻辑说明：observedMembershipsFromMembers 接收 members([]matrix.RoomMember)、userID(string)，按本函数中的条件与转换步骤处理Matrix 身份与房间的期望结果。
+	// 返回/状态：返回 []string；可能查询或改变 Matrix 用户、房间、别名、成员或权限状态。
+	// 失败/重试：Matrix 请求失败会返回错误；上层下一轮先重新观测实际状态，再只补做尚未满足的步骤。
 	memberships := make([]string, 0, 1)
 	for _, member := range members {
 		if member.UserID != userID {
@@ -1257,6 +1362,9 @@ func observedMembershipsFromMembers(members []matrix.RoomMember, userID string) 
 }
 
 func shouldForceLeaveAfterKickError(err error) bool {
+	// 逻辑说明：shouldForceLeaveAfterKickError 接收 err(error)，依次借助 ToLower、Contains判定Matrix 身份与房间的期望结果。
+	// 返回/状态：返回 bool；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	if err == nil {
 		return false
 	}
@@ -1267,11 +1375,17 @@ func shouldForceLeaveAfterKickError(err error) bool {
 
 // DeleteCredentials removes persisted credentials for a worker.
 func (p *Provisioner) DeleteCredentials(ctx context.Context, workerName string) error {
+	// 逻辑说明：DeleteCredentials 接收 ctx(context.Context)、workerName(string)，依次借助 DeleteWorkerCredentials删除Matrix 身份与房间的期望结果。
+	// 返回/状态：返回 error；可能读写凭据文件或 Kubernetes Secret，敏感内容只经返回值传递，禁止写日志。
+	// 失败/重试：随机源、文件系统或 Secret API 失败会返回错误；调用方重新读取现状后可安全重试。
 	return p.DeleteWorkerCredentials(ctx, workerName)
 }
 
 // DeleteWorkerCredentials removes persisted credentials for a worker-like CR.
 func (p *Provisioner) DeleteWorkerCredentials(ctx context.Context, credentialName string) error {
+	// 逻辑说明：DeleteWorkerCredentials 接收 ctx(context.Context)、credentialName(string)，依次借助 Delete删除Matrix 身份与房间的期望结果。
+	// 返回/状态：返回 error；可能读写凭据文件或 Kubernetes Secret，敏感内容只经返回值传递，禁止写日志。
+	// 失败/重试：随机源、文件系统或 Secret API 失败会返回错误；调用方重新读取现状后可安全重试。
 	return p.creds.Delete(ctx, credentialName)
 }
 
@@ -1281,6 +1395,9 @@ func (p *Provisioner) DeleteWorkerCredentials(ctx context.Context, credentialNam
 // the underlying room, which is intentionally left intact to preserve chat
 // history; it only detaches the controller's stable identifier from it.
 func (p *Provisioner) DeleteTeamRoomAliases(ctx context.Context, teamName, leaderName string) error {
+	// 逻辑说明：DeleteTeamRoomAliases 接收 ctx(context.Context)、teamName/leaderName(string)，依次借助 roomAliasFull、roomAliasLocalpart、DeleteRoomAlias删除Matrix 身份与房间的期望结果。
+	// 返回/状态：返回 error；可能查询或改变 Matrix 用户、房间、别名、成员或权限状态。
+	// 失败/重试：Matrix 请求失败会返回错误；上层下一轮先重新观测实际状态，再只补做尚未满足的步骤。
 	logger := log.FromContext(ctx)
 	teamAlias := p.roomAliasFull(roomAliasLocalpart("team", teamName))
 	if err := p.matrix.DeleteRoomAlias(ctx, teamAlias); err != nil {
@@ -1298,6 +1415,9 @@ func (p *Provisioner) DeleteTeamRoomAliases(ctx context.Context, teamName, leade
 // ArchiveTeamRooms marks preserved Team rooms with a stable deleted suffix so
 // humans can distinguish them from active rooms after aliases are released.
 func (p *Provisioner) ArchiveTeamRooms(ctx context.Context, req TeamRoomArchiveRequest) error {
+	// 逻辑说明：ArchiveTeamRooms 接收 ctx(context.Context)、req(TeamRoomArchiveRequest)，依次借助 SetRoomName归档Matrix 身份与房间的期望结果。
+	// 返回/状态：返回 error；可能查询或改变 Matrix 用户、房间、别名、成员或权限状态。
+	// 失败/重试：Matrix 请求失败会返回错误；上层下一轮先重新观测实际状态，再只补做尚未满足的步骤。
 	logger := log.FromContext(ctx)
 	if req.TeamRoomID != "" {
 		name := fmt.Sprintf("Team: %s [deleted]", req.TeamName)
@@ -1318,6 +1438,9 @@ func (p *Provisioner) ArchiveTeamRooms(ctx context.Context, req TeamRoomArchiveR
 // channel. Same semantics as DeleteTeamRoomAliases — the underlying room is
 // preserved, only the controller's handle to it is released.
 func (p *Provisioner) DeleteWorkerRoomAlias(ctx context.Context, workerName string) error {
+	// 逻辑说明：DeleteWorkerRoomAlias 接收 ctx(context.Context)、workerName(string)，依次借助 roomAliasFull、roomAliasLocalpart、DeleteRoomAlias删除Matrix 身份与房间的期望结果。
+	// 返回/状态：返回 error；可能查询或改变 Matrix 用户、房间、别名、成员或权限状态。
+	// 失败/重试：Matrix 请求失败会返回错误；上层下一轮先重新观测实际状态，再只补做尚未满足的步骤。
 	logger := log.FromContext(ctx)
 	alias := p.roomAliasFull(roomAliasLocalpart("worker", workerName))
 	if err := p.matrix.DeleteRoomAlias(ctx, alias); err != nil {
@@ -1329,6 +1452,9 @@ func (p *Provisioner) DeleteWorkerRoomAlias(ctx context.Context, workerName stri
 // DeleteManagerRoomAlias removes the alias for the Manager's Admin DM room.
 // Same preservation semantics as the worker/team variants.
 func (p *Provisioner) DeleteManagerRoomAlias(ctx context.Context, managerName string) error {
+	// 逻辑说明：DeleteManagerRoomAlias 接收 ctx(context.Context)、managerName(string)，依次借助 roomAliasFull、roomAliasLocalpart、DeleteRoomAlias删除Matrix 身份与房间的期望结果。
+	// 返回/状态：返回 error；可能查询或改变 Matrix 用户、房间、别名、成员或权限状态。
+	// 失败/重试：Matrix 请求失败会返回错误；上层下一轮先重新观测实际状态，再只补做尚未满足的步骤。
 	logger := log.FromContext(ctx)
 	alias := p.roomAliasFull(roomAliasLocalpart("manager", managerName))
 	if err := p.matrix.DeleteRoomAlias(ctx, alias); err != nil {
@@ -1361,6 +1487,9 @@ type ManagerProvisionResult struct {
 // “创建请求超时”不能立即认定为失败并换新名称，否则可能产生两个
 // Manager 账号或历史房间。
 func (p *Provisioner) ProvisionManager(ctx context.Context, req ManagerProvisionRequest) (*ManagerProvisionResult, error) {
+	// 逻辑说明：ProvisionManager 接收 ctx(context.Context)、req(ManagerProvisionRequest)，依次借助 UserID、Load、GenerateCredentials、Save开通Matrix 身份与房间的期望结果。
+	// 返回/状态：返回 *ManagerProvisionResult、error；会更新 Matrix 身份与房间的内存状态，存在客户端调用时还可能同步相应外部资源。
+	// 失败/重试：输入或依赖调用失败会返回错误；是否重排由上层调谐器决定，本函数不隐藏失败。
 	logger := log.FromContext(ctx)
 	managerName := req.Name
 	matrixUsername := "manager"
@@ -1580,6 +1709,9 @@ const llmAuthProbePromptTemplate = `{"model":%q,"messages":[{"role":"user","cont
 // controller doesn't know the data-plane URL or the model) do not
 // stall the welcome forever.
 func (p *Provisioner) IsManagerLLMAuthReady(ctx context.Context, gatewayKey string) (bool, error) {
+	// 逻辑说明：IsManagerLLMAuthReady 接收 ctx(context.Context)、gatewayKey(string)，依次借助 TrimRight、NewRequestWithContext、NewReader、Set判断Matrix 身份与房间的期望结果。
+	// 返回/状态：返回 bool、error；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	if p.aiGatewayURL == "" || p.managerModel == "" || gatewayKey == "" {
 		return true, nil
 	}
@@ -1618,6 +1750,9 @@ func (p *Provisioner) IsManagerLLMAuthReady(ctx context.Context, gatewayKey stri
 // MUST be separate from the actual send: claim-before-send would otherwise
 // churn the status field with claim/rollback patches on every requeue.
 func (p *Provisioner) IsManagerJoinedDM(ctx context.Context, roomID string) (bool, error) {
+	// 逻辑说明：IsManagerJoinedDM 接收 ctx(context.Context)、roomID(string)，依次借助 UserID、ListRoomMembers判断Matrix 身份与房间的期望结果。
+	// 返回/状态：返回 bool、error；仅在内存中整理或比较输入，不读取或写入外部系统。
+	// 失败/重试：纯计算不自行重试；若函数返回错误，调用者应修正输入或把错误交给上层调谐。
 	if roomID == "" {
 		return false, fmt.Errorf("welcome: empty RoomID")
 	}
@@ -1640,6 +1775,9 @@ func (p *Provisioner) IsManagerJoinedDM(ctx context.Context, roomID string) (boo
 // (b) committed the WelcomeSent=true claim to the API server, so that a
 // racing reconcile cannot also reach this point and double-deliver.
 func (p *Provisioner) SendManagerWelcomeMessage(ctx context.Context, req ManagerWelcomeRequest) error {
+	// 逻辑说明：SendManagerWelcomeMessage 接收 ctx(context.Context)、req(ManagerWelcomeRequest)，依次借助 renderManagerWelcomeBody、SendMessageAsAdmin发送Matrix 身份与房间的期望结果。
+	// 返回/状态：返回 error；会更新 Matrix 身份与房间的内存状态，存在客户端调用时还可能同步相应外部资源。
+	// 失败/重试：输入或依赖调用失败会返回错误；是否重排由上层调谐器决定，本函数不隐藏失败。
 	if req.RoomID == "" {
 		return fmt.Errorf("welcome: empty RoomID")
 	}
@@ -1686,6 +1824,9 @@ The human admin will start chatting shortly.`, language, timezone, language, tim
 
 // DeprovisionManager cleans up infrastructure for a deleted Manager.
 func (p *Provisioner) DeprovisionManager(ctx context.Context, name string) error {
+	// 逻辑说明：DeprovisionManager 接收 ctx(context.Context)、name(string)，依次借助 DeauthorizeAIRoutes、DeleteConsumer、DeleteUser回收Matrix 身份与房间的期望结果。
+	// 返回/状态：返回 error；可能回收 Matrix 身份与房间关联的外部资源，调用者只在成功后移除 finalizer。
+	// 失败/重试：把“已不存在”视为成功；其他错误会保留 finalizer，下一轮从剩余资源继续清理。
 	logger := log.FromContext(ctx)
 	consumerName := "manager"
 
@@ -1707,6 +1848,9 @@ func (p *Provisioner) DeprovisionManager(ctx context.Context, name string) error
 
 // CredentialNames returns all credential store keys (worker/manager names).
 func (p *Provisioner) CredentialNames(ctx context.Context) ([]string, error) {
+	// 逻辑说明：CredentialNames 接收 ctx(context.Context)，依次借助 List处理Matrix 身份与房间的期望结果。
+	// 返回/状态：返回 []string、error；可能读写凭据文件或 Kubernetes Secret，敏感内容只经返回值传递，禁止写日志。
+	// 失败/重试：随机源、文件系统或 Secret API 失败会返回错误；调用方重新读取现状后可安全重试。
 	return p.creds.List(ctx)
 }
 
@@ -1715,6 +1859,9 @@ func (p *Provisioner) CredentialNames(ctx context.Context) ([]string, error) {
 // controller is switched back to legacy password-based mode. This ensures
 // a seamless rollback without manual intervention.
 func (p *Provisioner) BackfillLegacyPasswords(ctx context.Context) error {
+	// 逻辑说明：BackfillLegacyPasswords 接收 ctx(context.Context)，依次借助 List、Load、GeneratePassword、UserID处理Matrix 身份与房间的期望结果。
+	// 返回/状态：返回 error；会更新 Matrix 身份与房间的内存状态，存在客户端调用时还可能同步相应外部资源。
+	// 失败/重试：输入或依赖调用失败会返回错误；是否重排由上层调谐器决定，本函数不隐藏失败。
 	logger := log.FromContext(ctx).WithName("backfill")
 
 	names, err := p.creds.List(ctx)

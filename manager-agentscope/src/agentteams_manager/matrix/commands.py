@@ -58,6 +58,7 @@ _ONE_ARGUMENT = {
 
 
 def parse_session_command(body: str) -> SessionCommand | None:
+    # 逻辑说明：把消息首词映射成确定性的会话动作并校验参数个数、模型名格式；普通聊天返回 None，语法错误抛出 ValueError，函数本身不读写会话。
     parts = body.strip().split()
     if not parts or not parts[0].startswith("/"):
         return None

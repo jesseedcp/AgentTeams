@@ -28,6 +28,7 @@ class CronSchedule:
 
     @classmethod
     def parse(cls, expression: str) -> CronSchedule:
+        # 逻辑说明：先限制输入规模和字段数，再逐字段展开为整数集合，后续匹配无需反复解析字符串。
         if not expression or len(expression) > _MAX_EXPRESSION_LENGTH:
             raise ValueError("cron expression length is invalid")
         fields = expression.split()
@@ -53,6 +54,7 @@ class CronSchedule:
         timezone: str,
     ) -> datetime:
         """Return the next matching UTC minute within the bounded horizon."""
+        # 逻辑说明：从下一分钟起按 UTC 有界扫描，再转为目标时区匹配，避免 DST 回拨时重复执行。
 
         if instant.tzinfo is None or instant.utcoffset() is None:
             raise ValueError("cron search instant must be timezone-aware")
@@ -74,6 +76,7 @@ class CronSchedule:
         )
 
     def matches(self, local: datetime) -> bool:
+        # 逻辑说明：先筛分钟/小时/月，再按 cron 规范组合“日期”和“星期”的 OR/单项规则。
         if (
             local.minute not in self.minute
             or local.hour not in self.hour
@@ -95,6 +98,7 @@ class CronSchedule:
 
 
 def _parse_field(value: str, minimum: int, maximum: int) -> frozenset[int]:
+    # 逻辑说明：把通配符、范围、列表和步长统一展开为去重集合；任一非法片段立即拒绝整个计划。
     if not re.fullmatch(r"[0-9*,/\-]+", value):
         raise ValueError(f"invalid cron field: {value!r}")
     selected: set[int] = set()
@@ -132,6 +136,7 @@ def _parse_field(value: str, minimum: int, maximum: int) -> frozenset[int]:
 
 
 def _integer(value: str, minimum: int, maximum: int) -> int:
+    # 逻辑说明：只接受 ASCII 十进制并执行字段边界检查，防止模糊字符或越界计划进入调度器。
     if not value or not value.isascii() or not value.isdigit():
         raise ValueError(f"invalid cron integer: {value!r}")
     number = int(value)

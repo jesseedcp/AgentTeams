@@ -47,6 +47,7 @@ type HTTPServer struct {
 // 检查，哪些需要某个 Action。新增 handler 时不得绕过 RequireAuthz 仅依赖
 // 前端不显示按钮，因为攻击者可以直接发 HTTP 请求。
 func NewHTTPServer(addr string, deps ServerDeps) *HTTPServer {
+	// 逻辑说明：创建带统一指标中间件的 ServeMux，把公开健康检查、需认证状态查询及按 Action 授权的资源/生命周期/凭据路由集中绑定；只在相应模式启用 AppService push 与受限 Docker proxy。
 	mux := http.NewServeMux()
 	s := &HTTPServer{
 		Addr: addr,
@@ -149,6 +150,7 @@ func NewHTTPServer(addr string, deps ServerDeps) *HTTPServer {
 // 被调用或监听失败。因此 App 通常在独立 goroutine 运行它，同时由
 // 上层 context 管理统一退出。
 func (s *HTTPServer) Start() error {
+	// 逻辑说明：阻塞监听配置地址；正常 Shutdown 产生的 ErrServerClosed 被视为成功，真实绑定或运行错误才返回上层终止进程。
 	logger := log.Log.WithName("http-server")
 	logger.Info("starting unified REST API server", "addr", s.Addr)
 	if err := s.server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -160,5 +162,6 @@ func (s *HTTPServer) Start() error {
 // Shutdown gracefully stops the HTTP server, waiting for in-flight requests
 // to finish or ctx to be cancelled. Idempotent.
 func (s *HTTPServer) Shutdown(ctx context.Context) error {
+	// 逻辑说明：把截止时间交给 net/http 优雅关闭，停止接收新连接并等待在途请求；context 超时后返回错误而不是无限阻塞退出流程。
 	return s.server.Shutdown(ctx)
 }

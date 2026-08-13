@@ -150,6 +150,7 @@ func NewK8sBackend(config K8sConfig, containerPrefix string, scheme *runtime.Sch
 // compatibility; OSS controllers no longer route backend operations to target
 // clusters.
 func NewK8sBackendWithCache(config K8sConfig, containerPrefix string, scheme *runtime.Scheme, remoteCache RemoteClientProvider) (*K8sBackend, error) {
+	// 逻辑说明：依次加载集群连接配置、构造 CoreV1 与 AuthenticationV1 客户端，再交给可注入客户端的构造器补默认值；任何客户端创建失败都带阶段返回，保留的 remoteCache 参数不参与开源版路由。
 	restConfig, err := loadK8sRESTConfig()
 	if err != nil {
 		return nil, err
@@ -168,6 +169,7 @@ func NewK8sBackendWithCache(config K8sConfig, containerPrefix string, scheme *ru
 // NewK8sBackendWithClient creates a Kubernetes backend with a custom client.
 // scheme may be nil in tests that don't set CreateRequest.Owner.
 func NewK8sBackendWithClient(client K8sCoreClient, config K8sConfig, containerPrefix string, scheme *runtime.Scheme) *K8sBackend {
+	// 逻辑说明：为未设置的 namespace、CPU 与内存补部署安全默认值，并保存调用方注入的客户端和 scheme；只构造内存对象，便于测试使用 fake client。
 	if config.Namespace == "" {
 		config.Namespace = detectK8sNamespace()
 	}
@@ -191,6 +193,7 @@ func NewK8sBackendWithClient(client K8sCoreClient, config K8sConfig, containerPr
 // Use WithPrefix("") to disable prefix for containers that already have full names
 // (e.g. Manager containers named "agentteams-manager" rather than "agentteams-worker-X").
 func (k *K8sBackend) WithPrefix(prefix string) *K8sBackend {
+	// 逻辑说明：浅拷贝 backend 并替换 Pod 名前缀，继续共享无状态 Kubernetes client；原实例保持不变，Manager 可借此使用完整固定名称。
 	cp := *k
 	cp.containerPrefix = prefix
 	return &cp
@@ -202,6 +205,7 @@ func (k *K8sBackend) resolveClient(ctx context.Context) (K8sCoreClient, string, 
 
 // ServiceClient implements ServiceBackend.
 func (k *K8sBackend) ServiceClient(ctx context.Context) (K8sServiceClient, string, error) {
+	// 逻辑说明：通过统一解析入口取得当前 Core client 与 namespace，再返回该 namespace 的 Service 子客户端；解析失败不返回半有效客户端。
 	client, ns, err := k.resolveClient(ctx)
 	if err != nil {
 		return nil, "", err
@@ -228,6 +232,7 @@ func (k *K8sBackend) Available(_ context.Context) bool {
 // 两个调用可能同时看到 NotFound；Kubernetes 的名称唯一性作为最终保护，
 // 上层在 AlreadyExists/超时后应通过 Status 查询现状。
 func (k *K8sBackend) Create(ctx context.Context, req CreateRequest) (*WorkerResult, error) {
+	// 逻辑说明：解析 runtime/命名/镜像与目标 namespace，拒绝重名 Pod，合并模板、资源、认证 token、HostPath 和 worker-deps 后设置 OwnerReference 并创建；冲突映射领域错误，成功先返回 Starting 等待后续状态收敛。
 	// Resolve effective runtime once: explicit > caller fallback > openclaw.
 	// See ResolveRuntime godoc — the Worker / Manager CRDs intentionally have
 	// no schema-level default, so the only place the operator-side env var can
@@ -459,6 +464,7 @@ func (k *K8sBackend) Create(ctx context.Context, req CreateRequest) (*WorkerResu
 }
 
 func configureAgentScopeManagerHealth(container *corev1.Container) {
+	// 逻辑说明：移除与 Manager 健康端口同名或同端口的旧声明后追加唯一 18799 端口，并强制设置 `/healthz` 与 `/readyz` 探针，避免模板中的冲突端口导致 Pod 无法创建。
 	const (
 		portName = "manager-health"
 		port     = 18799
@@ -494,6 +500,7 @@ func configureAgentScopeManagerHealth(container *corev1.Container) {
 }
 
 func (k *K8sBackend) Delete(ctx context.Context, name string) error {
+	// 逻辑说明：解析 client/namespace 后删除精确 Worker Pod；NotFound 作为幂等成功，其他 API 错误带 Pod 名返回，不触碰同标签的其他资源。
 	targetClient, targetNS, err := k.resolveClient(ctx)
 	if err != nil {
 		return fmt.Errorf("resolve client for delete: %w", err)
@@ -510,6 +517,7 @@ func (k *K8sBackend) Delete(ctx context.Context, name string) error {
 }
 
 func (k *K8sBackend) Start(ctx context.Context, name string) error {
+	// 逻辑说明：读取目标 Pod 并检查 phase；Running/Pending 视为已启动或正在启动，缺失映射 ErrNotFound，终止态不能原地重启而要求上层重建。
 	targetClient, targetNS, err := k.resolveClient(ctx)
 	if err != nil {
 		return fmt.Errorf("resolve client for start: %w", err)
@@ -531,12 +539,14 @@ func (k *K8sBackend) Start(ctx context.Context, name string) error {
 }
 
 func (k *K8sBackend) Stop(ctx context.Context, name string) error {
+	// 逻辑说明：Kubernetes 没有独立的“停止但保留”语义，因此把停止请求委托给删除流程，并原样返回资源清理失败。
 	return k.Delete(ctx, name)
 }
 
 func podHostPathVolumes(
 	mounts []VolumeMount,
 ) ([]corev1.Volume, []corev1.VolumeMount, error) {
+	// 逻辑说明：逐项验证宿主与容器路径均为绝对路径，再按索引生成稳定 HostPath volume/mount；任一非法项立即失败且不返回部分列表。
 	volumes := make([]corev1.Volume, 0, len(mounts))
 	volumeMounts := make([]corev1.VolumeMount, 0, len(mounts))
 	for index, mount := range mounts {
@@ -573,6 +583,7 @@ func podHostPathVolumes(
 }
 
 func (k *K8sBackend) Status(ctx context.Context, name string) (*WorkerResult, error) {
+	// 逻辑说明：读取 Pod 后先映射 phase，再优先用 init/主容器等待或退出原因识别真实失败，最后结合 Ready 条件区分预热与故障；NotFound 返回状态对象，API 错误才返回 error。
 	targetClient, targetNS, err := k.resolveClient(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("resolve client for status: %w", err)
@@ -624,6 +635,7 @@ func (k *K8sBackend) Status(ctx context.Context, name string) (*WorkerResult, er
 }
 
 func podContainerFailureStatus(statusGroups ...[]corev1.ContainerStatus) (WorkerStatus, string, string, bool) {
+	// 逻辑说明：按调用方给定顺序扫描 init 与主容器状态；已知 waiting 故障或非零 terminated 首次命中即返回统一 Failed、可读消息和原始原因，没有硬故障返回 false。
 	for _, statuses := range statusGroups {
 		for i := range statuses {
 			cs := statuses[i]
@@ -646,6 +658,7 @@ func podContainerFailureStatus(statusGroups ...[]corev1.ContainerStatus) (Worker
 }
 
 func isK8sContainerFailureReason(reason string) bool {
+	// 逻辑说明：只把镜像、容器配置、创建与崩溃循环等确定性 waiting 原因判为失败；普通 ContainerCreating 等启动原因返回 false，避免过早标红。
 	switch reason {
 	case "CrashLoopBackOff",
 		"CreateContainerConfigError",
@@ -664,6 +677,7 @@ func isK8sContainerFailureReason(reason string) bool {
 }
 
 func formatK8sContainerStateMessage(containerName, reason, message string) string {
+	// 逻辑说明：清理 reason/message 空白并按“容器名: 原因: 详情”组合诊断文本；缺 reason 使用稳定兜底，缺详情时不附多余分隔符。
 	reason = strings.TrimSpace(reason)
 	if reason == "" {
 		reason = "container failed"
@@ -683,6 +697,7 @@ func formatK8sContainerStateMessage(containerName, reason, message string) strin
 //   - Ready.Status != True    → (Ready.Message, false) — container not ready;
 //     message may be empty (still starting) or non-empty (actual error).
 func podReadyCondition(conditions []corev1.PodCondition) (string, bool) {
+	// 逻辑说明：查找 PodReady 条件并返回其消息与布尔就绪值；条件尚未出现按历史兼容视为 true，明确非 True 才返回 false。
 	for i := range conditions {
 		if conditions[i].Type == corev1.PodReady {
 			if conditions[i].Status == corev1.ConditionTrue {
@@ -696,6 +711,7 @@ func podReadyCondition(conditions []corev1.PodCondition) (string, bool) {
 }
 
 func podReadinessStillStarting(conditions []corev1.PodCondition) bool {
+	// 逻辑说明：定位非 True 的 PodReady 条件，仅当 reason 为 `ContainersNotReady` 时判定仍在探针预热；其他非就绪原因交给上层视为失败。
 	for i := range conditions {
 		condition := conditions[i]
 		if condition.Type == corev1.PodReady &&
@@ -707,6 +723,7 @@ func podReadinessStillStarting(conditions []corev1.PodCondition) bool {
 }
 
 func (k *K8sBackend) podName(prefix, name string) string {
+	// 逻辑说明：请求级前缀非空时优先拼接，否则使用 backend 默认前缀；返回稳定 Pod 名，不访问集群。
 	if prefix != "" {
 		return prefix + name
 	}
@@ -721,6 +738,7 @@ func (k *K8sBackend) workerPodName(name string) string {
 // "agentteams-worker-". Used only when a CreateRequest arrives without an
 // explicit ServiceAccountName (production callers always set one).
 func (k *K8sBackend) workerNamePrefix() string {
+	// 逻辑说明：从租户 ResourcePrefix 派生默认 Worker ServiceAccount 前缀；未配置时使用兼容值 `agentteams-worker-`，只参与命名。
 	if k.config.ResourcePrefix == "" {
 		return "agentteams-worker-"
 	}
@@ -732,6 +750,7 @@ func (k *K8sBackend) workerNamePrefix() string {
 // specifies resources. Request side is fixed at "100m" / "256Mi" to match
 // historical behavior; limits come from K8sConfig.WorkerCPU / WorkerMemory.
 func buildDefaultResources(workerCPU, workerMemory string) corev1.ResourceRequirements {
+	// 逻辑说明：为空的 limit 补 1 CPU/2Gi，再构造固定 100m/256Mi requests 的默认资源对象；数量解析失败由 MustParse 暴露为配置错误。
 	if workerCPU == "" {
 		workerCPU = "1000m"
 	}
@@ -753,6 +772,7 @@ func buildDefaultResources(workerCPU, workerMemory string) corev1.ResourceRequir
 // mergeResourceOverrides layers a ResourceRequirements override (from
 // CreateRequest.Resources) on top of defaults, field by field.
 func mergeResourceOverrides(defaults corev1.ResourceRequirements, override *ResourceRequirements) corev1.ResourceRequirements {
+	// 逻辑说明：深拷贝默认资源，再仅用非空请求字段逐项覆盖 CPU/内存 request/limit；nil 覆盖返回独立副本，避免修改共享默认 map。
 	out := *defaults.DeepCopy()
 	if override == nil {
 		return out
@@ -775,6 +795,7 @@ func mergeResourceOverrides(defaults corev1.ResourceRequirements, override *Reso
 // mergeOSSRegionFromProcessEnv sets AGENTTEAMS_FS_BUCKET and AGENTTEAMS_REGION when the client
 // omitted them; the controller process should already have these from the same Secret as Manager (envFrom).
 func mergeOSSRegionFromProcessEnv(env map[string]string) {
+	// 逻辑说明：仅当请求环境缺少文件桶或 region 时，从 Controller 进程环境补入已去空白的值；显式请求值优先，nil map 不创建新状态。
 	if env == nil {
 		return
 	}
@@ -791,6 +812,7 @@ func mergeOSSRegionFromProcessEnv(env map[string]string) {
 }
 
 func firstNonEmptyTrimmed(values ...string) string {
+	// 逻辑说明：按参数顺序返回第一个去空白后非空的字符串，全部为空返回空值；用于表达显式配置优先级。
 	for _, v := range values {
 		if trimmed := strings.TrimSpace(v); trimmed != "" {
 			return trimmed
@@ -800,6 +822,7 @@ func firstNonEmptyTrimmed(values ...string) string {
 }
 
 func buildK8sEnvVars(env map[string]string) []corev1.EnvVar {
+	// 逻辑说明：过滤空值、排序键后生成稳定 EnvVar 列表；确定顺序让 Pod spec hash 与测试不受 Go map 随机迭代影响。
 	keys := make([]string, 0, len(env))
 	for k := range env {
 		if env[k] != "" {
@@ -816,6 +839,7 @@ func buildK8sEnvVars(env map[string]string) []corev1.EnvVar {
 }
 
 func podWorkerDepsVolumes(deps *WorkerDepsSpec) ([]corev1.Volume, []corev1.VolumeMount) {
+	// 逻辑说明：当 worker-deps 声明完整且有挂载时，生成一个 PVC volume 和保持顺序的多个 mount；缺依赖/卷/挂载返回 nil，避免创建无用 PVC 引用。
 	if deps == nil || deps.PodVolume == nil || len(deps.PodVolume.Mounts) == 0 {
 		return nil, nil
 	}
@@ -840,6 +864,7 @@ func podWorkerDepsVolumes(deps *WorkerDepsSpec) ([]corev1.Volume, []corev1.Volum
 }
 
 func buildHostAliases(extraHosts []string) []corev1.HostAlias {
+	// 逻辑说明：解析 `hostname:ip` 条目、丢弃格式不全项，并按 IP 分组；IP 与组内主机均排序后输出，保证语义相同输入生成稳定 Pod spec。
 	byIP := map[string][]string{}
 	for _, entry := range extraHosts {
 		host, ip, ok := strings.Cut(strings.TrimSpace(entry), ":")
@@ -871,6 +896,7 @@ func buildHostAliases(extraHosts []string) []corev1.HostAlias {
 }
 
 func normalizeK8sPodPhase(phase corev1.PodPhase) WorkerStatus {
+	// 逻辑说明：把 Kubernetes Running/Pending/终止 phase 映射成跨后端 Running/Starting/Stopped；空值及未知 phase 返回 Unknown，容器级失败由 Status 另行细化。
 	switch phase {
 	case corev1.PodRunning:
 		return StatusRunning
@@ -884,6 +910,7 @@ func normalizeK8sPodPhase(phase corev1.PodPhase) WorkerStatus {
 }
 
 func rawK8sPhase(phase corev1.PodPhase) string {
+	// 逻辑说明：为尚未写入 phase 的新 Pod 返回可读 `Pending`，其他值保留 Kubernetes 原始字符串供 API 诊断。
 	if phase == "" {
 		return "Pending"
 	}
@@ -891,6 +918,7 @@ func rawK8sPhase(phase corev1.PodPhase) string {
 }
 
 func defaultRuntime(runtime string) string {
+	// 逻辑说明：只允许已知 Manager/Worker runtime 原样通过，未知或空值回退历史 OpenClaw；这是内部防御，外层仍负责校验用户输入。
 	switch runtime {
 	case RuntimeAgentScope,
 		RuntimeOpenClaw,
@@ -904,6 +932,7 @@ func defaultRuntime(runtime string) string {
 }
 
 func loadK8sRESTConfig() (*rest.Config, error) {
+	// 逻辑说明：优先加载 Pod 内 ServiceAccount 配置，失败后使用 `KUBECONFIG` 或用户默认文件；文件缺失和解析错误带路径返回，不构造空 client。
 	if cfg, err := rest.InClusterConfig(); err == nil {
 		return cfg, nil
 	}
@@ -922,6 +951,7 @@ func loadK8sRESTConfig() (*rest.Config, error) {
 }
 
 func detectK8sNamespace() string {
+	// 逻辑说明：优先读取显式 namespace 环境变量，否则读取 ServiceAccount 挂载文件并去空白；两者都不可用返回空值，让构造/Available 明确失败。
 	if ns := strings.TrimSpace(os.Getenv("AGENTTEAMS_K8S_NAMESPACE")); ns != "" {
 		return ns
 	}

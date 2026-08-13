@@ -19,6 +19,8 @@ _MESSAGE_FILTER_HOOK_INSTALLED = False
 
 
 def _builtin_tool_config(agent: Any, name: str) -> Any | None:
+    # 逻辑说明：`_builtin_tool_config` 接收 agent、name，执行 CoPaw hook 与工具注册 中的“builtin 工具 配置”步骤，返回 Any | None；
+    # 不修改外部状态。失败策略：已知失败按现有 except 转为错误结果或日志，未覆盖异常继续上抛；本函数不额外重试，避免掩盖持续故障。
     try:
         builtin_tools = agent._agent_config.tools.builtin_tools
         return builtin_tools.get(name)
@@ -27,16 +29,22 @@ def _builtin_tool_config(agent: Any, name: str) -> Any | None:
 
 
 def _builtin_tool_enabled(agent: Any, name: str) -> bool:
+    # 逻辑说明：`_builtin_tool_enabled` 接收 agent、name，执行 CoPaw hook 与工具注册 中的“builtin 工具 enabled”步骤，返回 bool；
+    # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     config = _builtin_tool_config(agent, name)
     return bool(getattr(config, "enabled", True))
 
 
 def _builtin_tool_async_execution(agent: Any, name: str) -> bool:
+    # 逻辑说明：`_builtin_tool_async_execution` 接收 agent、name，执行 CoPaw hook 与工具注册 中的“builtin 工具 async execution”步骤，返回 bool；
+    # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     config = _builtin_tool_config(agent, name)
     return bool(getattr(config, "async_execution", False))
 
 
 def _register_tool_function(toolkit: Any, func: Any, **kwargs: Any) -> None:
+    # 逻辑说明：`_register_tool_function` 接收 toolkit、func、**kwargs，执行 CoPaw hook 与工具注册 中的“register 工具 function”步骤，返回 None；
+    # 不修改外部状态。失败策略：已知失败按现有 except 转为错误结果或日志，未覆盖异常继续上抛；本函数不额外重试，避免掩盖持续故障。
     try:
         toolkit.register_tool_function(func, **kwargs)
     except TypeError:
@@ -46,6 +54,10 @@ def _register_tool_function(toolkit: Any, func: Any, **kwargs: Any) -> None:
 
 
 def _existing_tool_schema(toolkit: Any, name: str) -> dict[str, Any] | None:
+    # 逻辑说明：`_existing_tool_schema` 接收 toolkit、name，执行 CoPaw hook 与工具注册 中的“existing 工具 schema”步骤，
+    # 返回 dict[str, Any] | None；
+    #
+    # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     tool = getattr(toolkit, "tools", {}).get(name)
     schema = getattr(tool, "json_schema", None)
     return deepcopy(schema) if isinstance(schema, dict) else None
@@ -53,6 +65,7 @@ def _existing_tool_schema(toolkit: Any, name: str) -> dict[str, Any] | None:
 
 def install_message_filter_hooks() -> None:
     """Leave Matrix reply filtering to final send/tool boundaries."""
+    # 逻辑说明：把模块级标志设为已处理并记录 query-handler 过滤已禁用；重复调用幂等返回，因为 Matrix 回复过滤由最终发送与工具边界负责。
     global _MESSAGE_FILTER_HOOK_INSTALLED
     if _MESSAGE_FILTER_HOOK_INSTALLED:
         return
@@ -68,6 +81,8 @@ def install_tool_hooks() -> None:
     builds a fresh toolkit. Hooking _create_toolkit lets AgentTeams inject tools
     without modifying upstream CoPaw files.
     """
+    # 逻辑说明：一次性替换 CoPawAgent 的 toolkit 工厂，使每个临时 Agent 都注册 AgentTeams message/filesync/projectflow/taskflow 工具、输出脱敏中间件与凭据拦截。
+    # 各工具或中间件注册失败只记录日志并保留原 toolkit；补丁带 marker 且模块有安装标志，避免重复包装上游方法。
     global _TOOL_HOOK_INSTALLED
     install_message_filter_hooks()
 
@@ -89,6 +104,8 @@ def install_tool_hooks() -> None:
         return
 
     def create_toolkit_with_agentteams_tools(self: Any, *args: Any, **kwargs: Any):
+        # 逻辑说明：`create_toolkit_with_agentteams_tools` 接收 *args、**kwargs，创建toolkit with agentteams tools，返回 约定结果；
+        # 不修改外部状态。失败策略：已知失败按现有 except 转为错误结果或日志，未覆盖异常继续上抛；本函数不额外重试，避免掩盖持续故障。
         toolkit = original_create_toolkit(self, *args, **kwargs)
         try:
             _register_tool_function(

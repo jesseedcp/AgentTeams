@@ -17,6 +17,7 @@ import (
 // an empty name or url are skipped silently. Returns (nil, nil) when the input
 // is empty so the caller can skip writing the file entirely.
 func (g *Generator) GenerateMcporterConfig(gatewayKey string, mcpServers []v1beta1.MCPServer) ([]byte, error) {
+	// 逻辑说明：过滤无名/无 URL 项、补默认 transport，并只在生成容器文件时注入 gateway bearer key；全空返回 nil。
 	if len(mcpServers) == 0 {
 		return nil, nil
 	}

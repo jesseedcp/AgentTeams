@@ -41,6 +41,8 @@ from copaw_worker.bridge import bridge_runtime_to_standard
 logger = logging.getLogger(__name__)
 
 def _storage_alias() -> str:
+    # 逻辑说明：`_storage_alias` 接收 当前对象/进程状态，执行 MinIO/OSS 与本地工作区同步 中的“storage alias”步骤，返回 str；
+    # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     explicit = os.environ.get("AGENTTEAMS_STORAGE_ALIAS")
     if explicit:
         return explicit
@@ -81,6 +83,8 @@ class SharedPath:
 
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
     """Deep merge override into base (override wins leaf conflicts)."""
+    # 逻辑说明：`_deep_merge` 接收 base、override，执行 MinIO/OSS 与本地工作区同步 中的“deep merge”步骤，返回 dict[str, Any]；
+    # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     result = dict(base)
     for key, val in override.items():
         if key in result and isinstance(result[key], dict) and isinstance(val, dict):
@@ -100,6 +104,8 @@ def _merge_openclaw_config(remote_text: str, local_text: str) -> str:
       - channels.matrix.accessToken: local wins (Worker re-login after restart).
       - plugins.entries: deep merge with local winning on shared keys; load.paths union.
     """
+    # 逻辑说明：`_merge_openclaw_config` 接收 remote_text、local_text，合并openclaw 配置，返回 str；
+    # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     remote = json.loads(remote_text)
     local = json.loads(local_text)
     merged: dict[str, Any] = dict(local)
@@ -141,6 +147,8 @@ def _merge_openclaw_config(remote_text: str, local_text: str) -> str:
 
 
 def _preview_text(value: str | None, limit: int = 2000) -> str:
+    # 逻辑说明：`_preview_text` 接收 value、limit，执行 MinIO/OSS 与本地工作区同步 中的“preview 文本”步骤，返回 str；
+    # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     if not value:
         return ""
     if len(value) <= limit:
@@ -149,6 +157,8 @@ def _preview_text(value: str | None, limit: int = 2000) -> str:
 
 
 def _redact_url_userinfo(value: str) -> str:
+    # 逻辑说明：`_redact_url_userinfo` 接收 value，执行 MinIO/OSS 与本地工作区同步 中的“redact url userinfo”步骤，返回 str；
+    # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     if "://" not in value:
         return value
     scheme, rest = value.split("://", 1)
@@ -158,6 +168,8 @@ def _redact_url_userinfo(value: str) -> str:
 
 
 def _redacted_mc_command(cmd: list[str]) -> list[str]:
+    # 逻辑说明：`_redacted_mc_command` 接收 cmd，执行 MinIO/OSS 与本地工作区同步 中的“redacted mc command”步骤，返回 list[str]；
+    # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     redacted = [_redact_url_userinfo(part) for part in cmd]
     args = redacted[1:]
     if len(args) >= 6 and args[0] == "alias" and args[1] == "set":
@@ -168,6 +180,8 @@ def _redacted_mc_command(cmd: list[str]) -> list[str]:
 
 def _looks_like_remote_directory_error(exc: subprocess.CalledProcessError) -> bool:
     """Return True when mc cp failed because the remote path is a prefix."""
+    # 逻辑说明：`_looks_like_remote_directory_error` 接收 exc，执行 MinIO/OSS 与本地工作区同步 中的“looks like 远端 目录 error”步骤，返回 bool；
+    # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     stderr = str(exc.stderr or "")
     stdout = str(exc.stdout or "")
     text = f"{stderr}\n{stdout}"
@@ -176,6 +190,10 @@ def _looks_like_remote_directory_error(exc: subprocess.CalledProcessError) -> bo
 
 def _team_storage_name_from_worker_team(bucket: str, team_ref: str) -> str:
     """Derive the temporary storage team name from a WorkerResponse team ref."""
+    # 逻辑说明：`_team_storage_name_from_worker_team` 接收 bucket、team_ref，
+    # 执行 MinIO/OSS 与本地工作区同步 中的“团队 storage 名称 from Worker 团队”步骤，返回 str；
+    #
+    # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     team_name = team_ref.strip()
     bucket_name = (bucket or "").strip()
     prefixes = [bucket_name]
@@ -195,6 +213,10 @@ def _mc(
     log_output: bool = True,
 ) -> subprocess.CompletedProcess:
     """Run an mc command and return the result."""
+    # 逻辑说明：`_mc` 接收 check、warn_on_error、log_output、*args，执行经过日志脱敏的 mc 子命令，并按 check 策略返回结果或抛错，
+    # 返回 subprocess.CompletedProcess；
+    #
+    # 会访问网络服务、会执行外部命令。失败策略：已知失败按现有 except 转为错误结果或日志，未覆盖异常继续上抛；本函数不额外重试，避免掩盖持续故障。
     mc_bin = shutil.which("mc")
     if not mc_bin:
         raise RuntimeError("mc binary not found on PATH. Please install mc first.")
@@ -222,6 +244,10 @@ def _mc(
 
 
 def _looks_like_missing_object_error(stderr: str | None) -> bool:
+    # 逻辑说明：`_looks_like_missing_object_error` 接收 stderr，
+    # 执行 MinIO/OSS 与本地工作区同步 中的“looks like missing object error”步骤，返回 bool；
+    #
+    # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     text = stderr or ""
     return "Object does not exist" in text or "The specified key does not exist" in text
 
@@ -258,6 +284,9 @@ class FileSync:
         shared_dir: Optional[Path] = None,
         global_shared_dir: Optional[Path] = None,
     ) -> None:
+        # 逻辑说明：`__init__` 接收存储连接、Worker 身份及本地/共享目录，
+        # 规范化各条远端前缀和本地同步根目录，返回 None；
+        # 会读写本地文件、会更新对象内存状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
         self.endpoint = endpoint.rstrip("/")
         self.access_key = access_key
         self.secret_key = secret_key
@@ -296,6 +325,8 @@ class FileSync:
         and only hits the STS endpoint when the token is within 10 minutes
         of expiring.  Cheap no-op when credentials are still valid.
         """
+        # 逻辑说明：`_refresh_cloud_credentials` 接收 当前对象/进程状态，调用凭据提供器刷新短期对象存储凭据与 endpoint，返回 None；
+        # 会执行外部命令、会修改进程环境。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
         result = subprocess.run(
             ["bash", "-c",
              "source /opt/agentteams/scripts/lib/agentteams-env.sh && "
@@ -317,6 +348,8 @@ class FileSync:
         via the shared shell function (lazy, no-op when token is valid).
         Local mode: set mc alias once with static credentials.
         """
+        # 逻辑说明：`_ensure_alias` 接收 当前对象/进程状态，刷新云凭据并配置当前 Worker 专用 mc alias，返回 None；
+        # 会更新对象内存状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
         runtime = os.environ.get("AGENTTEAMS_RUNTIME", "<unset>")
         mc_host_set = bool(os.environ.get(f"MC_HOST_{_MC_ALIAS}"))
         controller_url = os.environ.get("AGENTTEAMS_CONTROLLER_URL", "<unset>")
@@ -375,6 +408,8 @@ class FileSync:
 
     def _cat(self, key: str) -> Optional[str]:
         """Download object content as text using mc cat."""
+        # 逻辑说明：`_cat` 接收 key，读取单个远端对象；不存在时返回 None，其他 mc 错误继续抛出，返回 Optional[str]；
+        # 会更新对象内存状态。失败策略：已知失败按现有 except 转为错误结果或日志，未覆盖异常继续上抛；本函数不额外重试，避免掩盖持续故障。
         self._ensure_alias()
         try:
             result = _mc(
@@ -401,6 +436,8 @@ class FileSync:
 
     def _ls(self, prefix: str) -> list[str]:
         """List objects under prefix, return list of relative names."""
+        # 逻辑说明：`_ls` 接收 prefix，列出远端前缀并把 mc 输出规范化为对象路径列表，返回 list[str]；
+        # 会执行外部命令、会更新对象内存状态。失败策略：已知失败按现有 except 转为错误结果或日志，未覆盖异常继续上抛；本函数不额外重试，避免掩盖持续故障。
         self._ensure_alias()
         try:
             result = _mc("ls", "--recursive", self._object_path(prefix), check=True)
@@ -420,6 +457,8 @@ class FileSync:
 
     def _pull_startup_files(self) -> list[str]:
         """Pull known startup files when mc mirror cannot stat the prefix."""
+        # 逻辑说明：`_pull_startup_files` 接收 当前对象/进程状态，从远端拉取startup files，返回 list[str]；
+        # 会读写本地文件、会更新对象内存状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
         changed: list[str] = []
         for rel_path in _STARTUP_SYNC_FILES:
             content = self._cat(f"{self._prefix}/{rel_path}")
@@ -439,6 +478,8 @@ class FileSync:
         After this, runtime Remote -> Local pulls are explicit; background sync
         only pushes eligible local changes via ``push_local``.
         """
+        # 逻辑说明：`mirror_all` 接收 当前对象/进程状态，从远端 Worker 前缀恢复完整本地状态，同时排除凭据和不应覆盖内容，返回 None；
+        # 会读写本地文件、会访问网络服务、会执行外部命令、会更新对象内存状态。失败策略：已知失败按现有 except 转为错误结果或日志，未覆盖异常继续上抛；本函数不额外重试，避免掩盖持续故障。
         runtime = os.environ.get("AGENTTEAMS_RUNTIME", "<unset>")
         controller_url = os.environ.get("AGENTTEAMS_CONTROLLER_URL", "<unset>")
         logger.info(
@@ -552,6 +593,8 @@ class FileSync:
 
     def _get_worker_info(self) -> dict[str, Any]:
         """Return authoritative worker metadata from the AgentTeams controller."""
+        # 逻辑说明：`_get_worker_info` 接收 当前对象/进程状态，读取Worker info，返回 dict[str, Any]；
+        # 会执行外部命令、会更新对象内存状态。失败策略：已知失败按现有 except 转为错误结果或日志，未覆盖异常继续上抛；本函数不额外重试，避免掩盖持续故障。
         if self._worker_info is not None:
             return self._worker_info
 
@@ -580,6 +623,8 @@ class FileSync:
 
     def _get_team_id(self) -> Optional[str]:
         """Resolve the temporary runtime/storage team name from worker metadata."""
+        # 逻辑说明：`_get_team_id` 接收 当前对象/进程状态，读取团队 ID，返回 Optional[str]；会更新对象内存状态。失败策略：底层异常继续上抛，由调用链统一处理；
+        # 本函数不额外重试，避免掩盖持续故障。
         worker = self._get_worker_info()
         team_ref = worker.get("team")
         if not isinstance(team_ref, str) or not team_ref.strip():
@@ -588,6 +633,7 @@ class FileSync:
 
     def _is_team_leader(self) -> bool:
         """Check if this worker is a team leader according to the controller."""
+        # 逻辑说明：`_is_team_leader` 接收 当前对象/进程状态，判断团队 Leader，返回 bool；会更新对象内存状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
         worker = self._get_worker_info()
         return worker.get("role") == "team_leader"
 
@@ -597,6 +643,7 @@ class FileSync:
         Team members sync from teams/{team}/shared/ instead of global shared/.
         Non-team workers sync from global shared/.
         """
+        # 逻辑说明：`_get_shared_remote` 接收 当前对象/进程状态，读取共享路径 远端，返回 str；会更新对象内存状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
         team_id = self._get_team_id()
         if team_id:
             return f"{_MC_ALIAS}/{self.bucket}/teams/{team_id}/shared/"
@@ -604,6 +651,8 @@ class FileSync:
 
     def _get_startup_shared_remote(self) -> str:
         """Use the mirrored controller config only during bootstrap fallback."""
+        # 逻辑说明：`_get_startup_shared_remote` 接收 当前对象/进程状态，读取startup 共享路径 远端，返回 str；
+        # 会更新对象内存状态。失败策略：已知失败按现有 except 转为错误结果或日志，未覆盖异常继续上抛；本函数不额外重试，避免掩盖持续故障。
         config_path = self.local_dir / "openclaw.json"
         try:
             config = json.loads(config_path.read_text(encoding="utf-8"))
@@ -626,6 +675,8 @@ class FileSync:
 
     def resolve_shared_path(self, path: str) -> SharedPath:
         """Resolve a user-facing shared path to local and remote paths."""
+        # 逻辑说明：`resolve_shared_path` 接收 path，校验 shared 路径并解析其本地与远端位置，返回 SharedPath；
+        # 会访问网络服务、会更新对象内存状态。失败策略：非法输入或状态会立即抛错，其他底层异常继续上抛；本函数不额外重试，避免掩盖持续故障。
         raw = (path or "").strip()
         if not raw:
             raise ValueError("path is required")
@@ -665,6 +716,8 @@ class FileSync:
 
     def pull_shared_path(self, path: str) -> SharedPath:
         """Pull a shared path from MinIO into the local workspace."""
+        # 逻辑说明：`pull_shared_path` 接收 path，解析 shared 路径后从对象存储拉取文件或目录，返回 SharedPath；
+        # 会读写本地文件、会执行外部命令、会更新对象内存状态。失败策略：已知失败按现有 except 转为错误结果或日志，未覆盖异常继续上抛；本函数不额外重试，避免掩盖持续故障。
         resolved = self.resolve_shared_path(path)
         self._ensure_alias()
         if (path or "").strip().endswith("/"):
@@ -690,6 +743,8 @@ class FileSync:
         exclude: Optional[list[str]] = None,
     ) -> SharedPath:
         """Push a local shared path to MinIO."""
+        # 逻辑说明：`push_shared_path` 接收 path、exclude，解析 shared 路径并把本地文件或目录上传到对象存储，返回 SharedPath；
+        # 会更新对象内存状态。失败策略：非法输入或状态会立即抛错，其他底层异常继续上抛；本函数不额外重试，避免掩盖持续故障。
         resolved = self.resolve_shared_path(path)
         if resolved.kind == "global-shared":
             raise ValueError("global-shared/ is read-only")
@@ -709,6 +764,8 @@ class FileSync:
 
     def stat_shared_path(self, path: str) -> SharedPath:
         """Check that a shared path exists in MinIO."""
+        # 逻辑说明：`stat_shared_path` 接收 path，查询 shared 路径是否存在及其解析结果，返回 SharedPath；
+        # 会更新对象内存状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
         resolved = self.resolve_shared_path(path)
         self._ensure_alias()
         _mc("stat", resolved.remote, check=True)
@@ -716,6 +773,8 @@ class FileSync:
 
     def list_shared_path(self, path: str) -> tuple[SharedPath, list[str]]:
         """List a shared path in MinIO."""
+        # 逻辑说明：`list_shared_path` 接收 path，列出 shared 远端前缀下的直接成员，返回 tuple[SharedPath, list[str]]；
+        # 会更新对象内存状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
         resolved = self.resolve_shared_path(path)
         self._ensure_alias()
         result = _mc("ls", "--recursive", resolved.remote, check=True)
@@ -724,6 +783,8 @@ class FileSync:
 
     def get_config(self) -> dict[str, Any]:
         """Pull openclaw.json and return parsed dict."""
+        # 逻辑说明：`get_config` 接收 当前对象/进程状态，读取配置，返回 dict[str, Any]；会更新对象内存状态。失败策略：非法输入或状态会立即抛错，其他底层异常继续上抛；
+        # 本函数不额外重试，避免掩盖持续故障。
         text = self._cat(f"{self._prefix}/openclaw.json")
         if not text:
             raise RuntimeError(f"openclaw.json not found in MinIO for worker {self.worker_name}")
@@ -740,6 +801,7 @@ class FileSync:
 
     def list_skills(self) -> list[str]:
         """Return list of skill names available in MinIO for this worker."""
+        # 逻辑说明：`list_skills` 接收 当前对象/进程状态，列出Skill，返回 list[str]；会更新对象内存状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
         prefix = f"{self._prefix}/skills/"
         entries = self._ls(prefix)
         # entries look like "skill-name/SKILL.md"
@@ -756,6 +818,8 @@ class FileSync:
 
     def pull_all(self) -> list[str]:
         """Pull controller-managed worker files, excluding shared data."""
+        # 逻辑说明：`pull_all` 接收 当前对象/进程状态，拉取启动文件、配置和 Skill，并返回实际变化的相对路径，返回 list[str]；
+        # 会读写本地文件、会更新对象内存状态。失败策略：已知失败按现有 except 转为错误结果或日志，未覆盖异常继续上抛；本函数不额外重试，避免掩盖持续故障。
         changed: list[str] = []
         files: dict[str, list[str]] = {
             "openclaw.json": [f"{self._prefix}/openclaw.json"],
@@ -836,6 +900,8 @@ def push_local(sync: FileSync, since: float = 0) -> list[str]:
     are Worker-managed and are pushed (including session backup).
     """
     # Controller-managed files that should never be pushed back
+    # 逻辑说明：`push_local` 接收 sync、since，先把 runtime 状态桥接回标准目录，再筛选并上传本地变化，返回 list[str]；
+    # 不修改外部状态。失败策略：已知失败按现有 except 转为错误结果或日志，未覆盖异常继续上抛；本函数不额外重试，避免掩盖持续故障。
     _EXCLUDE_FILES = {
         "openclaw.json",
         "mcporter-servers.json",
@@ -954,6 +1020,8 @@ async def push_loop(
     AGENTS.md, SOUL.md) still get uploaded. Otherwise their mtime is always
     ≤ ``last_push_time`` and they'd never be pushed.
     """
+    # 逻辑说明：`push_loop` 接收 sync、check_interval、health，按间隔持续执行本地持久化；失败更新 sync/bridge health 后继续下一轮，返回 None；
+    # 不修改外部状态。失败策略：已知失败按现有 except 转为错误结果或日志，未覆盖异常继续上抛；循环/重试受现有次数、超时或间隔限制。
     last_push_time: float = 0.0
 
     while True:
@@ -1016,6 +1084,8 @@ async def sync_loop(
     health: HealthStateProtocol | None = None,
 ) -> None:
     """Background task: pull controller-managed worker files."""
+    # 逻辑说明：`sync_loop` 接收 sync、interval、on_pull、health，按间隔拉取 Controller 管理文件，变化后调用刷新回调，返回 None；
+    # 不修改外部状态。失败策略：已知失败按现有 except 转为错误结果或日志，未覆盖异常继续上抛；循环/重试受现有次数、超时或间隔限制。
     while True:
         try:
             changed = await asyncio.to_thread(sync.pull_all)

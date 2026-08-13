@@ -132,6 +132,7 @@ class CompleteTaskInput(_TaskIdInput):
 
     @model_validator(mode="after")
     def validate_acceptance(self) -> CompleteTaskInput:
+        # 逻辑说明：接受结果必须携带 inspect 得到的 digest，把“看过产物”变成可验证前置条件；拒绝结果则允许没有 digest。
         if self.accepted and self.result_digest is None:
             raise ValueError(
                 "accepted results require result_digest from "
@@ -209,6 +210,7 @@ class UpdateProjectInput(_ProjectIdInput):
 
     @model_validator(mode="after")
     def validate_action_fields(self) -> UpdateProjectInput:
+        # 逻辑说明：按 add_task/complete_task 动作校验互相关联的字段，并要求接受结果时携带已检查 digest，阻止未验收内容直接进入项目状态机。
         if self.action == "add_task" and not (
             self.title and self.specification and self.assigned_to
         ):
@@ -269,6 +271,7 @@ class UpdateProjectParticipantsInput(_ProjectIdInput):
 
     @model_validator(mode="after")
     def validate_changes(self) -> UpdateProjectParticipantsInput:
+        # 逻辑说明：要求至少一项增删且禁止同一 Worker 同时出现两侧，消除 workflow 无法确定的参与者最终状态。
         if not self.add and not self.remove:
             raise ValueError("add or remove must contain a worker")
         overlap = set(self.add) & set(self.remove)
@@ -294,6 +297,7 @@ class SyncFilesInput(_Input):
 
     @model_validator(mode="after")
     def validate_target(self) -> SyncFilesInput:
+        # 逻辑说明：按 task_artifacts/worker_workspace/shared_knowledge 强制目标字段互斥，防止一个请求解析到错误本地根或对象前缀。
         if self.root == "task_artifacts":
             if not self.task_id or self.worker_name is not None:
                 raise ValueError(
@@ -408,6 +412,7 @@ class TaskTools:
     """Typed task facade retained for direct workflow composition."""
 
     def __init__(self, service: TaskService) -> None:
+        # 逻辑说明：保存强类型 Task workflow 门面；构造时不创建或迁移任务，后续每个方法仍要求调用方显式传入 MutationContext。
         self._service = service
 
     async def create_finite(
@@ -416,6 +421,7 @@ class TaskTools:
         *,
         context: MutationContext,
     ) -> TaskReceipt:
+        # 逻辑说明：把已验证输入拆成 TaskService 的显式字段并传递幂等上下文；创建、房间派发和回执由 workflow 原子/可恢复地协调。
         return await self._service.create_finite(
             title=request.title,
             spec=request.specification,
@@ -432,6 +438,7 @@ class TaskTools:
         *,
         context: MutationContext,
     ) -> TaskReceipt:
+        # 逻辑说明：使用当前 Matrix event 作为 Worker 完成证据，连同结构化结果、接受决定和 digest 交给服务验证后迁移状态。
         return await self._service.record_completion(
             task_id=request.task_id,
             worker_event_id=context.event_id,
@@ -446,6 +453,7 @@ class TaskTools:
         *,
         context: MutationContext,
     ) -> TaskReceipt:
+        # 逻辑说明：把 schedule、timezone 与指派信息显式传入 recurring workflow，并保留当前 mutation context 以实现重复调用幂等。
         return await self._service.create_recurring(
             title=request.title,
             spec=request.specification,
@@ -464,6 +472,7 @@ class TaskTools:
         *,
         context: MutationContext,
     ) -> TaskReceipt:
+        # 逻辑说明：以当前 event ID 记录 recurring/infinite 一次执行，服务负责防止相同周期重复推进 next_scheduled_at。
         return await self._service.record_execution(
             task_id=request.task_id,
             worker_event_id=context.event_id,
@@ -475,6 +484,7 @@ class TaskTools:
         *,
         context: MutationContext,
     ) -> TaskReceipt:
+        # 逻辑说明：把 task ID 与当前上下文交给取消 workflow；服务校验生命周期并记录终态，失败不伪报删除。
         return await self._service.cancel(
             task_id=request.task_id,
             context=context,
@@ -485,6 +495,7 @@ class ProjectTools:
     """Typed project facade retained for direct workflow composition."""
 
     def __init__(self, service: ProjectService) -> None:
+        # 逻辑说明：保存 Project workflow 门面供 create/confirm/add/close 转发；生命周期状态机和幂等性仍由 service 与显式 context 负责。
         self._service = service
 
     async def create(
@@ -493,6 +504,7 @@ class ProjectTools:
         *,
         context: MutationContext,
     ) -> ProjectReceipt:
+        # 逻辑说明：传递计划正文、参与者和幂等上下文创建 planning 项目及房间；是否确认由单独阶段或明确 auto-confirm 规则决定。
         return await self._service.create(
             title=request.title,
             description=request.description,
@@ -509,6 +521,7 @@ class ProjectTools:
         confirmed_by: str,
         auto_confirmed: bool = False,
     ) -> ProjectReceipt:
+        # 逻辑说明：携带确认人、上下文和 auto-confirm 标志调用计划确认状态机；服务验证项目仍在 planning，重复确认按幂等结果处理。
         return await self._service.confirm_plan(
             project_id=request.project_id,
             confirmed_by=confirmed_by,
@@ -522,6 +535,7 @@ class ProjectTools:
         *,
         context: MutationContext,
     ) -> TaskReceipt:
+        # 逻辑说明：把项目任务规格、指派与依赖边一起交给服务，服务在验证参与者/图后创建和派发，失败不留下孤立边。
         return await self._service.add_task(
             project_id=request.project_id,
             title=request.title,
@@ -538,6 +552,7 @@ class ProjectTools:
         *,
         context: MutationContext,
     ) -> ProjectReceipt:
+        # 逻辑说明：把项目 ID、force 决策与上下文交给关闭 workflow；非 force 时服务检查未完成任务，成功后才返回终态。
         return await self._service.close(
             project_id=request.project_id,
             force=request.force,
@@ -549,10 +564,12 @@ class GitDelegationTools:
     """Typed Git facade with parsing separated from confirmed execution."""
 
     def __init__(self, service: GitDelegationService) -> None:
+        # 逻辑说明：保存受约束的 Git 委托服务；此时不解析自然语言也不执行仓库命令，inspect/execute 分离预检与已确认副作用。
         self._service = service
 
     @staticmethod
     def inspect(request: GitDelegationInput) -> GitRequest:
+        # 逻辑说明：仅通过固定 GitRequestParser 把消息转换为允许的结构化 Git 请求，解析失败直接抛错，函数不访问仓库。
         return GitRequestParser.parse(request.message)
 
     async def execute(
@@ -562,6 +579,7 @@ class GitDelegationTools:
         context: MutationContext,
         confirmed: bool = False,
     ) -> GitDelegationReceipt:
+        # 逻辑说明：先用约束 parser 将自然语言变成固定 GitRequest，再传递确认标志与幂等上下文执行；不把原文直接交给 shell。
         return await self._service.execute(
             GitRequestParser.parse(request.message),
             context=context,
@@ -585,6 +603,7 @@ class TaskToolkit:
         context_provider: ContextProvider | None = None,
         yolo: bool = False,
     ) -> None:
+        # 逻辑说明：组合 Task/Project 服务、文件同步、Git、房间 policy 与 mutation context，并建立可见任务工具；构造不派发任务。
         self._policy = policy
         self._tasks = tasks
         self._projects = projects
@@ -599,6 +618,7 @@ class TaskToolkit:
         self.tools = self._build_tools()
 
     def _build_tools(self) -> tuple[ManagerTool, ...]:
+        # 逻辑说明：声明任务、项目、文件和 Git 工具的闭合 schema/handler/只读性，再仅注册 room policy 允许的能力，模型看不到越权入口。
         specs: tuple[
             tuple[
                 str,
@@ -826,7 +846,9 @@ class TaskToolkit:
         handler: Callable[[BaseModel], Awaitable[object]],
         read_only: bool,
     ) -> ManagerTool:
+        # 逻辑说明：把任务、项目或 Git handler 与闭合输入 schema 封装成 ManagerTool；执行时复核房间白名单，读工具才标记并发安全。
         async def invoke(**raw: Any) -> object:
+            # 逻辑说明：执行时重新核对 allowed_tools，验证闭合输入并调用绑定 handler；越权/schema 错误在任务或外部副作用前终止。
             self._require_tool(name)
             return await handler(request_model.model_validate(raw))
 
@@ -842,12 +864,14 @@ class TaskToolkit:
         )
 
     def _require_tool(self, name: str) -> None:
+        # 逻辑说明：在任务读写进入 workflow 前执行房间工具白名单检查；拒绝路径不创建 Operation、Task 或确认请求。
         if name not in self._policy.allowed_tools:
             raise PermissionDeniedError(
                 f"{name} is not allowed in {self._policy.kind.value}",
             )
 
     async def _context(self) -> MutationContext:
+        # 逻辑说明：解析同步或异步 context provider，并只接受当前 Matrix turn 的 MutationContext；无效身份不能进入 mutation workflow。
         value = self._context_provider()
         if inspect.isawaitable(value):
             value = await value
@@ -856,6 +880,7 @@ class TaskToolkit:
         return value
 
     async def _list_tasks(self, request: BaseModel) -> object:
+        # 逻辑说明：读取全部持久任务后逐项应用 room policy 可见性，再序列化有界集合；不可见任务不会出现在总数中。
         del request
         tasks = tuple(
             task
@@ -871,6 +896,7 @@ class TaskToolkit:
         )
 
     async def _get_task(self, request: BaseModel) -> object:
+        # 逻辑说明：验证 task ID、读取记录并在返回前检查可见性；越权明确拒绝，不以 not_found 隐藏权限审计。
         item = _TaskIdInput.model_validate(request)
         task = await self._tasks.get(item.task_id)
         if task is not None and not self._task_visible(task):
@@ -888,6 +914,7 @@ class TaskToolkit:
         )
 
     async def _create_task(self, request: BaseModel) -> object:
+        # 逻辑说明：验证有限任务与指派 scope；带 project 时先验证项目并走 ProjectService 加任务，否则走普通 TaskService 创建派发。
         item = CreateFiniteTaskInput.model_validate(request)
         self._require_assignment_scope(
             worker=item.assigned_to,
@@ -910,6 +937,7 @@ class TaskToolkit:
         )
 
     async def _update_task(self, request: BaseModel) -> object:
+        # 逻辑说明：验证任务可见性和当前上下文，再按 cancel/record_execution/complete 分派固定状态机方法；完成证据使用真实 Matrix event ID。
         item = UpdateTaskInput.model_validate(request)
         await self._require_visible_task(item.task_id)
         context = await self._context()
@@ -932,6 +960,7 @@ class TaskToolkit:
         )
 
     async def _inspect_task_result(self, request: BaseModel) -> object:
+        # 逻辑说明：验证 task 可见性后拉取并检查提交结果，返回 digest 供后续接受；只读验收不直接迁移完成状态。
         item = _TaskIdInput.model_validate(request)
         await self._require_visible_task(item.task_id)
         return await self._task_service.inspect_result(
@@ -939,6 +968,7 @@ class TaskToolkit:
         )
 
     async def _delete_task(self, request: BaseModel) -> object:
+        # 逻辑说明：验证可见性并携带幂等上下文调用 cancel；工具名 delete 在领域上是可恢复取消，不物理擦除审计记录。
         item = CancelTaskInput.model_validate(request)
         await self._require_visible_task(item.task_id)
         return await self._task_service.cancel(
@@ -947,6 +977,7 @@ class TaskToolkit:
         )
 
     async def _delegate_team_task(self, request: BaseModel) -> object:
+        # 逻辑说明：验证 Leader/Team 指派 scope；项目任务走项目图服务，独立任务走普通创建，二者都携带稳定 mutation context。
         item = DelegateTeamTaskInput.model_validate(request)
         self._require_assignment_scope(
             worker=item.leader,
@@ -974,6 +1005,7 @@ class TaskToolkit:
         )
 
     async def _complete_task(self, request: BaseModel) -> object:
+        # 逻辑说明：读取任务并验证可见性，按 project、recurring/infinite、finite 三类选择正确完成路径；项目完成还绑定唯一 policy sender 与验收 digest。
         item = CompleteTaskInput.model_validate(request)
         task = await self._tasks.get(item.task_id)
         if task is None:
@@ -1007,6 +1039,7 @@ class TaskToolkit:
         )
 
     async def _schedule_task(self, request: BaseModel) -> object:
+        # 逻辑说明：验证五字段 recurring 规格并通过 typed facade 创建日程任务，传递当前幂等上下文。
         item = CreateRecurringTaskInput.model_validate(request)
         return await TaskTools(self._task_service).create_recurring(
             item,
@@ -1014,6 +1047,7 @@ class TaskToolkit:
         )
 
     async def _create_project(self, request: BaseModel) -> object:
+        # 逻辑说明：先创建 planning 项目；仅 YOLO 且回执仍为 planning 时，用派生 tool-call ID 显式调用 auto-confirm，保持创建和确认各自可幂等恢复。
         item = CreateProjectInput.model_validate(request)
         context = await self._context()
         receipt = await ProjectTools(self._project_service).create(
@@ -1039,6 +1073,7 @@ class TaskToolkit:
         return receipt
 
     async def _confirm_project_plan(self, request: BaseModel) -> object:
+        # 逻辑说明：验证项目可见性、解析唯一确认 sender，并携带当前上下文调用计划确认；服务检查状态与计划版本。
         item = ConfirmProjectPlanInput.model_validate(request)
         await self._require_visible_project(item.project_id)
         return await self._project_service.confirm_plan(
@@ -1048,6 +1083,7 @@ class TaskToolkit:
         )
 
     async def _list_projects(self, request: BaseModel) -> object:
+        # 逻辑说明：读取全部项目并按 room policy 过滤可见集合，再序列化和计算总数，防止跨项目 metadata 泄漏。
         del request
         projects = tuple(
             project
@@ -1064,6 +1100,7 @@ class TaskToolkit:
         )
 
     async def _get_project(self, request: BaseModel) -> object:
+        # 逻辑说明：验证 project ID、查询并检查可见性，返回 found/not_found；存在但越权时明确拒绝。
         item = _ProjectIdInput.model_validate(request)
         project = await self._projects.get(item.project_id)
         if project is not None and not self._project_visible(project):
@@ -1081,6 +1118,7 @@ class TaskToolkit:
         )
 
     async def _update_project(self, request: BaseModel) -> object:
+        # 逻辑说明：先验证项目可见性与上下文；complete_task 绑定 sender/事件/验收 digest，add_task 则传入规格、指派和依赖图。
         item = UpdateProjectInput.model_validate(request)
         await self._require_visible_project(item.project_id)
         context = await self._context()
@@ -1109,6 +1147,7 @@ class TaskToolkit:
         )
 
     async def _delete_project(self, request: BaseModel) -> object:
+        # 逻辑说明：验证项目 scope 后调用 close workflow；force 语义由服务检查，只有完成对账才返回关闭回执。
         item = CloseProjectInput.model_validate(request)
         await self._require_visible_project(item.project_id)
         return await self._project_service.close(
@@ -1121,6 +1160,7 @@ class TaskToolkit:
         self,
         request: BaseModel,
     ) -> object:
+        # 逻辑说明：验证项目可见性，传递目标任务、反馈、可选新负责人/触发任务和上下文，由服务创建关联返修并阻塞下游。
         item = RequestProjectRevisionInput.model_validate(request)
         await self._require_visible_project(item.project_id)
         return await self._project_service.request_revision(
@@ -1136,6 +1176,7 @@ class TaskToolkit:
         self,
         request: BaseModel,
     ) -> object:
+        # 逻辑说明：验证项目可见性后，把新负责人、原因和幂等上下文交给项目服务原子撤销旧指派并重新派发。
         item = ReassignProjectTaskInput.model_validate(request)
         await self._require_visible_project(item.project_id)
         return await self._project_service.reassign_task(
@@ -1150,6 +1191,7 @@ class TaskToolkit:
         self,
         request: BaseModel,
     ) -> object:
+        # 逻辑说明：验证项目可见性并用唯一 policy sender 报告阻塞；服务核对 sender 是否为当前指派者后记录状态与原因。
         item = ReportProjectBlockedInput.model_validate(request)
         await self._require_visible_project(item.project_id)
         return await self._project_service.report_blocked(
@@ -1160,6 +1202,7 @@ class TaskToolkit:
         )
 
     async def _revise_project_plan(self, request: BaseModel) -> object:
+        # 逻辑说明：验证项目后将计划变更固定标记为 minor，携带理由和上下文版本化保存并更新当前计划指针。
         item = ReviseProjectPlanInput.model_validate(request)
         await self._require_visible_project(item.project_id)
         return await self._project_service.revise_plan(
@@ -1174,6 +1217,7 @@ class TaskToolkit:
         self,
         request: BaseModel,
     ) -> object:
+        # 逻辑说明：验证项目后以 major 类型调用计划版本 workflow；工具权限/确认层已在进入此 handler 前处理高风险批准。
         item = ReviseProjectPlanInput.model_validate(request)
         await self._require_visible_project(item.project_id)
         return await self._project_service.revise_plan(
@@ -1188,6 +1232,7 @@ class TaskToolkit:
         self,
         request: BaseModel,
     ) -> object:
+        # 逻辑说明：验证项目和无交集增删集合，再携带原因与上下文更新参与者；服务负责活跃任务约束及 Matrix 房间成员对账。
         item = UpdateProjectParticipantsInput.model_validate(request)
         await self._require_visible_project(item.project_id)
         return await self._project_service.update_participants(
@@ -1199,6 +1244,7 @@ class TaskToolkit:
         )
 
     async def _sync_files(self, request: BaseModel) -> object:
+        # 逻辑说明：验证 root/target 组合；task artifacts 先校验任务可见性并走可恢复 sync_task，其他根再检查 Worker scope 后选择 pull/push，统一返回路径或结构化回执。
         item = SyncFilesInput.model_validate(request)
         if item.root == "task_artifacts":
             assert item.task_id is not None
@@ -1254,6 +1300,7 @@ class TaskToolkit:
         )
 
     async def _read_task_file(self, request: BaseModel) -> object:
+        # 逻辑说明：验证 task ID、可见性、相对路径和上限，再调用 FileSync 的安全缓存读取；不允许借此读取任意主机路径。
         item = ReadTaskFileInput.model_validate(request)
         await self._require_visible_task(item.task_id)
         return await self._file_sync.read_task_file(
@@ -1263,10 +1310,12 @@ class TaskToolkit:
         )
 
     async def _inspect_git(self, request: BaseModel) -> object:
+        # 逻辑说明：验证消息并用约束 parser 返回结构化 GitRequest 与风险等级；只解析，不触发仓库副作用。
         item = GitDelegationInput.model_validate(request)
         return GitRequestParser.parse(item.message)
 
     async def _git_delegate(self, request: BaseModel) -> object:
+        # 逻辑说明：验证并解析 Git 请求，携带当前上下文以未确认模式执行；服务仅允许低/中风险操作，高风险会拒绝。
         item = GitDelegationInput.model_validate(request)
         return await self._git.execute(
             GitRequestParser.parse(item.message),
@@ -1278,6 +1327,7 @@ class TaskToolkit:
         self,
         request: BaseModel,
     ) -> object:
+        # 逻辑说明：验证并解析请求，要求 parser 明确认定需要确认后才以 confirmed=True 执行；低/中风险引导使用普通入口，避免批准语义混淆。
         item = GitDelegationInput.model_validate(request)
         parsed = GitRequestParser.parse(item.message)
         if not parsed.requires_confirmation:
@@ -1291,6 +1341,7 @@ class TaskToolkit:
         )
 
     def _task_visible(self, task: TaskRecord) -> bool:
+        # 逻辑说明：按 Manager、Worker、Leader、Project 房间范围判断单个任务可见性；默认仅允许显式 Worker/Team 关联，防止跨房间泄露任务。
         if self._policy.resource_scope_all:
             return True
         if self._policy.kind is RoomKind.WORKER_ROOM:
@@ -1312,6 +1363,7 @@ class TaskToolkit:
         )
 
     def _project_visible(self, project: ProjectRecord) -> bool:
+        # 逻辑说明：全局 scope 允许全部；Project Room 只允许同 ID；其他受限房间仅在项目参与者与 allowed workers 有交集时可见。
         if self._policy.resource_scope_all:
             return True
         if self._policy.kind is RoomKind.PROJECT_ROOM:
@@ -1323,6 +1375,7 @@ class TaskToolkit:
         return bool(participants & self._policy.allowed_worker_names)
 
     async def _require_visible_task(self, task_id: str) -> TaskRecord:
+        # 逻辑说明：读取任务，区分不存在与越权，并仅返回通过 _task_visible 的记录；所有 mutation handler 复用此边界。
         task = await self._tasks.get(task_id)
         if task is None:
             raise NotFoundError(f"task/{task_id} does not exist")
@@ -1336,6 +1389,7 @@ class TaskToolkit:
         self,
         project_id: str,
     ) -> ProjectRecord:
+        # 逻辑说明：读取项目并应用当前 room policy 的可见性判定；不存在或越权分别报错，防止 mutation 跨项目执行。
         project = await self._projects.get(project_id)
         if project is None:
             raise NotFoundError(
@@ -1353,6 +1407,7 @@ class TaskToolkit:
         worker: str,
         team: str | None,
     ) -> None:
+        # 逻辑说明：按 room kind 校验 Worker/Team 指派：Worker 只能派自己，Leader 只能本 Team，其他 Human scope 只能白名单目标；不匹配即拒绝。
         if self._policy.resource_scope_all:
             return
         if self._policy.kind is RoomKind.WORKER_ROOM:
@@ -1385,6 +1440,7 @@ class TaskToolkitFactory:
         git: GitDelegationService,
         yolo: bool = False,
     ) -> None:
+        # 逻辑说明：保存共享任务依赖和默认确认策略，后续依据房间 policy 创建隔离 toolkit；Factory 本身不改变 Task 或 Project 状态。
         self._tasks = tasks
         self._projects = projects
         self._task_service = task_service
@@ -1397,6 +1453,7 @@ class TaskToolkitFactory:
         self,
         policy: RoomPolicy,
     ) -> tuple[ManagerTool, ...]:
+        # 逻辑说明：为当前 policy 创建独立 TaskToolkit，注入共享读库和 workflow 后返回已按任务/项目资源范围过滤的工具，不跨房间缓存授权。
         return TaskToolkit(
             policy=policy,
             tasks=self._tasks,
@@ -1410,6 +1467,7 @@ class TaskToolkitFactory:
 
 
 def _current_mutation_context() -> MutationContext:
+    # 逻辑说明：从统一工具上下文复制 room/event/call ID，生成 Task/Project workflow 的稳定 operation 身份；脱离 Matrix turn 调用立即失败。
     invocation = current_tool_invocation()
     return MutationContext(
         room_id=invocation.room_id,
@@ -1419,6 +1477,7 @@ def _current_mutation_context() -> MutationContext:
 
 
 def _policy_sender(policy: RoomPolicy) -> str:
+    # 逻辑说明：项目状态变更要求 policy 已解析为恰好一个 Matrix sender；数量不为一时拒绝，避免把共享房间权限误作具体执行者身份。
     if len(policy.allowed_senders) != 1:
         raise PermissionDeniedError(
             "project mutation requires one resolved Matrix sender",

@@ -18,6 +18,7 @@ if ! command -v ruby >/dev/null 2>&1; then
 fi
 
 stage_dir="$(mktemp -d "${TMPDIR:-/tmp}/workerflow-qwenpaw-install.XXXXXX")"
+# 逻辑说明：退出时只删除由本脚本创建的随机暂存目录，不触碰已安装的 WorkerFlow 数据。
 cleanup() {
   rm -rf "$stage_dir"
 }

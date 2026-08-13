@@ -14,6 +14,7 @@ import (
 )
 
 func createCmd() *cobra.Command {
+	// 逻辑说明：创建资源命令组并注册 Worker、Team、Human、Manager 四个独立创建入口。
 	cmd := &cobra.Command{
 		Use:   "create",
 		Short: "Create a resource",
@@ -30,6 +31,7 @@ func createCmd() *cobra.Command {
 // ---------------------------------------------------------------------------
 
 func createWorkerCmd() *cobra.Command {
+	// 逻辑说明：解析并校验 Worker flag，提交异步创建；可立即返回，也可轮询到 Ready/Failed/超时再输出。
 	var (
 		name        string
 		model       string
@@ -169,6 +171,7 @@ func createWorkerCmd() *cobra.Command {
 // 多个异步阶段，因此这里不把 POST 成功误报为 Worker 已可用。启动窗口
 // 中的 404/5xx 可重试，而显式 Failed 立即返回详细状态。
 func waitForWorkerReady(client *APIClient, name string, timeout time.Duration) (*workerResp, error) {
+	// 逻辑说明：每两秒读取真实 status，Ready 成功、Failed 立即失败；仅 404/5xx 可重试，截止时带最后状态返回。
 	deadline := time.Now().Add(timeout)
 	last := &workerResp{Name: name, Phase: "Pending"}
 
@@ -199,6 +202,7 @@ func waitForWorkerReady(client *APIClient, name string, timeout time.Duration) (
 }
 
 func isRetryableWorkerStatusError(err error, apiErr **APIError) bool {
+	// 逻辑说明：只把类型化 APIError 的 404 或 5xx 判为启动期瞬时错误，并可把解析出的错误回传调用方。
 	if err == nil {
 		return false
 	}
@@ -213,6 +217,7 @@ func isRetryableWorkerStatusError(err error, apiErr **APIError) bool {
 }
 
 func renderWorkerStatusSummary(resp *workerResp) string {
+	// 逻辑说明：从非空 phase/container state/message 生成诊断摘要；没有可用字段时稳定返回 unknown。
 	if resp == nil {
 		return "unknown"
 	}
@@ -238,6 +243,7 @@ func renderWorkerStatusSummary(resp *workerResp) string {
 // ---------------------------------------------------------------------------
 
 func createTeamCmd() *cobra.Command {
+	// 逻辑说明：要求 Team/Leader 名，构造 Leader 加普通 Worker 的有角色成员表，并附可选管理员和协调配置创建资源。
 	var (
 		name                 string
 		teamName             string
@@ -316,6 +322,7 @@ resources, skills, and lifecycle state.`,
 // ---------------------------------------------------------------------------
 
 func createHumanCmd() *cobra.Command {
+	// 逻辑说明：要求稳定名称和显示名，解析可访问资源列表与权限字段后创建 Human CR。
 	var (
 		name              string
 		displayName       string
@@ -380,6 +387,7 @@ func createHumanCmd() *cobra.Command {
 // ---------------------------------------------------------------------------
 
 func createManagerCmd() *cobra.Command {
+	// 逻辑说明：要求 Manager 名与模型，只附加显式 runtime/image/identity/soul 后提交创建。
 	var (
 		name     string
 		model    string
@@ -447,6 +455,7 @@ var workerNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 // fallback every `agt create worker` / `agt apply worker` invoked by the
 // Manager Agent would silently override the admin's install-time model choice.
 func defaultWorkerModel() string {
+	// 逻辑说明：优先沿用安装时传播的默认模型并去空白，未配置才使用内置 qwen 默认，避免 CLI 偷换模型。
 	if m := strings.TrimSpace(os.Getenv("AGENTTEAMS_DEFAULT_MODEL")); m != "" {
 		return m
 	}
@@ -454,6 +463,7 @@ func defaultWorkerModel() string {
 }
 
 func validateWorkerName(name string) error {
+	// 逻辑说明：去空白后要求 DNS 风格小写名称，防止非法资源名进入 REST 路径或 Kubernetes metadata。
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return fmt.Errorf("invalid worker name: name is required")
@@ -465,6 +475,7 @@ func validateWorkerName(name string) error {
 }
 
 func expandPackageURI(raw string) (string, error) {
+	// 逻辑说明：完整 URI 原样保留；简写则验证 Nacos registry 基址并逐段 PathEscape，拒绝空路径段。
 	raw = strings.TrimSpace(raw)
 	if raw == "" || strings.Contains(raw, "://") {
 		return raw, nil
@@ -496,6 +507,7 @@ func expandPackageURI(raw string) (string, error) {
 }
 
 func splitCSV(s string) []string {
+	// 逻辑说明：按逗号拆分、去两侧空白并过滤空项，保持用户输入顺序供成员/技能列表使用。
 	result := make([]string, 0)
 	for _, item := range strings.Split(s, ",") {
 		item = strings.TrimSpace(item)
@@ -507,6 +519,7 @@ func splitCSV(s string) []string {
 }
 
 func parseExposePorts(s string) ([]map[string]interface{}, error) {
+	// 逻辑说明：复用 CSV 解析，逐个校验 1..65535 且去重，再转成 Controller API 所需对象数组。
 	ports := make([]map[string]interface{}, 0)
 	seen := make(map[int]struct{})
 	for _, p := range splitCSV(s) {
@@ -525,6 +538,7 @@ func parseExposePorts(s string) ([]map[string]interface{}, error) {
 }
 
 func setIfNotEmpty(m map[string]interface{}, key, value string) {
+	// 逻辑说明：只写入显式非空字符串，省略字段不会意外覆盖 Controller 默认值。
 	if value != "" {
 		m[key] = value
 	}

@@ -233,6 +233,7 @@ class ProjectService:
         manager_user_id: str,
         memory: ProjectMemoryPort | None = None,
     ) -> None:
+        # 逻辑说明：`__init__` 校验并保存 `projects`、`tasks`、`task_service`、`storage`、`controller`、`matrix`、`topology`、`graph`、`supervisor`、`clock`、`admin_user_id`、`manager_user_id`、`memory`，为项目和任务图建立进程内服务状态；配置不合法时立即抛错，且构造阶段不执行远端变更。
         if not admin_user_id or not manager_user_id:
             raise ValueError("admin and Manager Matrix IDs are required")
         self._projects = projects
@@ -258,6 +259,7 @@ class ProjectService:
         participants: tuple[str, ...],
         context: MutationContext,
     ) -> ProjectReceipt:
+        # 逻辑说明：`create` 接收 `title`、`description`、`plan`、`participants`、`context`，创建 项目和任务图，核心调用为 `fromkeys`、`ProjectCreateRequest`、`begin`，返回 `ProjectReceipt`。 它可能读写仓库、Controller、Matrix 或对象存储；下游异常按原语义向上传递，不会伪造成功结果。
         normalized_participants = tuple(dict.fromkeys(participants))
         request = ProjectCreateRequest(
             title=title,
@@ -278,6 +280,7 @@ class ProjectService:
         self,
         operation: OperationRecord,
     ) -> ProjectReceipt:
+        # 逻辑说明：`resume_create` 接收 `operation`，恢复 create，核心调用为 `ValueError`、`ConflictError`、`model_validate`，返回 `ProjectReceipt`。 它可能读写仓库、Controller、Matrix 或对象存储；前置条件不满足时保留现有领域异常，防止错误状态继续传播。
         if operation.kind is not OperationKind.CREATE_PROJECT:
             raise ValueError("operation is not project creation")
         if operation.status is OperationStatus.FAILED:
@@ -484,6 +487,7 @@ class ProjectService:
     ) -> ProjectReceipt:
         """Activate a prepared project after the plan decision is explicit."""
 
+        # 逻辑说明：`confirm_plan` 接收 `project_id`、`confirmed_by`、`context`、`auto_confirmed`，确认 plan，核心调用为 `_require_project`、`ConflictError`、`begin`，返回 `ProjectReceipt`。 它可能读写仓库、Controller、Matrix 或对象存储；前置条件不满足时保留现有领域异常，防止错误状态继续传播。
         project = await self._require_project(project_id)
         confirmation_policy = "yolo" if auto_confirmed else "manual"
         if confirmed_by != self._admin_user_id:
@@ -641,6 +645,7 @@ class ProjectService:
         dependencies: tuple[str, ...] = (),
         metadata: dict[str, Any] | None = None,
     ) -> TaskReceipt:
+        # 逻辑说明：`add_task` 接收 `project_id`、`title`、`specification`、`assigned_to`、`context`、`delegated_to_team`、`dependencies`、`metadata`，添加 task，核心调用为 `_require_project`、`ConflictError`、`get`，返回 `TaskReceipt`。 它可能读写仓库、Controller、Matrix 或对象存储；前置条件不满足时保留现有领域异常，防止错误状态继续传播。
         project = await self._require_project(project_id)
         if project.status != "active":
             raise ConflictError(
@@ -758,6 +763,7 @@ class ProjectService:
     ) -> TaskReceipt:
         """Create a linked rework task without erasing the original task."""
 
+        # 逻辑说明：`request_revision` 接收 `project_id`、`task_id`、`feedback`、`assigned_to`、`triggered_by_task_id`、`context`，识别请求 revision，核心调用为 `strip`、`ValueError`、`_require_project`，返回 `TaskReceipt`。 它可能读写仓库、Controller、Matrix 或对象存储；前置条件不满足时保留现有领域异常，防止错误状态继续传播。
         from agentteams_manager.state.tasks import ProjectTaskState
 
         if not feedback.strip():
@@ -935,6 +941,7 @@ class ProjectService:
     ) -> TaskReceipt:
         """Move one live project task and revoke the previous assignee."""
 
+        # 逻辑说明：`reassign_task` 接收 `project_id`、`task_id`、`assigned_to`、`reason`、`context`，重新分派 task，核心调用为 `strip`、`ValueError`、`_require_project`，返回 `TaskReceipt`。 它可能读写仓库、Controller、Matrix 或对象存储；前置条件不满足时保留现有领域异常，防止错误状态继续传播。
         if not reason.strip():
             raise ValueError("reassignment reason must not be empty")
         project = await self._require_project(project_id)
@@ -1103,6 +1110,7 @@ class ProjectService:
     ) -> ProjectReceipt:
         """Synchronize durable participants with Matrix membership."""
 
+        # 逻辑说明：`update_participants` 接收 `project_id`、`add`、`remove`、`reason`、`context`、`_recovering`、`_recovery_worker_users`，更新 participants，核心调用为 `fromkeys`、`strip`、`ValueError`，返回 `ProjectReceipt`。 它可能读写仓库、Controller、Matrix 或对象存储；前置条件不满足时保留现有领域异常，防止错误状态继续传播。
         additions = tuple(dict.fromkeys(add))
         removals = tuple(dict.fromkeys(remove))
         if not reason.strip():
@@ -1306,6 +1314,7 @@ class ProjectService:
     ) -> ProjectReceipt:
         """Persist a minor or confirmed-major plan revision."""
 
+        # 逻辑说明：`revise_plan` 接收 `project_id`、`plan`、`change_kind`、`reason`、`context`，修订 plan，核心调用为 `ValueError`、`strip`、`_require_project`，返回 `ProjectReceipt`。 它可能读写仓库、Controller、Matrix 或对象存储；前置条件不满足时保留现有领域异常，防止错误状态继续传播。
         if change_kind not in {"minor", "major"}:
             raise ValueError("plan change kind must be minor or major")
         if not plan.strip() or not reason.strip():
@@ -1406,6 +1415,7 @@ class ProjectService:
         accepted: bool = False,
         result_digest: str | None = None,
     ) -> TaskReceipt:
+        # 逻辑说明：`complete_task` 接收 `project_id`、`task_id`、`worker_event_id`、`sender_id`、`structured_result`、`accepted`、`result_digest`，完成 task，核心调用为 `_require_project`、`_require_task_assignee`、`record_completion`，返回 `TaskReceipt`。 它可能读写仓库、Controller、Matrix 或对象存储；前置条件不满足时保留现有领域异常，防止错误状态继续传播。
         project = await self._require_project(project_id)
         await self._require_task_assignee(
             project_id=project_id,
@@ -1633,6 +1643,7 @@ class ProjectService:
         sender_id: str,
         reason: str,
     ) -> TaskRecord:
+        # 逻辑说明：`report_blocked` 接收 `project_id`、`task_id`、`sender_id`、`reason`，报告 blocked，核心调用为 `_require_task_assignee`、`transition`，返回 `TaskRecord`。 它可能读写仓库、Controller、Matrix 或对象存储；下游异常按原语义向上传递，不会伪造成功结果。
         from agentteams_manager.state.tasks import ProjectTaskState
 
         task = await self._require_task_assignee(
@@ -1658,6 +1669,7 @@ class ProjectService:
         task_id: str,
         sender_id: str,
     ) -> TaskRecord:
+        # 逻辑说明：`_require_task_assignee` 通过 `list_by_project`、`NotFoundError` 读取并验证 task assignee，返回 `TaskRecord`；目标不存在、依赖未启用或数据不合法时在产生后续副作用前抛出领域错误。
         task_record = next(
             (
                 item
@@ -1697,6 +1709,7 @@ class ProjectService:
         generic task delegation from leaving stale or invisible entries.
         """
 
+        # 逻辑说明：`_project_task_index` 接收 `project`，构造项目数据 task index，核心调用为 `list_by_project`、`fromkeys`，返回 `dict[str, Any]`。 它可能读写仓库、Controller、Matrix 或对象存储；下游异常按原语义向上传递，不会伪造成功结果。
         tasks = await self._tasks.list_by_project(project.project_id)
         task_ids = tuple(dict.fromkeys(task.task_id for task in tasks))
         tasks_by_id = {task.task_id: task for task in tasks}
@@ -1723,6 +1736,7 @@ class ProjectService:
     ) -> ProjectRecord:
         """Refresh the project task projection from authoritative task rows."""
 
+        # 逻辑说明：`_synchronize_project_task_index` 接收 `project_id`，处理 project task index，核心调用为 `_require_project`、`_project_task_index`、`update`，返回 `ProjectRecord`。 它可能读写仓库、Controller、Matrix 或对象存储；下游异常按原语义向上传递，不会伪造成功结果。
         project = await self._require_project(project_id)
         indexed_metadata = await self._project_task_index(project)
         if indexed_metadata == project.metadata:
@@ -1742,6 +1756,7 @@ class ProjectService:
         worker_event_id: str,
         task_id: str,
     ) -> None:
+        # 逻辑说明：`_close_project_if_terminal` 接收 `project_id`、`worker_event_id`、`task_id`，关闭 project if terminal，核心调用为 `list_by_project`、`_require_project`、`close`，返回 `None`。 它可能读写仓库、Controller、Matrix 或对象存储；下游异常按原语义向上传递，不会伪造成功结果。
         remaining = tuple(
             item
             for item in await self._tasks.list_by_project(project_id)
@@ -1769,6 +1784,7 @@ class ProjectService:
         force: bool,
         context: MutationContext,
     ) -> ProjectReceipt:
+        # 逻辑说明：`close` 接收 `project_id`、`force`、`context`，关闭 项目和任务图，核心调用为 `_require_project`、`_project_receipt`、`list_by_project`，返回 `ProjectReceipt`。 它可能读写仓库、Controller、Matrix 或对象存储；前置条件不满足时保留现有领域异常，防止错误状态继续传播。
         project = await self._require_project(project_id)
         if project.status in {"completed", "cancelled"}:
             return _project_receipt(context.operation_id, project)
@@ -1801,6 +1817,7 @@ class ProjectService:
         self,
         operation: OperationRecord,
     ) -> ProjectReceipt:
+        # 逻辑说明：`_resume_close` 从持久化 operation/request 重建项目和任务图上下文，通过 `ValueError`、`get`、`RecoveryError` 证明或补做下一阶段，最终返回 `ProjectReceipt`；字段缺失、状态冲突或效果不可证明时保持失败/歧义状态而不是重复执行。
         if operation.kind is not OperationKind.CLOSE_PROJECT:
             raise ValueError("operation is not project closure")
         project_id = str(operation.request.get("project_id", ""))
@@ -1938,6 +1955,7 @@ class ProjectService:
         self,
         operation: OperationRecord,
     ) -> TaskRecord:
+        # 逻辑说明：`_resume_project_task_index` 从持久化 operation/request 重建项目和任务图上下文，通过 `get`、`RecoveryError`、`_require_project` 证明或补做下一阶段，最终返回 `TaskRecord`；字段缺失、状态冲突或效果不可证明时保持失败/歧义状态而不是重复执行。
         request = operation.request
         action = request.get("action")
         if action not in {"add_task", "complete_task"}:
@@ -2042,6 +2060,7 @@ class ProjectService:
         operation: OperationRecord,
     ) -> object:
         """Resume one project operation from durable request facts."""
+        # 逻辑说明：`resume_operation` 从持久化 operation/request 重建项目和任务图上下文，通过 `resume_create`、`get`、`_context_from_operation` 证明或补做下一阶段，最终返回 `object`；字段缺失、状态冲突或效果不可证明时保持失败/歧义状态而不是重复执行。
         if operation.kind is OperationKind.CREATE_PROJECT:
             return await self.resume_create(operation)
         if operation.kind is OperationKind.UPDATE_PROJECT:
@@ -2116,6 +2135,7 @@ class ProjectService:
         room_id: str,
         expected: tuple[str, ...],
     ) -> None:
+        # 逻辑说明：`_ensure_members` 先读取 members 的现状，再通过 `_known_room_members`、`before_effect`、`invite_user` 只补齐缺失部分，返回 `None`；已存在但内容冲突时拒绝覆盖，保证恢复操作幂等。
         current = await self._known_room_members(room_id)
         for user_id in expected:
             if user_id in current:
@@ -2150,6 +2170,7 @@ class ProjectService:
 
     async def _known_room_members(self, room_id: str) -> set[str]:
         """Return joined and invited Matrix users for idempotent membership."""
+        # 逻辑说明：`_known_room_members` 接收 `room_id`，处理 room members，核心调用为 `members`、`room_state`、`get`，返回 `set[str]`。 它可能读写仓库、Controller、Matrix 或对象存储；下游异常按原语义向上传递，不会伪造成功结果。
         known = set(await self._matrix.members(room_id))
         for event in await self._matrix.room_state(room_id):
             if event.get("type") != "m.room.member":
@@ -2166,6 +2187,7 @@ class ProjectService:
         return known
 
     async def _find_project_room(self, project_id: str) -> str | None:
+        # 逻辑说明：`_find_project_room` 接收 `project_id`，查找 project room，核心调用为 `joined_rooms`、`room_state`、`get`，返回 `str | None`。 它可能读写仓库、Controller、Matrix 或对象存储；前置条件不满足时保留现有领域异常，防止错误状态继续传播。
         matches: list[str] = []
         for room_id in await self._matrix.joined_rooms():
             for event in await self._matrix.room_state(room_id):
@@ -2194,6 +2216,7 @@ class ProjectService:
         *,
         operation_name: str,
     ) -> ObjectReceipt:
+        # 逻辑说明：`_ensure_json` 先读取 json 的现状，再通过 `head`、`get_json`、`get` 只补齐缺失部分，返回 `ObjectReceipt`；已存在但内容冲突时拒绝覆盖，保证恢复操作幂等。
         existing = await self._storage.head(key)
         if existing is not None:
             current = await self._storage.get_json(key)
@@ -2231,6 +2254,7 @@ class ProjectService:
         *,
         operation_name: str,
     ) -> ObjectReceipt:
+        # 逻辑说明：`_ensure_bytes` 先读取 bytes 的现状，再通过 `head`、`get_bytes`、`ConflictError` 只补齐缺失部分，返回 `ObjectReceipt`；已存在但内容冲突时拒绝覆盖，保证恢复操作幂等。
         existing = await self._storage.head(key)
         if existing is not None:
             if await self._storage.get_bytes(key) != value:
@@ -2271,6 +2295,7 @@ class ProjectService:
         expected_etag: str | None,
         operation_name: str,
     ) -> ObjectReceipt:
+        # 逻辑说明：`_replace_json` 先登记外部效果意图，再通过 `before_effect`、`put_json_if_version`、`_record_external_failure` 替换 json 并记录回执，返回 `ObjectReceipt`；并发版本冲突或远端结果不确定时保留可恢复证据。
         await self._supervisor.before_effect(
             operation.operation_id,
             ExternalEffect.STORAGE,
@@ -2303,6 +2328,7 @@ class ProjectService:
         *,
         operation_name: str,
     ) -> ObjectReceipt:
+        # 逻辑说明：`_replace_project_metadata` 先登记外部效果意图，再通过 `_ensure_json`、`model_dump` 替换 project metadata 并记录回执，返回 `ObjectReceipt`；并发版本冲突或远端结果不确定时保留可恢复证据。
         return await self._ensure_json(
             operation,
             f"shared/projects/{metadata.project_id}/meta.json",
@@ -2317,6 +2343,7 @@ class ProjectService:
         *,
         operation_name: str,
     ) -> ObjectReceipt:
+        # 逻辑说明：`_replace_project_plan` 先登记外部效果意图，再通过 `encode`、`render`、`_project_plan` 替换 project plan 并记录回执，返回 `ObjectReceipt`；并发版本冲突或远端结果不确定时保留可恢复证据。
         key = f"shared/projects/{project.project_id}/plan.md"
         target = _project_plan(project).render().encode("utf-8")
         current = await self._storage.head(key)
@@ -2356,6 +2383,7 @@ class ProjectService:
         decision: str,
         rationale: str,
     ) -> None:
+        # 逻辑说明：`_remember_project_decision` 接收 `operation`、`project`、`decision`、`rationale`，写入记忆 project decision，核心调用为 `get`、`record_project_decision`，返回 `None`。 它可能读写仓库、Controller、Matrix 或对象存储；下游异常按原语义向上传递，不会伪造成功结果。
         if self._memory is None:
             return
         room_id = str(
@@ -2380,6 +2408,7 @@ class ProjectService:
         effect: ExternalEffect,
         exc: Exception,
     ) -> None:
+        # 逻辑说明：`_record_external_failure` 将 Project 的 Matrix、Controller 或对象存储失败写入对应 operation effect；连接/超时类结果标记 ambiguous，其余标记 failed，供项目恢复流程继续证明。
         if isinstance(exc, (TimeoutError, ConnectionError, BrokenPipeError)):
             await self._supervisor.effect_ambiguous(
                 operation_id,
@@ -2394,6 +2423,7 @@ class ProjectService:
             )
 
     async def _require_project(self, project_id: str) -> ProjectRecord:
+        # 逻辑说明：`_require_project` 通过 `get`、`NotFoundError` 读取并验证 project，返回 `ProjectRecord`；目标不存在、依赖未启用或数据不合法时在产生后续副作用前抛出领域错误。
         project = await self._projects.get(project_id)
         if project is None:
             raise NotFoundError(f"project/{project_id} does not exist")
@@ -2405,6 +2435,7 @@ class ProjectService:
         operation: OperationRecord,
         request: ProjectCreateRequest,
     ) -> None:
+        # 逻辑说明：`_verify_project_request` 接收 `project`、`operation`、`request`，核对 project request，核心调用为 `get`、`ConflictError`，返回 `None`。 它只在内存中计算、校验或组装数据；前置条件不满足时保留现有领域异常，防止错误状态继续传播。
         if (
             project.name != request.title
             or project.metadata.get("operation_id")
@@ -2420,6 +2451,7 @@ class ProjectService:
 
 
 def _project_id_for(operation: OperationRecord) -> str:
+    # 逻辑说明：`_project_id_for` 从稳定输入生成可重复的 id for，返回 `str` 供幂等写入/发送使用；同一输入得到同一标识，不产生外部副作用。
     timestamp = operation.created_at.astimezone(UTC)
     return (
         f"project-{timestamp:%Y%m%d-%H%M%S}-"
@@ -2428,6 +2460,7 @@ def _project_id_for(operation: OperationRecord) -> str:
 
 
 def _project_metadata(project: ProjectRecord) -> ProjectMetadata:
+    # 逻辑说明：`_project_metadata` 接收 `project`，构造项目数据 metadata，核心调用为 `get`、`isoformat`、`ProjectMetadata`，返回 `ProjectMetadata`。 它只在内存中计算、校验或组装数据；下游异常按原语义向上传递，不会伪造成功结果。
     completed_at = project.metadata.get("completed_at")
     confirmed_at = project.metadata.get("confirmed_at")
     confirmed_by = project.metadata.get("confirmed_by")
@@ -2468,6 +2501,7 @@ def _project_metadata(project: ProjectRecord) -> ProjectMetadata:
 
 
 def _project_plan(project: ProjectRecord) -> ProjectPlan:
+    # 逻辑说明：`_project_plan` 接收 `project`，构造项目数据 plan，核心调用为 `ProjectPlan`、`_project_status`、`get`，返回 `ProjectPlan`。 它只在内存中计算、校验或组装数据；下游异常按原语义向上传递，不会伪造成功结果。
     return ProjectPlan(
         project_id=project.project_id,
         title=project.name,
@@ -2481,6 +2515,7 @@ def _project_plan(project: ProjectRecord) -> ProjectPlan:
 
 
 def _project_status(project: ProjectRecord) -> ProjectStatus:
+    # 逻辑说明：`_project_status` 接收 `project`，构造项目数据 status，核心调用为 `RecoveryError`，返回 `ProjectStatus`。 它只在内存中计算、校验或组装数据；前置条件不满足时保留现有领域异常，防止错误状态继续传播。
     if project.status not in {
         "planning",
         "active",
@@ -2498,6 +2533,7 @@ def _project_receipt(
     operation_id: str,
     project: ProjectRecord,
 ) -> ProjectReceipt:
+    # 逻辑说明：`_project_receipt` 从 `operation_id`、`project` 构造 `ProjectReceipt`，统一调用方看到的项目和任务图结果；它只转换数据，不执行远端 I/O。
     return ProjectReceipt(
         operation_id=operation_id,
         project_id=project.project_id,
@@ -2523,6 +2559,7 @@ def _task_receipt_from_record(
     operation_id: str,
     task: TaskRecord,
 ) -> TaskReceipt:
+    # 逻辑说明：`_task_receipt_from_record` 从 `operation_id`、`task` 构造 `TaskReceipt`，统一调用方看到的项目和任务图结果；它只转换数据，不执行远端 I/O。
     return TaskReceipt(
         operation_id=operation_id,
         task_id=task.task_id,
@@ -2547,6 +2584,7 @@ def _task_receipt_from_record(
 def _context_from_operation(
     operation: OperationRecord,
 ) -> MutationContext:
+    # 逻辑说明：`_context_from_operation` 接收 `operation`，处理 from operation，核心调用为 `get`、`RecoveryError`、`MutationContext`，返回 `MutationContext`。 它只在内存中计算、校验或组装数据；前置条件不满足时保留现有领域异常，防止错误状态继续传播。
     room_id = str(operation.request.get("source_room_id") or "")
     event_id = str(operation.request.get("source_event_id") or "")
     tool_call_id = str(
@@ -2569,6 +2607,7 @@ def _context_from_operation(
 
 
 def _fallback_worker_user(worker: WorkerResource) -> str:
+    # 逻辑说明：`_fallback_worker_user` 接收 `worker`，生成后备值 worker user，核心调用为 `rsplit`，返回 `str`。 它只在内存中计算、校验或组装数据；下游异常按原语义向上传递，不会伪造成功结果。
     domain = "example"
     if worker.room_id and ":" in worker.room_id:
         domain = worker.room_id.rsplit(":", 1)[1]
@@ -2576,6 +2615,7 @@ def _fallback_worker_user(worker: WorkerResource) -> str:
 
 
 def _project_status_rank(status: str) -> int:
+    # 逻辑说明：`_project_status_rank` 接收 `status`，构造项目数据 status rank，核心调用为 `get`，返回 `int`。 它只在内存中计算、校验或组装数据；下游异常按原语义向上传递，不会伪造成功结果。
     return {
         "planning": 0,
         "active": 1,

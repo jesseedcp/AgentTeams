@@ -19,14 +19,17 @@
 
 set -e
 
+# 逻辑说明：为声明式 apply 的检测和提交阶段统一添加可识别的终端前缀。
 log() {
     echo -e "\033[36m[AgentTeams Apply]\033[0m $1"
 }
 
+# 逻辑说明：把可恢复错误写到 stderr，是否退出由调用者决定。
 error() {
     echo -e "\033[31m[AgentTeams Apply ERROR]\033[0m $1" >&2
 }
 
+# 逻辑说明：用于无法继续的输入或环境错误，先复用统一错误格式再终止脚本。
 die() {
     error "$1"
     exit 1

@@ -74,6 +74,7 @@ _DEBUG_ENABLED: bool = os.getenv("AGENTTEAMS_TASK_TRACE_DEBUG", "").strip() in (
 
 def _trace_log(msg: str, *args: Any) -> None:
     """Emit debug log only when AGENTTEAMS_TASK_TRACE_DEBUG=1."""
+    # 逻辑说明：`_trace_log` 仅在 debug 开启时写 stderr 和 logger，避免默认热路径产生 I/O。
     if not _DEBUG_ENABLED:
         return
     formatted = msg % args if args else msg
@@ -83,6 +84,7 @@ def _trace_log(msg: str, *args: Any) -> None:
 
 def _trace_warning(msg: str, *args: Any) -> None:
     """Report a non-fatal trace-correlation problem."""
+    # 逻辑说明：`_trace_warning` 始终记录非致命关联问题；debug 模式额外写 stderr 便于容器诊断。
     formatted = msg % args if args else msg
     if _DEBUG_ENABLED:
         print(f"[AgentTeamsTaskSpanProcessor] {formatted}", file=sys.stderr, flush=True)
@@ -91,6 +93,7 @@ def _trace_warning(msg: str, *args: Any) -> None:
 
 def set_trace_debug(enabled: bool) -> None:
     """Programmatically enable/disable processor debug logging."""
+    # 逻辑说明：显式更新进程内 trace 调试开关；只影响后续诊断输出，不重建 processor 或更改已发送的 span。
     global _DEBUG_ENABLED
     _DEBUG_ENABLED = enabled
 
@@ -116,11 +119,13 @@ def set_current_room(room_id: str) -> contextvars.Token[str]:
 
     Returns a token for resetting (useful in try/finally blocks).
     """
+    # 逻辑说明：`set_current_room` 规范化 room ID 并写入当前协程 ContextVar，返回 token 供 finally 恢复。
     return _current_room.set(canonical_room_id(room_id))
 
 
 def get_current_room() -> str:
     """Return the room_id for the current coroutine/thread, or empty string."""
+    # 逻辑说明：`get_current_room` 从 ContextVar 读取当前协程关联的 Matrix 房间，返回给链路追踪标签逻辑；读取不会改变上下文。
     return _current_room.get()
 
 
@@ -149,6 +154,7 @@ def is_entry_span(span_name: str) -> bool:
 
 def canonical_room_id(room_id: Any) -> str:
     """Return a stable Matrix room key across TeamHarness/QwenPaw prefixes."""
+    # 逻辑说明：`canonical_room_id` 反复剥离兼容前缀，直到得到稳定 Matrix room key。
     value = str(room_id or "").strip()
     changed = True
     while changed:
@@ -162,6 +168,7 @@ def canonical_room_id(room_id: Any) -> str:
 
 def canonical_worker_name(worker_id: Any) -> str:
     """Normalize Matrix user ids and bare worker names to the worker name."""
+    # 逻辑说明：`canonical_worker_name` 去掉 MXID 的 `@` 与 domain，仅保留可比较的 Worker 名。
     value = str(worker_id or "").strip()
     if value.startswith("@"):
         value = value[1:]
@@ -172,6 +179,7 @@ def canonical_worker_name(worker_id: Any) -> str:
 
 def _meta_text(meta: dict[str, Any], *keys: str) -> str:
     """Return the first non-empty string value for *keys* in *meta*."""
+    # 逻辑说明：`_meta_text` 按兼容字段顺序返回首个非空文本，不修改任务 metadata。
     for key in keys:
         value = str(meta.get(key) or "").strip()
         if value:
@@ -196,6 +204,7 @@ def _task_id(meta: dict[str, Any]) -> str:
 
 
 def _read_task_metas(workspace_dir: Path) -> list[dict[str, Any]]:
+    # 逻辑说明：`_read_task_metas` 稳定扫描 shared/tasks；跳过残缺或非法 JSON，返回可关联的字典列表。
     tasks_dir = workspace_dir / "shared" / "tasks"
     if not tasks_dir.is_dir():
         return []
@@ -227,6 +236,8 @@ def find_task_trace_context(
     room, exactly one active task may be assigned to ``AGENTTEAMS_WORKER_NAME``.
     Ambiguous or missing task matches keep project attribution but omit task id.
     """
+    # 逻辑说明：`find_task_trace_context` 用 room、project、assignee 和 active status 唯一匹配 Task。
+    # 匹配歧义时只保留可证明的 project，避免把一个 Worker 的 trace 错标到另一项 Task。
     canonical_room = canonical_room_id(room_id)
     context: dict[str, Any] = {
         "project_id": "",
@@ -324,6 +335,7 @@ def find_active_task(
     room_id: str = "",
 ) -> dict[str, Any] | None:
     """Return the current worker's active task for ``room_id``, if unique."""
+    # 逻辑说明：`find_active_task` 复用完整关联逻辑，并只在 task 为唯一字典结果时返回。
     context = find_task_trace_context(workspace_dir, room_id=room_id)
     task = context.get("task")
     return task if isinstance(task, dict) else None
@@ -339,6 +351,7 @@ def register_task_trace_processor(
     Safe to call even when the OTel SDK is not installed — returns a result
     dict describing what happened.
     """
+    # 逻辑说明：`register_task_trace_processor` 解析真实 TracerProvider，并按对象 ID 幂等注册 processor。
     try:
         from opentelemetry import trace as trace_api
         from opentelemetry.sdk.trace import TracerProvider
@@ -374,6 +387,7 @@ def register_task_trace_processor(
 
 
 def _span_is_recording(span: Any) -> bool:
+    # 逻辑说明：`_span_is_recording` 兼容真实与测试 span；存在 API 时遵从其 recording 状态。
     is_recording = getattr(span, "is_recording", None)
     if callable(is_recording):
         return bool(is_recording())
@@ -382,6 +396,7 @@ def _span_is_recording(span: Any) -> bool:
 
 def tag_entry_span(span: Any, workspace_dir: Path | str, *, room_id: str = "") -> dict[str, Any]:
     """Attach AgentTeams task attributes to an already-started entry span."""
+    # 逻辑说明：`tag_entry_span` 仅标记正在记录的入口 span，并从当前 room 重新读取权威 Task metadata。
     span_name = str(getattr(span, "name", "") or "")
     if not _span_is_recording(span):
         return {"ok": False, "reason": "span not recording"}
@@ -447,6 +462,7 @@ def tag_current_entry_span(workspace_dir: Path | str, *, room_id: str = "") -> d
     time the room context becomes available).  Falls back to the OTel current
     span.
     """
+    # 逻辑说明：`tag_current_entry_span` 优先处理早先保存的入口 span，否则回退到 OTel 当前 span。
     pending = _pending_entry_span.get()
     if pending is not None:
         return tag_pending_entry_span(workspace_dir, room_id=room_id)
@@ -461,6 +477,7 @@ def tag_current_entry_span(workspace_dir: Path | str, *, room_id: str = "") -> d
 
 def get_pending_entry_span() -> Any:
     """Return the entry span saved by on_start, or None."""
+    # 逻辑说明：`get_pending_entry_span` 读取 on_start 暂存的入口 Span，供后续补写任务标签；这里只读取，不会清除或结束 Span。
     return _pending_entry_span.get()
 
 
@@ -476,6 +493,7 @@ def tag_pending_entry_span(workspace_dir: Path | str, *, room_id: str = "") -> d
     span — which was created *before* the room was known — gets tagged with
     the correct task attributes.
     """
+    # 逻辑说明：`tag_pending_entry_span` 先取出并清空待处理引用，再标记，避免同一 span 被重复复用。
     span = _pending_entry_span.get()
     if span is None:
         return {"ok": False, "reason": "no pending entry span"}
@@ -496,10 +514,12 @@ class AgentTeamsTaskSpanProcessor:
     """
 
     def __init__(self, workspace_dir: Path, *, cache_ttl: float = _CACHE_TTL) -> None:
+        # 逻辑说明：`__init__` 固定 metadata 工作区；cache_ttl 仅为兼容旧 API，不启用陈旧缓存。
         _ = cache_ttl
         self._workspace_dir = workspace_dir
 
     def on_start(self, span: Any, parent_context: Any = None) -> None:
+        # 逻辑说明：`on_start` 只处理入口 span；room 已知时立即标记，否则保存给 turn hook 稍后补标。
         span_name = str(getattr(span, "name", "") or "")
         if not _span_is_recording(span):
             return
@@ -520,6 +540,7 @@ class AgentTeamsTaskSpanProcessor:
             )
 
     def on_end(self, span: Any) -> None:
+        # 逻辑说明：`on_end` 仅在 debug 模式输出入口 span 的最终关联属性，不改变 span 状态。
         span_name = str(getattr(span, "name", "") or "")
         if not is_entry_span(span_name):
             return
@@ -553,6 +574,7 @@ class AgentTeamsTaskSpanProcessor:
         return None
 
     def _get_trace_context(self, room_id: str = "") -> dict[str, Any]:
+        # 逻辑说明：`_get_trace_context` 每次规范化 room 并重新扫描 metadata，缺少关联时只记录诊断。
         cache_key = canonical_room_id(room_id)
         context = find_task_trace_context(self._workspace_dir, room_id=cache_key)
         if not context.get("project_id"):

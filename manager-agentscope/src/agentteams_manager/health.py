@@ -61,9 +61,11 @@ class ReadinessState:
         self,
         probe: Callable[[], bool] | None,
     ) -> None:
+        # 逻辑说明：绑定 Matrix live/ready 探针供请求即时刷新；这里只保存回调不主动调用。
         self._matrix_probe = probe
 
     def _refresh_matrix(self) -> None:
+        # 逻辑说明：调用可选探针更新 Matrix 状态；探针异常按未就绪处理而不使服务崩溃。
         if self._matrix_probe is None:
             return
         try:
@@ -73,6 +75,7 @@ class ReadinessState:
 
     @property
     def ready(self) -> bool:
+        # 逻辑说明：刷新 Matrix 后汇总所有必需组件，只有全部满足才对外报告 ready。
         self._refresh_matrix()
         return all(
             (
@@ -85,6 +88,7 @@ class ReadinessState:
         )
 
     def as_dict(self) -> dict[str, bool]:
+        # 逻辑说明：生成健康快照，包含总状态与各组件布尔值，供页面和探针读取。
         ready = self.ready
         return {
             "database_ready": self.database_ready,
@@ -111,6 +115,7 @@ class HealthServer:
         capability_snapshot: CapabilitySnapshot | None = None,
         liveness_probe: LivenessProbe | None = None,
     ) -> None:
+        # 逻辑说明：保存健康、指标、webhook 和管理 API 依赖；socket 延迟到 start 创建。
         self.readiness = readiness
         self._metrics = metrics
         self._host = host
@@ -125,11 +130,13 @@ class HealthServer:
 
     @property
     def bound_port(self) -> int:
+        # 逻辑说明：从实际监听 socket 读取端口；尚未启动时返回零。
         if self._server is None or not self._server.sockets:
             raise RuntimeError("health server is not running")
         return int(self._server.sockets[0].getsockname()[1])
 
     async def start(self) -> None:
+        # 逻辑说明：幂等启动 asyncio HTTP server 并保存句柄，端口为零时由 socket 分配。
         if self._server is not None:
             return
         self._server = await asyncio.start_server(
@@ -140,6 +147,7 @@ class HealthServer:
         )
 
     async def stop(self) -> None:
+        # 逻辑说明：取出 server、停止接受连接并等待关闭；未启动时为空操作。
         if self._server is None:
             return
         self._server.close()
@@ -151,6 +159,7 @@ class HealthServer:
         reader: asyncio.StreamReader,
         writer: asyncio.StreamWriter,
     ) -> None:
+        # 逻辑说明：解析请求并分派健康、指标、webhook 或管理 API；异常统一转 JSON 错误。
         try:
             request = await asyncio.wait_for(
                 reader.readuntil(b"\r\n\r\n"),
@@ -258,6 +267,7 @@ class HealthServer:
         headers: dict[str, str],
         query: dict[str, str],
     ) -> None:
+        # 逻辑说明：校验 handler 和请求体后交给 channel 适配器，按结果返回标准 JSON。
         if self._webhook_handler is None:
             await self._respond(writer, 404, b"not found\n")
             return
@@ -322,6 +332,7 @@ class HealthServer:
         path: str,
         headers: dict[str, str],
     ) -> None:
+        # 逻辑说明：验证管理员 token 并返回只读快照；未配置能力或未授权时拒绝。
         if self._admin_token is None or self._admin_snapshot is None:
             await self._respond(writer, 503, b"admin console disabled\n")
             return
@@ -360,6 +371,7 @@ class HealthServer:
         path: str,
         headers: dict[str, str],
     ) -> None:
+        # 逻辑说明：解析资源路径/方法、验证 token 与 JSON 后调用管理命令并映射错误。
         if self._admin_token is None or self._admin_command is None:
             await self._json_error(
                 writer,
@@ -472,6 +484,7 @@ class HealthServer:
         writer: asyncio.StreamWriter,
         headers: dict[str, str],
     ) -> dict[str, object] | None:
+        # 逻辑说明：要求 JSON 类型、限制 body 大小并验证根对象；格式问题返回客户端错误。
         content_type = headers.get("content-type", "")
         media_type = content_type.partition(";")[0].strip().casefold()
         if media_type != "application/json":
@@ -541,6 +554,7 @@ class HealthServer:
         return parsed
 
     def _admin_authorized(self, headers: dict[str, str]) -> bool:
+        # 逻辑说明：提取 Bearer token 并做常量时间比较，降低凭据比较侧信道。
         if self._admin_token is None:
             return False
         expected = (
@@ -558,6 +572,7 @@ class HealthServer:
         *,
         details: object | None = None,
     ) -> None:
+        # 逻辑说明：构造统一错误 envelope，可选附加详情，再通过 JSON responder 发送。
         error: dict[str, object] = {
             "code": code,
             "message": message,
@@ -572,6 +587,7 @@ class HealthServer:
         status: int,
         payload: Mapping[str, object],
     ) -> None:
+        # 逻辑说明：将对象 UTF-8 JSON 编码，补齐 content-type 后交给底层响应函数。
         await self._respond(
             writer,
             status,
@@ -592,6 +608,7 @@ class HealthServer:
         content_type: str = "text/plain; charset=utf-8",
         headers: Mapping[str, str] | None = None,
     ) -> None:
+        # 逻辑说明：构造 HTTP/1.1 状态、长度和关闭头，写入后可靠关闭 stream。
         reasons = {
             200: "OK",
             201: "Created",
@@ -626,6 +643,7 @@ class HealthServer:
 
 
 def _headers(request: bytes) -> dict[str, str]:
+    # 逻辑说明：从原始请求解析小写 header 映射，跳过请求行和畸形行。
     result: dict[str, str] = {}
     for raw_line in request.split(b"\r\n")[1:]:
         if not raw_line:

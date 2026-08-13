@@ -24,6 +24,7 @@ async def run_application(
     *,
     install_signals: bool = True,
 ) -> None:
+    # 逻辑说明：构建完整应用、注册停止信号并运行到结束；退出时保证生命周期清理。
     if install_signals:
         loop = asyncio.get_running_loop()
         for signum in (signal.SIGINT, signal.SIGTERM):
@@ -42,6 +43,7 @@ async def run_application(
 
 def main() -> None:
     """Load deployment wiring and run until a termination signal."""
+    # 逻辑说明：延迟导入生产装配器、读取环境配置并运行应用，使模块导入本身不连接外部服务。
     from .bootstrap import create_application
 
     configure_logging()
@@ -49,6 +51,7 @@ def main() -> None:
     config = ManagerConfig.from_env()
 
     async def run() -> None:
+        # 逻辑说明：在事件循环内执行应用，并将 KeyboardInterrupt 作为正常人工停止处理。
         application = await create_application(config, tracer=tracer)
         await run_application(application)
 

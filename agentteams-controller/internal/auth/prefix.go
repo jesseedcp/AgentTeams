@@ -25,6 +25,7 @@ const DefaultResourcePrefix ResourcePrefix = "agentteams-"
 // Or returns the receiver if non-empty, else DefaultResourcePrefix. Useful
 // at construction sites that accept an optional prefix via a config struct.
 func (p ResourcePrefix) Or(fallback ResourcePrefix) ResourcePrefix {
+	// 逻辑说明：接收者非空时保持租户前缀；否则采用显式 fallback，二者都空才使用系统默认值。
 	if p == "" {
 		if fallback == "" {
 			return DefaultResourcePrefix
@@ -95,6 +96,7 @@ func (p ResourcePrefix) ManagerSessionName(name string) string {
 // The "default" Manager uses ManagerDefaultName (for install-script and
 // CMS-service-name compatibility); other Managers use "${prefix}manager-<name>".
 func (p ResourcePrefix) ManagerPodName(managerName string) string {
+	// 逻辑说明：default Manager 保留历史固定 Pod 名，其他 Manager 用带资源名的前缀避免相互碰撞。
 	if managerName == "default" {
 		return p.ManagerDefaultName()
 	}
@@ -105,6 +107,7 @@ func (p ResourcePrefix) ManagerPodName(managerName string) string {
 // Manager role returns a single shared SA regardless of manager CR name
 // (historical invariant); worker/team-leader share the worker prefix.
 func (p ResourcePrefix) SAName(role, name string) string {
+	// 逻辑说明：Admin/Manager 映射固定共享 SA；Worker 与 Team Leader 使用按业务名隔离的 Worker SA。
 	switch role {
 	case RoleAdmin:
 		return p.AdminName()
@@ -120,6 +123,7 @@ func (p ResourcePrefix) SAName(role, name string) string {
 // the receiver prefix so multi-tenant controllers with different prefixes
 // remain isolated.
 func (p ResourcePrefix) ParseSAUsername(username string) (*CallerIdentity, error) {
+	// 逻辑说明：解析 Kubernetes SA username 的 namespace/name，再按当前租户前缀映射角色；未知格式或前缀立即拒绝。
 	const saPrefix = "system:serviceaccount:"
 	if !strings.HasPrefix(username, saPrefix) {
 		return nil, fmt.Errorf("unexpected username format: %q", username)
@@ -148,6 +152,7 @@ func (p ResourcePrefix) ParseSAUsername(username string) (*CallerIdentity, error
 // Kept private so consumers can't silently construct an ambiguous zero-value
 // prefix — explicit Or() at construction sites is clearer.
 func (p ResourcePrefix) effective() string {
+	// 逻辑说明：私有统一零值回退，确保所有派生 Pod、SA、label 名都使用同一实际前缀。
 	if p == "" {
 		return string(DefaultResourcePrefix)
 	}

@@ -13,6 +13,7 @@ __all__ = [
 
 def __getattr__(name: str) -> Any:
     """Keep public imports lazy so runtime modules do not form cycles."""
+    # 逻辑说明：按请求的公开名称延迟导入并返回对应 runtime 类，避免模块初始化形成循环；名称不在导出表时抛出 AttributeError，且不缓存或改写模块状态。
     if name == "AgentFactory":
         from .agent_factory import AgentFactory
 

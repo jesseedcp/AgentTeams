@@ -47,6 +47,7 @@ class ProcessRunner:
         allowed_executables: Collection[str] = ("agt",),
         environment: Mapping[str, str] | None = None,
     ) -> None:
+        # 逻辑说明：固化可执行文件白名单和可选最小环境，后续 argv 不能临时突破允许的程序集合。
         self._allowed = frozenset(allowed_executables)
         if not self._allowed:
             raise ValueError("process allowlist cannot be empty")
@@ -62,6 +63,7 @@ class ProcessRunner:
         cwd: Path | None = None,
         timeout: float | None = 30,
     ) -> ProcessResult:
+        # 逻辑说明：先验证 argv allowlist，再无 shell 启动；超时先 terminate、后 kill 并返回稳定异常。
         self._validate(argv)
         process = await asyncio.create_subprocess_exec(
             *argv,
@@ -106,6 +108,7 @@ class ProcessRunner:
         )
 
     def _validate(self, argv: tuple[str, ...]) -> None:
+        # 逻辑说明：只允许 allowlist 中的裸可执行名，阻止绝对路径或目录分隔符绕过配置。
         if not argv or not argv[0]:
             raise ProcessRejected("process argv cannot be empty")
         executable = argv[0]

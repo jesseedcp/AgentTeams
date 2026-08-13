@@ -146,11 +146,13 @@ class ChannelResolver:
         matrix: MatrixAdministrationPort,
         manager_admin_room: str,
     ) -> None:
+        # 逻辑说明：`__init__` 校验并保存 `channels`、`matrix`、`manager_admin_room`，为Matrix 房间与成员资源建立进程内服务状态；配置不合法时立即抛错，且构造阶段不执行远端变更。
         self._channels = channels
         self._matrix = matrix
         self._manager_admin_room = manager_admin_room
 
     async def notification_room(self, *, recipient: str) -> str:
+        # 逻辑说明：`notification_room` 读取 Manager 已加入的房间，依次尝试 recipient 的主通道和可信通道，只有房间仍存在且 recipient 是成员才返回；否则回退管理员房间。
         joined = frozenset(await self._matrix.joined_rooms())
         primary = await self._channels.primary_channel(recipient)
         if primary and await self._usable(
@@ -175,6 +177,7 @@ class ChannelResolver:
         recipient: str,
         joined: frozenset[str],
     ) -> bool:
+        # 逻辑说明：`_usable` 先确认候选 room_id 在 Manager 的 joined 集合中，再读取 Matrix 成员并检查 recipient；只做可达性判断，不邀请成员或发送消息。
         if room_id not in joined:
             return False
         return recipient in await self._matrix.members(room_id)
@@ -191,6 +194,7 @@ class MatrixResourceService:
         channels: ChannelStore,
         manager_admin_room: str,
     ) -> None:
+        # 逻辑说明：`__init__` 校验并保存 `supervisor`、`matrix`、`channels`、`manager_admin_room`，为Matrix 房间与成员资源建立进程内服务状态；配置不合法时立即抛错，且构造阶段不执行远端变更。
         self._supervisor = supervisor
         self._matrix = matrix
         self._channels = channels
@@ -209,6 +213,7 @@ class MatrixResourceService:
         revision: int,
         context: MutationContext,
     ) -> str:
+        # 逻辑说明：`create_channel` 接收 `name`、`topic`、`invite`、`revision`、`context`，创建 channel，核心调用为 `begin`、`_resume_create_channel`，返回 `str`。 它可能读写仓库、Controller、Matrix 或对象存储；下游异常按原语义向上传递，不会伪造成功结果。
         request: dict[str, object] = {
             "action": "create_channel",
             "name": name,
@@ -234,6 +239,7 @@ class MatrixResourceService:
         peer_user_id: str | None,
         context: MutationContext,
     ) -> dict[str, object]:
+        # 逻辑说明：`update_channel` 接收 `action`、`user_id`、`room_id`、`peer_user_id`、`context`，更新 channel，核心调用为 `begin`、`_resume_channel`，返回 `dict[str, object]`。 它可能读写仓库、Controller、Matrix 或对象存储；下游异常按原语义向上传递，不会伪造成功结果。
         request: dict[str, object] = {
             "action": action,
             "user_id": user_id,
@@ -256,6 +262,7 @@ class MatrixResourceService:
         peer_user_id: str | None,
         context: MutationContext,
     ) -> dict[str, object]:
+        # 逻辑说明：`delete_channel` 接收 `action`、`user_id`、`peer_user_id`、`context`，删除 channel，核心调用为 `begin`、`_resume_channel`，返回 `dict[str, object]`。 它可能读写仓库、Controller、Matrix 或对象存储；下游异常按原语义向上传递，不会伪造成功结果。
         request: dict[str, object] = {
             "action": action,
             "user_id": user_id,
@@ -276,6 +283,7 @@ class MatrixResourceService:
         text: str,
         context: MutationContext,
     ) -> dict[str, object]:
+        # 逻辑说明：`send_notification` 接收 `recipient`、`text`、`context`，发送 notification，核心调用为 `notification_room`、`begin`、`_resume_notification`，返回 `dict[str, object]`。 它可能读写仓库、Controller、Matrix 或对象存储；下游异常按原语义向上传递，不会伪造成功结果。
         room_id = await self._resolver.notification_room(
             recipient=recipient,
         )
@@ -299,6 +307,7 @@ class MatrixResourceService:
         path: Path,
         context: MutationContext,
     ) -> str:
+        # 逻辑说明：`upload_media` 接收 `path`、`context`，上传 media，核心调用为 `resolve`、`hexdigest`、`sha256`，返回 `str`。 它可能读写仓库、Controller、Matrix 或对象存储；下游异常按原语义向上传递，不会伪造成功结果。
         resolved = path.resolve(strict=True)
         request: dict[str, object] = {
             "action": "upload_media",
@@ -325,6 +334,7 @@ class MatrixResourceService:
         reason: str,
         context: MutationContext,
     ) -> dict[str, object]:
+        # 逻辑说明：`change_membership` 接收 `action`、`room_id`、`user_id`、`reason`、`context`，变更 membership，核心调用为 `begin`、`_resume_membership`，返回 `dict[str, object]`。 它可能读写仓库、Controller、Matrix 或对象存储；下游异常按原语义向上传递，不会伪造成功结果。
         request: dict[str, object] = {
             "action": action,
             "room_id": room_id,
@@ -344,6 +354,7 @@ class MatrixResourceService:
         operation: OperationRecord,
     ) -> dict[str, object]:
         """Reconcile one previously journaled Matrix/channel mutation."""
+        # 逻辑说明：`resume` 接收 `operation`，恢复 Matrix 房间与成员资源，核心调用为 `_resume_channel`、`ValueError`、`get`，返回 `dict[str, object]`。 它可能读写仓库、Controller、Matrix 或对象存储；前置条件不满足时保留现有领域异常，防止错误状态继续传播。
         if operation.kind is OperationKind.CHANNEL_MUTATION:
             return await self._resume_channel(operation)
         if operation.kind is not OperationKind.MATRIX_MUTATION:
@@ -363,6 +374,7 @@ class MatrixResourceService:
         self,
         operation: OperationRecord | Any,
     ) -> dict[str, object]:
+        # 逻辑说明：`_resume_create_channel` 从持久化 operation/request 重建Matrix 房间与成员资源上下文，通过 `_terminal_result`、`_find_created_room`、`AmbiguousEffectError` 证明或补做下一阶段，最终返回 `dict[str, object]`；字段缺失、状态冲突或效果不可证明时保持失败/歧义状态而不是重复执行。
         terminal = self._terminal_result(operation)
         if terminal is not None:
             return terminal
@@ -403,6 +415,7 @@ class MatrixResourceService:
         self,
         operation: OperationRecord | Any,
     ) -> dict[str, object]:
+        # 逻辑说明：`_resume_notification` 从持久化 operation/request 重建Matrix 房间与成员资源上下文，通过 `_terminal_result`、`_before_matrix`、`send_text` 证明或补做下一阶段，最终返回 `dict[str, object]`；字段缺失、状态冲突或效果不可证明时保持失败/歧义状态而不是重复执行。
         terminal = self._terminal_result(operation)
         if terminal is not None:
             return terminal
@@ -434,6 +447,7 @@ class MatrixResourceService:
         self,
         operation: OperationRecord | Any,
     ) -> dict[str, object]:
+        # 逻辑说明：`_resume_upload` 从持久化 operation/request 重建Matrix 房间与成员资源上下文，通过 `_terminal_result`、`AmbiguousEffectError`、`_before_matrix` 证明或补做下一阶段，最终返回 `dict[str, object]`；字段缺失、状态冲突或效果不可证明时保持失败/歧义状态而不是重复执行。
         terminal = self._terminal_result(operation)
         if terminal is not None:
             return terminal
@@ -458,6 +472,7 @@ class MatrixResourceService:
         self,
         operation: OperationRecord | Any,
     ) -> dict[str, object]:
+        # 逻辑说明：`_resume_membership` 从持久化 operation/request 重建Matrix 房间与成员资源上下文，通过 `_terminal_result`、`_membership_matches`、`_succeed` 证明或补做下一阶段，最终返回 `dict[str, object]`；字段缺失、状态冲突或效果不可证明时保持失败/歧义状态而不是重复执行。
         terminal = self._terminal_result(operation)
         if terminal is not None:
             return terminal
@@ -513,6 +528,7 @@ class MatrixResourceService:
         self,
         operation: OperationRecord | Any,
     ) -> dict[str, object]:
+        # 逻辑说明：`_resume_channel` 从持久化 operation/request 重建Matrix 房间与成员资源上下文，通过 `_terminal_result`、`before_effect`、`get` 证明或补做下一阶段，最终返回 `dict[str, object]`；字段缺失、状态冲突或效果不可证明时保持失败/歧义状态而不是重复执行。
         terminal = self._terminal_result(operation)
         if terminal is not None:
             return terminal
@@ -566,6 +582,7 @@ class MatrixResourceService:
         self,
         operation: OperationRecord | Any,
     ) -> dict[str, object] | None:
+        # 逻辑说明：`_terminal_result` 接收 `operation`，读取终态 result，核心调用为 `ConflictError`，返回 `dict[str, object] | None`。 它只在内存中计算、校验或组装数据；前置条件不满足时保留现有领域异常，防止错误状态继续传播。
         if operation.status is OperationStatus.SUCCEEDED:
             return dict(operation.result)
         if operation.status is OperationStatus.FAILED:
@@ -578,6 +595,7 @@ class MatrixResourceService:
         self,
         operation: OperationRecord | Any,
     ) -> None:
+        # 逻辑说明：`_before_matrix` 接收 `operation`，登记效果意图 matrix，核心调用为 `before_effect`，返回 `None`。 它可能读写仓库、Controller、Matrix 或对象存储；下游异常按原语义向上传递，不会伪造成功结果。
         await self._supervisor.before_effect(
             operation.operation_id,
             ExternalEffect.MATRIX,
@@ -591,6 +609,7 @@ class MatrixResourceService:
         *,
         effect: ExternalEffect = ExternalEffect.MATRIX,
     ) -> dict[str, object]:
+        # 逻辑说明：`_succeed` 接收 `operation`、`receipt`、`effect`，提交成功结果 Matrix 房间与成员资源，核心调用为 `effect_succeeded`，返回 `dict[str, object]`。 它可能读写仓库、Controller、Matrix 或对象存储；下游异常按原语义向上传递，不会伪造成功结果。
         await self._supervisor.effect_succeeded(
             operation.operation_id,
             effect,
@@ -605,6 +624,7 @@ class MatrixResourceService:
         *,
         effect: ExternalEffect = ExternalEffect.MATRIX,
     ) -> None:
+        # 逻辑说明：`_record_error` 区分“明确失败”和“结果未知”，分别写入 supervisor 的 failed/ambiguous effect；它不吞掉原始失败语义，供心跳恢复决定能否安全重试。
         if isinstance(
             exc,
             (ValueError, FileNotFoundError, PermissionError),
@@ -625,6 +645,7 @@ class MatrixResourceService:
         self,
         operation_id: str,
     ) -> str | None:
+        # 逻辑说明：`_find_created_room` 接收 `operation_id`，查找 created room，核心调用为 `joined_rooms`、`room_state`、`get`，返回 `str | None`。 它可能读写仓库、Controller、Matrix 或对象存储；下游异常按原语义向上传递，不会伪造成功结果。
         for room_id in await self._matrix.joined_rooms():
             for event in await self._matrix.room_state(room_id):
                 content = event.get("content")
@@ -644,6 +665,7 @@ class MatrixResourceService:
         room_id: str,
         user_id: str,
     ) -> bool:
+        # 逻辑说明：`_membership_matches` 比较期望请求与已观测 matches，返回 `bool` 供 operation 判断外部效果是否已经发生；它只读数据，不修改资源。
         desired = {
             "invite": {"invite", "join"},
             "kick": {"leave"},

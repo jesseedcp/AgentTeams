@@ -39,6 +39,8 @@ from copaw_worker.task import (
 
 
 def _response(payload: dict[str, Any]) -> ToolResponse:
+    # 逻辑说明：`_response` 接收 payload，执行 Project/DAG 工具 中的“响应”步骤，返回 ToolResponse；不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；
+    # 本函数不额外重试，避免掩盖持续故障。
     return ToolResponse(
         content=[
             TextBlock(
@@ -58,6 +60,8 @@ def _error(message: str, **payload: Any) -> ToolResponse:
 
 
 def _workspace_dir() -> Path:
+    # 逻辑说明：`_workspace_dir` 接收 当前对象/进程状态，执行 Project/DAG 工具 中的“workspace dir”步骤，返回 Path；
+    # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     configured = os.getenv("COPAW_WORKING_DIR")
     if configured:
         return Path(configured) / "workspaces" / "default"
@@ -71,10 +75,14 @@ def _workspace_dir() -> Path:
 
 
 def _store() -> FileSystemTaskStore:
+    # 逻辑说明：`_store` 接收 当前对象/进程状态，执行 Project/DAG 工具 中的“store”步骤，返回 FileSystemTaskStore；
+    # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     return FileSystemTaskStore(_workspace_dir())
 
 
 def _coerce_payload(payload: dict[str, Any] | str | None) -> dict[str, Any]:
+    # 逻辑说明：规范化 Project/DAG 工具调用的 payload：JSON 字符串先解码，None 变为空字典，已有字典原样返回。
+    # 解码失败或顶层不是对象时抛出 TaskflowError，阻止错误形状的数据进入项目状态存储；这里不产生文件副作用。
     if isinstance(payload, str):
         try:
             payload = json.loads(payload)
@@ -88,6 +96,8 @@ def _coerce_payload(payload: dict[str, Any] | str | None) -> dict[str, Any]:
 
 
 def _required_str(payload: dict[str, Any], key: str) -> str:
+    # 逻辑说明：`_required_str` 接收 payload、key，执行 Project/DAG 工具 中的“必填 str”步骤，返回 str；
+    # 不修改外部状态。失败策略：非法输入或状态会立即抛错，其他底层异常继续上抛；本函数不额外重试，避免掩盖持续故障。
     value = payload.get(key)
     if not isinstance(value, str) or not value.strip():
         raise TaskflowError(f"payload.{key} is required")
@@ -95,6 +105,8 @@ def _required_str(payload: dict[str, Any], key: str) -> str:
 
 
 def _optional_str(payload: dict[str, Any], key: str) -> str | None:
+    # 逻辑说明：`_optional_str` 接收 payload、key，执行 Project/DAG 工具 中的“可选 str”步骤，返回 str | None；
+    # 不修改外部状态。失败策略：非法输入或状态会立即抛错，其他底层异常继续上抛；本函数不额外重试，避免掩盖持续故障。
     value = payload.get(key)
     if value is None:
         return None
@@ -104,6 +116,8 @@ def _optional_str(payload: dict[str, Any], key: str) -> str | None:
 
 
 def _coerce_tasks(tasks: list[dict[str, Any]] | str | None) -> list[dict[str, Any]]:
+    # 逻辑说明：`_coerce_tasks` 接收 tasks，把输入转换为tasks，返回 list[dict[str, Any]]；
+    # 不修改外部状态。失败策略：已知失败按现有 except 转为错误结果或日志，未覆盖异常继续上抛；本函数不额外重试，避免掩盖持续故障。
     if isinstance(tasks, str):
         try:
             tasks = json.loads(tasks)
@@ -117,12 +131,16 @@ def _coerce_tasks(tasks: list[dict[str, Any]] | str | None) -> list[dict[str, An
 
 
 def _coerce_optional_tasks(tasks: list[dict[str, Any]] | str | None) -> list[dict[str, Any]]:
+    # 逻辑说明：`_coerce_optional_tasks` 接收 tasks，把输入转换为可选 tasks，返回 list[dict[str, Any]]；
+    # 不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     if tasks is None:
         return []
     return _coerce_tasks(tasks)
 
 
 def _required_int(payload: dict[str, Any], key: str) -> int:
+    # 逻辑说明：`_required_int` 接收 payload、key，执行 Project/DAG 工具 中的“必填 int”步骤，返回 int；
+    # 不修改外部状态。失败策略：非法输入或状态会立即抛错，其他底层异常继续上抛；本函数不额外重试，避免掩盖持续故障。
     value = payload.get(key)
     if isinstance(value, bool) or not isinstance(value, int):
         raise TaskflowError(f"payload.{key} must be an integer")
@@ -130,6 +148,8 @@ def _required_int(payload: dict[str, Any], key: str) -> int:
 
 
 def _optional_int(payload: dict[str, Any], key: str, default: int) -> int:
+    # 逻辑说明：`_optional_int` 接收 payload、key、default，执行 Project/DAG 工具 中的“可选 int”步骤，返回 int；
+    # 不修改外部状态。失败策略：非法输入或状态会立即抛错，其他底层异常继续上抛；本函数不额外重试，避免掩盖持续故障。
     value = payload.get(key)
     if value is None:
         return default
@@ -139,6 +159,7 @@ def _optional_int(payload: dict[str, Any], key: str, default: int) -> int:
 
 
 def _list_project_ids(store: FileSystemTaskStore) -> list[str]:
+    # 逻辑说明：`_list_project_ids` 接收 store，列出Project ids，返回 list[str]；不修改外部状态。失败策略：底层异常继续上抛，由调用链统一处理；本函数不额外重试，避免掩盖持续故障。
     projects_dir = store.shared_dir / "projects"
     if not projects_dir.exists():
         return []
@@ -164,6 +185,10 @@ async def _fetch_worker_runtime_status(
     *,
     timeout_seconds: int,
 ) -> dict[str, Any]:
+    # 逻辑说明：`_fetch_worker_runtime_status` 接收 worker_name、timeout_seconds，在线程中请求目标 Worker /api/chats，统计运行会话并返回状态，
+    # 返回 dict[str, Any]；
+    #
+    # 会访问网络服务。失败策略：已知失败按现有 except 转为错误结果或日志，未覆盖异常继续上抛；本函数不额外重试，避免掩盖持续故障。
     safe_worker = canonical_worker_id(worker_name)
     if not safe_worker:
         return {
@@ -175,6 +200,8 @@ async def _fetch_worker_runtime_status(
     url = f"http://agentteams-worker-{safe_worker}:8088/api/chats"
 
     def _fetch() -> dict[str, Any]:
+        # 逻辑说明：`_fetch` 接收 当前对象/进程状态，执行 Project/DAG 工具 中的“fetch”步骤，返回 dict[str, Any]；
+        # 会访问网络服务。失败策略：非法输入或状态会立即抛错，其他底层异常继续上抛；本函数不额外重试，避免掩盖持续故障。
         request = urllib.request.Request(url, headers={"X-Agent-Id": "default"})
         with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
             data = json.loads(response.read().decode("utf-8"))
@@ -218,6 +245,10 @@ async def _check_active_tasks(
     project_id: str | None = None,
     timeout_seconds: int = 3,
 ) -> dict[str, Any]:
+    # 逻辑说明：`_check_active_tasks` 接收 store、project_id、timeout_seconds，遍历活动 Project 与 delegated Task，
+    # 汇总运行状态、结果缺失和阻塞问题，返回 dict[str, Any]；
+    #
+    # 不修改外部状态。失败策略：已知失败按现有 except 转为错误结果或日志，未覆盖异常继续上抛；本函数不额外重试，避免掩盖持续故障。
     project_ids = [project_id] if project_id else _list_project_ids(store)
     issues: list[dict[str, Any]] = []
     checked_projects = 0
@@ -383,6 +414,10 @@ async def projectflow(
     dryRun: bool = False,
 ) -> ToolResponse:
     """Manage AgentTeams project execution plans with action-specific payload fields."""
+    # 逻辑说明：`projectflow` 接收 action、payload、dryRun，解析 action 与 payload，执行 Project/DAG 操作并统一返回 ToolResponse，
+    # 返回 ToolResponse；
+    #
+    # 不修改外部状态。失败策略：已知失败按现有 except 转为错误结果或日志，未覆盖异常继续上抛；本函数不额外重试，避免掩盖持续故障。
     payload_data: dict[str, Any] = {}
     try:
         store = _store()

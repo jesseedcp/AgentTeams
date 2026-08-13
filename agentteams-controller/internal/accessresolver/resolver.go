@@ -36,6 +36,7 @@ type Resolver struct {
 // prefix drives the STS session-name output; empty falls back to
 // auth.DefaultResourcePrefix ("agentteams-").
 func New(c client.Client, namespace, defaultBucket, defaultGatewayID string, prefix auth.ResourcePrefix) *Resolver {
+	// 逻辑说明：绑定 CR 读取器、逻辑引用的集群默认值和有效资源前缀，后续解析不再读取环境变量。
 	return &Resolver{
 		client:           c,
 		namespace:        namespace,
@@ -54,6 +55,7 @@ func New(c client.Client, namespace, defaultBucket, defaultGatewayID string, pre
 // logs. The STS sidecar request uses a generated UUID as RoleSessionName
 // to stay below cloud-provider length limits.
 func (r *Resolver) ResolveForCaller(ctx context.Context, caller *auth.CallerIdentity) (sessionName string, entries []credprovider.AccessEntry, err error) {
+	// 逻辑说明：按已认证角色选择 Worker、团队成员或 Manager 路径；不具备 STS 资格的角色立即拒绝。
 	if caller == nil {
 		return "", nil, errors.New("accessresolver: caller is nil")
 	}
@@ -79,6 +81,7 @@ func (r *Resolver) ResolveForCaller(ctx context.Context, caller *auth.CallerIden
 }
 
 func (r *Resolver) resolveWorker(ctx context.Context, name string) (string, []credprovider.AccessEntry, error) {
+	// 逻辑说明：读取 Worker CR；缺失时仍用安全默认，显式权限缺 OSS 时补默认，再以 runtimeName 展开模板。
 	if name == "" {
 		return "", nil, errors.New("accessresolver: empty worker name")
 	}
@@ -116,6 +119,7 @@ func (r *Resolver) resolveWorker(ctx context.Context, name string) (string, []cr
 // STS issuance for a caller whose identity has already been accepted
 // by the enricher.
 func (r *Resolver) resolveTeamMember(ctx context.Context, name, teamName string) (string, []credprovider.AccessEntry, error) {
+	// 逻辑说明：读取 Team 引用与对应 Worker 权限，识别 Leader/Worker 及有效身份名，补默认后展开团队模板。
 	if name == "" {
 		return "", nil, errors.New("accessresolver: empty team member name")
 	}
@@ -173,6 +177,7 @@ func (r *Resolver) resolveTeamMember(ctx context.Context, name, teamName string)
 }
 
 func (r *Resolver) resolveManager(ctx context.Context, name string) (string, []credprovider.AccessEntry, error) {
+	// 逻辑说明：规范化默认 Manager 名，读取显式 AccessEntries 并补齐 OSS 基线，再展开为 sidecar 可签发范围。
 	if name == "" {
 		name = "manager"
 	}
@@ -207,6 +212,7 @@ type templateCtx struct {
 }
 
 func (t templateCtx) expand(s string) string {
+	// 逻辑说明：一次替换四个受支持变量；非团队调用的 self.team 为空，不能泄漏其他团队标识。
 	s = strings.ReplaceAll(s, "${self.name}", t.name)
 	s = strings.ReplaceAll(s, "${self.kind}", t.kind)
 	s = strings.ReplaceAll(s, "${self.namespace}", t.namespace)
@@ -215,6 +221,7 @@ func (t templateCtx) expand(s string) string {
 }
 
 func (r *Resolver) resolveEntries(in []v1beta1.AccessEntry, tmpl templateCtx) ([]credprovider.AccessEntry, error) {
+	// 逻辑说明：保持输入顺序按 service 分派到类型化解析器，并用索引包装错误；空或未知服务拒绝签发。
 	out := make([]credprovider.AccessEntry, 0, len(in))
 	for i, e := range in {
 		switch e.Service {
@@ -255,6 +262,7 @@ type objectStorageScope struct {
 }
 
 func (r *Resolver) resolveObjectStorage(e v1beta1.AccessEntry, tmpl templateCtx) (credprovider.AccessEntry, error) {
+	// 逻辑说明：解码 scope、解析显式 bucket 或 workspace 引用，展开每个 prefix；空范围绝不提升为全桶权限。
 	var s objectStorageScope
 	if err := unmarshalScope(e.Scope, &s); err != nil {
 		return credprovider.AccessEntry{}, fmt.Errorf("object-storage: %w", err)
@@ -298,6 +306,7 @@ type aiGatewayScope struct {
 }
 
 func (r *Resolver) resolveAIGateway(e v1beta1.AccessEntry, tmpl templateCtx) (credprovider.AccessEntry, error) {
+	// 逻辑说明：解析显式 gateway 或 default 引用并展开资源；未列资源时按协议使用通配符，再复制权限切片。
 	var s aiGatewayScope
 	if err := unmarshalScope(e.Scope, &s); err != nil {
 		return credprovider.AccessEntry{}, fmt.Errorf("ai-gateway: %w", err)
@@ -340,6 +349,7 @@ type aiRegistryScope struct {
 }
 
 func (r *Resolver) resolveAIRegistry(e v1beta1.AccessEntry, tmpl templateCtx) (credprovider.AccessEntry, error) {
+	// 逻辑说明：展开并要求 namespaceId，展开资源列表；空列表仅回退受支持的 AgentSpec/skill 默认范围。
 	var s aiRegistryScope
 	if err := unmarshalScope(e.Scope, &s); err != nil {
 		return credprovider.AccessEntry{}, fmt.Errorf("ai-registry: %w", err)
@@ -369,6 +379,7 @@ func (r *Resolver) resolveAIRegistry(e v1beta1.AccessEntry, tmpl templateCtx) (c
 }
 
 func unmarshalScope(raw *apiextensionsv1.JSON, dst any) error {
+	// 逻辑说明：拒绝 nil/空 scope，再把原始 CR JSON 解码进具体结构，错误保留为可定位的 decode scope。
 	if raw == nil || len(raw.Raw) == 0 {
 		return errors.New("scope is empty")
 	}
@@ -382,6 +393,7 @@ func unmarshalScope(raw *apiextensionsv1.JSON, dst any) error {
 // the resolver never hands the sidecar a slice backed by user-owned
 // CR memory.
 func copyPermissions(in []string) []string {
+	// 逻辑说明：复制用户 CR 的底层数组，sidecar 或后续处理无法反向修改 informer 缓存中的对象。
 	if len(in) == 0 {
 		return nil
 	}
@@ -392,6 +404,7 @@ func copyPermissions(in []string) []string {
 
 // hasServiceEntry reports whether any entry in the list targets the given service.
 func hasServiceEntry(entries []v1beta1.AccessEntry, service string) bool {
+	// 逻辑说明：扫描显式条目判断是否已覆盖某服务，用于只在缺 OSS 基线时补默认权限。
 	for _, e := range entries {
 		if e.Service == service {
 			return true
@@ -403,6 +416,7 @@ func hasServiceEntry(entries []v1beta1.AccessEntry, service string) bool {
 // marshalJSONDeterministic marshals m with sorted keys so that default
 // entries produce stable output (useful in tests).
 func marshalJSONDeterministic(m map[string]any) ([]byte, error) {
+	// 逻辑说明：先稳定所有直接 string slice 的顺序，再利用 json.Marshal 的 map 键排序生成可比较 scope 字节。
 	// json.Marshal on a map sorts keys alphabetically, but nested
 	// maps retain insertion order. For our fixed default shapes this
 	// is sufficient; we add explicit sorting for any string slice
